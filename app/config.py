@@ -16,6 +16,7 @@ class Settings(BaseSettings):
 
     PROVIDER_API_URL: str = ""
     PROVIDER_API_TOKEN: str = ""
+    ADMIN_PHONE: str = ""
 
     HISTORY_DAYS: int = 7
     REQUEST_TIMEOUT_MINUTES: int = 10
