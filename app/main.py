@@ -8,7 +8,7 @@ from app.models import AuthorizedUser, AuthorizedGroup, RequestLog
 from app.queue import request_queue
 from app.worker import process_request
 from app.utils.curp import extract_curps, detect_act_type, normalize_text
-from app.services.evolution import send_text, send_document
+from app.services.evolution import send_text, send_document, send_group_document
 
 app = FastAPI(title=settings.APP_NAME)
 
@@ -84,6 +84,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         source_group_id = remote_jid if is_group else None
         requester_wa_id = participant.replace("@s.whatsapp.net", "") if is_group and participant else remote_jid.replace("@s.whatsapp.net", "")
 
+        # comandos admin
         if text_upper.startswith("/ADDUSER "):
             wa = text_upper.replace("/ADDUSER", "").strip()
             if wa and not db.query(AuthorizedUser).filter_by(wa_id=wa).first():
@@ -92,12 +93,25 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             send_text(requester_wa_id, f"✅ Usuario autorizado: {wa}")
             return {"ok": True}
 
-        if text_upper.startswith("/ADDGROUP "):
-            grp = text_upper.replace("/ADDGROUP", "").strip()
-            if grp and not db.query(AuthorizedGroup).filter_by(group_jid=grp).first():
-                db.add(AuthorizedGroup(group_jid=grp))
+        if text_upper.startswith("/RMUSER "):
+            wa = text_upper.replace("/RMUSER", "").strip()
+            row = db.query(AuthorizedUser).filter_by(wa_id=wa).first()
+            if row:
+                db.delete(row)
                 db.commit()
-            send_text(requester_wa_id, f"✅ Grupo autorizado: {grp}")
+                send_text(requester_wa_id, f"✅ Usuario eliminado: {wa}")
+            else:
+                send_text(requester_wa_id, f"⚠️ Usuario no encontrado: {wa}")
+            return {"ok": True}
+
+        if text_upper.startswith("/ADDGROUP"):
+            if is_group:
+                if not db.query(AuthorizedGroup).filter_by(group_jid=source_group_id).first():
+                    db.add(AuthorizedGroup(group_jid=source_group_id, group_name=""))
+                    db.commit()
+                send_text(requester_wa_id, f"✅ Grupo autorizado: {source_group_id}")
+            else:
+                send_text(requester_wa_id, "⚠️ /ADDGROUP solo se usa dentro del grupo.")
             return {"ok": True}
 
         if text_upper.startswith("/STATUS"):
@@ -107,6 +121,48 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             send_text(requester_wa_id, f"📊 Total: {total}\n⏳ Pendientes: {pending}\n✅ Entregadas: {done}")
             return {"ok": True}
 
+        if text_upper.startswith("/PENDING"):
+            rows = db.query(RequestLog).filter(RequestLog.status.in_(["QUEUED", "PROCESSING", "PENDING"])).order_by(RequestLog.created_at.desc()).limit(15).all()
+            if not rows:
+                send_text(requester_wa_id, "✅ No hay pendientes.")
+            else:
+                body = "\n".join([f"{r.id} | {r.curp} | {r.act_type} | {r.status}" for r in rows])
+                send_text(requester_wa_id, f"⏳ Pendientes:\n{body}")
+            return {"ok": True}
+
+        if text_upper.startswith("/LAST "):
+            curp = text_upper.replace("/LAST", "").strip()
+            last = (
+                db.query(RequestLog)
+                .filter(RequestLog.curp == curp, RequestLog.status == "DONE")
+                .order_by(RequestLog.created_at.desc())
+                .first()
+            )
+            if last and last.pdf_url:
+                send_document(requester_wa_id, last.pdf_url, filename=f"{last.curp}_{last.act_type}.pdf", caption="♻️ Reenviado desde historial")
+            else:
+                send_text(requester_wa_id, "⚠️ No encontré PDF reciente para esa CURP.")
+            return {"ok": True}
+
+        if text_upper.startswith("/REQUEUE "):
+            curp = text_upper.replace("/REQUEUE", "").strip()
+            last = (
+                db.query(RequestLog)
+                .filter(RequestLog.curp == curp)
+                .order_by(RequestLog.created_at.desc())
+                .first()
+            )
+            if not last:
+                send_text(requester_wa_id, "⚠️ No encontré solicitud previa para esa CURP.")
+            else:
+                last.status = "QUEUED"
+                last.updated_at = datetime.utcnow()
+                db.commit()
+                request_queue.enqueue(process_request, last.id)
+                send_text(requester_wa_id, f"🔁 Reintentando folio {last.id}")
+            return {"ok": True}
+
+        # autorización
         if is_group and not is_authorized_group(db, source_group_id):
             return {"ok": True, "ignored": "group_not_authorized"}
 
@@ -123,12 +179,20 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         for curp in curps:
             last_done = get_last_done_request(db, curp, act_type)
             if last_done and last_done.pdf_url and last_done.expires_at > datetime.utcnow():
-                send_document(
-                    requester_wa_id,
-                    last_done.pdf_url,
-                    filename=f"{curp}_{act_type}.pdf",
-                    caption="♻️ Reenviado desde historial"
-                )
+                if source_group_id:
+                    send_group_document(
+                        source_group_id,
+                        last_done.pdf_url,
+                        filename=f"{curp}_{act_type}.pdf",
+                        caption="♻️ Reenviado desde historial"
+                    )
+                else:
+                    send_document(
+                        requester_wa_id,
+                        last_done.pdf_url,
+                        filename=f"{curp}_{act_type}.pdf",
+                        caption="♻️ Reenviado desde historial"
+                    )
                 continue
 
             request_key = build_request_key(curp, act_type, source_chat_id)
@@ -170,6 +234,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         return {"ok": True}
 
     except Exception as e:
+        print("WEBHOOK ERROR:", str(e), payload)
         return {"ok": False, "error": str(e)}
 
 
@@ -189,11 +254,19 @@ def provider_result(payload: dict, db: Session = Depends(get_db)):
     req.updated_at = datetime.utcnow()
     db.commit()
 
-    send_document(
-        req.requester_wa_id,
-        req.pdf_url,
-        filename=f"{req.curp}_{req.act_type}.pdf",
-        caption="✅ Aquí está tu acta"
-    )
+    if req.source_group_id:
+        send_group_document(
+            req.source_group_id,
+            req.pdf_url,
+            filename=f"{req.curp}_{req.act_type}.pdf",
+            caption="✅ Aquí está tu acta"
+        )
+    else:
+        send_document(
+            req.requester_wa_id,
+            req.pdf_url,
+            filename=f"{req.curp}_{req.act_type}.pdf",
+            caption="✅ Aquí está tu acta"
+        )
 
     return {"ok": True}
