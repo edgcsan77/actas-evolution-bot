@@ -2,7 +2,7 @@ services:
   - type: web
     name: actas-evolution-web
     runtime: python
-    plan: basic
+    plan: starter
     buildCommand: "pip install -r requirements.txt"
     startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
     healthCheckPath: /health
@@ -103,4 +103,4 @@ services:
 
 databases:
   - name: actas-evolution-db
-    plan: starter
+    plan: basic
