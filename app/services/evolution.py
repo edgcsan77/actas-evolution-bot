@@ -10,7 +10,15 @@ def _headers():
 
 
 def _normalize_number(number: str) -> str:
-    return (number or "").replace("@s.whatsapp.net", "").strip()
+    if not number:
+        return ""
+
+    number = number.replace("@s.whatsapp.net", "")
+    number = number.replace("@g.us", "")
+    number = number.replace("+", "")
+    number = number.strip()
+
+    return number
 
 
 def send_text(number: str, text: str):
