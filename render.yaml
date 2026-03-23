@@ -100,7 +100,3 @@ services:
     name: actas-evolution-redis
     plan: starter
     ipAllowList: []
-
-databases:
-  - name: actas-evolution-db
-    plan: basic
