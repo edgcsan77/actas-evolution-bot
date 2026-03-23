@@ -68,10 +68,8 @@ def send_document(number: str, pdf_url: str, filename: str = "acta.pdf", caption
 def send_group_text(group_jid: str, text: str):
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendText/{settings.EVOLUTION_INSTANCE}"
     payload = {
-        "number": group_jid,
-        "textMessage": {
-            "text": text
-        }
+        "number": _normalize_number(group_jid),
+        "text": (text or "").strip()
     }
 
     resp = requests.post(url, headers=_headers(), json=payload, timeout=30)
@@ -88,7 +86,7 @@ def send_group_text(group_jid: str, text: str):
 def send_group_document(group_jid: str, pdf_url: str, filename: str = "acta.pdf", caption: str = ""):
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{settings.EVOLUTION_INSTANCE}"
     payload = {
-        "number": group_jid,
+        "number": _normalize_number(group_jid),
         "mediatype": "document",
         "mimetype": "application/pdf",
         "caption": caption,
