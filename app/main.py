@@ -10,6 +10,8 @@ from app.worker import process_request
 from app.utils.curp import extract_curps, detect_act_type, normalize_text
 from app.services.evolution import send_text, send_document, send_group_document, send_group_text
 
+import re
+
 app = FastAPI(title=settings.APP_NAME)
 
 
@@ -82,32 +84,39 @@ def _is_no_record_message(text_upper: str) -> bool:
     return any(p in text_upper for p in patterns)
 
 
+def _extract_provider_curp_loose(text_body: str) -> str | None:
+    """
+    Intenta sacar una CURP del texto del proveedor.
+    Primero usa la validación normal.
+    Si no encuentra, busca cualquier bloque de 18 caracteres alfanuméricos.
+    """
+    curps = extract_curps(text_body)
+    if curps:
+        return curps[0]
+
+    text_upper = normalize_text(text_body or "")
+    m = re.search(r"\b([A-Z0-9]{18})\b", text_upper)
+    if m:
+        return m.group(1)
+
+    return None
+
+
 def _find_open_request_for_provider(db: Session, provider_wa: str, text_body: str):
     """
-    Busca primero por CURP incluida en el texto del proveedor.
-    Si no encuentra, toma la solicitud PROCESSING más antigua.
+    SOLO busca por CURP si el proveedor la manda.
+    Si no encuentra CURP clara, no adivina por antigüedad.
     """
-    provider_curps = extract_curps(text_body)
+    provider_curp = _extract_provider_curp_loose(text_body)
 
-    if provider_curps:
-        curp = provider_curps[0]
-        row = (
-            db.query(RequestLog)
-            .filter(
-                RequestLog.provider_whatsapp == provider_wa,
-                RequestLog.curp == curp,
-                RequestLog.status == "PROCESSING"
-            )
-            .order_by(RequestLog.created_at.asc())
-            .first()
-        )
-        if row:
-            return row
+    if not provider_curp:
+        return None
 
     return (
         db.query(RequestLog)
         .filter(
             RequestLog.provider_whatsapp == provider_wa,
+            RequestLog.curp == provider_curp,
             RequestLog.status == "PROCESSING"
         )
         .order_by(RequestLog.created_at.asc())
@@ -155,13 +164,21 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         # RESPUESTA DEL PROVEEDOR
         # =========================
         if is_provider_message:
+            provider_curp = _extract_provider_curp_loose(text_body or "")
+            print("PROVIDER_TEXT =", text_body, flush=True)
+            print("PROVIDER_CURP_DETECTED =", provider_curp, flush=True)
+            
             open_req = _find_open_request_for_provider(db, provider_wa, text_body or "")
-
+            
             if not open_req:
+                print("PROVIDER_NO_MATCH_FOR_TEXT =", text_body, flush=True)
                 return {"ok": True, "ignored": "provider_message_without_open_request"}
 
             # caso texto "sin registro" / "no se encontró..."
             if text_body and _is_no_record_message(text_upper):
+                print("PROVIDER_NO_RECORD_MATCHED_REQ_ID =", open_req.id, flush=True)
+                print("PROVIDER_NO_RECORD_MATCHED_CURP =", open_req.curp, flush=True)
+            
                 open_req.status = "ERROR"
                 open_req.error_message = text_body.strip()
                 open_req.updated_at = datetime.utcnow()
