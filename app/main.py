@@ -72,6 +72,49 @@ def _deliver_pdf_result(req: RequestLog, pdf_url: str):
         )
 
 
+def _provider_no_record_patterns():
+    raw = settings.PROVIDER_NO_RECORD_TEXT or ""
+    return [normalize_text(x) for x in raw.split("|") if x.strip()]
+
+
+def _is_no_record_message(text_upper: str) -> bool:
+    patterns = _provider_no_record_patterns()
+    return any(p in text_upper for p in patterns)
+
+
+def _find_open_request_for_provider(db: Session, provider_wa: str, text_body: str):
+    """
+    Busca primero por CURP incluida en el texto del proveedor.
+    Si no encuentra, toma la solicitud PROCESSING más antigua.
+    """
+    provider_curps = extract_curps(text_body)
+
+    if provider_curps:
+        curp = provider_curps[0]
+        row = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.provider_whatsapp == provider_wa,
+                RequestLog.curp == curp,
+                RequestLog.status == "PROCESSING"
+            )
+            .order_by(RequestLog.created_at.asc())
+            .first()
+        )
+        if row:
+            return row
+
+    return (
+        db.query(RequestLog)
+        .filter(
+            RequestLog.provider_whatsapp == provider_wa,
+            RequestLog.status == "PROCESSING"
+        )
+        .order_by(RequestLog.created_at.asc())
+        .first()
+    )
+
+
 @app.post("/webhook/evolution")
 async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
     try:
@@ -112,32 +155,23 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         # RESPUESTA DEL PROVEEDOR
         # =========================
         if is_provider_message:
-            open_req = (
-                db.query(RequestLog)
-                .filter(
-                    RequestLog.provider_whatsapp == provider_wa,
-                    RequestLog.status == "PROCESSING"
-                )
-                .order_by(RequestLog.created_at.asc())
-                .first()
-            )
+            open_req = _find_open_request_for_provider(db, provider_wa, text_body or "")
 
             if not open_req:
                 return {"ok": True, "ignored": "provider_message_without_open_request"}
 
-            # caso texto "sin registro"
-            if text_body:
-                if settings.PROVIDER_NO_RECORD_TEXT in text_upper:
-                    open_req.status = "ERROR"
-                    open_req.error_message = "SIN REGISTRO"
-                    open_req.updated_at = datetime.utcnow()
-                    db.commit()
+            # caso texto "sin registro" / "no se encontró..."
+            if text_body and _is_no_record_message(text_upper):
+                open_req.status = "ERROR"
+                open_req.error_message = text_body.strip()
+                open_req.updated_at = datetime.utcnow()
+                db.commit()
 
-                    _deliver_text_result(
-                        open_req,
-                        f"⚠️ Sin registro\nCURP: {open_req.curp}\nTipo: {open_req.act_type}\nFolio: {open_req.id}"
-                    )
-                    return {"ok": True, "provider_result": "no_record"}
+                _deliver_text_result(
+                    open_req,
+                    f"❌ No se encontró el acta en sistema.\nCURP: {open_req.curp}\nTipo: {open_req.act_type}\nFolio: {open_req.id}"
+                )
+                return {"ok": True, "provider_result": "no_record"}
 
             # caso documento/pdf
             if "documentMessage" in message:
