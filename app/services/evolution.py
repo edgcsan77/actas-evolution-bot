@@ -22,17 +22,20 @@ def _normalize_number(number: str) -> str:
 
     return number
 
-
 def send_text(number: str, text: str):
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendText/{settings.EVOLUTION_INSTANCE}"
+
     payload = {
         "number": _normalize_number(number),
-        "textMessage": {
-            "text": text
-        }
+        "text": text
     }
 
-    resp = requests.post(url, headers=_headers(), json=payload, timeout=30)
+    resp = requests.post(
+        url,
+        headers=_headers(),
+        json=payload,
+        timeout=30
+    )
 
     print("SEND_TEXT_URL =", url, flush=True)
     print("SEND_TEXT_PAYLOAD =", payload, flush=True)
