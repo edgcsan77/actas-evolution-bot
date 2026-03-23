@@ -37,7 +37,11 @@ class RequestLog(Base):
     source_group_id = Column(String(120), nullable=True, index=True)
 
     evolution_message_id = Column(String(120), nullable=True)
-    provider_ref = Column(String(120), nullable=True)
+
+    provider_whatsapp = Column(String(50), nullable=True, index=True)
+    provider_message = Column(Text, nullable=True)
+    provider_media_url = Column(Text, nullable=True)
+
     pdf_url = Column(Text, nullable=True)
 
     status = Column(String(20), default="QUEUED", index=True)
