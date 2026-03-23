@@ -8,7 +8,7 @@ from app.models import AuthorizedUser, AuthorizedGroup, RequestLog
 from app.queue import request_queue
 from app.worker import process_request
 from app.utils.curp import extract_curps, detect_act_type, normalize_text
-from app.services.evolution import send_text, send_document, send_group_document
+from app.services.evolution import send_text, send_document, send_group_document, send_group_text
 
 app = FastAPI(title=settings.APP_NAME)
 
@@ -48,6 +48,30 @@ def is_authorized_group(db: Session, group_jid: str) -> bool:
     return db.query(AuthorizedGroup).filter(AuthorizedGroup.group_jid == group_jid).first() is not None
 
 
+def _deliver_text_result(req: RequestLog, text: str):
+    if req.source_group_id:
+        send_group_text(req.source_group_id, text)
+    else:
+        send_text(req.requester_wa_id, text)
+
+
+def _deliver_pdf_result(req: RequestLog, pdf_url: str):
+    if req.source_group_id:
+        send_group_document(
+            req.source_group_id,
+            pdf_url,
+            filename=f"{req.curp}_{req.act_type}.pdf",
+            caption="✅ Aquí está tu acta"
+        )
+    else:
+        send_document(
+            req.requester_wa_id,
+            pdf_url,
+            filename=f"{req.curp}_{req.act_type}.pdf",
+            caption="✅ Aquí está tu acta"
+        )
+
+
 @app.post("/webhook/evolution")
 async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
     try:
@@ -68,23 +92,73 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         if from_me:
             return {"ok": True, "ignored": "from_me"}
 
+        is_group = remote_jid.endswith("@g.us")
+        source_chat_id = remote_jid
+        source_group_id = remote_jid if is_group else None
+        requester_wa_id = participant.replace("@s.whatsapp.net", "") if is_group and participant else remote_jid.replace("@s.whatsapp.net", "")
+
         text_body = ""
         if "conversation" in message:
             text_body = message.get("conversation", "")
         elif "extendedTextMessage" in message:
             text_body = message.get("extendedTextMessage", {}).get("text", "")
 
-        if not text_body:
-            return {"ok": True, "ignored": "no_text"}
-
         text_upper = normalize_text(text_body)
 
-        is_group = remote_jid.endswith("@g.us")
-        source_chat_id = remote_jid
-        source_group_id = remote_jid if is_group else None
-        requester_wa_id = participant.replace("@s.whatsapp.net", "") if is_group and participant else remote_jid.replace("@s.whatsapp.net", "")
+        provider_wa = (settings.PROVIDER_WHATSAPP or "").strip()
+        is_provider_message = requester_wa_id == provider_wa
 
-        # comandos admin
+        # =========================
+        # RESPUESTA DEL PROVEEDOR
+        # =========================
+        if is_provider_message:
+            open_req = (
+                db.query(RequestLog)
+                .filter(
+                    RequestLog.provider_whatsapp == provider_wa,
+                    RequestLog.status == "PROCESSING"
+                )
+                .order_by(RequestLog.created_at.asc())
+                .first()
+            )
+
+            if not open_req:
+                return {"ok": True, "ignored": "provider_message_without_open_request"}
+
+            # caso texto "sin registro"
+            if text_body:
+                if settings.PROVIDER_NO_RECORD_TEXT in text_upper:
+                    open_req.status = "ERROR"
+                    open_req.error_message = "SIN REGISTRO"
+                    open_req.updated_at = datetime.utcnow()
+                    db.commit()
+
+                    _deliver_text_result(
+                        open_req,
+                        f"⚠️ Sin registro\nCURP: {open_req.curp}\nTipo: {open_req.act_type}\nFolio: {open_req.id}"
+                    )
+                    return {"ok": True, "provider_result": "no_record"}
+
+            # caso documento/pdf
+            if "documentMessage" in message:
+                doc = message.get("documentMessage", {})
+                pdf_url = doc.get("url") or doc.get("directPath") or ""
+
+                open_req.pdf_url = pdf_url
+                open_req.provider_media_url = pdf_url
+                open_req.status = "DONE"
+                open_req.updated_at = datetime.utcnow()
+                db.commit()
+
+                if pdf_url:
+                    _deliver_pdf_result(open_req, pdf_url)
+                    return {"ok": True, "provider_result": "pdf_delivered"}
+
+            return {"ok": True, "ignored": "provider_unhandled_message"}
+
+        # =========================
+        # COMANDOS ADMIN
+        # =========================
         if text_upper.startswith("/ADDUSER "):
             wa = text_upper.replace("/ADDUSER", "").strip()
             if wa and not db.query(AuthorizedUser).filter_by(wa_id=wa).first():
@@ -118,7 +192,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             total = db.query(RequestLog).count()
             pending = db.query(RequestLog).filter(RequestLog.status.in_(["QUEUED", "PROCESSING", "PENDING"])).count()
             done = db.query(RequestLog).filter(RequestLog.status == "DONE").count()
-            send_text(requester_wa_id, f"📊 Total: {total}\n⏳ Pendientes: {pending}\n✅ Entregadas: {done}")
+            errors = db.query(RequestLog).filter(RequestLog.status == "ERROR").count()
+            send_text(requester_wa_id, f"📊 Total: {total}\n⏳ Pendientes: {pending}\n✅ Entregadas: {done}\n❌ Error/Sin registro: {errors}")
             return {"ok": True}
 
         if text_upper.startswith("/PENDING"):
@@ -162,13 +237,18 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 send_text(requester_wa_id, f"🔁 Reintentando folio {last.id}")
             return {"ok": True}
 
-        # autorización
+        # =========================
+        # FLUJO NORMAL DE USUARIO
+        # =========================
         if is_group and not is_authorized_group(db, source_group_id):
             return {"ok": True, "ignored": "group_not_authorized"}
 
         if not is_authorized_user(db, requester_wa_id):
             send_text(requester_wa_id, "⛔ Tu número no está autorizado.")
             return {"ok": True}
+
+        if not text_body:
+            return {"ok": True, "ignored": "no_text"}
 
         curps = extract_curps(text_body)
         if not curps:
@@ -179,20 +259,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         for curp in curps:
             last_done = get_last_done_request(db, curp, act_type)
             if last_done and last_done.pdf_url and last_done.expires_at > datetime.utcnow():
-                if source_group_id:
-                    send_group_document(
-                        source_group_id,
-                        last_done.pdf_url,
-                        filename=f"{curp}_{act_type}.pdf",
-                        caption="♻️ Reenviado desde historial"
-                    )
-                else:
-                    send_document(
-                        requester_wa_id,
-                        last_done.pdf_url,
-                        filename=f"{curp}_{act_type}.pdf",
-                        caption="♻️ Reenviado desde historial"
-                    )
+                _deliver_pdf_result(last_done, last_done.pdf_url)
                 continue
 
             request_key = build_request_key(curp, act_type, source_chat_id)
@@ -236,37 +303,3 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
     except Exception as e:
         print("WEBHOOK ERROR:", str(e), payload)
         return {"ok": False, "error": str(e)}
-
-
-@app.post("/provider/result")
-def provider_result(payload: dict, db: Session = Depends(get_db)):
-    request_id = payload.get("request_id")
-    pdf_url = payload.get("pdf_url")
-    provider_ref = payload.get("provider_ref")
-
-    req = db.query(RequestLog).filter(RequestLog.id == request_id).first()
-    if not req:
-        raise HTTPException(status_code=404, detail="request_id no encontrado")
-
-    req.pdf_url = pdf_url
-    req.provider_ref = provider_ref
-    req.status = "DONE"
-    req.updated_at = datetime.utcnow()
-    db.commit()
-
-    if req.source_group_id:
-        send_group_document(
-            req.source_group_id,
-            req.pdf_url,
-            filename=f"{req.curp}_{req.act_type}.pdf",
-            caption="✅ Aquí está tu acta"
-        )
-    else:
-        send_document(
-            req.requester_wa_id,
-            req.pdf_url,
-            filename=f"{req.curp}_{req.act_type}.pdf",
-            caption="✅ Aquí está tu acta"
-        )
-
-    return {"ok": True}
