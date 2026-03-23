@@ -1,8 +1,8 @@
 from datetime import datetime
 from app.db import SessionLocal
 from app.models import RequestLog
-from app.services.provider import request_acta
 from app.services.evolution import send_text
+from app.config import settings
 
 
 def process_request(request_id: int):
@@ -14,17 +14,23 @@ def process_request(request_id: int):
 
         req.status = "PROCESSING"
         req.updated_at = datetime.utcnow()
+        req.provider_whatsapp = settings.PROVIDER_WHATSAPP
+
+        text_to_provider = req.curp
+        if req.act_type and req.act_type != "NACIMIENTO":
+            text_to_provider = f"{req.curp} {req.act_type}"
+
+        req.provider_message = text_to_provider
         db.commit()
 
-        result = request_acta(req.curp, req.act_type, req.id)
+        if not settings.PROVIDER_WHATSAPP:
+            raise RuntimeError("PROVIDER_WHATSAPP_EMPTY")
 
-        req.provider_ref = result.get("provider_ref")
-        req.updated_at = datetime.utcnow()
-        db.commit()
+        send_text(settings.PROVIDER_WHATSAPP, text_to_provider)
 
         send_text(
             req.requester_wa_id,
-            f"✅ Solicitud recibida\nCURP: {req.curp}\nTipo: {req.act_type}\nFolio: {req.id}"
+            f"✅ Solicitud enviada al proveedor\nCURP: {req.curp}\nTipo: {req.act_type}\nFolio: {req.id}"
         )
 
     except Exception as e:
