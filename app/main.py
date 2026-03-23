@@ -278,7 +278,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             return {"ok": True, "ignored": "group_not_authorized"}
 
         if not is_authorized_user(db, requester_wa_id):
-            send_text(requester_wa_id, "⛔ Tu número no está autorizado.")
+            send_text(requester_wa_id, "") #⛔ Tu número no está autorizado.
             return {"ok": True}
 
         if not text_body:
