@@ -63,3 +63,18 @@ def send_group_document(group_jid: str, pdf_url: str, filename: str = "acta.pdf"
     resp = requests.post(url, headers=_headers(), json=payload, timeout=60)
     resp.raise_for_status()
     return resp.json()
+
+
+def get_media_base64(media_type: str, message_id: str):
+    url = f"{settings.EVOLUTION_BASE_URL}/chat/getBase64FromMediaMessage/{settings.EVOLUTION_INSTANCE}"
+    payload = {
+        "message": {
+            "key": {
+                "id": message_id
+            }
+        },
+        "convertToMp4": False
+    }
+    resp = requests.post(url, headers=_headers(), json=payload, timeout=60)
+    resp.raise_for_status()
+    return resp.json()
