@@ -27,7 +27,7 @@ class RequestLog(Base):
     id = Column(Integer, primary_key=True)
     request_key = Column(String(150), unique=True, nullable=False, index=True)
 
-    curp = Column(String(18), nullable=False, index=True)
+    curp = Column(String(40), nullable=False, index=True)
     act_type = Column(String(30), nullable=False, index=True)
 
     requester_wa_id = Column(String(50), nullable=False, index=True)
