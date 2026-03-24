@@ -124,6 +124,18 @@ def _find_open_request_for_provider(db: Session, provider_wa: str, text_body: st
     )
 
 
+def _extract_curp_from_filename(filename: str) -> str | None:
+    if not filename:
+        return None
+
+    name = normalize_text(filename)
+    m = re.search(r"\b([A-Z0-9]{18})\b", name)
+    if m:
+        return m.group(1)
+
+    return None
+
+
 @app.post("/webhook/evolution")
 async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
     try:
@@ -191,9 +203,48 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 return {"ok": True, "provider_result": "no_record"}
 
             # caso documento/pdf
+            doc = None
+
+            # documento directo
             if "documentMessage" in message:
-                doc = message.get("documentMessage", {})
+                doc = message.get("documentMessage")
+
+            # documento reenviado/citado
+            elif "extendedTextMessage" in message:
+                ext = message.get("extendedTextMessage", {})
+                ctx = ext.get("contextInfo", {})
+                quoted = ctx.get("quotedMessage", {})
+
+                if "documentMessage" in quoted:
+                    doc = quoted.get("documentMessage")
+
+            if doc:
+                filename = doc.get("fileName") or ""
                 pdf_url = doc.get("url") or doc.get("directPath") or ""
+                filename_curp = _extract_curp_from_filename(filename)
+
+                print("PROVIDER_DOC_FILENAME =", filename, flush=True)
+                print("PROVIDER_DOC_FILENAME_CURP =", filename_curp, flush=True)
+                print("PROVIDER_DOC_URL =", pdf_url, flush=True)
+
+                # si el archivo trae CURP, vuelve a buscar la solicitud exacta
+                if filename_curp:
+                    exact_req = (
+                        db.query(RequestLog)
+                        .filter(
+                            RequestLog.provider_whatsapp == provider_wa,
+                            RequestLog.curp == filename_curp,
+                            RequestLog.status == "PROCESSING"
+                        )
+                        .order_by(RequestLog.created_at.asc())
+                        .first()
+                    )
+                    if exact_req:
+                        open_req = exact_req
+
+                if not open_req:
+                    print("PROVIDER_PDF_WITHOUT_MATCH =", filename, flush=True)
+                    return {"ok": True, "ignored": "provider_pdf_without_match"}
 
                 open_req.pdf_url = pdf_url
                 open_req.provider_media_url = pdf_url
@@ -202,6 +253,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 db.commit()
 
                 if pdf_url:
+                    print("PROVIDER_PDF_MATCHED_REQ_ID =", open_req.id, flush=True)
+                    print("PROVIDER_PDF_MATCHED_CURP =", open_req.curp, flush=True)
+
                     _deliver_pdf_result(open_req, pdf_url)
                     return {"ok": True, "provider_result": "pdf_delivered"}
 
