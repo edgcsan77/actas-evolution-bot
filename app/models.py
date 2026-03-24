@@ -28,7 +28,7 @@ class RequestLog(Base):
     request_key = Column(String(150), unique=True, nullable=False, index=True)
 
     curp = Column(String(18), nullable=False, index=True)
-    act_type = Column(String(20), nullable=False, index=True)
+    act_type = Column(String(30), nullable=False, index=True)
 
     requester_wa_id = Column(String(50), nullable=False, index=True)
     requester_name = Column(String(150), nullable=True)
@@ -38,7 +38,7 @@ class RequestLog(Base):
 
     evolution_message_id = Column(String(120), nullable=True)
 
-    provider_whatsapp = Column(String(50), nullable=True, index=True)
+    provider_group_id = Column(String(120), nullable=True, index=True)
     provider_message = Column(Text, nullable=True)
     provider_media_url = Column(Text, nullable=True)
 
