@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
+import re
 
 from app.config import settings
 from app.db import Base, engine, get_db
@@ -9,8 +10,6 @@ from app.queue import request_queue
 from app.worker import process_request
 from app.utils.curp import extract_curps, detect_act_type, normalize_text
 from app.services.evolution import send_text, send_document, send_group_document, send_group_text
-
-import re
 
 app = FastAPI(title=settings.APP_NAME)
 
@@ -85,11 +84,6 @@ def _is_no_record_message(text_upper: str) -> bool:
 
 
 def _extract_provider_curp_loose(text_body: str) -> str | None:
-    """
-    Intenta sacar una CURP del texto del proveedor.
-    Primero usa la validación normal.
-    Si no encuentra, busca cualquier bloque de 18 caracteres alfanuméricos.
-    """
     curps = extract_curps(text_body)
     if curps:
         return curps[0]
@@ -102,28 +96,6 @@ def _extract_provider_curp_loose(text_body: str) -> str | None:
     return None
 
 
-def _find_open_request_for_provider(db: Session, provider_wa: str, text_body: str):
-    """
-    SOLO busca por CURP si el proveedor la manda.
-    Si no encuentra CURP clara, no adivina por antigüedad.
-    """
-    provider_curp = _extract_provider_curp_loose(text_body)
-
-    if not provider_curp:
-        return None
-
-    return (
-        db.query(RequestLog)
-        .filter(
-            RequestLog.provider_whatsapp == provider_wa,
-            RequestLog.curp == provider_curp,
-            RequestLog.status == "PROCESSING"
-        )
-        .order_by(RequestLog.created_at.asc())
-        .first()
-    )
-
-
 def _extract_curp_from_filename(filename: str) -> str | None:
     if not filename:
         return None
@@ -134,6 +106,16 @@ def _extract_curp_from_filename(filename: str) -> str | None:
         return m.group(1)
 
     return None
+
+
+def _all_provider_groups() -> set[str]:
+    vals = {
+        settings.PROVIDER_GROUP_NACIMIENTO_1,
+        settings.PROVIDER_GROUP_NACIMIENTO_2,
+        settings.PROVIDER_GROUP_NACIMIENTO_3,
+        settings.PROVIDER_GROUP_ESPECIALES,
+    }
+    return {v.strip() for v in vals if v and v.strip()}
 
 
 @app.post("/webhook/evolution")
@@ -168,33 +150,26 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             text_body = message.get("extendedTextMessage", {}).get("text", "")
 
         text_upper = normalize_text(text_body)
-
-        provider_wa = (settings.PROVIDER_WHATSAPP or "").strip()
-        is_provider_message = requester_wa_id == provider_wa
+        provider_groups = _all_provider_groups()
+        is_provider_message = source_chat_id in provider_groups
 
         # =========================
         # RESPUESTA DEL PROVEEDOR
         # =========================
         if is_provider_message:
             provider_curp = _extract_provider_curp_loose(text_body or "")
+            print("PROVIDER_GROUP =", source_chat_id, flush=True)
             print("PROVIDER_TEXT =", text_body, flush=True)
             print("PROVIDER_CURP_DETECTED =", provider_curp, flush=True)
 
-            # =========================
             # 1) INTENTAR DETECTAR PDF
-            # =========================
             doc = None
 
-            # documento directo
             if "documentMessage" in message:
                 doc = message.get("documentMessage")
-
-            # documento con caption
             elif "documentWithCaptionMessage" in message:
                 doc_wrap = message.get("documentWithCaptionMessage", {})
                 doc = doc_wrap.get("message", {}).get("documentMessage")
-
-            # documento reenviado/citado
             elif "extendedTextMessage" in message:
                 ext = message.get("extendedTextMessage", {})
                 ctx = ext.get("contextInfo", {})
@@ -217,12 +192,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                 open_req = None
 
-                # si el nombre del archivo trae CURP, usar esa CURP
                 if filename_curp:
                     open_req = (
                         db.query(RequestLog)
                         .filter(
-                            RequestLog.provider_whatsapp == provider_wa,
+                            RequestLog.provider_group_id == source_chat_id,
                             RequestLog.curp == filename_curp,
                             RequestLog.status == "PROCESSING"
                         )
@@ -230,12 +204,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         .first()
                     )
 
-                # si no trae CURP en filename, intentar por texto
                 if not open_req and provider_curp:
                     open_req = (
                         db.query(RequestLog)
                         .filter(
-                            RequestLog.provider_whatsapp == provider_wa,
+                            RequestLog.provider_group_id == source_chat_id,
                             RequestLog.curp == provider_curp,
                             RequestLog.status == "PROCESSING"
                         )
@@ -262,15 +235,13 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                 return {"ok": True, "ignored": "provider_pdf_without_url"}
 
-            # =========================
             # 2) SI NO HAY PDF, INTENTAR TEXTO
-            # =========================
             open_req = None
             if provider_curp:
                 open_req = (
                     db.query(RequestLog)
                     .filter(
-                        RequestLog.provider_whatsapp == provider_wa,
+                        RequestLog.provider_group_id == source_chat_id,
                         RequestLog.curp == provider_curp,
                         RequestLog.status == "PROCESSING"
                     )
@@ -300,7 +271,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             print("PROVIDER_UNHANDLED_MESSAGE =", message, flush=True)
             return {"ok": True, "ignored": "provider_unhandled_message"}
 
-            
         # =========================
         # COMANDOS ADMIN
         # =========================
@@ -389,8 +359,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             return {"ok": True, "ignored": "group_not_authorized"}
 
         if not is_authorized_user(db, requester_wa_id):
-            send_text(requester_wa_id, "") #⛔ Tu número no está autorizado.
-            return {"ok": True}
+            return {"ok": True, "ignored": "user_not_authorized"}
 
         if not text_body:
             return {"ok": True, "ignored": "no_text"}
