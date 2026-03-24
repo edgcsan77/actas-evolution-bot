@@ -179,30 +179,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             provider_curp = _extract_provider_curp_loose(text_body or "")
             print("PROVIDER_TEXT =", text_body, flush=True)
             print("PROVIDER_CURP_DETECTED =", provider_curp, flush=True)
-            
-            open_req = _find_open_request_for_provider(db, provider_wa, text_body or "")
-            
-            if not open_req:
-                print("PROVIDER_NO_MATCH_FOR_TEXT =", text_body, flush=True)
-                return {"ok": True, "ignored": "provider_message_without_open_request"}
 
-            # caso texto "sin registro" / "no se encontró..."
-            if text_body and _is_no_record_message(text_upper):
-                print("PROVIDER_NO_RECORD_MATCHED_REQ_ID =", open_req.id, flush=True)
-                print("PROVIDER_NO_RECORD_MATCHED_CURP =", open_req.curp, flush=True)
-            
-                open_req.status = "ERROR"
-                open_req.error_message = text_body.strip()
-                open_req.updated_at = datetime.utcnow()
-                db.commit()
-
-                _deliver_text_result(
-                    open_req,
-                    f"❌ No se encontró el acta en sistema.\nCURP: {open_req.curp}\nTipo: {open_req.act_type}\nFolio: {open_req.id}"
-                )
-                return {"ok": True, "provider_result": "no_record"}
-
-            # caso documento/pdf
+            # =========================
+            # 1) INTENTAR DETECTAR PDF
+            # =========================
             doc = None
 
             # documento directo
@@ -227,9 +207,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 print("PROVIDER_DOC_FILENAME_CURP =", filename_curp, flush=True)
                 print("PROVIDER_DOC_URL =", pdf_url, flush=True)
 
-                # si el archivo trae CURP, vuelve a buscar la solicitud exacta
+                open_req = None
+
+                # si el nombre del archivo trae CURP, usar esa CURP
                 if filename_curp:
-                    exact_req = (
+                    open_req = (
                         db.query(RequestLog)
                         .filter(
                             RequestLog.provider_whatsapp == provider_wa,
@@ -239,8 +221,19 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         .order_by(RequestLog.created_at.asc())
                         .first()
                     )
-                    if exact_req:
-                        open_req = exact_req
+
+                # si no trae CURP en filename, intentar por texto
+                if not open_req and provider_curp:
+                    open_req = (
+                        db.query(RequestLog)
+                        .filter(
+                            RequestLog.provider_whatsapp == provider_wa,
+                            RequestLog.curp == provider_curp,
+                            RequestLog.status == "PROCESSING"
+                        )
+                        .order_by(RequestLog.created_at.asc())
+                        .first()
+                    )
 
                 if not open_req:
                     print("PROVIDER_PDF_WITHOUT_MATCH =", filename, flush=True)
@@ -259,8 +252,47 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     _deliver_pdf_result(open_req, pdf_url)
                     return {"ok": True, "provider_result": "pdf_delivered"}
 
+                return {"ok": True, "ignored": "provider_pdf_without_url"}
+
+            # =========================
+            # 2) SI NO HAY PDF, INTENTAR TEXTO
+            # =========================
+            open_req = None
+            if provider_curp:
+                open_req = (
+                    db.query(RequestLog)
+                    .filter(
+                        RequestLog.provider_whatsapp == provider_wa,
+                        RequestLog.curp == provider_curp,
+                        RequestLog.status == "PROCESSING"
+                    )
+                    .order_by(RequestLog.created_at.asc())
+                    .first()
+                )
+
+            if text_body and _is_no_record_message(text_upper):
+                if not open_req:
+                    print("PROVIDER_NO_RECORD_WITHOUT_MATCH =", text_body, flush=True)
+                    return {"ok": True, "ignored": "provider_no_record_without_match"}
+
+                print("PROVIDER_NO_RECORD_MATCHED_REQ_ID =", open_req.id, flush=True)
+                print("PROVIDER_NO_RECORD_MATCHED_CURP =", open_req.curp, flush=True)
+
+                open_req.status = "ERROR"
+                open_req.error_message = text_body.strip()
+                open_req.updated_at = datetime.utcnow()
+                db.commit()
+
+                _deliver_text_result(
+                    open_req,
+                    f"❌ No se encontró el acta en sistema.\nCURP: {open_req.curp}\nTipo: {open_req.act_type}\nFolio: {open_req.id}"
+                )
+                return {"ok": True, "provider_result": "no_record"}
+
+            print("PROVIDER_UNHANDLED_MESSAGE =", message, flush=True)
             return {"ok": True, "ignored": "provider_unhandled_message"}
 
+            
         # =========================
         # COMANDOS ADMIN
         # =========================
