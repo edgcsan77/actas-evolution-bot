@@ -3,6 +3,7 @@ from app.db import SessionLocal
 from app.models import RequestLog
 from app.services.evolution import send_group_text, send_text
 from app.config import settings
+from app.utils.curp import provider_label_for_type
 
 
 def _pick_provider_group(act_type: str, request_id: int) -> str:
@@ -39,9 +40,8 @@ def process_request(request_id: int):
         req.status = "PROCESSING"
         req.updated_at = datetime.utcnow()
 
-        text_to_provider = req.curp
-        if req.act_type and req.act_type != "NACIMIENTO":
-            text_to_provider = f"{req.curp} {req.act_type}"
+        provider_type = provider_label_for_type(req.act_type)
+        text_to_provider = f"{req.curp} {provider_type}"
 
         req.provider_message = text_to_provider
         req.provider_group_id = _pick_provider_group(req.act_type, req.id)
@@ -54,7 +54,7 @@ def process_request(request_id: int):
 
         ack = (
             f"✅ Solicitud enviada al proveedor\n"
-            f"CURP: {req.curp}\n"
+            f"Dato: {req.curp}\n"
             f"Tipo: {req.act_type}\n"
             f"Folio: {req.id}"
         )
