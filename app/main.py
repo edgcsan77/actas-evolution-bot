@@ -290,13 +290,19 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             return {"ok": True}
 
         if text_upper.startswith("/ADDGROUP"):
+            admin = settings.ADMIN_PHONE.replace("+", "").replace(" ", "")
+        
+            if requester_wa_id != admin:
+                print("ADDGROUP_DENIED_USER =", requester_wa_id, flush=True)
+                return {"ok": True, "ignored": "not_admin"}
+        
             if is_group:
                 if not db.query(AuthorizedGroup).filter_by(group_jid=source_group_id).first():
                     db.add(AuthorizedGroup(group_jid=source_group_id, group_name=""))
                     db.commit()
+        
                 send_group_text(source_group_id, f"✅ Grupo autorizado: {source_group_id}")
-            else:
-                send_text(requester_wa_id, "⚠️ /ADDGROUP solo se usa dentro del grupo.")
+        
             return {"ok": True}
 
         if text_upper.startswith("/STATUS"):
