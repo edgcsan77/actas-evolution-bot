@@ -8,7 +8,13 @@ from app.db import Base, engine, get_db
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog
 from app.queue import request_queue
 from app.worker import process_request
-from app.utils.curp import extract_curps, detect_act_type, normalize_text
+from app.utils.curp import (
+    extract_request_terms,
+    detect_act_type,
+    normalize_text,
+    extract_identifier_loose,
+    extract_identifier_from_filename,
+)
 from app.services.evolution import send_text, send_document, send_group_document, send_group_text
 
 app = FastAPI(title=settings.APP_NAME)
@@ -83,29 +89,12 @@ def _is_no_record_message(text_upper: str) -> bool:
     return any(p in text_upper for p in patterns)
 
 
-def _extract_provider_curp_loose(text_body: str) -> str | None:
-    curps = extract_curps(text_body)
-    if curps:
-        return curps[0]
-
-    text_upper = normalize_text(text_body or "")
-    m = re.search(r"\b([A-Z0-9]{18})\b", text_upper)
-    if m:
-        return m.group(1)
-
-    return None
+def _extract_provider_identifier_loose(text_body: str) -> str | None:
+    return extract_identifier_loose(text_body)
 
 
-def _extract_curp_from_filename(filename: str) -> str | None:
-    if not filename:
-        return None
-
-    name = normalize_text(filename)
-    m = re.search(r"\b([A-Z0-9]{18})\b", name)
-    if m:
-        return m.group(1)
-
-    return None
+def _extract_identifier_from_filename_local(filename: str) -> str | None:
+    return extract_identifier_from_filename(filename)
 
 
 def _all_provider_groups() -> set[str]:
@@ -157,10 +146,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         # RESPUESTA DEL PROVEEDOR
         # =========================
         if is_provider_message:
-            provider_curp = _extract_provider_curp_loose(text_body or "")
+            provider_id = _extract_identifier_curp_loose(text_body or "")
             print("PROVIDER_GROUP =", source_chat_id, flush=True)
             print("PROVIDER_TEXT =", text_body, flush=True)
-            print("PROVIDER_CURP_DETECTED =", provider_curp, flush=True)
+            print("PROVIDER_IDENTIFIER_DETECTED =", provider_id, flush=True)
 
             # 1) INTENTAR DETECTAR PDF
             doc = None
@@ -184,32 +173,32 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             if doc:
                 filename = doc.get("fileName") or ""
                 pdf_url = doc.get("url") or doc.get("directPath") or ""
-                filename_curp = _extract_curp_from_filename(filename)
+                filename_id = _extract_identifier_from_filename_local(filename)
 
                 print("PROVIDER_DOC_FILENAME =", filename, flush=True)
-                print("PROVIDER_DOC_FILENAME_CURP =", filename_curp, flush=True)
+                print("PROVIDER_DOC_FILENAME_IDENTIFIER =", filename_id, flush=True)
                 print("PROVIDER_DOC_URL =", pdf_url, flush=True)
 
                 open_req = None
 
-                if filename_curp:
+                if filename_id:
                     open_req = (
                         db.query(RequestLog)
                         .filter(
                             RequestLog.provider_group_id == source_chat_id,
-                            RequestLog.curp == filename_curp,
+                            RequestLog.curp == filename_id,
                             RequestLog.status == "PROCESSING"
                         )
                         .order_by(RequestLog.created_at.asc())
                         .first()
                     )
-
-                if not open_req and provider_curp:
+                
+                if not open_req and provider_id:
                     open_req = (
                         db.query(RequestLog)
                         .filter(
                             RequestLog.provider_group_id == source_chat_id,
-                            RequestLog.curp == provider_curp,
+                            RequestLog.curp == provider_id,
                             RequestLog.status == "PROCESSING"
                         )
                         .order_by(RequestLog.created_at.asc())
@@ -237,12 +226,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             # 2) SI NO HAY PDF, INTENTAR TEXTO
             open_req = None
-            if provider_curp:
+            if provider_id:
                 open_req = (
                     db.query(RequestLog)
                     .filter(
                         RequestLog.provider_group_id == source_chat_id,
-                        RequestLog.curp == provider_curp,
+                        RequestLog.curp == provider_id,
                         RequestLog.status == "PROCESSING"
                     )
                     .order_by(RequestLog.created_at.asc())
@@ -364,19 +353,19 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         if not text_body:
             return {"ok": True, "ignored": "no_text"}
 
-        curps = extract_curps(text_body)
-        if not curps:
-            return {"ok": True, "ignored": "no_curp"}
+        terms = extract_request_terms(text_body)
+        if not terms:
+            return {"ok": True, "ignored": "no_identifier"}
 
         act_type = detect_act_type(text_body)
 
-        for curp in curps:
-            last_done = get_last_done_request(db, curp, act_type)
+        for term in terms:
+            last_done = get_last_done_request(db, term, act_type)
             if last_done and last_done.pdf_url and last_done.expires_at > datetime.utcnow():
                 _deliver_pdf_result(last_done, last_done.pdf_url)
                 continue
 
-            request_key = build_request_key(curp, act_type, source_chat_id)
+            request_key = build_request_key(term, act_type, source_chat_id)
 
             duplicate_open = (
                 db.query(RequestLog)
@@ -389,13 +378,13 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             if duplicate_open:
                 send_text(
                     requester_wa_id,
-                    f"⏳ Ya existe una solicitud en proceso\nCURP: {curp}\nTipo: {act_type}\nFolio: {duplicate_open.id}"
+                    f"⏳ Ya existe una solicitud en proceso\nDato: {term}\nTipo: {act_type}\nFolio: {duplicate_open.id}"
                 )
                 continue
 
             row = RequestLog(
                 request_key=request_key,
-                curp=curp,
+                curp=term,
                 act_type=act_type,
                 requester_wa_id=requester_wa_id,
                 requester_name="",
@@ -411,7 +400,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             request_queue.enqueue(process_request, row.id)
 
-        send_text(requester_wa_id, f"✅ Solicitud recibida. CURPs detectadas: {len(curps)}")
+        send_text(requester_wa_id, f"✅ Solicitud recibida. CURPs detectadas: {len(terms)}")
         return {"ok": True}
 
     except Exception as e:
