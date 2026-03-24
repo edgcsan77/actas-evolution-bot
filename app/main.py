@@ -19,6 +19,14 @@ from app.services.evolution import send_text, send_document, send_group_document
 app = FastAPI(title=settings.APP_NAME)
 
 
+def _normalize_wa_actor(value: str) -> str:
+    value = (value or "").strip()
+    value = value.replace("@s.whatsapp.net", "")
+    value = value.replace("@lid", "")
+    value = value.replace("@g.us", "")
+    return value
+
+
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(bind=engine)
@@ -129,8 +137,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         is_group = remote_jid.endswith("@g.us")
         source_chat_id = remote_jid
         source_group_id = remote_jid if is_group else None
-        requester_wa_id = participant.replace("@s.whatsapp.net", "") if is_group and participant else remote_jid.replace("@s.whatsapp.net", "")
-
+        requester_wa_id = _normalize_wa_actor(participant) if is_group and participant else _normalize_wa_actor(remote_jid)
+        
         text_body = ""
         if "conversation" in message:
             text_body = message.get("conversation", "")
