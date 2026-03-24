@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
-import re
 
 from app.config import settings
 from app.db import Base, engine, get_db
@@ -146,7 +145,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         # RESPUESTA DEL PROVEEDOR
         # =========================
         if is_provider_message:
-            provider_id = _extract_identifier_curp_loose(text_body or "")
+            provider_id = _extract_provider_identifier_loose(text_body or "")
             print("PROVIDER_GROUP =", source_chat_id, flush=True)
             print("PROVIDER_TEXT =", text_body, flush=True)
             print("PROVIDER_IDENTIFIER_DETECTED =", provider_id, flush=True)
@@ -400,7 +399,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             request_queue.enqueue(process_request, row.id)
 
-        send_text(requester_wa_id, f"✅ Solicitud recibida. CURPs detectadas: {len(terms)}")
+        send_text(requester_wa_id, f"✅ Solicitud recibida. Datos detectados: {len(terms)}")
         return {"ok": True}
 
     except Exception as e:
