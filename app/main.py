@@ -344,21 +344,32 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         # FLUJO NORMAL DE USUARIO
         # =========================
         if is_group and not is_authorized_group(db, source_group_id):
+            print("IGNORED_REASON = group_not_authorized", flush=True)
+            print("IGNORED_GROUP =", source_group_id, flush=True)
             return {"ok": True, "ignored": "group_not_authorized"}
-
+        
         if not is_authorized_user(db, requester_wa_id):
+            print("IGNORED_REASON = user_not_authorized", flush=True)
+            print("IGNORED_USER =", requester_wa_id, flush=True)
             return {"ok": True, "ignored": "user_not_authorized"}
-
+        
         if not text_body:
+            print("IGNORED_REASON = no_text", flush=True)
             return {"ok": True, "ignored": "no_text"}
-
+        
         terms = extract_request_terms(text_body)
+        print("REQUEST_TEXT =", text_body, flush=True)
+        print("REQUEST_TERMS =", terms, flush=True)
+        
         if not terms:
+            print("IGNORED_REASON = no_identifier", flush=True)
             return {"ok": True, "ignored": "no_identifier"}
-
+        
         act_type = detect_act_type(text_body)
+        print("REQUEST_ACT_TYPE =", act_type, flush=True)
 
         for term in terms:
+            print("PROCESSING_TERM =", term, flush=True)
             last_done = get_last_done_request(db, term, act_type)
             if last_done and last_done.pdf_url and last_done.expires_at > datetime.utcnow():
                 _deliver_pdf_result(last_done, last_done.pdf_url)
@@ -398,6 +409,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             db.refresh(row)
 
             request_queue.enqueue(process_request, row.id)
+            print("ENQUEUED_REQUEST_ID =", row.id, flush=True)
+            print("ENQUEUED_TERM =", row.curp, flush=True)
+            print("ENQUEUED_TYPE =", row.act_type, flush=True)
+            print("ENQUEUED_SOURCE_GROUP =", row.source_group_id, flush=True)
 
         send_text(requester_wa_id, f"✅ Solicitud recibida. Datos detectados: {len(terms)}")
         return {"ok": True}
