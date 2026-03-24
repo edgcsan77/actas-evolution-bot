@@ -189,6 +189,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             if "documentMessage" in message:
                 doc = message.get("documentMessage")
 
+            # documento con caption
+            elif "documentWithCaptionMessage" in message:
+                doc_wrap = message.get("documentWithCaptionMessage", {})
+                doc = doc_wrap.get("message", {}).get("documentMessage")
+
             # documento reenviado/citado
             elif "extendedTextMessage" in message:
                 ext = message.get("extendedTextMessage", {})
@@ -197,6 +202,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                 if "documentMessage" in quoted:
                     doc = quoted.get("documentMessage")
+                elif "documentWithCaptionMessage" in quoted:
+                    doc_wrap = quoted.get("documentWithCaptionMessage", {})
+                    doc = doc_wrap.get("message", {}).get("documentMessage")
 
             if doc:
                 filename = doc.get("fileName") or ""
