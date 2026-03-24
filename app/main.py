@@ -348,7 +348,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             print("IGNORED_GROUP =", source_group_id, flush=True)
             return {"ok": True, "ignored": "group_not_authorized"}
         
-        if not is_authorized_user(db, requester_wa_id):
+        if not is_group and not is_authorized_user(db, requester_wa_id):
             print("IGNORED_REASON = user_not_authorized", flush=True)
             print("IGNORED_USER =", requester_wa_id, flush=True)
             return {"ok": True, "ignored": "user_not_authorized"}
