@@ -386,10 +386,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 .first()
             )
             if duplicate_open:
-                send_text(
-                    requester_wa_id,
-                    f"⏳ Ya existe una solicitud en proceso\nDato: {term}\nTipo: {act_type}\nFolio: {duplicate_open.id}"
-                )
+                dup_msg = f"⏳ Ya existe una solicitud en proceso\nDato: {term}\nTipo: {act_type}\nFolio: {duplicate_open.id}"
+                if source_group_id:
+                    send_group_text(source_group_id, dup_msg)
+                else:
+                    send_text(requester_wa_id, dup_msg)
                 continue
 
             row = RequestLog(
@@ -414,7 +415,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             print("ENQUEUED_TYPE =", row.act_type, flush=True)
             print("ENQUEUED_SOURCE_GROUP =", row.source_group_id, flush=True)
 
-        send_text(requester_wa_id, f"✅ Solicitud recibida. Datos detectados: {len(terms)}")
+        ack_msg = f"✅ Solicitud recibida. Datos detectados: {len(terms)}"
+        if source_group_id:
+            send_group_text(source_group_id, ack_msg)
+        else:
+            send_text(requester_wa_id, ack_msg)
+            
         return {"ok": True}
 
     except Exception as e:
