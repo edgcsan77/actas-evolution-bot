@@ -253,7 +253,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                 _deliver_text_result(
                     open_req,
-                    f"❌ No se encontró el acta en sistema.\nCURP: {open_req.curp}\nTipo: {open_req.act_type}\nFolio: {open_req.id}"
+                    f"❌ No hay registros disponibles.\nDato: {open_req.curp}\nTipo: {open_req.act_type}\nFolio: {open_req.id}"
                 )
                 return {"ok": True, "provider_result": "no_record"}
 
