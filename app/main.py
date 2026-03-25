@@ -407,7 +407,7 @@ def panel_actas(
       </div>
     </div>
 
-    <form class="box" method="get" action="/panel/actas">
+    <form class="box" method="get" action="/panel">
       <div class="head"><strong>Filtros</strong></div>
       <div class="filters">
         <input type="hidden" name="view" value="{_esc(view)}">
