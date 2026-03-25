@@ -63,26 +63,35 @@ def _remove_type_words(line: str) -> str:
     return " ".join(x.split())
 
 
-def _extract_identifier_from_line(line: str) -> str | None:
-    """
-    Prioridad:
-    1) CURP-like: 18 alfanuméricos
-    2) cadena de 20 dígitos
-    3) código genérico alfanumérico (6 a 30)
-    """
+def extract_identifier_from_line(line: str) -> str | None:
     cleaned = _remove_type_words(line)
 
-    m = re.search(r"\b([A-Z0-9]{18})\b", cleaned)
+    # 1️⃣ CURP estricta
+    m = re.search(r"\b([A-Z]{4}\d{6}[A-Z]{6}\d{2})\b", cleaned)
     if m:
         return m.group(1)
 
+    # 2️⃣ cadena de 20 dígitos
     m = re.search(r"\b(\d{20})\b", cleaned)
     if m:
         return m.group(1)
 
-    m = re.search(r"\b([A-Z0-9]{6,30})\b", cleaned)
-    if m:
-        return m.group(1)
+    # 3️⃣ posibles tokens alfanuméricos
+    tokens = re.findall(r"[A-Z0-9]{6,30}", cleaned)
+
+    for token in tokens:
+
+        # si parece CURP pero no mide 18 → error
+        if re.match(r"[A-Z]{4}\d{6}[A-Z]{6}\d{1,2}", token):
+            return None
+
+        # si parece cadena pero no mide 20 → error
+        if token.isdigit() and len(token) != 20:
+            return None
+
+        # aceptar código si no parece CURP
+        if not re.match(r"[A-Z]{4}\d{6}", token):
+            return token
 
     return None
 
@@ -121,35 +130,23 @@ def extract_identifier_loose(text: str) -> str | None:
     return None
 
 
-def extract_identifier_from_line(line: str) -> str | None:
-    cleaned = _remove_type_words(line)
+def extract_identifier_from_filename(filename: str) -> str | None:
+    if not filename:
+        return None
 
-    # 1️⃣ CURP estricta
-    m = re.search(r"\b([A-Z]{4}\d{6}[A-Z]{6}\d{2})\b", cleaned)
+    name = normalize_text(filename)
+
+    m = re.search(r"\b([A-Z0-9]{18})\b", name)
     if m:
         return m.group(1)
 
-    # 2️⃣ cadena de 20 dígitos
-    m = re.search(r"\b(\d{20})\b", cleaned)
+    m = re.search(r"\b(\d{20})\b", name)
     if m:
         return m.group(1)
 
-    # 3️⃣ posibles tokens alfanuméricos
-    tokens = re.findall(r"[A-Z0-9]{6,30}", cleaned)
-
-    for token in tokens:
-
-        # si parece CURP pero no mide 18 → error
-        if re.match(r"[A-Z]{4}\d{6}[A-Z]{6}\d{1,2}", token):
-            return None
-
-        # si parece cadena pero no mide 20 → error
-        if token.isdigit() and len(token) != 20:
-            return None
-
-        # aceptar código si no parece CURP
-        if not re.match(r"[A-Z]{4}\d{6}", token):
-            return token
+    m = re.search(r"\b([A-Z0-9]{6,30})\b", name)
+    if m:
+        return m.group(1)
 
     return None
 
