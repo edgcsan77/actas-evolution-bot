@@ -138,6 +138,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
         key = data.get("key", {})
         message = data.get("message", {})
+        push_name = data.get("pushName", "")
 
         remote_jid = key.get("remoteJid", "")
         from_me = key.get("fromMe", False)
@@ -533,9 +534,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             print("ENQUEUED_TYPE =", row.act_type, flush=True)
             print("ENQUEUED_SOURCE_GROUP =", row.source_group_id, flush=True)
 
-        actor = requester_wa_id
-        if requester_wa_id:
-            actor = requester_wa_id
+        actor = push_name or requester_wa_id
         
         ack_msg = (
             f"🚀 DOCU EXPRES\n"
