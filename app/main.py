@@ -75,14 +75,14 @@ def _deliver_pdf_result(req: RequestLog, pdf_url: str):
         send_group_document(
             req.source_group_id,
             pdf_url,
-            filename=f"{req.curp}_{req.act_type}.pdf",
+            filename=f"{req.curp}.pdf",
             caption=""
         )
     else:
         send_document(
             req.requester_wa_id,
             pdf_url,
-            filename=f"{req.curp}_{req.act_type}.pdf",
+            filename=f"{req.curp}.pdf",
             caption=""
         )
 
@@ -408,14 +408,14 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     send_group_document(
                         source_group_id,
                         last.pdf_url,
-                        filename=f"{last.curp}_{last.act_type}.pdf",
+                        filename=f"{last.curp}.pdf",
                         caption="♻️ Reenviado desde historial"
                     )
                 else:
                     send_document(
                         requester_wa_id,
                         last.pdf_url,
-                        filename=f"{last.curp}_{last.act_type}.pdf",
+                        filename=f"{last.curp}.pdf",
                         caption="♻️ Reenviado desde historial"
                     )
             else:
