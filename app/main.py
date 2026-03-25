@@ -999,6 +999,16 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     print("PROVIDER_PDF_BASE64_EMPTY =", media_json, flush=True)
                     return {"ok": True, "ignored": "provider_pdf_base64_empty"}
                 
+                # limpiar prefijo data:... si viene así
+                if media_b64.startswith("data:"):
+                    parts = media_b64.split(",", 1)
+                    media_b64 = parts[1] if len(parts) > 1 else media_b64
+                
+                # quitar saltos de línea y espacios
+                media_b64 = media_b64.replace("\n", "").replace("\r", "").strip()
+                
+                print("PROVIDER_PDF_BASE64_START =", media_b64[:20], flush=True)
+                
                 open_req.pdf_url = pdf_url
                 open_req.provider_media_url = "BASE64_FROM_MEDIA_MESSAGE"
                 open_req.status = "DONE"
