@@ -66,32 +66,29 @@ def _remove_type_words(line: str) -> str:
 def _extract_identifier_from_line(line: str) -> str | None:
     cleaned = _remove_type_words(line)
 
-    # 1️⃣ CURP estricta
-    m = re.search(r"\b([A-Z]{4}\d{6}[A-Z]{6}\d{2})\b", cleaned)
+    # 1) CURP estricta correcta
+    m = re.search(r"\b([A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2})\b", cleaned)
     if m:
         return m.group(1)
 
-    # 2️⃣ cadena de 20 dígitos
+    # 2) cadena de 20 dígitos
     m = re.search(r"\b(\d{20})\b", cleaned)
     if m:
         return m.group(1)
 
-    # 3️⃣ posibles tokens alfanuméricos
+    # 3) código genérico, pero evitando confundir CURPs incompletas
     tokens = re.findall(r"[A-Z0-9]{6,30}", cleaned)
-
     for token in tokens:
-
-        # si parece CURP pero no mide 18 → error
-        if re.match(r"[A-Z]{4}\d{6}[A-Z]{6}\d{1,2}", token):
+        if re.match(r"^[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{0,2}$", token):
+            # parece CURP pero incompleta/mal formada
             return None
 
-        # si parece cadena pero no mide 20 → error
-        if token.isdigit() and len(token) != 20:
-            return None
+        if token.isdigit():
+            if len(token) == 20:
+                return token
+            continue
 
-        # aceptar código si no parece CURP
-        if not re.match(r"[A-Z]{4}\d{6}", token):
-            return token
+        return token
 
     return None
 
@@ -115,7 +112,7 @@ def extract_request_terms(text: str) -> list[str]:
 def extract_identifier_loose(text: str) -> str | None:
     text = normalize_text(text)
 
-    m = re.search(r"\b([A-Z0-9]{18})\b", text)
+    m = re.search(r"\b([A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2})\b", text)
     if m:
         return m.group(1)
 
@@ -136,7 +133,7 @@ def extract_identifier_from_filename(filename: str) -> str | None:
 
     name = normalize_text(filename)
 
-    m = re.search(r"\b([A-Z0-9]{18})\b", name)
+    m = re.search(r"\b([A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2})\b", name)
     if m:
         return m.group(1)
 
@@ -189,7 +186,14 @@ def detect_identifier_problem(text: str) -> str | None:
                 "Revisa el dato e inténtalo de nuevo."
             )
 
-    # 3) solo números, pero no 20
+    # 3) mensaje con letras/números pero sin formato válido
+    if re.search(r"[A-Z]", cleaned) and re.search(r"\d", cleaned):
+        return (
+            "⚠️ El dato parece inválido o incompleto.\n"
+            "Revisa la CURP, cadena o código e inténtalo de nuevo."
+        )
+
+    # 4) solo números, pero no 20
     if re.fullmatch(r"\d+", cleaned):
         return (
             "⚠️ La cadena parece incorrecta.\n"
