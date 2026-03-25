@@ -638,6 +638,9 @@ def panel_actas(
 
   }
 
+  setInterval(() => {
+    location.reload();
+  }, 30000);
   </script>
 </body>
 </html>
