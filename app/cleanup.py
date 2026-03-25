@@ -23,7 +23,7 @@ def cleanup_expired_and_mark_pending():
         )
 
         for r in rows:
-            r.status = "PENDING"
+            r.status = "ERROR"
             r.updated_at = datetime.utcnow()
             r.error_message = f"Timeout automático a los {settings.REQUEST_TIMEOUT_MINUTES} minutos"
 
