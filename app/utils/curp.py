@@ -22,7 +22,6 @@ def detect_act_type(text: str) -> str:
     if "DIVORCIO" in t_nospace:
         return "DIVORCIO"
 
-    # nacimiento por default y tolerante a typo tipo "nacimieinto"
     if "NACIMIENTO" in t_nospace or "NACIMI" in t_nospace:
         return "NACIMIENTO"
 
@@ -47,13 +46,12 @@ def provider_label_for_type(act_type: str) -> str:
 def _remove_type_words(line: str) -> str:
     x = normalize_text(line)
 
-    # orden importante: primero el más específico
     patterns = [
         r"NACIMIENTO\s*FOLIO",
         r"NACIMIENTOFOLIO",
         r"DE\s+NACIMIENTO",
         r"NACIMIENTO",
-        r"NACIMI\w*",   # tolera "nacimieinto"
+        r"NACIMI\w*",
         r"DEFUNCION",
         r"MATRIMONIO",
         r"DIVORCIO",
@@ -74,17 +72,14 @@ def _extract_identifier_from_line(line: str) -> str | None:
     """
     cleaned = _remove_type_words(line)
 
-    # CURP o identificador de 18
     m = re.search(r"\b([A-Z0-9]{18})\b", cleaned)
     if m:
         return m.group(1)
 
-    # cadena de 20 dígitos
     m = re.search(r"\b(\d{20})\b", cleaned)
     if m:
         return m.group(1)
 
-    # código genérico
     m = re.search(r"\b([A-Z0-9]{6,30})\b", cleaned)
     if m:
         return m.group(1)
@@ -93,12 +88,6 @@ def _extract_identifier_from_line(line: str) -> str | None:
 
 
 def extract_request_terms(text: str) -> list[str]:
-    """
-    Soporta:
-    - una solicitud por línea
-    - term + tipo separado por espacios
-    - term pegado con 'Nacimiento'
-    """
     text = text or ""
     lines = [x.strip() for x in text.splitlines() if x.strip()]
 
@@ -115,10 +104,6 @@ def extract_request_terms(text: str) -> list[str]:
 
 
 def extract_identifier_loose(text: str) -> str | None:
-    """
-    Para respuestas del proveedor:
-    intenta sacar un identificador desde texto libre.
-    """
     text = normalize_text(text)
 
     m = re.search(r"\b([A-Z0-9]{18})\b", text)
@@ -153,5 +138,60 @@ def extract_identifier_from_filename(filename: str) -> str | None:
     m = re.search(r"\b([A-Z0-9]{6,30})\b", name)
     if m:
         return m.group(1)
+
+    return None
+
+
+def detect_identifier_problem(text: str) -> str | None:
+    """
+    Devuelve un mensaje específico si parece que el usuario quiso mandar
+    un dato pero está mal escrito o incompleto.
+    """
+    t = normalize_text(text)
+    cleaned = _remove_type_words(t)
+
+    # 1) cadena casi correcta pero no de 20 dígitos
+    digit_runs = re.findall(r"\d{8,25}", cleaned)
+    for d in digit_runs:
+        if len(d) != 20:
+            return (
+                "⚠️ La cadena parece incompleta o incorrecta.\n"
+                "Debe tener exactamente 20 dígitos."
+            )
+
+    # 2) CURP/código de longitud cercana pero incorrecta
+    alnum_runs = re.findall(r"[A-Z0-9]{6,30}", cleaned)
+    for token in alnum_runs:
+        # si es puramente numérico ya se trató arriba
+        if token.isdigit():
+            continue
+
+        # si parece CURP pero no mide 18
+        if 10 <= len(token) <= 17 or 19 <= len(token) <= 21:
+            return (
+                "⚠️ La CURP parece incompleta o incorrecta.\n"
+                "Debe tener exactamente 18 caracteres."
+            )
+
+        # si es muy corto para código razonable
+        if len(token) < 6:
+            return (
+                "⚠️ El código parece demasiado corto.\n"
+                "Revisa el dato e inténtalo de nuevo."
+            )
+
+    # 3) mensaje con letras/números pero sin formato válido
+    if re.search(r"[A-Z]", cleaned) and re.search(r"\d", cleaned):
+        return (
+            "⚠️ El dato parece inválido o incompleto.\n"
+            "Revisa la CURP, cadena o código e inténtalo de nuevo."
+        )
+
+    # 4) solo números, pero no 20
+    if re.fullmatch(r"\d+", cleaned):
+        return (
+            "⚠️ La cadena parece incorrecta.\n"
+            "Debe tener exactamente 20 dígitos."
+        )
 
     return None
