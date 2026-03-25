@@ -38,6 +38,7 @@ class RequestLog(Base):
 
     evolution_message_id = Column(String(120), nullable=True)
 
+    provider_name = Column(String(30), nullable=True, index=True)   # PROVIDER1 / PROVIDER2
     provider_group_id = Column(String(120), nullable=True, index=True)
     provider_message = Column(Text, nullable=True)
     provider_media_url = Column(Text, nullable=True)
@@ -50,5 +51,15 @@ class RequestLog(Base):
     resent_from_history = Column(Boolean, default=False)
 
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, index=True)
     expires_at = Column(DateTime, nullable=False)
+
+
+class ProviderSetting(Base):
+    __tablename__ = "provider_settings"
+
+    id = Column(Integer, primary_key=True)
+    provider_name = Column(String(30), unique=True, nullable=False, index=True)  # PROVIDER1 / PROVIDER2
+    is_enabled = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
