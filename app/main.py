@@ -114,6 +114,18 @@ def _all_provider_groups() -> set[str]:
     return {v.strip() for v in vals if v and v.strip()}
 
 
+def _is_admin(requester_wa_id: str) -> bool:
+    admin = (settings.ADMIN_PHONE or "").replace("+", "").replace(" ", "").strip()
+    return requester_wa_id == admin
+
+
+def _reply_to_origin(source_group_id: str | None, requester_wa_id: str, text: str):
+    if source_group_id:
+        send_group_text(source_group_id, text)
+    else:
+        send_text(requester_wa_id, text)
+
+
 @app.post("/webhook/evolution")
 async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
     try:
@@ -271,58 +283,105 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         # COMANDOS ADMIN
         # =========================
         if text_upper.startswith("/ADDUSER "):
+            if not _is_admin(requester_wa_id):
+                print("ADDUSER_DENIED_USER =", requester_wa_id, flush=True)
+                return {"ok": True, "ignored": "not_admin"}
+
             wa = text_upper.replace("/ADDUSER", "").strip()
             if wa and not db.query(AuthorizedUser).filter_by(wa_id=wa).first():
                 db.add(AuthorizedUser(wa_id=wa))
                 db.commit()
-            send_text(requester_wa_id, f"✅ Usuario autorizado: {wa}")
+
+            _reply_to_origin(source_group_id, requester_wa_id, f"✅ Usuario autorizado: {wa}")
             return {"ok": True}
 
         if text_upper.startswith("/RMUSER "):
+            if not _is_admin(requester_wa_id):
+                print("RMUSER_DENIED_USER =", requester_wa_id, flush=True)
+                return {"ok": True, "ignored": "not_admin"}
+
             wa = text_upper.replace("/RMUSER", "").strip()
             row = db.query(AuthorizedUser).filter_by(wa_id=wa).first()
+
             if row:
                 db.delete(row)
                 db.commit()
-                send_text(requester_wa_id, f"✅ Usuario eliminado: {wa}")
+                _reply_to_origin(source_group_id, requester_wa_id, f"✅ Usuario eliminado: {wa}")
             else:
-                send_text(requester_wa_id, f"⚠️ Usuario no encontrado: {wa}")
+                _reply_to_origin(source_group_id, requester_wa_id, f"⚠️ Usuario no encontrado: {wa}")
+
             return {"ok": True}
 
         if text_upper.startswith("/ADDGROUP"):
-            admin = settings.ADMIN_PHONE.replace("+", "").replace(" ", "")
-        
-            if requester_wa_id != admin:
+            if not _is_admin(requester_wa_id):
                 print("ADDGROUP_DENIED_USER =", requester_wa_id, flush=True)
                 return {"ok": True, "ignored": "not_admin"}
-        
+
             if is_group:
                 if not db.query(AuthorizedGroup).filter_by(group_jid=source_group_id).first():
                     db.add(AuthorizedGroup(group_jid=source_group_id, group_name=""))
                     db.commit()
-        
+
                 send_group_text(source_group_id, f"✅ Grupo autorizado: {source_group_id}")
-        
+
             return {"ok": True}
 
         if text_upper.startswith("/STATUS"):
+            if not _is_admin(requester_wa_id):
+                print("STATUS_DENIED_USER =", requester_wa_id, flush=True)
+                return {"ok": True, "ignored": "not_admin"}
+
             total = db.query(RequestLog).count()
             pending = db.query(RequestLog).filter(RequestLog.status.in_(["QUEUED", "PROCESSING", "PENDING"])).count()
             done = db.query(RequestLog).filter(RequestLog.status == "DONE").count()
             errors = db.query(RequestLog).filter(RequestLog.status == "ERROR").count()
-            send_text(requester_wa_id, f"📊 Total: {total}\n⏳ Pendientes: {pending}\n✅ Entregadas: {done}\n❌ Error/Sin registro: {errors}")
+
+            _reply_to_origin(
+                source_group_id,
+                requester_wa_id,
+                f"📊 Total: {total}\n⏳ Pendientes: {pending}\n✅ Entregadas: {done}\n❌ Error/Sin registro: {errors}"
+            )
             return {"ok": True}
 
         if text_upper.startswith("/PENDING"):
-            rows = db.query(RequestLog).filter(RequestLog.status.in_(["QUEUED", "PROCESSING", "PENDING"])).order_by(RequestLog.created_at.desc()).limit(15).all()
+            if not _is_admin(requester_wa_id):
+                print("PENDING_DENIED_USER =", requester_wa_id, flush=True)
+                return {"ok": True, "ignored": "not_admin"}
+
+            rows = db.query(RequestLog).filter(
+                RequestLog.status.in_(["QUEUED", "PROCESSING", "PENDING"])
+            ).order_by(RequestLog.created_at.desc()).limit(15).all()
+
             if not rows:
-                send_text(requester_wa_id, "✅ No hay pendientes.")
+                _reply_to_origin(source_group_id, requester_wa_id, "✅ No hay pendientes.")
             else:
                 body = "\n".join([f"{r.id} | {r.curp} | {r.act_type} | {r.status}" for r in rows])
-                send_text(requester_wa_id, f"⏳ Pendientes:\n{body}")
+                _reply_to_origin(source_group_id, requester_wa_id, f"⏳ Pendientes:\n{body}")
+
+            return {"ok": True}
+
+        if text_upper.startswith("/QUEUE"):
+            if not _is_admin(requester_wa_id):
+                print("QUEUE_DENIED_USER =", requester_wa_id, flush=True)
+                return {"ok": True, "ignored": "not_admin"}
+
+            rows = db.query(RequestLog).filter(
+                RequestLog.status.in_(["QUEUED", "PROCESSING", "PENDING"])
+            ).order_by(RequestLog.created_at.desc()).limit(15).all()
+
+            if not rows:
+                _reply_to_origin(source_group_id, requester_wa_id, "✅ No hay pendientes.")
+            else:
+                body = "\n".join([f"{r.id} | {r.curp} | {r.act_type} | {r.status}" for r in rows])
+                _reply_to_origin(source_group_id, requester_wa_id, f"⏳ Pendientes:\n{body}")
+
             return {"ok": True}
 
         if text_upper.startswith("/LAST "):
+            if not _is_admin(requester_wa_id):
+                print("LAST_DENIED_USER =", requester_wa_id, flush=True)
+                return {"ok": True, "ignored": "not_admin"}
+
             curp = text_upper.replace("/LAST", "").strip()
             last = (
                 db.query(RequestLog)
@@ -330,13 +389,32 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 .order_by(RequestLog.created_at.desc())
                 .first()
             )
+
             if last and last.pdf_url:
-                send_document(requester_wa_id, last.pdf_url, filename=f"{last.curp}_{last.act_type}.pdf", caption="♻️ Reenviado desde historial")
+                if source_group_id:
+                    send_group_document(
+                        source_group_id,
+                        last.pdf_url,
+                        filename=f"{last.curp}_{last.act_type}.pdf",
+                        caption="♻️ Reenviado desde historial"
+                    )
+                else:
+                    send_document(
+                        requester_wa_id,
+                        last.pdf_url,
+                        filename=f"{last.curp}_{last.act_type}.pdf",
+                        caption="♻️ Reenviado desde historial"
+                    )
             else:
-                send_text(requester_wa_id, "⚠️ No encontré PDF reciente para esa CURP.")
+                _reply_to_origin(source_group_id, requester_wa_id, "⚠️ No encontré PDF reciente para ese dato.")
+
             return {"ok": True}
 
         if text_upper.startswith("/REQUEUE "):
+            if not _is_admin(requester_wa_id):
+                print("REQUEUE_DENIED_USER =", requester_wa_id, flush=True)
+                return {"ok": True, "ignored": "not_admin"}
+
             curp = text_upper.replace("/REQUEUE", "").strip()
             last = (
                 db.query(RequestLog)
@@ -344,14 +422,16 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 .order_by(RequestLog.created_at.desc())
                 .first()
             )
+
             if not last:
-                send_text(requester_wa_id, "⚠️ No encontré solicitud previa para esa CURP.")
+                _reply_to_origin(source_group_id, requester_wa_id, "⚠️ No encontré solicitud previa para ese dato.")
             else:
                 last.status = "QUEUED"
                 last.updated_at = datetime.utcnow()
                 db.commit()
                 request_queue.enqueue(process_request, last.id)
-                send_text(requester_wa_id, f"🔁 Reintentando folio {last.id}")
+                _reply_to_origin(source_group_id, requester_wa_id, f"🔁 Reintentando folio {last.id}")
+
             return {"ok": True}
 
         # =========================
