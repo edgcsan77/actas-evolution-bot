@@ -132,7 +132,8 @@ def _all_provider_groups() -> set[str]:
         settings.PROVIDER_GROUP_NACIMIENTO_2,
         settings.PROVIDER_GROUP_NACIMIENTO_3,
         settings.PROVIDER_GROUP_ESPECIALES,
-        settings.PROVIDER2_GROUP,
+        settings.PROVIDER2_GROUP_1,
+        settings.PROVIDER2_GROUP_2,
     }
     return {v.strip() for v in vals if v and v.strip()}
 
@@ -236,6 +237,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         text_upper = normalize_text(text_body)
         
         admin_commands = (
+            "/GROUPID",
             "/ADDGROUP",
             "/ADDUSER ",
             "/RMUSER ",
