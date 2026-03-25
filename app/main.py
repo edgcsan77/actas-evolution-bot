@@ -1011,8 +1011,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 _deliver_pdf_result(open_req, media_b64, filename=filename or f"{open_req.curp}.pdf")
                 return {"ok": True, "provider_result": "pdf_delivered"}
 
-                return {"ok": True, "ignored": "provider_pdf_without_url"}
-
             # 2) SI NO HAY PDF, INTENTAR TEXTO
             open_req = None
             if provider_id:
