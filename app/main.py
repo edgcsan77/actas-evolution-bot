@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import Base, engine, get_db
-from app.models import AuthorizedUser, AuthorizedGroup, RequestLog
+from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting
 from app.queue import request_queue
 from app.worker import process_request
 from app.utils.curp import (
@@ -32,6 +32,13 @@ def _normalize_wa_actor(value: str) -> str:
 def startup():
     Base.metadata.create_all(bind=engine)
 
+    db = Session(bind=engine)
+    try:
+        _get_or_create_provider(db, "PROVIDER1", True)
+        _get_or_create_provider(db, "PROVIDER2", False)
+    finally:
+        db.close()
+        
 
 @app.get("/health")
 def health():
@@ -105,16 +112,6 @@ def _extract_identifier_from_filename_local(filename: str) -> str | None:
     return extract_identifier_from_filename(filename)
 
 
-def _all_provider_groups() -> set[str]:
-    vals = {
-        settings.PROVIDER_GROUP_NACIMIENTO_1,
-        settings.PROVIDER_GROUP_NACIMIENTO_2,
-        settings.PROVIDER_GROUP_NACIMIENTO_3,
-        settings.PROVIDER_GROUP_ESPECIALES,
-    }
-    return {v.strip() for v in vals if v and v.strip()}
-
-
 def _is_admin(requester_wa_id: str, from_me: bool = False) -> bool:
     admin = (settings.ADMIN_PHONE or "").replace("+", "").replace(" ", "").strip()
     return from_me or requester_wa_id == admin
@@ -125,6 +122,48 @@ def _reply_to_origin(source_group_id: str | None, requester_wa_id: str, text: st
         send_group_text(source_group_id, text)
     else:
         send_text(requester_wa_id, text)
+
+
+def _all_provider_groups() -> set[str]:
+    vals = {
+        settings.PROVIDER_GROUP_NACIMIENTO_1,
+        settings.PROVIDER_GROUP_NACIMIENTO_2,
+        settings.PROVIDER_GROUP_NACIMIENTO_3,
+        settings.PROVIDER_GROUP_ESPECIALES,
+        settings.PROVIDER2_GROUP,
+    }
+    return {v.strip() for v in vals if v and v.strip()}
+
+
+def _get_or_create_provider(db: Session, provider_name: str, default_enabled: bool):
+    row = db.query(ProviderSetting).filter(ProviderSetting.provider_name == provider_name).first()
+    if row:
+        return row
+
+    row = ProviderSetting(
+        provider_name=provider_name,
+        is_enabled=default_enabled,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def _providers_status_text(db: Session) -> str:
+    p1 = _get_or_create_provider(db, "PROVIDER1", True)
+    p2 = _get_or_create_provider(db, "PROVIDER2", False)
+
+    s1 = "ON" if p1.is_enabled else "OFF"
+    s2 = "ON" if p2.is_enabled else "OFF"
+
+    return (
+        "⚙️ Estado de proveedores\n"
+        f"• PROVIDER1: {s1}\n"
+        f"• PROVIDER2: {s2}"
+    )
 
 
 @app.post("/webhook/evolution")
@@ -149,6 +188,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         source_chat_id = remote_jid
         source_group_id = remote_jid if is_group else None
         requester_wa_id = _normalize_wa_actor(participant) if is_group and participant else _normalize_wa_actor(remote_jid)
+        is_group and participant else _normalize_wa_actor(remote_jid)
         
         text_body = ""
         if "conversation" in message:
@@ -160,7 +200,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         
         admin_commands = (
             "/ADDGROUP",
-            "/GROUPID",
             "/ADDUSER ",
             "/RMUSER ",
             "/STATUS",
@@ -168,6 +207,15 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             "/QUEUE",
             "/LAST ",
             "/REQUEUE ",
+            "/PROVIDERS",
+            "/P1 ON",
+            "/P1 OFF",
+            "/P2 ON",
+            "/P2 OFF",
+            "/PROVIDER1 ON",
+            "/PROVIDER1 OFF",
+            "/PROVIDER2 ON",
+            "/PROVIDER2 OFF",
         )
         
         if from_me and not any(text_upper.startswith(cmd) for cmd in admin_commands):
@@ -461,6 +509,61 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             return {"ok": True}
 
+        if text_upper.startswith("/PROVIDERS"):
+            if not _is_admin(requester_wa_id, from_me):
+                return {"ok": True, "ignored": "not_admin"}
+
+            _reply_to_origin(source_group_id, requester_wa_id, _providers_status_text(db))
+            return {"ok": True}
+
+        if text_upper in ("/P1 ON", "/PROVIDER1 ON"):
+            if not _is_admin(requester_wa_id, from_me):
+                return {"ok": True, "ignored": "not_admin"}
+
+            row = _get_or_create_provider(db, "PROVIDER1", True)
+            row.is_enabled = True
+            row.updated_at = datetime.utcnow()
+            db.commit()
+
+            _reply_to_origin(source_group_id, requester_wa_id, "✅ PROVIDER1 activado")
+            return {"ok": True}
+
+        if text_upper in ("/P1 OFF", "/PROVIDER1 OFF"):
+            if not _is_admin(requester_wa_id, from_me):
+                return {"ok": True, "ignored": "not_admin"}
+
+            row = _get_or_create_provider(db, "PROVIDER1", True)
+            row.is_enabled = False
+            row.updated_at = datetime.utcnow()
+            db.commit()
+
+            _reply_to_origin(source_group_id, requester_wa_id, "✅ PROVIDER1 desactivado")
+            return {"ok": True}
+
+        if text_upper in ("/P2 ON", "/PROVIDER2 ON"):
+            if not _is_admin(requester_wa_id, from_me):
+                return {"ok": True, "ignored": "not_admin"}
+
+            row = _get_or_create_provider(db, "PROVIDER2", False)
+            row.is_enabled = True
+            row.updated_at = datetime.utcnow()
+            db.commit()
+
+            _reply_to_origin(source_group_id, requester_wa_id, "✅ PROVIDER2 activado")
+            return {"ok": True}
+
+        if text_upper in ("/P2 OFF", "/PROVIDER2 OFF"):
+            if not _is_admin(requester_wa_id, from_me):
+                return {"ok": True, "ignored": "not_admin"}
+
+            row = _get_or_create_provider(db, "PROVIDER2", False)
+            row.is_enabled = False
+            row.updated_at = datetime.utcnow()
+            db.commit()
+
+            _reply_to_origin(source_group_id, requester_wa_id, "✅ PROVIDER2 desactivado")
+            return {"ok": True}
+        
         # =========================
         # FLUJO NORMAL DE USUARIO
         # =========================
@@ -548,7 +651,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             print("ENQUEUED_SOURCE_GROUP =", row.source_group_id, flush=True)
 
         actor = push_name or requester_wa_id
-        
         ack_msg = (
             f"🚀 DOCU EXPRES\n"
             f"Solicitud recibida de {actor}.\n"
