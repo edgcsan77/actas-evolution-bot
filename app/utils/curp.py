@@ -98,19 +98,6 @@ def _extract_identifier_from_line(line: str) -> str | None:
     if m:
         return m.group(1)
 
-    # código genérico, evitando confundir CURP incompleta
-    tokens = re.findall(r"[A-Z0-9]{6,30}", cleaned)
-    for token in tokens:
-        if re.match(r"^[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{0,2}$", token):
-            return None
-
-        if token.isdigit():
-            if len(token) == 20:
-                return token
-            continue
-
-        return token
-
     return None
 
 
@@ -141,10 +128,6 @@ def extract_identifier_loose(text: str) -> str | None:
     if m:
         return m.group(1)
 
-    m = re.search(r"\b([A-Z0-9]{6,30})\b", text)
-    if m:
-        return m.group(1)
-
     return None
 
 
@@ -159,10 +142,6 @@ def extract_identifier_from_filename(filename: str) -> str | None:
         return m.group(1)
 
     m = re.search(r"\b(\d{20})\b", name)
-    if m:
-        return m.group(1)
-
-    m = re.search(r"\b([A-Z0-9]{6,30})\b", name)
     if m:
         return m.group(1)
 
