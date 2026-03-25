@@ -11,16 +11,20 @@ def cleanup_expired_and_mark_pending():
         # borrar historial vencido
         db.query(RequestLog).filter(RequestLog.expires_at < datetime.utcnow()).delete()
 
-        # marcar timeout como PENDING
+        # timeout solo para solicitudes ya enviadas al proveedor
         limit = datetime.utcnow() - timedelta(minutes=settings.REQUEST_TIMEOUT_MINUTES)
+
         rows = (
             db.query(RequestLog)
             .filter(
-                RequestLog.status.in_(["QUEUED", "PROCESSING"]),
-                RequestLog.created_at <= limit
+                RequestLog.status == "PROCESSING",
+                RequestLog.updated_at <= limit
             )
             .all()
         )
+
+        print("CLEANUP_TIMEOUT_LIMIT =", limit, flush=True)
+        print("CLEANUP_TIMEOUT_ROWS =", len(rows), flush=True)
 
         for r in rows:
             r.status = "ERROR"
@@ -40,11 +44,14 @@ def cleanup_expired_and_mark_pending():
                 else:
                     send_text(r.requester_wa_id, msg)
 
-            except Exception:
-                pass
+                print("CLEANUP_SENT_TIMEOUT_MSG =", r.id, flush=True)
+
+            except Exception as e:
+                print("CLEANUP_SEND_ERROR =", str(e), flush=True)
 
         db.commit()
-        print("cleanup ok")
+        print("cleanup ok", flush=True)
+
     finally:
         db.close()
 
