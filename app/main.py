@@ -160,6 +160,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         
         admin_commands = (
             "/ADDGROUP",
+            "/GROUPID",
             "/ADDUSER ",
             "/RMUSER ",
             "/STATUS",
@@ -174,11 +175,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
         provider_groups = _all_provider_groups()
         is_provider_message = source_chat_id in provider_groups
+        is_admin_command = text_upper.startswith("/")
 
         # =========================
         # RESPUESTA DEL PROVEEDOR
         # =========================
-        if is_provider_message:
+        if is_provider_message and not is_admin_command:
             provider_id = _extract_provider_identifier_loose(text_body or "")
             print("PROVIDER_GROUP =", source_chat_id, flush=True)
             print("PROVIDER_TEXT =", text_body, flush=True)
