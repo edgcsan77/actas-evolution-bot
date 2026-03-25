@@ -234,6 +234,19 @@ def _panel_type_rows(rows: list[RequestLog]) -> list[dict]:
     return out
 
 
+GROUP_NAME_MAP = {
+    "120363406806549379@g.us": "CLIENTES ACTAS",
+    "120363426725671842@g.us": "PROVEEDOR 1 ACTAS",
+    "120363408272742958@g.us": "PROVEEDOR 2 ACTAS",
+}
+
+
+def _group_name(jid: str):
+    if not jid:
+        return ""
+    return GROUP_NAME_MAP.get(jid, jid)
+    
+
 @app.get("/panel/api")
 def panel_api_actas(
     view: str = "day",
@@ -584,9 +597,9 @@ def panel_actas(
               <td class="mono">{_esc(r.curp)}</td>
               <td>{_esc(r.act_type)}</td>
               <td class="{status_class}">{_esc(r.status)}</td>
-              <td class="mono">{_esc(r.source_group_id)}</td>
+              <td>{_esc(_group_name(r.source_group_id))}</td>
               <td>{_esc(r.provider_name)}</td>
-              <td class="mono">{_esc(r.provider_group_id)}</td>
+              <td>{_esc(_group_name(r.provider_group_id))}</td>
               <td class="small">{_esc(r.provider_message)}</td>
               <td>{_esc(_fmt_dt(r.created_at))}</td>
               <td>{_esc(_fmt_dt(r.updated_at))}</td>
