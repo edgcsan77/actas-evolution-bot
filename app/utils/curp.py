@@ -189,14 +189,7 @@ def detect_identifier_problem(text: str) -> str | None:
                 "Revisa el dato e inténtalo de nuevo."
             )
 
-    # 3) mensaje con letras/números pero sin formato válido
-    if re.search(r"[A-Z]", cleaned) and re.search(r"\d", cleaned):
-        return (
-            "⚠️ El dato parece inválido o incompleto.\n"
-            "Revisa la CURP, cadena o código e inténtalo de nuevo."
-        )
-
-    # 4) solo números, pero no 20
+    # 3) solo números, pero no 20
     if re.fullmatch(r"\d+", cleaned):
         return (
             "⚠️ La cadena parece incorrecta.\n"
