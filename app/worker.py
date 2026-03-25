@@ -52,12 +52,7 @@ def process_request(request_id: int):
 
         send_group_text(req.provider_group_id, text_to_provider)
 
-        ack = (
-            f"✅ Solicitud enviada al proveedor\n"
-            f"Dato: {req.curp}\n"
-            f"Tipo: {req.act_type}\n"
-            f"Folio: {req.id}"
-        )
+        ack = ""
 
         if req.source_group_id:
             send_group_text(req.source_group_id, ack)
