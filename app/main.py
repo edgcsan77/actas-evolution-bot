@@ -499,7 +499,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 db.query(RequestLog)
                 .filter(
                     RequestLog.request_key == request_key,
-                    RequestLog.status.in_(["QUEUED", "PROCESSING", "PENDING"])
+                    RequestLog.status.in_(["QUEUED", "PROCESSING"])
                 )
                 .first()
             )
