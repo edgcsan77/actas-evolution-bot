@@ -76,14 +76,14 @@ def _deliver_pdf_result(req: RequestLog, pdf_url: str):
             req.source_group_id,
             pdf_url,
             filename=f"{req.curp}_{req.act_type}.pdf",
-            caption="✅ Aquí está tu acta"
+            caption=""
         )
     else:
         send_document(
             req.requester_wa_id,
             pdf_url,
             filename=f"{req.curp}_{req.act_type}.pdf",
-            caption="✅ Aquí está tu acta"
+            caption=""
         )
 
 
