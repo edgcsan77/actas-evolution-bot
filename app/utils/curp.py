@@ -63,7 +63,7 @@ def _remove_type_words(line: str) -> str:
     return " ".join(x.split())
 
 
-def extract_identifier_from_line(line: str) -> str | None:
+def _extract_identifier_from_line(line: str) -> str | None:
     cleaned = _remove_type_words(line)
 
     # 1️⃣ CURP estricta
