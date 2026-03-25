@@ -17,7 +17,7 @@ from app.utils.curp import (
 )
 from app.services.evolution import send_text, send_document, send_group_document, send_group_text
 
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from zoneinfo import ZoneInfo
 
 app = FastAPI(title=settings.APP_NAME)
@@ -232,6 +232,11 @@ def _panel_type_rows(rows: list[RequestLog]) -> list[dict]:
     out = list(data.values())
     out.sort(key=lambda x: (-x["total"], x["act_type"]))
     return out
+
+
+@app.get("/panel")
+def panel_root():
+    return RedirectResponse(url="/panel/actas")
 
 
 @app.get("/panel/api/actas")
