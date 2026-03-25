@@ -540,7 +540,7 @@ def panel_actas(
         for r in by_group:
             html += f"""
             <tr>
-              <td class="mono">{_esc(r["group_jid"])}</td>
+              <td>{_esc(_group_name(r["group_jid"]))}</td>
               <td class="right">{r["total"]}</td>
               <td class="right">{r["queued"]}</td>
               <td class="right">{r["processing"]}</td>
