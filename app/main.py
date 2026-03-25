@@ -13,6 +13,7 @@ from app.utils.curp import (
     normalize_text,
     extract_identifier_loose,
     extract_identifier_from_filename,
+    detect_identifier_problem,
 )
 from app.services.evolution import send_text, send_document, send_group_document, send_group_text
 
@@ -457,6 +458,17 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         
         if not terms:
             print("IGNORED_REASON = no_identifier", flush=True)
+        
+            problem_msg = detect_identifier_problem(text_body)
+        
+            if problem_msg:
+                final_msg = problem_msg
+        
+                if source_group_id:
+                    send_group_text(source_group_id, final_msg)
+                else:
+                    send_text(requester_wa_id, final_msg)
+        
             return {"ok": True, "ignored": "no_identifier"}
         
         act_type = detect_act_type(text_body)
