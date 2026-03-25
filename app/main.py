@@ -400,7 +400,6 @@ def panel_actas(
 
         <br><br>
 
-        Estado actual:<br>
         {provider_states}
 
       </div>
