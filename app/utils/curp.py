@@ -13,17 +13,24 @@ def detect_act_type(text: str) -> str:
     t = normalize_text(text)
     t_nospace = t.replace(" ", "")
 
+    # FOLIO primero
     if "NACIMIENTOFOLIO" in t_nospace:
         return "NACIMIENTO FOLIO"
-    if "DEFUNCION" in t_nospace:
-        return "DEFUNCION"
-    if "MATRIMONIO" in t_nospace:
-        return "MATRIMONIO"
-    if "DIVORCIO" in t_nospace:
-        return "DIVORCIO"
+    if "MATRIMONIOFOLIO" in t_nospace:
+        return "MATRIMONIO FOLIO"
+    if "DEFUNCIONFOLIO" in t_nospace:
+        return "DEFUNCION FOLIO"
+    if "DIVORCIOFOLIO" in t_nospace:
+        return "DIVORCIO FOLIO"
 
     if "NACIMIENTO" in t_nospace or "NACIMI" in t_nospace:
         return "NACIMIENTO"
+    if "MATRIMONIO" in t_nospace:
+        return "MATRIMONIO"
+    if "DEFUNCION" in t_nospace:
+        return "DEFUNCION"
+    if "DIVORCIO" in t_nospace:
+        return "DIVORCIO"
 
     return "NACIMIENTO"
 
@@ -31,16 +38,17 @@ def detect_act_type(text: str) -> str:
 def provider_label_for_type(act_type: str) -> str:
     act_type = normalize_text(act_type)
 
-    if act_type == "NACIMIENTO FOLIO":
-        return "nacimiento folio"
-    if act_type == "DEFUNCION":
-        return "defuncion"
-    if act_type == "MATRIMONIO":
-        return "matrimonio"
-    if act_type == "DIVORCIO":
-        return "divorcio"
-
-    return "nacimiento"
+    mapping = {
+        "NACIMIENTO": "nacimiento",
+        "MATRIMONIO": "matrimonio",
+        "DEFUNCION": "defuncion",
+        "DIVORCIO": "divorcio",
+        "NACIMIENTO FOLIO": "nacimiento folio",
+        "MATRIMONIO FOLIO": "matrimonio folio",
+        "DEFUNCION FOLIO": "defuncion folio",
+        "DIVORCIO FOLIO": "divorcio folio",
+    }
+    return mapping.get(act_type, "nacimiento")
 
 
 def _remove_type_words(line: str) -> str:
@@ -48,13 +56,22 @@ def _remove_type_words(line: str) -> str:
 
     patterns = [
         r"NACIMIENTO\s*FOLIO",
+        r"MATRIMONIO\s*FOLIO",
+        r"DEFUNCION\s*FOLIO",
+        r"DIVORCIO\s*FOLIO",
         r"NACIMIENTOFOLIO",
+        r"MATRIMONIOFOLIO",
+        r"DEFUNCIONFOLIO",
+        r"DIVORCIOFOLIO",
         r"DE\s+NACIMIENTO",
+        r"DE\s+MATRIMONIO",
+        r"DE\s+DEFUNCION",
+        r"DE\s+DIVORCIO",
         r"NACIMIENTO",
-        r"NACIMI\w*",
-        r"DEFUNCION",
         r"MATRIMONIO",
+        r"DEFUNCION",
         r"DIVORCIO",
+        r"NACIMI\w*",
     ]
 
     for p in patterns:
@@ -63,24 +80,28 @@ def _remove_type_words(line: str) -> str:
     return " ".join(x.split())
 
 
+def is_chain(term: str) -> bool:
+    term = (term or "").strip()
+    return term.isdigit() and len(term) == 20
+
+
 def _extract_identifier_from_line(line: str) -> str | None:
     cleaned = _remove_type_words(line)
 
-    # 1) CURP estricta correcta
+    # CURP estricta
     m = re.search(r"\b([A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2})\b", cleaned)
     if m:
         return m.group(1)
 
-    # 2) cadena de 20 dígitos
+    # cadena 20 dígitos
     m = re.search(r"\b(\d{20})\b", cleaned)
     if m:
         return m.group(1)
 
-    # 3) código genérico, pero evitando confundir CURPs incompletas
+    # código genérico, evitando confundir CURP incompleta
     tokens = re.findall(r"[A-Z0-9]{6,30}", cleaned)
     for token in tokens:
         if re.match(r"^[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{0,2}$", token):
-            # parece CURP pero incompleta/mal formada
             return None
 
         if token.isdigit():
@@ -149,14 +170,9 @@ def extract_identifier_from_filename(filename: str) -> str | None:
 
 
 def detect_identifier_problem(text: str) -> str | None:
-    """
-    Devuelve un mensaje específico si parece que el usuario quiso mandar
-    un dato pero está mal escrito o incompleto.
-    """
     t = normalize_text(text)
     cleaned = _remove_type_words(t)
 
-    # 1) cadena casi correcta pero no de 20 dígitos
     digit_runs = re.findall(r"\d{8,25}", cleaned)
     for d in digit_runs:
         if len(d) != 20:
@@ -165,35 +181,23 @@ def detect_identifier_problem(text: str) -> str | None:
                 "Debe tener exactamente 20 dígitos."
             )
 
-    # 2) CURP/código de longitud cercana pero incorrecta
     alnum_runs = re.findall(r"[A-Z0-9]{6,30}", cleaned)
     for token in alnum_runs:
-        # si es puramente numérico ya se trató arriba
         if token.isdigit():
             continue
 
-        # si parece CURP pero no mide 18
         if 10 <= len(token) <= 17 or 19 <= len(token) <= 21:
             return (
                 "⚠️ La CURP parece incompleta o incorrecta.\n"
                 "Debe tener exactamente 18 caracteres."
             )
 
-        # si es muy corto para código razonable
-        if len(token) < 6:
-            return (
-                "⚠️ El código parece demasiado corto.\n"
-                "Revisa el dato e inténtalo de nuevo."
-            )
-
-    # 3) mensaje con letras/números pero sin formato válido
     if re.search(r"[A-Z]", cleaned) and re.search(r"\d", cleaned):
         return (
             "⚠️ El dato parece inválido o incompleto.\n"
             "Revisa la CURP, cadena o código e inténtalo de nuevo."
         )
 
-    # 4) solo números, pero no 20
     if re.fullmatch(r"\d+", cleaned):
         return (
             "⚠️ La cadena parece incorrecta.\n"
