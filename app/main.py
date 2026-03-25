@@ -115,9 +115,9 @@ def _all_provider_groups() -> set[str]:
     return {v.strip() for v in vals if v and v.strip()}
 
 
-def _is_admin(requester_wa_id: str) -> bool:
+def _is_admin(requester_wa_id: str, from_me: bool = False) -> bool:
     admin = (settings.ADMIN_PHONE or "").replace("+", "").replace(" ", "").strip()
-    return requester_wa_id == admin
+    return from_me or requester_wa_id == admin
 
 
 def _reply_to_origin(source_group_id: str | None, requester_wa_id: str, text: str):
@@ -296,7 +296,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         # COMANDOS ADMIN
         # =========================
         if text_upper.startswith("/ADDUSER "):
-            if not _is_admin(requester_wa_id):
+            if not _is_admin(requester_wa_id, from_me):
                 print("ADDUSER_DENIED_USER =", requester_wa_id, flush=True)
                 return {"ok": True, "ignored": "not_admin"}
 
@@ -309,7 +309,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             return {"ok": True}
 
         if text_upper.startswith("/RMUSER "):
-            if not _is_admin(requester_wa_id):
+            if not _is_admin(requester_wa_id, from_me):
                 print("RMUSER_DENIED_USER =", requester_wa_id, flush=True)
                 return {"ok": True, "ignored": "not_admin"}
 
@@ -326,7 +326,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             return {"ok": True}
 
         if text_upper.startswith("/ADDGROUP"):
-            if not _is_admin(requester_wa_id):
+            if not _is_admin(requester_wa_id, from_me):
                 print("ADDGROUP_DENIED_USER =", requester_wa_id, flush=True)
                 return {"ok": True, "ignored": "not_admin"}
 
@@ -340,7 +340,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             return {"ok": True}
 
         if text_upper.startswith("/STATUS"):
-            if not _is_admin(requester_wa_id):
+            if not _is_admin(requester_wa_id, from_me):
                 print("STATUS_DENIED_USER =", requester_wa_id, flush=True)
                 return {"ok": True, "ignored": "not_admin"}
 
@@ -357,7 +357,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             return {"ok": True}
 
         if text_upper.startswith("/PENDING"):
-            if not _is_admin(requester_wa_id):
+            if not _is_admin(requester_wa_id, from_me):
                 print("PENDING_DENIED_USER =", requester_wa_id, flush=True)
                 return {"ok": True, "ignored": "not_admin"}
 
@@ -374,7 +374,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             return {"ok": True}
 
         if text_upper.startswith("/QUEUE"):
-            if not _is_admin(requester_wa_id):
+            if not _is_admin(requester_wa_id, from_me):
                 print("QUEUE_DENIED_USER =", requester_wa_id, flush=True)
                 return {"ok": True, "ignored": "not_admin"}
 
@@ -391,7 +391,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             return {"ok": True}
 
         if text_upper.startswith("/LAST "):
-            if not _is_admin(requester_wa_id):
+            if not _is_admin(requester_wa_id, from_me):
                 print("LAST_DENIED_USER =", requester_wa_id, flush=True)
                 return {"ok": True, "ignored": "not_admin"}
 
@@ -424,7 +424,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             return {"ok": True}
 
         if text_upper.startswith("/REQUEUE "):
-            if not _is_admin(requester_wa_id):
+            if not _is_admin(requester_wa_id, from_me):
                 print("REQUEUE_DENIED_USER =", requester_wa_id, flush=True)
                 return {"ok": True, "ignored": "not_admin"}
 
