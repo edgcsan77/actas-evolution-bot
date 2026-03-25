@@ -15,7 +15,14 @@ from app.utils.curp import (
     extract_identifier_from_filename,
     detect_identifier_problem,
 )
-from app.services.evolution import send_text, send_document, send_group_document, send_group_text
+from app.services.evolution import (
+    send_text,
+    send_document,
+    send_group_document,
+    send_group_text,
+    send_document_base64,
+    send_group_document_base64,
+)
 
 from fastapi.responses import HTMLResponse
 from zoneinfo import ZoneInfo
@@ -725,19 +732,21 @@ def _deliver_text_result(req: RequestLog, text: str):
         send_text(req.requester_wa_id, text)
 
 
-def _deliver_pdf_result(req: RequestLog, pdf_url: str):
+def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = None):
+    filename = filename or f"{req.curp}.pdf"
+
     if req.source_group_id:
-        send_group_document(
+        send_group_document_base64(
             req.source_group_id,
-            pdf_url,
-            filename=f"{req.curp}.pdf",
+            pdf_data,
+            filename=filename,
             caption=""
         )
     else:
-        send_document(
+        send_document_base64(
             req.requester_wa_id,
-            pdf_url,
-            filename=f"{req.curp}.pdf",
+            pdf_data,
+            filename=filename,
             caption=""
         )
 
@@ -977,18 +986,30 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     print("PROVIDER_PDF_WITHOUT_MATCH =", filename, flush=True)
                     return {"ok": True, "ignored": "provider_pdf_without_match"}
 
+                media_json = get_media_base64("document", msg_id)
+                media_b64 = (
+                    media_json.get("base64")
+                    or media_json.get("data")
+                    or media_json.get("media")
+                    or ""
+                )
+                
+                if not media_b64:
+                    print("PROVIDER_PDF_BASE64_EMPTY =", media_json, flush=True)
+                    return {"ok": True, "ignored": "provider_pdf_base64_empty"}
+                
                 open_req.pdf_url = pdf_url
-                open_req.provider_media_url = pdf_url
+                open_req.provider_media_url = "BASE64_FROM_MEDIA_MESSAGE"
                 open_req.status = "DONE"
                 open_req.updated_at = datetime.utcnow()
                 db.commit()
-
-                if pdf_url:
-                    print("PROVIDER_PDF_MATCHED_REQ_ID =", open_req.id, flush=True)
-                    print("PROVIDER_PDF_MATCHED_CURP =", open_req.curp, flush=True)
-
-                    _deliver_pdf_result(open_req, pdf_url)
-                    return {"ok": True, "provider_result": "pdf_delivered"}
+                
+                print("PROVIDER_PDF_MATCHED_REQ_ID =", open_req.id, flush=True)
+                print("PROVIDER_PDF_MATCHED_CURP =", open_req.curp, flush=True)
+                print("PROVIDER_PDF_BASE64_LEN =", len(media_b64), flush=True)
+                
+                _deliver_pdf_result(open_req, media_b64, filename=filename or f"{open_req.curp}.pdf")
+                return {"ok": True, "provider_result": "pdf_delivered"}
 
                 return {"ok": True, "ignored": "provider_pdf_without_url"}
 
