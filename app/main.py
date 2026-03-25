@@ -384,7 +384,6 @@ def panel_actas(
       <div class="toolbar">
         <a href="/panel?view=day" class="tool-link {'tool-link-active' if view == 'day' else ''}">Hoy</a>
         <a href="/panel?view=week" class="tool-link {'tool-link-active' if view == 'week' else ''}">Semana</a>
-        <a href="/panel/api?view={_esc(view)}" class="tool-link">API JSON</a>
       </div>
 
       <div class="state-box">
@@ -421,9 +420,9 @@ def panel_actas(
 
     <div class="cards">
       <div class="card"><div class="label">Total</div><div class="value">{summary["total"]}</div></div>
-      <div class="card"><div class="label">QUEUED</div><div class="value">{summary["queued"]}</div></div>
-      <div class="card"><div class="label">PROCESSING</div><div class="value">{summary["processing"]}</div></div>
-      <div class="card"><div class="label">DONE</div><div class="value">{summary["done"]}</div></div>
+      <div class="card"><div class="label">EN COLA</div><div class="value">{summary["queued"]}</div></div>
+      <div class="card"><div class="label">PROCESANDO</div><div class="value">{summary["processing"]}</div></div>
+      <div class="card"><div class="label">HECHO</div><div class="value">{summary["done"]}</div></div>
       <div class="card"><div class="label">ERROR</div><div class="value">{summary["error"]}</div></div>
     </div>
 
@@ -435,9 +434,9 @@ def panel_actas(
             <tr>
               <th>Proveedor</th>
               <th class="right">Total</th>
-              <th class="right">QUEUED</th>
-              <th class="right">PROCESSING</th>
-              <th class="right">DONE</th>
+              <th class="right">EN COLA</th>
+              <th class="right">PROCESANDO</th>
+              <th class="right">HECHO</th>
               <th class="right">ERROR</th>
             </tr>
           </thead>
@@ -475,9 +474,9 @@ def panel_actas(
             <tr>
               <th>Tipo</th>
               <th class="right">Total</th>
-              <th class="right">QUEUED</th>
-              <th class="right">PROCESSING</th>
-              <th class="right">DONE</th>
+              <th class="right">EN COLA</th>
+              <th class="right">PROCESANDO</th>
+              <th class="right">HECHO</th>
               <th class="right">ERROR</th>
             </tr>
           </thead>
@@ -515,9 +514,9 @@ def panel_actas(
             <tr>
               <th>Grupo</th>
               <th class="right">Total</th>
-              <th class="right">QUEUED</th>
-              <th class="right">PROCESSING</th>
-              <th class="right">DONE</th>
+              <th class="right">EN COLA</th>
+              <th class="right">PROCESANDO</th>
+              <th class="right">HECHO</th>
               <th class="right">ERROR</th>
               <th>Última actualización</th>
             </tr>
