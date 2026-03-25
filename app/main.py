@@ -1358,8 +1358,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 dup_msg = (
                     f"⏳ Ya existe una solicitud en proceso\n"
                     f"Dato: {term}\n"
-                    f"Tipo: {act_type}\n"
-                    f"Folio: {existing.id}"
                 )
         
                 if source_group_id:
@@ -1396,8 +1394,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 retry_msg = (
                     f"🔁 Reintentando solicitud\n"
                     f"Dato: {term}\n"
-                    f"Tipo: {act_type}\n"
-                    f"Folio: {existing.id}"
                 )
         
                 if source_group_id:
