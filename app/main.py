@@ -362,6 +362,17 @@ def panel_actas(
       .filters {{ grid-template-columns:1fr; }}
       .table-wrap {{ overflow-x:auto; }}
     }}
+    .state-box button {{
+      padding: 10px 14px;
+      border: none;
+      border-radius: 10px;
+      background: #2563eb;
+      color: white;
+      font-weight: 700;
+      cursor: pointer;
+      margin-right: 8px;
+      margin-bottom: 8px;
+    }}
   </style>
 </head>
 <body>
@@ -371,9 +382,9 @@ def panel_actas(
       <div>{_esc(subtitle)}</div>
 
       <div class="toolbar">
-        <a href="/panel/actas?view=day" class="tool-link {'tool-link-active' if view == 'day' else ''}">Hoy</a>
-        <a href="/panel/actas?view=week" class="tool-link {'tool-link-active' if view == 'week' else ''}">Semana</a>
-        <a href="/panel/api/actas?view={_esc(view)}" class="tool-link">API JSON</a>
+        <a href="/panel?view=day" class="tool-link {'tool-link-active' if view == 'day' else ''}">Hoy</a>
+        <a href="/panel?view=week" class="tool-link {'tool-link-active' if view == 'week' else ''}">Semana</a>
+        <a href="/panel/api?view={_esc(view)}" class="tool-link">API JSON</a>
       </div>
 
       <div class="state-box">
