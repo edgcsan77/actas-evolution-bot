@@ -533,7 +533,16 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             print("ENQUEUED_TYPE =", row.act_type, flush=True)
             print("ENQUEUED_SOURCE_GROUP =", row.source_group_id, flush=True)
 
-        ack_msg = f"✅ Solicitud recibida. Datos detectados: {len(terms)}"
+        actor = requester_wa_id
+        if requester_wa_id:
+            actor = requester_wa_id
+        
+        ack_msg = (
+            f"🚀 DOCU EXPRES\n"
+            f"Solicitud recibida de {actor}.\n"
+            f"Esto puede tardar unos segundos..."
+        )
+        
         if source_group_id:
             send_group_text(source_group_id, ack_msg)
         else:
