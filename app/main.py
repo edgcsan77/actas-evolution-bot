@@ -377,7 +377,22 @@ def panel_actas(
       </div>
 
       <div class="state-box">
+
+        <b>PROVIDER1</b><br>
+          <button onclick="toggleProvider('PROVIDER1','on')">Activar</button>
+          <button onclick="toggleProvider('PROVIDER1','off')">Desactivar</button>
+
+        <br><br>
+
+        <b>PROVIDER2</b><br>
+          <button onclick="toggleProvider('PROVIDER2','on')">Activar</button>
+          <button onclick="toggleProvider('PROVIDER2','off')">Desactivar</button>
+
+        <br><br>
+
+        Estado actual:<br>
         {provider_states}
+
       </div>
     </div>
 
@@ -579,6 +594,29 @@ def panel_actas(
     </div>
 
   </div>
+
+
+  <script>
+
+  async function toggleProvider(provider, action) {
+
+    const url = `/panel/provider/${provider}/${action}`;
+
+    const res = await fetch(url, {
+        method: "POST"
+    });
+
+    const data = await res.json();
+
+    if(data.ok){
+        location.reload();
+    } else {
+        alert("Error cambiando proveedor");
+    }
+
+  }
+
+  </script>
 </body>
 </html>
     """
