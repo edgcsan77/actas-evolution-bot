@@ -80,9 +80,17 @@ def _pick_provider_group(provider_name: str, act_type: str, request_id: int) -> 
         return _pick_provider1_group(act_type, request_id)
 
     if provider_name == "PROVIDER2":
-        if not settings.PROVIDER2_GROUP:
-            raise RuntimeError("PROVIDER2_GROUP_NOT_CONFIGURED")
-        return settings.PROVIDER2_GROUP
+        provider2_groups = [
+            settings.PROVIDER2_GROUP_1,
+            settings.PROVIDER2_GROUP_2,
+        ]
+        provider2_groups = [g for g in provider2_groups if g]
+
+        if not provider2_groups:
+            raise RuntimeError("PROVIDER2_GROUPS_NOT_CONFIGURED")
+
+        idx = (request_id - 1) % len(provider2_groups)
+        return provider2_groups[idx]
 
     raise RuntimeError("UNKNOWN_PROVIDER")
 
