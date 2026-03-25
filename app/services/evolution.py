@@ -131,3 +131,47 @@ def get_media_base64(media_type: str, message_id: str):
     resp = requests.post(url, headers=_headers(), json=payload, timeout=60)
     resp.raise_for_status()
     return resp.json()
+
+
+def send_document_base64(number: str, media_b64: str, filename: str = "acta.pdf", caption: str = ""):
+    url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{settings.EVOLUTION_INSTANCE}"
+
+    payload = {
+        "number": _normalize_number(number),
+        "mediatype": "document",
+        "mimetype": "application/pdf",
+        "caption": caption,
+        "fileName": filename,
+        "media": media_b64,
+    }
+
+    resp = requests.post(url, headers=_headers(), json=payload, timeout=60)
+
+    print("SEND_DOCUMENT_BASE64_URL =", url, flush=True)
+    print("SEND_DOCUMENT_BASE64_STATUS =", resp.status_code, flush=True)
+    print("SEND_DOCUMENT_BASE64_BODY =", resp.text, flush=True)
+
+    resp.raise_for_status()
+    return resp.json()
+
+
+def send_group_document_base64(group_jid: str, media_b64: str, filename: str = "acta.pdf", caption: str = ""):
+    url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{settings.EVOLUTION_INSTANCE}"
+
+    payload = {
+        "number": _normalize_number(group_jid),
+        "mediatype": "document",
+        "mimetype": "application/pdf",
+        "caption": caption,
+        "fileName": filename,
+        "media": media_b64,
+    }
+
+    resp = requests.post(url, headers=_headers(), json=payload, timeout=60)
+
+    print("SEND_GROUP_DOCUMENT_BASE64_URL =", url, flush=True)
+    print("SEND_GROUP_DOCUMENT_BASE64_STATUS =", resp.status_code, flush=True)
+    print("SEND_GROUP_DOCUMENT_BASE64_BODY =", resp.text, flush=True)
+
+    resp.raise_for_status()
+    return resp.json()
