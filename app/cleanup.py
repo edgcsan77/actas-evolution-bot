@@ -28,14 +28,14 @@ def cleanup_expired_and_mark_pending():
             r.error_message = f"Timeout automático a los {settings.REQUEST_TIMEOUT_MINUTES} minutos"
 
             try:
-                msg = f"⚠️ Solicitud demorada\nCURP: {r.curp}\nTipo: {r.act_type}\nFolio: {r.id}\nEstado: PENDIENTE"
+                msg = f"⚠️ Solicitud demorada\nDATO: {r.curp}\nTipo: {r.act_type}\nFolio: {r.id}\nEstado: PENDIENTE"
                 if r.source_group_id:
                     send_group_text(r.source_group_id, msg)
                 else:
                     send_text(r.requester_wa_id, msg)
 
                 if settings.ADMIN_PHONE:
-                    send_text(settings.ADMIN_PHONE, f"⚠️ Timeout en folio {r.id}\nCURP: {r.curp}\nTipo: {r.act_type}")
+                    send_text(settings.ADMIN_PHONE, f"⚠️ Timeout en folio {r.id}\nDATO: {r.curp}\nTipo: {r.act_type}")
             except Exception:
                 pass
 
