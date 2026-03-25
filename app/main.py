@@ -22,6 +22,7 @@ from app.services.evolution import (
     send_group_text,
     send_document_base64,
     send_group_document_base64,
+    get_media_base64,
 )
 
 from fastapi.responses import HTMLResponse
