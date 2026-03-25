@@ -17,7 +17,590 @@ from app.utils.curp import (
 )
 from app.services.evolution import send_text, send_document, send_group_document, send_group_text
 
+from fastapi.responses import HTMLResponse
+from zoneinfo import ZoneInfo
+
 app = FastAPI(title=settings.APP_NAME)
+
+
+PANEL_TZ = "America/Monterrey"
+
+
+def _panel_now():
+    return datetime.now(ZoneInfo(PANEL_TZ))
+
+
+def _panel_day_str():
+    return _panel_now().strftime("%Y-%m-%d")
+
+
+def _panel_week_start(dt=None):
+    dt = dt or _panel_now()
+    start = dt - timedelta(days=dt.weekday())
+    return start.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _panel_week_end(dt=None):
+    return _panel_week_start(dt) + timedelta(days=7)
+
+
+def _daterange_days(start_dt, end_dt):
+    days = []
+    cur = start_dt
+    while cur < end_dt:
+        days.append(cur.strftime("%Y-%m-%d"))
+        cur += timedelta(days=1)
+    return days
+
+
+def _esc(v):
+    if v is None:
+        return ""
+    return str(v)
+
+
+def _fmt_dt(dt):
+    if not dt:
+        return ""
+    try:
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return str(dt)
+
+
+def _panel_period_bounds(view: str):
+    view = (view or "day").strip().lower()
+
+    if view == "week":
+        start = _panel_week_start()
+        end = _panel_week_end()
+        return start, end, "week"
+
+    now = _panel_now()
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=1)
+    return start, end, "day"
+
+
+def _query_requests_for_panel(
+    db: Session,
+    time_min: datetime,
+    time_max: datetime,
+    group_jid: str | None = None,
+    provider_name: str | None = None,
+    status: str | None = None,
+    act_type: str | None = None,
+):
+    q = db.query(RequestLog).filter(
+        RequestLog.created_at >= time_min,
+        RequestLog.created_at < time_max,
+    )
+
+    if group_jid:
+        q = q.filter(RequestLog.source_group_id == group_jid)
+
+    if provider_name:
+        q = q.filter(RequestLog.provider_name == provider_name)
+
+    if status:
+        q = q.filter(RequestLog.status == status)
+
+    if act_type:
+        q = q.filter(RequestLog.act_type == act_type)
+
+    return q
+
+
+def _panel_summary_from_rows(rows: list[RequestLog]) -> dict:
+    out = {
+        "total": 0,
+        "queued": 0,
+        "processing": 0,
+        "done": 0,
+        "error": 0,
+    }
+
+    for r in rows:
+        out["total"] += 1
+        if r.status == "QUEUED":
+            out["queued"] += 1
+        elif r.status == "PROCESSING":
+            out["processing"] += 1
+        elif r.status == "DONE":
+            out["done"] += 1
+        elif r.status == "ERROR":
+            out["error"] += 1
+
+    return out
+
+
+def _panel_group_rows(rows: list[RequestLog]) -> list[dict]:
+    data = {}
+
+    for r in rows:
+        gid = r.source_group_id or "PRIVADO"
+        if gid not in data:
+            data[gid] = {
+                "group_jid": gid,
+                "total": 0,
+                "queued": 0,
+                "processing": 0,
+                "done": 0,
+                "error": 0,
+                "last_update": None,
+            }
+
+        item = data[gid]
+        item["total"] += 1
+
+        if r.status == "QUEUED":
+            item["queued"] += 1
+        elif r.status == "PROCESSING":
+            item["processing"] += 1
+        elif r.status == "DONE":
+            item["done"] += 1
+        elif r.status == "ERROR":
+            item["error"] += 1
+
+        if not item["last_update"] or (r.updated_at and r.updated_at > item["last_update"]):
+            item["last_update"] = r.updated_at
+
+    out = list(data.values())
+    out.sort(key=lambda x: (-x["total"], x["group_jid"]))
+    return out
+
+
+def _panel_provider_rows(rows: list[RequestLog]) -> list[dict]:
+    data = {}
+
+    for r in rows:
+        name = r.provider_name or "SIN_PROVEEDOR"
+        if name not in data:
+            data[name] = {
+                "provider_name": name,
+                "total": 0,
+                "queued": 0,
+                "processing": 0,
+                "done": 0,
+                "error": 0,
+            }
+
+        item = data[name]
+        item["total"] += 1
+
+        if r.status == "QUEUED":
+            item["queued"] += 1
+        elif r.status == "PROCESSING":
+            item["processing"] += 1
+        elif r.status == "DONE":
+            item["done"] += 1
+        elif r.status == "ERROR":
+            item["error"] += 1
+
+    out = list(data.values())
+    out.sort(key=lambda x: (-x["total"], x["provider_name"]))
+    return out
+
+
+def _panel_type_rows(rows: list[RequestLog]) -> list[dict]:
+    data = {}
+
+    for r in rows:
+        name = r.act_type or "SIN_TIPO"
+        if name not in data:
+            data[name] = {
+                "act_type": name,
+                "total": 0,
+                "queued": 0,
+                "processing": 0,
+                "done": 0,
+                "error": 0,
+            }
+
+        item = data[name]
+        item["total"] += 1
+
+        if r.status == "QUEUED":
+            item["queued"] += 1
+        elif r.status == "PROCESSING":
+            item["processing"] += 1
+        elif r.status == "DONE":
+            item["done"] += 1
+        elif r.status == "ERROR":
+            item["error"] += 1
+
+    out = list(data.values())
+    out.sort(key=lambda x: (-x["total"], x["act_type"]))
+    return out
+
+
+@app.get("/panel/api/actas")
+def panel_api_actas(
+    view: str = "day",
+    group_jid: str = "",
+    provider_name: str = "",
+    status: str = "",
+    act_type: str = "",
+    db: Session = Depends(get_db),
+):
+    time_min, time_max, view = _panel_period_bounds(view)
+
+    rows = _query_requests_for_panel(
+        db=db,
+        time_min=time_min,
+        time_max=time_max,
+        group_jid=group_jid or None,
+        provider_name=provider_name or None,
+        status=status or None,
+        act_type=act_type or None,
+    ).order_by(RequestLog.created_at.desc()).all()
+
+    summary = _panel_summary_from_rows(rows)
+    by_group = _panel_group_rows(rows)
+    by_provider = _panel_provider_rows(rows)
+    by_type = _panel_type_rows(rows)
+
+    latest = []
+    for r in rows[:100]:
+        latest.append({
+            "id": r.id,
+            "dato": r.curp,
+            "tipo": r.act_type,
+            "estado": r.status,
+            "grupo": r.source_group_id,
+            "proveedor": r.provider_name,
+            "proveedor_grupo": r.provider_group_id,
+            "mensaje_proveedor": r.provider_message,
+            "pdf_url": r.pdf_url,
+            "created_at": _fmt_dt(r.created_at),
+            "updated_at": _fmt_dt(r.updated_at),
+            "error_message": r.error_message or "",
+        })
+
+    return {
+        "ok": True,
+        "view": view,
+        "summary": summary,
+        "by_group": by_group,
+        "by_provider": by_provider,
+        "by_type": by_type,
+        "latest": latest,
+    }
+
+
+@app.get("/panel/actas", response_class=HTMLResponse)
+def panel_actas(
+    view: str = "day",
+    group_jid: str = "",
+    provider_name: str = "",
+    status: str = "",
+    act_type: str = "",
+    db: Session = Depends(get_db),
+):
+    time_min, time_max, view = _panel_period_bounds(view)
+
+    rows = _query_requests_for_panel(
+        db=db,
+        time_min=time_min,
+        time_max=time_max,
+        group_jid=group_jid or None,
+        provider_name=provider_name or None,
+        status=status or None,
+        act_type=act_type or None,
+    ).order_by(RequestLog.created_at.desc()).all()
+
+    summary = _panel_summary_from_rows(rows)
+    by_group = _panel_group_rows(rows)
+    by_provider = _panel_provider_rows(rows)
+    by_type = _panel_type_rows(rows)
+
+    latest = rows[:100]
+
+    subtitle = (
+        f"Vista semanal ({PANEL_TZ})" if view == "week"
+        else f"Vista diaria ({_panel_day_str()}, {PANEL_TZ})"
+    )
+
+    provider_states = _providers_status_text(db).replace("\n", "<br>")
+
+    html = f"""
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Panel Actas</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {{ font-family: Arial, sans-serif; background:#f5f7fb; margin:0; padding:16px; color:#0f172a; }}
+    .wrap {{ max-width:1500px; margin:0 auto; }}
+    .hero {{ background:linear-gradient(135deg,#0f172a 0%, #1e293b 55%, #2563eb 100%); color:white; padding:22px; border-radius:20px; margin-bottom:16px; }}
+    .toolbar {{ margin-top:12px; display:flex; gap:10px; flex-wrap:wrap; }}
+    .tool-link {{ text-decoration:none; padding:10px 14px; border-radius:10px; background:rgba(255,255,255,.16); color:white; font-weight:700; }}
+    .tool-link-active {{ background:white; color:#0f172a; }}
+    .cards {{ display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; margin-bottom:16px; }}
+    .card {{ background:white; border-radius:16px; padding:16px; box-shadow:0 8px 24px rgba(15,23,42,.08); }}
+    .label {{ color:#64748b; font-size:.9rem; margin-bottom:8px; }}
+    .value {{ font-size:1.8rem; font-weight:800; }}
+    .box {{ background:white; border-radius:18px; box-shadow:0 8px 24px rgba(15,23,42,.08); overflow:hidden; margin-bottom:16px; }}
+    .head {{ padding:16px 18px; border-bottom:1px solid #e2e8f0; }}
+    table {{ width:100%; border-collapse:collapse; }}
+    th, td {{ padding:12px; border-bottom:1px solid #e2e8f0; text-align:left; vertical-align:top; }}
+    th {{ background:#0f172a; color:white; }}
+    .right {{ text-align:right; }}
+    .mono {{ font-family: monospace; font-size:.92rem; }}
+    .small {{ color:#64748b; font-size:.84rem; }}
+    .status-q {{ color:#92400e; font-weight:700; }}
+    .status-p {{ color:#1d4ed8; font-weight:700; }}
+    .status-d {{ color:#15803d; font-weight:700; }}
+    .status-e {{ color:#b91c1c; font-weight:700; }}
+    .filters {{ display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; padding:16px; }}
+    .filters input, .filters select {{ padding:10px; border:1px solid #cbd5e1; border-radius:10px; }}
+    .filters button {{ padding:10px 14px; border:none; border-radius:10px; background:#2563eb; color:white; font-weight:700; cursor:pointer; }}
+    .state-box {{ background:#f8fafc; border:1px solid #e2e8f0; border-radius:14px; padding:14px; margin-top:10px; color:#0f172a; }}
+    @media (max-width: 900px) {{
+      .cards {{ grid-template-columns:repeat(2,minmax(0,1fr)); }}
+      .filters {{ grid-template-columns:1fr; }}
+      .table-wrap {{ overflow-x:auto; }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <h1 style="margin:0 0 8px;">Panel de Actas</h1>
+      <div>{_esc(subtitle)}</div>
+
+      <div class="toolbar">
+        <a href="/panel/actas?view=day" class="tool-link {'tool-link-active' if view == 'day' else ''}">Hoy</a>
+        <a href="/panel/actas?view=week" class="tool-link {'tool-link-active' if view == 'week' else ''}">Semana</a>
+        <a href="/panel/api/actas?view={_esc(view)}" class="tool-link">API JSON</a>
+      </div>
+
+      <div class="state-box">
+        {provider_states}
+      </div>
+    </div>
+
+    <form class="box" method="get" action="/panel/actas">
+      <div class="head"><strong>Filtros</strong></div>
+      <div class="filters">
+        <input type="hidden" name="view" value="{_esc(view)}">
+        <input name="group_jid" placeholder="Grupo cliente" value="{_esc(group_jid)}">
+        <input name="provider_name" placeholder="Proveedor" value="{_esc(provider_name)}">
+        <input name="status" placeholder="Estado" value="{_esc(status)}">
+        <input name="act_type" placeholder="Tipo de acta" value="{_esc(act_type)}">
+        <button type="submit">Filtrar</button>
+      </div>
+    </form>
+
+    <div class="cards">
+      <div class="card"><div class="label">Total</div><div class="value">{summary["total"]}</div></div>
+      <div class="card"><div class="label">QUEUED</div><div class="value">{summary["queued"]}</div></div>
+      <div class="card"><div class="label">PROCESSING</div><div class="value">{summary["processing"]}</div></div>
+      <div class="card"><div class="label">DONE</div><div class="value">{summary["done"]}</div></div>
+      <div class="card"><div class="label">ERROR</div><div class="value">{summary["error"]}</div></div>
+    </div>
+
+    <div class="box">
+      <div class="head"><strong>Resumen por proveedor</strong></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Proveedor</th>
+              <th class="right">Total</th>
+              <th class="right">QUEUED</th>
+              <th class="right">PROCESSING</th>
+              <th class="right">DONE</th>
+              <th class="right">ERROR</th>
+            </tr>
+          </thead>
+          <tbody>
+    """
+
+    if by_provider:
+        for r in by_provider:
+            html += f"""
+            <tr>
+              <td>{_esc(r["provider_name"])}</td>
+              <td class="right">{r["total"]}</td>
+              <td class="right">{r["queued"]}</td>
+              <td class="right">{r["processing"]}</td>
+              <td class="right">{r["done"]}</td>
+              <td class="right">{r["error"]}</td>
+            </tr>
+            """
+    else:
+        html += '<tr><td colspan="6">Sin datos.</td></tr>'
+
+    html += """
+          </tbody>
+        </table>
+      </div>
+    </div>
+    """
+
+    html += """
+    <div class="box">
+      <div class="head"><strong>Resumen por tipo de acta</strong></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Tipo</th>
+              <th class="right">Total</th>
+              <th class="right">QUEUED</th>
+              <th class="right">PROCESSING</th>
+              <th class="right">DONE</th>
+              <th class="right">ERROR</th>
+            </tr>
+          </thead>
+          <tbody>
+    """
+
+    if by_type:
+        for r in by_type:
+            html += f"""
+            <tr>
+              <td>{_esc(r["act_type"])}</td>
+              <td class="right">{r["total"]}</td>
+              <td class="right">{r["queued"]}</td>
+              <td class="right">{r["processing"]}</td>
+              <td class="right">{r["done"]}</td>
+              <td class="right">{r["error"]}</td>
+            </tr>
+            """
+    else:
+        html += '<tr><td colspan="6">Sin datos.</td></tr>'
+
+    html += """
+          </tbody>
+        </table>
+      </div>
+    </div>
+    """
+
+    html += """
+    <div class="box">
+      <div class="head"><strong>Resumen por grupo cliente</strong></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Grupo</th>
+              <th class="right">Total</th>
+              <th class="right">QUEUED</th>
+              <th class="right">PROCESSING</th>
+              <th class="right">DONE</th>
+              <th class="right">ERROR</th>
+              <th>Última actualización</th>
+            </tr>
+          </thead>
+          <tbody>
+    """
+
+    if by_group:
+        for r in by_group:
+            html += f"""
+            <tr>
+              <td class="mono">{_esc(r["group_jid"])}</td>
+              <td class="right">{r["total"]}</td>
+              <td class="right">{r["queued"]}</td>
+              <td class="right">{r["processing"]}</td>
+              <td class="right">{r["done"]}</td>
+              <td class="right">{r["error"]}</td>
+              <td>{_esc(_fmt_dt(r["last_update"]))}</td>
+            </tr>
+            """
+    else:
+        html += '<tr><td colspan="7">Sin datos.</td></tr>'
+
+    html += """
+          </tbody>
+        </table>
+      </div>
+    </div>
+    """
+
+    html += """
+    <div class="box">
+      <div class="head"><strong>Solicitudes recientes</strong></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Dato</th>
+              <th>Tipo</th>
+              <th>Estado</th>
+              <th>Grupo cliente</th>
+              <th>Proveedor</th>
+              <th>Grupo proveedor</th>
+              <th>Mensaje proveedor</th>
+              <th>Creado</th>
+              <th>Actualizado</th>
+              <th>Error</th>
+            </tr>
+          </thead>
+          <tbody>
+    """
+
+    if latest:
+        for r in latest:
+            status_class = {
+                "QUEUED": "status-q",
+                "PROCESSING": "status-p",
+                "DONE": "status-d",
+                "ERROR": "status-e",
+            }.get(r.status, "")
+
+            html += f"""
+            <tr>
+              <td>{r.id}</td>
+              <td class="mono">{_esc(r.curp)}</td>
+              <td>{_esc(r.act_type)}</td>
+              <td class="{status_class}">{_esc(r.status)}</td>
+              <td class="mono">{_esc(r.source_group_id)}</td>
+              <td>{_esc(r.provider_name)}</td>
+              <td class="mono">{_esc(r.provider_group_id)}</td>
+              <td class="small">{_esc(r.provider_message)}</td>
+              <td>{_esc(_fmt_dt(r.created_at))}</td>
+              <td>{_esc(_fmt_dt(r.updated_at))}</td>
+              <td class="small">{_esc(r.error_message)}</td>
+            </tr>
+            """
+    else:
+        html += '<tr><td colspan="11">Sin solicitudes en este periodo.</td></tr>'
+
+    html += """
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>
+    """
+    return HTMLResponse(content=html)
+
+
+@app.post("/panel/provider/{provider_name}/on")
+def panel_provider_on(provider_name: str, db: Session = Depends(get_db)):
+    row = _get_or_create_provider(db, provider_name.upper(), provider_name.upper() == "PROVIDER1")
+    row.is_enabled = True
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    return {"ok": True, "provider": provider_name.upper(), "enabled": True}
+
+
+@app.post("/panel/provider/{provider_name}/off")
+def panel_provider_off(provider_name: str, db: Session = Depends(get_db)):
+    row = _get_or_create_provider(db, provider_name.upper(), provider_name.upper() == "PROVIDER1")
+    row.is_enabled = False
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    return {"ok": True, "provider": provider_name.upper(), "enabled": False}
 
 
 def _normalize_wa_actor(value: str) -> str:
