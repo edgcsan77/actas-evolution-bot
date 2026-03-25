@@ -219,6 +219,13 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         source_chat_id = remote_jid
         source_group_id = remote_jid if is_group else None
         requester_wa_id = _resolve_requester_wa_id(data, key, is_group)
+
+        print("ADMIN_DEBUG_REMOTE_JID =", remote_jid, flush=True)
+        print("ADMIN_DEBUG_PARTICIPANT =", participant, flush=True)
+        print("ADMIN_DEBUG_PARTICIPANT_ALT =", data.get("participantAlt", ""), flush=True)
+        print("ADMIN_DEBUG_SENDER =", data.get("sender", ""), flush=True)
+        print("ADMIN_DEBUG_REQUESTER_WA_ID =", requester_wa_id, flush=True)
+        print("ADMIN_DEBUG_ADMIN_PHONE =", (settings.ADMIN_PHONE or "").replace("+", "").replace(" ", "").strip(), flush=True)
         
         text_body = ""
         if "conversation" in message:
