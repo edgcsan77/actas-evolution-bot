@@ -143,10 +143,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         from_me = key.get("fromMe", False)
         participant = key.get("participant", "")
         msg_id = key.get("id", "")
-
-        if from_me:
-            return {"ok": True, "ignored": "from_me"}
-
+        
         is_group = remote_jid.endswith("@g.us")
         source_chat_id = remote_jid
         source_group_id = remote_jid if is_group else None
@@ -157,8 +154,23 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             text_body = message.get("conversation", "")
         elif "extendedTextMessage" in message:
             text_body = message.get("extendedTextMessage", {}).get("text", "")
-
+        
         text_upper = normalize_text(text_body)
+        
+        admin_commands = (
+            "/ADDGROUP",
+            "/ADDUSER ",
+            "/RMUSER ",
+            "/STATUS",
+            "/PENDING",
+            "/QUEUE",
+            "/LAST ",
+            "/REQUEUE ",
+        )
+        
+        if from_me and not any(text_upper.startswith(cmd) for cmd in admin_commands):
+            return {"ok": True, "ignored": "from_me"}
+
         provider_groups = _all_provider_groups()
         is_provider_message = source_chat_id in provider_groups
 
