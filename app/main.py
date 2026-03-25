@@ -285,7 +285,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                 _deliver_text_result(
                     open_req,
-                    f"❌ No hay registros disponibles.\nDato: {open_req.curp}\nTipo: {open_req.act_type}\nFolio: {open_req.id}"
+                    f"❌ No hay registros disponibles.\nDato: {open_req.curp}\nTipo: {open_req.act_type}"
                 )
                 return {"ok": True, "provider_result": "no_record"}
 
@@ -504,7 +504,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 .first()
             )
             if duplicate_open:
-                dup_msg = f"⏳ Ya existe una solicitud en proceso\nDato: {term}\nTipo: {act_type}\nFolio: {duplicate_open.id}"
+                dup_msg = f"⏳ Ya existe una solicitud en proceso\nDato: {term}\nTipo: {act_type}"
                 if source_group_id:
                     send_group_text(source_group_id, dup_msg)
                 else:
