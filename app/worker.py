@@ -52,12 +52,7 @@ def process_request(request_id: int):
 
         send_group_text(req.provider_group_id, text_to_provider)
 
-        ack = ""
-
-        if req.source_group_id:
-            send_group_text(req.source_group_id, ack)
-        else:
-            send_text(req.requester_wa_id, ack)
+        # sin acuse al grupo cliente
 
     except Exception as e:
         req = db.query(RequestLog).filter(RequestLog.id == request_id).first()
