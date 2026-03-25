@@ -193,8 +193,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             else _normalize_wa_actor(remote_jid)
         )
         
-        is_group and participant else _normalize_wa_actor(remote_jid)
-        
         text_body = ""
         if "conversation" in message:
             text_body = message.get("conversation", "")
