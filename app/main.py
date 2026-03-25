@@ -25,6 +25,8 @@ def _normalize_wa_actor(value: str) -> str:
     value = value.replace("@s.whatsapp.net", "")
     value = value.replace("@lid", "")
     value = value.replace("@g.us", "")
+    value = value.replace("+", "")
+    value = value.replace(" ", "")
     return value
 
 
