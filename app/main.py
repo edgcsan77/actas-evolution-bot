@@ -161,9 +161,38 @@ def _providers_status_text(db: Session) -> str:
 
     return (
         "⚙️ Estado de proveedores\n"
-        f"• PROVIDER1: {s1}\n"
-        f"• PROVIDER2: {s2}"
+        f"PROVIDER1: {s1}\n"
+        f"PROVIDER2: {s2}"
     )
+
+
+def _resolve_requester_wa_id(data: dict, key: dict, is_group: bool) -> str:
+    participant = key.get("participant", "") or ""
+    remote_jid = key.get("remoteJid", "") or ""
+
+    # Campos alternos que a veces manda Evolution
+    participant_alt = data.get("participantAlt", "") or ""
+    remote_jid_alt = data.get("remoteJidAlt", "") or ""
+    sender = data.get("sender", "") or ""
+
+    # 1) En grupo, intenta primero participantAlt si existe
+    if is_group and participant_alt:
+        return _normalize_wa_actor(participant_alt)
+
+    # 2) Luego sender
+    if sender:
+        return _normalize_wa_actor(sender)
+
+    # 3) Luego participant
+    if is_group and participant:
+        return _normalize_wa_actor(participant)
+
+    # 4) Luego remote_jid_alt
+    if remote_jid_alt:
+        return _normalize_wa_actor(remote_jid_alt)
+
+    # 5) Finalmente remote_jid
+    return _normalize_wa_actor(remote_jid)
 
 
 @app.post("/webhook/evolution")
@@ -187,11 +216,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         is_group = remote_jid.endswith("@g.us")
         source_chat_id = remote_jid
         source_group_id = remote_jid if is_group else None
-        requester_wa_id = (
-            _normalize_wa_actor(participant)
-            if is_group and participant
-            else _normalize_wa_actor(remote_jid)
-        )
+        requester_wa_id = _resolve_requester_wa_id(data, key, is_group)
         
         text_body = ""
         if "conversation" in message:
