@@ -326,6 +326,17 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             return {"ok": True}
 
+        if text_upper.startswith("/GROUPID"):
+            if not _is_admin(requester_wa_id, from_me):
+                return {"ok": True, "ignored": "not_admin"}
+
+            if is_group:
+                send_group_text(source_group_id, f"🆔 Group ID:\n{source_group_id}")
+            else:
+                send_text(requester_wa_id, "⚠️ Usa /GROUPID dentro de un grupo.")
+
+            return {"ok": True}
+        
         if text_upper.startswith("/ADDGROUP"):
             if not _is_admin(requester_wa_id, from_me):
                 print("ADDGROUP_DENIED_USER =", requester_wa_id, flush=True)
