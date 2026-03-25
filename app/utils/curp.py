@@ -11,27 +11,78 @@ def normalize_text(text: str) -> str:
 
 def detect_act_type(text: str) -> str:
     t = normalize_text(text)
-    t_nospace = t.replace(" ", "")
+    t_nospace = re.sub(r"\s+", "", t)
 
+    # -----------------------------
     # FOLIO primero
-    if "NACIMIENTOFOLIO" in t_nospace:
+    # -----------------------------
+    # Si solo ponen "folio", asumir NACIMIENTO FOLIO
+    if "FOLIO" in t_nospace and not any(x in t_nospace for x in ["NAC", "MAT", "DEF", "DIV"]):
         return "NACIMIENTO FOLIO"
-    if "MATRIMONIOFOLIO" in t_nospace:
+
+    # NACIMIENTO FOLIO
+    if any(x in t_nospace for x in [
+        "NACIMIENTOFOLIO", "NACIMIENTOCONFOLIO", "ACTADENACIMIENTOFOLIO",
+        "NACIMFOLIO", "NACFOLIO", "FOLIONACIMIENTO", "FOLIONAC"
+    ]):
+        return "NACIMIENTO FOLIO"
+
+    # MATRIMONIO FOLIO
+    if any(x in t_nospace for x in [
+        "MATRIMONIOFOLIO", "ACTADEMATRIMONIOFOLIO",
+        "MATRIFOLIO", "MATFOLIO", "FOLIOMATRIMONIO", "FOLIOMAT"
+    ]):
         return "MATRIMONIO FOLIO"
-    if "DEFUNCIONFOLIO" in t_nospace:
+
+    # DEFUNCION FOLIO
+    if any(x in t_nospace for x in [
+        "DEFUNCIONFOLIO", "ACTADEDEFUNCIONFOLIO",
+        "DEFFOLIO", "DEFUNFOLIO", "FOLIODEFUNCION", "FOLIODEF"
+    ]):
         return "DEFUNCION FOLIO"
-    if "DIVORCIOFOLIO" in t_nospace:
+
+    # DIVORCIO FOLIO
+    if any(x in t_nospace for x in [
+        "DIVORCIOFOLIO", "ACTADEDIVORCIOFOLIO",
+        "DIVFOLIO", "DIVORFOLIO", "FOLIODIVORCIO", "FOLIODIV"
+    ]):
         return "DIVORCIO FOLIO"
 
-    if "NACIMIENTO" in t_nospace or "NACIMI" in t_nospace:
+    # Variantes más flexibles: tipo + folio en cualquier orden
+    if "FOLIO" in t_nospace:
+        if any(x in t_nospace for x in ["NACIMIENTO", "NACIM", "NAC"]):
+            return "NACIMIENTO FOLIO"
+        if any(x in t_nospace for x in ["MATRIMONIO", "MATRI", "MAT"]):
+            return "MATRIMONIO FOLIO"
+        if any(x in t_nospace for x in ["DEFUNCION", "DEFUN", "DEF"]):
+            return "DEFUNCION FOLIO"
+        if any(x in t_nospace for x in ["DIVORCIO", "DIVOR", "DIV"]):
+            return "DIVORCIO FOLIO"
+
+    # -----------------------------
+    # SIN FOLIO
+    # -----------------------------
+    if any(x in t_nospace for x in [
+        "NACIMIENTO", "ACTADENACIMIENTO", "NACIM", "NAC"
+    ]):
         return "NACIMIENTO"
-    if "MATRIMONIO" in t_nospace:
+
+    if any(x in t_nospace for x in [
+        "MATRIMONIO", "ACTADEMATRIMONIO", "MATRI"
+    ]):
         return "MATRIMONIO"
-    if "DEFUNCION" in t_nospace:
+
+    if any(x in t_nospace for x in [
+        "DEFUNCION", "ACTADEDEFUNCION", "DEFUN", "DEF"
+    ]):
         return "DEFUNCION"
-    if "DIVORCIO" in t_nospace:
+
+    if any(x in t_nospace for x in [
+        "DIVORCIO", "ACTADEDIVORCIO", "DIVOR", "DIV"
+    ]):
         return "DIVORCIO"
 
+    # Por defecto
     return "NACIMIENTO"
 
 
