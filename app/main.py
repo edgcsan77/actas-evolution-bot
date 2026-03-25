@@ -736,20 +736,38 @@ def _deliver_text_result(req: RequestLog, text: str):
 def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = None):
     filename = filename or f"{req.curp}.pdf"
 
+    is_base64 = not pdf_data.startswith("http")
+
     if req.source_group_id:
-        send_group_document_base64(
-            req.source_group_id,
-            pdf_data,
-            filename=filename,
-            caption=""
-        )
+        if is_base64:
+            send_group_document_base64(
+                req.source_group_id,
+                pdf_data,
+                filename=filename,
+                caption=""
+            )
+        else:
+            send_group_document(
+                req.source_group_id,
+                pdf_data,
+                filename=filename,
+                caption=""
+            )
     else:
-        send_document_base64(
-            req.requester_wa_id,
-            pdf_data,
-            filename=filename,
-            caption=""
-        )
+        if is_base64:
+            send_document_base64(
+                req.requester_wa_id,
+                pdf_data,
+                filename=filename,
+                caption=""
+            )
+        else:
+            send_document(
+                req.requester_wa_id,
+                pdf_data,
+                filename=filename,
+                caption=""
+            )
 
 
 def _provider_no_record_patterns():
@@ -1320,29 +1338,76 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
         for term in terms:
             print("PROCESSING_TERM =", term, flush=True)
+        
             last_done = get_last_done_request(db, term, act_type)
             if last_done and last_done.pdf_url and last_done.expires_at > datetime.utcnow():
                 _deliver_pdf_result(last_done, last_done.pdf_url)
                 continue
-
+        
             request_key = build_request_key(term, act_type, source_chat_id)
-
-            duplicate_open = (
+        
+            existing = (
                 db.query(RequestLog)
-                .filter(
-                    RequestLog.request_key == request_key,
-                    RequestLog.status.in_(["QUEUED", "PROCESSING"])
-                )
+                .filter(RequestLog.request_key == request_key)
+                .order_by(RequestLog.created_at.desc())
                 .first()
             )
-            if duplicate_open:
-                dup_msg = f"⏳ Ya existe una solicitud en proceso\nDato: {term}\nTipo: {act_type}"
+        
+            # 1) si ya existe una abierta, no duplicar
+            if existing and existing.status in ["QUEUED", "PROCESSING", "PENDING"]:
+                dup_msg = (
+                    f"⏳ Ya existe una solicitud en proceso\n"
+                    f"Dato: {term}\n"
+                    f"Tipo: {act_type}\n"
+                    f"Folio: {existing.id}"
+                )
+        
                 if source_group_id:
                     send_group_text(source_group_id, dup_msg)
                 else:
                     send_text(requester_wa_id, dup_msg)
+        
                 continue
-
+        
+            # 2) si existe y está en ERROR, reutilizar la misma fila
+            if existing and existing.status == "ERROR":
+                existing.status = "QUEUED"
+                existing.updated_at = datetime.utcnow()
+                existing.error_message = None
+                existing.evolution_message_id = msg_id
+                existing.requester_wa_id = requester_wa_id
+                existing.requester_name = ""
+                existing.source_chat_id = source_chat_id
+                existing.source_group_id = source_group_id
+                existing.provider_name = None
+                existing.provider_group_id = None
+                existing.provider_message = None
+                existing.provider_media_url = None
+                existing.pdf_url = None
+                existing.expires_at = datetime.utcnow() + timedelta(days=settings.HISTORY_DAYS)
+                db.commit()
+        
+                request_queue.enqueue(process_request, existing.id)
+        
+                print("REQUEUED_EXISTING_REQUEST_ID =", existing.id, flush=True)
+                print("REQUEUED_EXISTING_TERM =", existing.curp, flush=True)
+                print("REQUEUED_EXISTING_TYPE =", existing.act_type, flush=True)
+        
+                retry_msg = (
+                    f"🔁 Reintentando solicitud\n"
+                    f"Dato: {term}\n"
+                    f"Tipo: {act_type}\n"
+                    f"Folio: {existing.id}"
+                )
+        
+                if source_group_id:
+                    send_group_text(source_group_id, retry_msg)
+                else:
+                    send_text(requester_wa_id, retry_msg)
+        
+                continue
+        
+            # 3) si no existe, crear nueva
             row = RequestLog(
                 request_key=request_key,
                 curp=term,
@@ -1355,11 +1420,13 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 status="QUEUED",
                 expires_at=datetime.utcnow() + timedelta(days=settings.HISTORY_DAYS),
             )
+        
             db.add(row)
             db.commit()
             db.refresh(row)
-
+        
             request_queue.enqueue(process_request, row.id)
+        
             print("ENQUEUED_REQUEST_ID =", row.id, flush=True)
             print("ENQUEUED_TERM =", row.curp, flush=True)
             print("ENQUEUED_TYPE =", row.act_type, flush=True)
