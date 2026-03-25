@@ -187,7 +187,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         is_group = remote_jid.endswith("@g.us")
         source_chat_id = remote_jid
         source_group_id = remote_jid if is_group else None
-        requester_wa_id = _normalize_wa_actor(participant) if is_group and participant else _normalize_wa_actor(remote_jid)
+        requester_wa_id = (
+            _normalize_wa_actor(participant)
+            if is_group and participant
+            else _normalize_wa_actor(remote_jid)
+        )
+        
         is_group and participant else _normalize_wa_actor(remote_jid)
         
         text_body = ""
