@@ -1,3 +1,4 @@
+import base64
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
@@ -276,7 +277,8 @@ GROUP_NAME_MAP = {
     "120363408668441985@g.us": "Gpo. No. 42 Arturo",
     "120363404207028239@g.us": "Gpo. No. 24 Beto",
     "120363421694580090@g.us": "Gpo. No. 37 Loez",
-    "120363427788039518@g.us": "Docify 1",
+    "120363427788039518@g.us": "Docify Mx 1",
+    "120363424360403186@g.us": "Docify Mx 2",
     "120363406562422137@g.us": "Gpo. No. 1 Max",
     "120363406732530093@g.us": "Gpo. No. 2 Max",
     "120363424567042045@g.us": "Gpo. No. 3 Max",
@@ -290,6 +292,15 @@ GROUP_NAME_MAP = {
     "120363404620511153@g.us": "Gpo. No. 11 Max",
     "120363424829883028@g.us": "Gpo. No. 12 Max",
     "120363407417260200@g.us": "Gpo. No. 13 Max",
+    "120363422073988332@g.us": "Gpo. No. Day",
+    "120363423887399966@g.us": "Gpo. No. 2 Lesli",
+    "120363407701598429@g.us": "Gpo. No. 20 Altas IMSS",
+    "120363425702893567@g.us": "Gpo. No. 46 Papeleria MC",
+    "120363424321234737@g.us": "Gpo. No. 56 Broder Zihua",
+    "120363407168361684@g.us": "Gpo. No. 38 Tramites Ana",
+    "120363406276735177@g.us": "Gpo. No. 22 Servi Todo",
+    "120363423160777316@g.us": "Gpo. No. 15 Cancun",
+    "120363406102408537@g.us": "Gpo. No. 10 Miguel",
 }
 
 
@@ -991,7 +1002,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         is_provider_message = source_chat_id in provider_groups
         is_admin_command = text_upper.startswith("/")
 
-        #terms = extract_request_terms(text_body)
+        terms = extract_request_terms(text_body)
 
         if not bot_is_open() and terms and not is_provider_message and not is_admin_command:
             msg = (
@@ -1054,21 +1065,21 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         .filter(
                             RequestLog.provider_group_id == source_chat_id,
                             RequestLog.curp == filename_id,
-                            RequestLog.status == "PROCESSING"
+                            RequestLog.status.in_(["PROCESSING", "QUEUED", "PENDING"])
                         )
-                        .order_by(RequestLog.created_at.asc())
+                        .order_by(RequestLog.created_at.desc())
                         .first()
                     )
                 
-                if not open_req and provider_id:
+                if not open_req and not filename_id and provider_id:
                     open_req = (
                         db.query(RequestLog)
                         .filter(
                             RequestLog.provider_group_id == source_chat_id,
                             RequestLog.curp == provider_id,
-                            RequestLog.status == "PROCESSING"
+                            RequestLog.status.in_(["PROCESSING", "QUEUED", "PENDING"])
                         )
-                        .order_by(RequestLog.created_at.asc())
+                        .order_by(RequestLog.created_at.desc())
                         .first()
                     )
 
@@ -1088,17 +1099,28 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     print("PROVIDER_PDF_BASE64_EMPTY =", media_json, flush=True)
                     return {"ok": True, "ignored": "provider_pdf_base64_empty"}
                 
-                # limpiar prefijo data:... si viene así
                 if media_b64.startswith("data:"):
                     parts = media_b64.split(",", 1)
                     media_b64 = parts[1] if len(parts) > 1 else media_b64
                 
-                # quitar saltos de línea y espacios
                 media_b64 = media_b64.replace("\n", "").replace("\r", "").strip()
                 
-                print("PROVIDER_PDF_BASE64_START =", media_b64[:20], flush=True)
+                missing_padding = len(media_b64) % 4
+                if missing_padding:
+                    media_b64 += "=" * (4 - missing_padding)
                 
-                open_req.pdf_url = pdf_url
+                pdf_bytes = base64.b64decode(media_b64, validate=False)
+
+                print("PDF_HEADER =", pdf_bytes[:8], flush=True)
+                print("PDF_BYTES_LEN =", len(pdf_bytes), flush=True)
+                
+                if not pdf_bytes.startswith(b"%PDF"):
+                    print("PROVIDER_PDF_INVALID_BINARY", flush=True)
+                    return {"ok": True, "ignored": "provider_pdf_invalid_binary"}
+                
+                safe_media_b64 = base64.b64encode(pdf_bytes).decode()
+                
+                open_req.pdf_url = None
                 open_req.provider_media_url = "BASE64_FROM_MEDIA_MESSAGE"
                 open_req.status = "DONE"
                 open_req.updated_at = datetime.utcnow()
@@ -1106,9 +1128,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 
                 print("PROVIDER_PDF_MATCHED_REQ_ID =", open_req.id, flush=True)
                 print("PROVIDER_PDF_MATCHED_CURP =", open_req.curp, flush=True)
-                print("PROVIDER_PDF_BASE64_LEN =", len(media_b64), flush=True)
+                print("PROVIDER_PDF_BASE64_LEN =", len(safe_media_b64), flush=True)
                 
-                _deliver_pdf_result(open_req, media_b64, filename=filename or f"{open_req.curp}.pdf")
+                _deliver_pdf_result(open_req, safe_media_b64, filename=filename or f"{open_req.curp}.pdf")
                 return {"ok": True, "provider_result": "pdf_delivered"}
 
             # 2) SI NO HAY PDF, INTENTAR TEXTO
@@ -1385,7 +1407,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             print("IGNORED_REASON = no_text", flush=True)
             return {"ok": True, "ignored": "no_text"}
         
-        terms = extract_request_terms(text_body)
         print("REQUEST_TEXT =", text_body, flush=True)
         print("REQUEST_TERMS =", terms, flush=True)
         
@@ -1411,9 +1432,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             print("PROCESSING_TERM =", term, flush=True)
         
             last_done = get_last_done_request(db, term, act_type)
-            if last_done and last_done.pdf_url and last_done.expires_at > datetime.utcnow():
-                _deliver_pdf_result(last_done, last_done.pdf_url)
-                continue
         
             request_key = build_request_key(term, act_type, source_chat_id)
         
