@@ -16,14 +16,16 @@ def detect_act_type(text: str) -> str:
     # -----------------------------
     # FOLIO primero
     # -----------------------------
-    # Si solo ponen "folio", asumir NACIMIENTO FOLIO
-    if "FOLIO" in t_nospace and not any(x in t_nospace for x in ["NAC", "MAT", "DEF", "DIV"]):
+    # Si solo ponen "folio" o "foliado", asumir NACIMIENTO FOLIO
+    if ("FOLIO" in t_nospace or "FOLIADO" in t_nospace) and not any(x in t_nospace for x in ["NAC", "MAT", "DEF", "DIV"]):
         return "NACIMIENTO FOLIO"
 
     # NACIMIENTO FOLIO
     if any(x in t_nospace for x in [
         "NACIMIENTOFOLIO", "NACIMIENTOCONFOLIO", "ACTADENACIMIENTOFOLIO",
-        "NACIMFOLIO", "NACFOLIO", "FOLIONACIMIENTO", "FOLIONAC"
+        "NACIMFOLIO", "NACFOLIO", "FOLIONACIMIENTO", "FOLIONAC",
+        "NACIMIENTOFOLIADO", "ACTADENACIMIENTOFOLIADO",
+        "NACIMFOLIADO", "NACFOLIADO", "FOLIADONACIMIENTO", "FOLIADONAC"
     ]):
         return "NACIMIENTO FOLIO"
 
@@ -49,7 +51,7 @@ def detect_act_type(text: str) -> str:
         return "DIVORCIO FOLIO"
 
     # Variantes más flexibles: tipo + folio en cualquier orden
-    if "FOLIO" in t_nospace:
+    if "FOLIO" in t_nospace or "FOLIADO" in t_nospace:
         if any(x in t_nospace for x in ["NACIMIENTO", "NACIM", "NAC"]):
             return "NACIMIENTO FOLIO"
         if any(x in t_nospace for x in ["MATRIMONIO", "MATRI", "MAT"]):
@@ -203,6 +205,7 @@ def detect_identifier_problem(text: str) -> str | None:
     t = normalize_text(text)
     cleaned = _remove_type_words(t)
 
+    # 1) cadenas numéricas parecidas pero no de 20 dígitos
     digit_runs = re.findall(r"\d{8,25}", cleaned)
     for d in digit_runs:
         if len(d) != 20:
@@ -211,23 +214,25 @@ def detect_identifier_problem(text: str) -> str | None:
                 "Debe tener exactamente 20 dígitos."
             )
 
-    alnum_runs = re.findall(r"[A-Z0-9]{6,30}", cleaned)
-    for token in alnum_runs:
-        if token.isdigit():
+    # 2) posibles CURP incompletas: patrón parecido, pero longitud incorrecta
+    curp_like = re.findall(r"[A-Z]{1,4}\d{2,6}[HM]?[A-Z]{0,6}[A-Z0-9]{0,2}", cleaned)
+    for token in curp_like:
+        token = token.strip()
+        if not token:
             continue
 
+        # ignorar si ya es CURP válida
+        if re.fullmatch(r"[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2}", token):
+            continue
+
+        # si parece CURP pero no mide 18
         if 10 <= len(token) <= 17 or 19 <= len(token) <= 21:
             return (
                 "⚠️ La CURP parece incompleta o incorrecta.\n"
                 "Debe tener exactamente 18 caracteres."
             )
 
-    if re.search(r"[A-Z]", cleaned) and re.search(r"\d", cleaned):
-        return (
-            "⚠️ El dato parece inválido o incompleto.\n"
-            "Revisa la CURP, cadena o código e inténtalo de nuevo."
-        )
-
+    # 3) solo números, pero no 20
     if re.fullmatch(r"\d+", cleaned):
         return (
             "⚠️ La cadena parece incorrecta.\n"
