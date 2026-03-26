@@ -272,6 +272,10 @@ GROUP_NAME_MAP = {
     "120363407761523786@g.us": "Gpo. No. 59 Max",
     "120363425287655854@g.us": "Gpo. No. 28 David",
     "120363424740372709@g.us": "Gpo. No. 57 Isidro",
+    "120363424031837828@g.us": "Gpo. No. 52 Pereyra",
+    "120363408668441985@g.us": "Gpo. No. 42 Arturo",
+    "120363404207028239@g.us": "Gpo. No. 24 Beto",
+    "120363421694580090@g.us": "Gpo. No. 37 Loez",
 }
 
 
@@ -815,9 +819,18 @@ def _extract_identifier_from_filename_local(filename: str) -> str | None:
 
 
 def _is_admin(requester_wa_id: str, from_me: bool = False) -> bool:
-    admin = (settings.ADMIN_PHONE or "").replace("+", "").replace(" ", "").strip()
-    return from_me or requester_wa_id == admin
+    raw = settings.ADMIN_PHONE or ""
 
+    admins = [
+        x.strip().replace("+", "").replace(" ", "")
+        for x in raw.split(",")
+        if x.strip()
+    ]
+
+    requester = (requester_wa_id or "").replace("+", "").replace(" ", "").strip()
+
+    return from_me or requester in admins
+    
 
 def _reply_to_origin(source_group_id: str | None, requester_wa_id: str, text: str):
     if source_group_id:
@@ -926,7 +939,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         print("ADMIN_DEBUG_PARTICIPANT_ALT =", data.get("participantAlt", ""), flush=True)
         print("ADMIN_DEBUG_SENDER =", data.get("sender", ""), flush=True)
         print("ADMIN_DEBUG_REQUESTER_WA_ID =", requester_wa_id, flush=True)
-        print("ADMIN_DEBUG_ADMIN_PHONE =", (settings.ADMIN_PHONE or "").replace("+", "").replace(" ", "").strip(), flush=True)
+        print("ADMIN_DEBUG_ADMIN_PHONES =", settings.ADMIN_PHONE, flush=True)
         
         text_body = ""
         if "conversation" in message:
@@ -966,21 +979,21 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
         #terms = extract_request_terms(text_body)
 
-        #if not bot_is_open() and terms and not is_provider_message and not is_admin_command:
-        #    msg = (
-        #        "🚀 *DOCU EXPRES*\n"
-        #        "El sistema está cerrado.\n\n"
-        #        "Horario de solicitudes:\n"
-        #        "🕗 8:00 AM - 10:00 PM\n"
-        #        "Horario América/Monterrey."
-        #    )
+        if not bot_is_open() and terms and not is_provider_message and not is_admin_command:
+            msg = (
+                "🚀 *DOCU EXPRES*\n"
+                "El sistema está cerrado.\n\n"
+                "Horario de solicitudes:\n"
+                "🕗 8:00 AM - 10:00 PM\n"
+                "Horario América/Monterrey."
+            )
 
-        #    if source_group_id:
-        #        send_group_text(source_group_id, msg)
-        #    else:
-        #        send_text(requester_wa_id, msg)
+            if source_group_id:
+                send_group_text(source_group_id, msg)
+            else:
+                send_text(requester_wa_id, msg)
 
-        #    return {"ok": True, "ignored": "outside_hours"}
+            return {"ok": True, "ignored": "outside_hours"}
 
         # =========================
         # RESPUESTA DEL PROVEEDOR
