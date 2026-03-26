@@ -960,7 +960,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         is_provider_message = source_chat_id in provider_groups
         is_admin_command = text_upper.startswith("/")
 
-        if not bot_is_open():
+        if not bot_is_open() and not is_provider_message and not is_admin_command:
             msg = (
                 "🚀 *DOCU EXPRES*\n"
                 "El sistema está cerrado.\n\n"
