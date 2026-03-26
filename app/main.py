@@ -1109,7 +1109,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                 _deliver_text_result(
                     open_req,
-                    f"❌ No hay registros disponibles.\nDato: {open_req.curp}\nTipo: {open_req.act_type}"
+                    f"❌ No hay registros disponibles.\nDato: {open_req.curp}\nTipo: {open_req.act_type}\n\nVerificar que la CURP esté certificada en RENAPO"
                 )
                 return {"ok": True, "provider_result": "no_record"}
 
