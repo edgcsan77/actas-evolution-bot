@@ -34,6 +34,12 @@ app = FastAPI(title=settings.APP_NAME)
 PANEL_TZ = "America/Monterrey"
 
 
+def bot_is_open():
+    now = datetime.now(ZoneInfo("America/Monterrey"))
+    hour = now.hour
+    return 8 <= hour < 22
+
+
 def _panel_now():
     return datetime.now(ZoneInfo(PANEL_TZ))
 
@@ -253,7 +259,15 @@ GROUP_NAME_MAP = {
     "120363424509175054@g.us": "PROV NORMAL 3",
     "120363426176817361@g.us": "PROV NORMAL 4",
     "120363409870423163@g.us": "PROV ESPECIAL 1",
-    "120363422785755828@g.us": "Gpo. No 4 Karen",
+    "120363422785755828@g.us": "Gpo. No. 4 Karen",
+    "120363426949877636@g.us": "Gpo. No. 11 Morelos",
+    "120363425014097597@g.us": "Gpo. No. 7 Karen Marvin",
+    "120363425275514736@g.us": "Gpo. No. 8 Ana Marvin",
+    "120363406182077605@g.us": "Gpo. No. 12 Marvin",
+    "120363425721043776@g.us": "Gpo. No. 3 Rodolfo",
+    "120363424204506742@g.us": "Gpo. No. 51 PR Mesino",
+    "120363403551029435@g.us": "Gpo. No. 18 Barranco",
+    "120363421166637606@g.us": "Gpo. No. 14 Giro",
 }
 
 
@@ -945,6 +959,22 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         provider_groups = _all_provider_groups()
         is_provider_message = source_chat_id in provider_groups
         is_admin_command = text_upper.startswith("/")
+
+        if not bot_is_open():
+            msg = (
+                "🚀 *DOCU EXPRES*\n"
+                "El sistema está cerrado.\n\n"
+                "Horario de solicitudes:\n"
+                "🕗 8:00 AM - 10:00 PM\n"
+                "Horario América/Monterrey."
+            )
+
+            if source_group_id:
+                send_group_text(source_group_id, msg)
+            else:
+                send_text(requester_wa_id, msg)
+
+            return {"ok": True, "ignored": "outside_hours"}
 
         # =========================
         # RESPUESTA DEL PROVEEDOR
