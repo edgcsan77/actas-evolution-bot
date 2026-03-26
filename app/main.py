@@ -267,7 +267,7 @@ GROUP_NAME_MAP = {
     "120363425721043776@g.us": "Gpo. No. 3 Rodolfo",
     "120363424204506742@g.us": "Gpo. No. 51 PR Mesino",
     "120363403551029435@g.us": "Gpo. No. 18 Barranco",
-    "120363421166637606@g.us": "Gpo. No. 14 Giro",
+    "120363421166637606@g.us": "Gpo. No. 14 Hiro",
 }
 
 
