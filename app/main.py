@@ -268,6 +268,10 @@ GROUP_NAME_MAP = {
     "120363424204506742@g.us": "Gpo. No. 51 PR Mesino",
     "120363403551029435@g.us": "Gpo. No. 18 Barranco",
     "120363421166637606@g.us": "Gpo. No. 14 Hiro",
+    "120363406888061577@g.us": "Gpo. No. 31 Barcelo",
+    "120363407761523786@g.us": "Gpo. No. 59 Max",
+    "120363425287655854@g.us": "Gpo. No. 28 David",
+    "120363424740372709@g.us": "Gpo. No. 57 Isidro",
 }
 
 
@@ -960,23 +964,23 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         is_provider_message = source_chat_id in provider_groups
         is_admin_command = text_upper.startswith("/")
 
-        terms = extract_request_terms(text_body)
+        #terms = extract_request_terms(text_body)
 
-        if not bot_is_open() and terms and not is_provider_message and not is_admin_command:
-            msg = (
-                "🚀 *DOCU EXPRES*\n"
-                "El sistema está cerrado.\n\n"
-                "Horario de solicitudes:\n"
-                "🕗 8:00 AM - 10:00 PM\n"
-                "Horario América/Monterrey."
-            )
+        #if not bot_is_open() and terms and not is_provider_message and not is_admin_command:
+        #    msg = (
+        #        "🚀 *DOCU EXPRES*\n"
+        #        "El sistema está cerrado.\n\n"
+        #        "Horario de solicitudes:\n"
+        #        "🕗 8:00 AM - 10:00 PM\n"
+        #        "Horario América/Monterrey."
+        #    )
 
-            if source_group_id:
-                send_group_text(source_group_id, msg)
-            else:
-                send_text(requester_wa_id, msg)
+        #    if source_group_id:
+        #        send_group_text(source_group_id, msg)
+        #    else:
+        #        send_text(requester_wa_id, msg)
 
-            return {"ok": True, "ignored": "outside_hours"}
+        #    return {"ok": True, "ignored": "outside_hours"}
 
         # =========================
         # RESPUESTA DEL PROVEEDOR
