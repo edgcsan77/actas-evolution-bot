@@ -252,16 +252,18 @@ def process_request(request_id: int):
         err = str(e)
     
         if req:
-            req.status = "ERROR"
-            req.error_message = err
             req.updated_at = datetime.utcnow()
-            db.commit()
     
             if err.startswith("PROVIDER3_NO_RECORD:"):
+                req.status = "ERROR"
+                req.error_message = err
+                db.commit()
+            
                 msg = (
                     f"❌ No hay registros disponibles.\n"
                     f"Dato: {req.curp}\n"
-                    f"Tipo: {req.act_type}"
+                    f"Tipo: {req.act_type}\n\n"
+                    f"Verificar que la CURP esté certificada en RENAPO"
                 )
     
                 if req.source_group_id:
@@ -269,9 +271,31 @@ def process_request(request_id: int):
                 else:
                     from app.services.evolution import send_text
                     send_text(req.requester_wa_id, msg)
+                return
+
+            if err.startswith("PROVIDER3_RATE_LIMIT"):
+                req.status = "ERROR"
+                req.error_message = err
+                db.commit()
+
+                msg = (
+                    f"⏳ El proveedor está saturado por demasiadas solicitudes.\n"
+                    f"Dato: {req.curp}\n"
+                    f"Tipo: {req.act_type}\n\n"
+                    f"Intenta nuevamente en unos minutos"
+                )
+
+                if req.source_group_id:
+                    send_group_text(req.source_group_id, msg)
+                else:
+                    from app.services.evolution import send_text
+                    send_text(req.requester_wa_id, msg)
     
                 return
-    
+
+            req.status = "ERROR"
+            req.error_message = err
+            db.commit()
         raise
         
     finally:
