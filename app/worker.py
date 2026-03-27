@@ -1,5 +1,6 @@
 import base64
 from datetime import datetime
+
 from app.db import SessionLocal
 from app.models import RequestLog, ProviderSetting
 from app.services.evolution import send_group_text, send_document_base64, send_group_document_base64
@@ -26,6 +27,13 @@ def _get_or_create_provider(db, provider_name: str, default_enabled: bool):
     return row
 
 
+def _get_app_setting(db, key: str, default: str = "") -> str:
+    row = db.query(AppSetting).filter(AppSetting.key == key).first()
+    if not row or row.value is None:
+        return default
+    return row.value.strip()
+    
+
 def _enabled_providers(db) -> list[str]:
     p1 = _get_or_create_provider(db, "PROVIDER1", True)
     p2 = _get_or_create_provider(db, "PROVIDER2", False)
@@ -51,7 +59,6 @@ def _pick_provider_name(db, request_id: int) -> str:
     if len(enabled) == 1:
         return enabled[0]
 
-    # round robin simple cuando ambos están activos
     idx = (request_id - 1) % len(enabled)
     return enabled[idx]
 
@@ -133,8 +140,9 @@ def _provider3_tipo_acta(act_type: str) -> str:
     return mapping.get(act_type, "nacimiento")
 
 
-def _process_provider3(req):
-    client = Provider3Client()
+def _process_provider3(req, db):
+    phpsessid = _get_app_setting(db, "PROVIDER3_PHPSESSID", settings.PROVIDER3_PHPSESSID)
+    client = Provider3Client(phpsessid=phpsessid)
 
     if is_chain(req.curp):
         result = client.generar_por_cadena(
@@ -177,6 +185,7 @@ def process_request(request_id: int):
 
         req.status = "PROCESSING"
         req.updated_at = datetime.utcnow()
+        db.commit()
 
         provider_name = _pick_provider_name(db, req.id)
         provider_group_id = _pick_provider_group(provider_name, req.act_type, req.id)
@@ -185,6 +194,7 @@ def process_request(request_id: int):
         req.provider_name = provider_name
         req.provider_group_id = provider_group_id
         req.provider_message = text_to_provider
+        req.updated_at = datetime.utcnow()
         db.commit()
 
         print("WORKER_PROVIDER_NAME =", provider_name, flush=True)
