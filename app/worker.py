@@ -27,12 +27,15 @@ def _get_or_create_provider(db, provider_name: str, default_enabled: bool):
 def _enabled_providers(db) -> list[str]:
     p1 = _get_or_create_provider(db, "PROVIDER1", True)
     p2 = _get_or_create_provider(db, "PROVIDER2", False)
+    p3 = _get_or_create_provider(db, "PROVIDER3", False)
 
     enabled = []
     if p1.is_enabled:
         enabled.append("PROVIDER1")
     if p2.is_enabled:
         enabled.append("PROVIDER2")
+    if p3.is_enabled:
+        enabled.append("PROVIDER3")
 
     return enabled
 
@@ -92,6 +95,9 @@ def _pick_provider_group(provider_name: str, act_type: str, request_id: int) -> 
         idx = (request_id - 1) % len(provider2_groups)
         return provider2_groups[idx]
 
+    if provider_name == "PROVIDER3":
+        return None
+
     raise RuntimeError("UNKNOWN_PROVIDER")
 
 
@@ -103,8 +109,42 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
     if provider_name == "PROVIDER2":
         return provider2_command(term, act_type)
 
+    if provider_name == "PROVIDER3":
+        return None
+
     raise RuntimeError("UNKNOWN_PROVIDER")
 
+
+def _process_provider3(req):
+    client = Provider3Client()
+
+    tipo_acta = "nacimiento"
+    result = client.generar_por_curp(
+        curp=req.curp,
+        tipo_acta=tipo_acta,
+        folio1=False,
+        folio2=False,
+        reverso=True,
+        margen=True,
+    )
+
+    pdf_b64 = result.get("pdf") or ""
+    if not pdf_b64:
+        raise RuntimeError(f"PROVIDER3_NO_PDF: {result}")
+
+    pdf_bytes = decode_pdf_base64(pdf_b64)
+
+    # Aquí guardas pdf_bytes donde manejes archivos
+    # por ejemplo en disk, S3, DB, etc.
+    # output_path = f"storage/actas/{req.id}.pdf"
+    # Path(output_path).write_bytes(pdf_bytes)
+
+    return {
+        "remaining": result.get("remaining"),
+        "raw_result": result,
+        "pdf_bytes": pdf_bytes,
+    }
+    
 
 def process_request(request_id: int):
     db = SessionLocal()
