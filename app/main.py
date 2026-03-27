@@ -40,7 +40,7 @@ PANEL_TZ = "America/Monterrey"
 def bot_is_open():
     now = datetime.now(ZoneInfo("America/Monterrey"))
     hour = now.hour
-    return 8 <= hour < 9
+    return 8 <= hour < 22
 
 
 def _panel_now():
