@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     PROVIDER3_EMAIL: str = ""
     PROVIDER3_PASSWORD: str = ""
     PROVIDER3_PHPSESSID: str = ""
+    PROVIDER3_KEEPALIVE_SECRET: str = ""
     PROVIDER3_TIMEOUT_LOGIN: int = 60
     PROVIDER3_TIMEOUT_GENERATE: int = 120
 
