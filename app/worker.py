@@ -2,7 +2,7 @@ import base64
 from datetime import datetime
 
 from app.db import SessionLocal
-from app.models import RequestLog, ProviderSetting
+from app.models import RequestLog, ProviderSetting, AppSetting
 from app.services.evolution import send_group_text, send_document_base64, send_group_document_base64
 from app.config import settings
 from app.utils.curp import provider_label_for_type, is_chain
