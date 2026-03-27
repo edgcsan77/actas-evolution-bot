@@ -1,5 +1,6 @@
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean
+
 from app.db import Base
 
 
@@ -19,6 +20,24 @@ class AuthorizedGroup(Base):
     group_jid = Column(String(120), unique=True, nullable=False, index=True)
     group_name = Column(String(150), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ProviderSetting(Base):
+    __tablename__ = "provider_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    provider_name = Column(String, unique=True, index=True, nullable=False)
+    is_enabled = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    key = Column(String, primary_key=True, index=True)
+    value = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class RequestLog(Base):
@@ -53,13 +72,3 @@ class RequestLog(Base):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, index=True)
     expires_at = Column(DateTime, nullable=False)
-
-
-class ProviderSetting(Base):
-    __tablename__ = "provider_settings"
-
-    id = Column(Integer, primary_key=True)
-    provider_name = Column(String(30), unique=True, nullable=False, index=True)  # PROVIDER1 / PROVIDER2
-    is_enabled = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
