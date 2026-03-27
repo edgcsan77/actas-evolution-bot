@@ -496,6 +496,7 @@ def panel_actas(
         <b>PROVIDER3</b><br>
           <button onclick="toggleProvider('PROVIDER3','on')">Activar</button>
           <button onclick="toggleProvider('PROVIDER3','off')">Desactivar</button>
+          <button onclick="refreshSID()">Actualizar SID</button>
 
         <br><br>
 
@@ -724,6 +725,33 @@ def panel_actas(
 
   }
 
+  async function refreshSID(){
+
+    const sid = prompt("Pega el nuevo PHPSESSID");
+
+    if(!sid) return;
+
+    const res = await fetch("/panel/provider3/update-sid", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            phpsessid: sid
+        })
+    });
+
+    const data = await res.json();
+
+    if(data.ok){
+        alert("SID actualizada");
+        location.reload();
+    }else{
+        alert("Error actualizando SID");
+    }
+
+  }
+
   setInterval(() => {
     location.reload();
   }, 30000);
@@ -732,6 +760,16 @@ def panel_actas(
 </html>
     """
     return HTMLResponse(content=html)
+
+
+@app.post("/panel/provider3/update-sid")
+async def update_provider3_sid(payload: dict):
+    sid = payload.get("phpsessid")
+    if not sid:
+        return {"ok": False, "error": "SID vacía"}
+
+    os.environ["PROVIDER3_PHPSESSID"] = sid
+    return {"ok": True}
 
 
 @app.post("/panel/provider/{provider_name}/on")
