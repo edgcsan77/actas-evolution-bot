@@ -1,5 +1,4 @@
 import base64
-from pathlib import Path
 import requests
 
 from app.config import settings
@@ -25,12 +24,18 @@ class Provider3Client:
             ),
         })
 
-        cookie = phpsessid or settings.PROVIDER3_PHPSESSID
+        cookie = (phpsessid or settings.PROVIDER3_PHPSESSID or "").strip()
         if cookie:
+            domain = (
+                self.base_url
+                .replace("https://", "")
+                .replace("http://", "")
+                .strip("/")
+            )
             self.session.cookies.set(
                 "PHPSESSID",
                 cookie,
-                domain=self.base_url.replace("https://", "").replace("http://", ""),
+                domain=domain,
                 path="/",
             )
 
@@ -40,6 +45,7 @@ class Provider3Client:
             "password": settings.PROVIDER3_PASSWORD,
             "captcha": captcha,
         }
+
         resp = self.session.post(
             self.login_url,
             json=payload,
