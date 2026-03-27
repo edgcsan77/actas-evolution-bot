@@ -477,6 +477,12 @@ def panel_actas(
 
         <br><br>
 
+        <b>PROVIDER3</b><br>
+          <button onclick="toggleProvider('PROVIDER3','on')">Activar</button>
+          <button onclick="toggleProvider('PROVIDER3','off')">Desactivar</button>
+
+        <br><br>
+
         {provider_states}
 
       </div>
@@ -748,6 +754,7 @@ def startup():
     try:
         _get_or_create_provider(db, "PROVIDER1", True)
         _get_or_create_provider(db, "PROVIDER2", False)
+        _get_or_create_provider(db, "PROVIDER3", False)
     finally:
         db.close()
         
@@ -897,14 +904,17 @@ def _get_or_create_provider(db: Session, provider_name: str, default_enabled: bo
 def _providers_status_text(db: Session) -> str:
     p1 = _get_or_create_provider(db, "PROVIDER1", True)
     p2 = _get_or_create_provider(db, "PROVIDER2", False)
+    p3 = _get_or_create_provider(db, "PROVIDER3", False)
 
     s1 = "ON" if p1.is_enabled else "OFF"
     s2 = "ON" if p2.is_enabled else "OFF"
+    s3 = "ON" if p3.is_enabled else "OFF"
 
     return (
         "⚙️ Estado de proveedores\n"
         f"PROVIDER1: {s1}\n"
-        f"PROVIDER2: {s2}"
+        f"PROVIDER2: {s2}\n"
+        f"PROVIDER3: {s3}"
     )
 
 
