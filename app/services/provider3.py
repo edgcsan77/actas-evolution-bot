@@ -71,14 +71,39 @@ class Provider3Client:
             "reverso": reverso,
             "margen": margen,
         }
-
+    
         resp = self.session.post(
             self.acta_curp_url,
             json=payload,
             timeout=settings.PROVIDER3_TIMEOUT_GENERATE
         )
+    
+        if resp.status_code == 401:
+            raise RuntimeError(f"PROVIDER3_SESSION_INVALID_OR_EXPIRED: {resp.text[:500]}")
+    
+        if resp.status_code == 400:
+            body_text = (resp.text or "").strip()
+    
+            try:
+                data = resp.json()
+            except Exception:
+                data = {}
+    
+            message = (
+                data.get("message")
+                or data.get("error")
+                or body_text
+                or "ACTA_NO_LOCALIZADA"
+            )
+    
+            raise RuntimeError(f"PROVIDER3_NO_RECORD: {message[:500]}")
+    
         resp.raise_for_status()
-        return resp.json()
+    
+        try:
+            return resp.json()
+        except Exception as exc:
+            raise RuntimeError(f"CURP_NO_JSON: {resp.text[:500]}") from exc
 
     def generar_por_cadena(
         self,
@@ -95,14 +120,39 @@ class Provider3Client:
             "reverso": reverso,
             "margen": margen,
         }
-
+    
         resp = self.session.post(
             self.acta_cadena_url,
             json=payload,
             timeout=settings.PROVIDER3_TIMEOUT_GENERATE
         )
+    
+        if resp.status_code == 401:
+            raise RuntimeError(f"PROVIDER3_SESSION_INVALID_OR_EXPIRED: {resp.text[:500]}")
+    
+        if resp.status_code == 400:
+            body_text = (resp.text or "").strip()
+    
+            try:
+                data = resp.json()
+            except Exception:
+                data = {}
+    
+            message = (
+                data.get("message")
+                or data.get("error")
+                or body_text
+                or "ACTA_NO_LOCALIZADA"
+            )
+    
+            raise RuntimeError(f"PROVIDER3_NO_RECORD: {message[:500]}")
+    
         resp.raise_for_status()
-        return resp.json()
+    
+        try:
+            return resp.json()
+        except Exception as exc:
+            raise RuntimeError(f"CADENA_NO_JSON: {resp.text[:500]}") from exc
 
 
 def decode_pdf_base64(pdf_b64: str) -> bytes:
