@@ -81,6 +81,15 @@ class Provider3Client:
         if resp.status_code == 401:
             raise RuntimeError(f"PROVIDER3_SESSION_INVALID_OR_EXPIRED: {resp.text[:500]}")
     
+        if resp.status_code == 429:
+            retry_after = resp.headers.get("Retry-After", "").strip()
+            detail = resp.text[:500]
+            raise RuntimeError(
+                f"PROVIDER3_RATE_LIMIT"
+                + (f": retry_after={retry_after}" if retry_after else "")
+                + (f" | {detail}" if detail else "")
+            )
+    
         if resp.status_code == 400:
             body_text = (resp.text or "").strip()
     
@@ -129,6 +138,15 @@ class Provider3Client:
     
         if resp.status_code == 401:
             raise RuntimeError(f"PROVIDER3_SESSION_INVALID_OR_EXPIRED: {resp.text[:500]}")
+    
+        if resp.status_code == 429:
+            retry_after = resp.headers.get("Retry-After", "").strip()
+            detail = resp.text[:500]
+            raise RuntimeError(
+                f"PROVIDER3_RATE_LIMIT"
+                + (f": retry_after={retry_after}" if retry_after else "")
+                + (f" | {detail}" if detail else "")
+            )
     
         if resp.status_code == 400:
             body_text = (resp.text or "").strip()
