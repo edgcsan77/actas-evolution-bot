@@ -249,11 +249,30 @@ def process_request(request_id: int):
 
     except Exception as e:
         req = db.query(RequestLog).filter(RequestLog.id == request_id).first()
+        err = str(e)
+    
         if req:
             req.status = "ERROR"
-            req.error_message = str(e)
+            req.error_message = err
             req.updated_at = datetime.utcnow()
             db.commit()
+    
+            if err.startswith("PROVIDER3_NO_RECORD:"):
+                msg = (
+                    f"❌ No hay registros disponibles.\n"
+                    f"Dato: {req.curp}\n"
+                    f"Tipo: {req.act_type}"
+                )
+    
+                if req.source_group_id:
+                    send_group_text(req.source_group_id, msg)
+                else:
+                    from app.services.evolution import send_text
+                    send_text(req.requester_wa_id, msg)
+    
+                return
+    
         raise
+        
     finally:
         db.close()
