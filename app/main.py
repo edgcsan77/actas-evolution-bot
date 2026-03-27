@@ -28,6 +28,7 @@ from app.services.evolution import (
 
 from fastapi.responses import HTMLResponse
 from zoneinfo import ZoneInfo
+from sqlalchemy.exc import IntegrityError
 
 app = FastAPI(title=settings.APP_NAME)
 
@@ -1433,17 +1434,23 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         
             last_done = get_last_done_request(db, term, act_type)
         
-            request_key = build_request_key(term, act_type, source_chat_id)
+            base_request_key = build_request_key(term, act_type, source_chat_id)
         
-            existing = (
+            # buscar si hay una abierta para este dato/tipo/grupo
+            open_existing = (
                 db.query(RequestLog)
-                .filter(RequestLog.request_key == request_key)
+                .filter(
+                    RequestLog.curp == term,
+                    RequestLog.act_type == act_type,
+                    RequestLog.source_chat_id == source_chat_id,
+                    RequestLog.status.in_(["QUEUED", "PROCESSING", "PENDING"])
+                )
                 .order_by(RequestLog.created_at.desc())
                 .first()
             )
         
             # 1) si ya existe una abierta, no duplicar
-            if existing and existing.status in ["QUEUED", "PROCESSING", "PENDING"]:
+            if open_existing:
                 dup_msg = (
                     f"⏳ Ya existe una solicitud en proceso\n"
                     f"Dato: {term}\n"
@@ -1456,29 +1463,70 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         
                 continue
         
-            # 2) si existe y está en ERROR, reutilizar la misma fila
-            if existing and existing.status == "ERROR":
-                existing.status = "QUEUED"
-                existing.updated_at = datetime.utcnow()
-                existing.error_message = None
-                existing.evolution_message_id = msg_id
-                existing.requester_wa_id = requester_wa_id
-                existing.requester_name = ""
-                existing.source_chat_id = source_chat_id
-                existing.source_group_id = source_group_id
-                existing.provider_name = None
-                existing.provider_group_id = None
-                existing.provider_message = None
-                existing.provider_media_url = None
-                existing.pdf_url = None
-                existing.expires_at = datetime.utcnow() + timedelta(days=settings.HISTORY_DAYS)
+            # contar intentos previos de ese mismo dato/tipo/grupo
+            same_requests_count = (
+                db.query(RequestLog)
+                .filter(
+                    RequestLog.curp == term,
+                    RequestLog.act_type == act_type,
+                    RequestLog.source_chat_id == source_chat_id
+                )
+                .count()
+            )
+        
+            # máximo 3 intentos
+            if same_requests_count >= 3:
+                limit_msg = (
+                    f"⚠️ Ya alcanzaste el máximo de intentos para este dato.\n"
+                    f"Dato: {term}\n"
+                )
+        
+                if source_group_id:
+                    send_group_text(source_group_id, limit_msg)
+                else:
+                    send_text(requester_wa_id, limit_msg)
+        
+                continue
+        
+            # request_key único por intento
+            request_key = f"{base_request_key}:try_{same_requests_count + 1}"
+        
+            # 2) si existe una anterior en ERROR, reutilizar SOLO la más reciente en error
+            error_existing = (
+                db.query(RequestLog)
+                .filter(
+                    RequestLog.curp == term,
+                    RequestLog.act_type == act_type,
+                    RequestLog.source_chat_id == source_chat_id,
+                    RequestLog.status == "ERROR"
+                )
+                .order_by(RequestLog.created_at.desc())
+                .first()
+            )
+        
+            if error_existing:
+                error_existing.request_key = request_key
+                error_existing.status = "QUEUED"
+                error_existing.updated_at = datetime.utcnow()
+                error_existing.error_message = None
+                error_existing.evolution_message_id = msg_id
+                error_existing.requester_wa_id = requester_wa_id
+                error_existing.requester_name = ""
+                error_existing.source_chat_id = source_chat_id
+                error_existing.source_group_id = source_group_id
+                error_existing.provider_name = None
+                error_existing.provider_group_id = None
+                error_existing.provider_message = None
+                error_existing.provider_media_url = None
+                error_existing.pdf_url = None
+                error_existing.expires_at = datetime.utcnow() + timedelta(days=settings.HISTORY_DAYS)
                 db.commit()
         
-                request_queue.enqueue(process_request, existing.id)
+                request_queue.enqueue(process_request, error_existing.id)
         
-                print("REQUEUED_EXISTING_REQUEST_ID =", existing.id, flush=True)
-                print("REQUEUED_EXISTING_TERM =", existing.curp, flush=True)
-                print("REQUEUED_EXISTING_TYPE =", existing.act_type, flush=True)
+                print("REQUEUED_EXISTING_REQUEST_ID =", error_existing.id, flush=True)
+                print("REQUEUED_EXISTING_TERM =", error_existing.curp, flush=True)
+                print("REQUEUED_EXISTING_TYPE =", error_existing.act_type, flush=True)
         
                 retry_msg = (
                     f"🔁 Reintentando solicitud\n"
@@ -1507,8 +1555,24 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             )
         
             db.add(row)
-            db.commit()
-            db.refresh(row)
+            try:
+                db.commit()
+                db.refresh(row)
+            except IntegrityError:
+                db.rollback()
+                print("DUPLICATE_REQUEST_KEY =", request_key, flush=True)
+            
+                dup_msg = (
+                    f"⏳ Ya existe una solicitud en proceso\n"
+                    f"Dato: {term}\n"
+                )
+            
+                if source_group_id:
+                    send_group_text(source_group_id, dup_msg)
+                else:
+                    send_text(requester_wa_id, dup_msg)
+            
+                continue
         
             request_queue.enqueue(process_request, row.id)
         
