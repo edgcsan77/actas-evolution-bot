@@ -206,7 +206,7 @@ def process_request(request_id: int):
             return
 
         if provider_name == "PROVIDER3":
-            provider3_result = _process_provider3(req)
+            provider3_result = _process_provider3(req, db)
         
             pdf_bytes = provider3_result["pdf_bytes"]
             safe_media_b64 = base64.b64encode(pdf_bytes).decode()
