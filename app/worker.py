@@ -1,10 +1,12 @@
+import base64
 from datetime import datetime
 from app.db import SessionLocal
 from app.models import RequestLog, ProviderSetting
-from app.services.evolution import send_group_text
+from app.services.evolution import send_group_text, send_document_base64, send_group_document_base64
 from app.config import settings
-from app.utils.curp import provider_label_for_type
+from app.utils.curp import provider_label_for_type, is_chain
 from app.utils.provider_format import provider2_command
+from app.services.provider3 import Provider3Client, decode_pdf_base64
 
 
 def _get_or_create_provider(db, provider_name: str, default_enabled: bool):
@@ -78,7 +80,7 @@ def _pick_provider1_group(act_type: str, request_id: int) -> str:
     return especiales_group
 
 
-def _pick_provider_group(provider_name: str, act_type: str, request_id: int) -> str:
+def _pick_provider_group(provider_name: str, act_type: str, request_id: int) -> str | None:
     if provider_name == "PROVIDER1":
         return _pick_provider1_group(act_type, request_id)
 
@@ -101,7 +103,7 @@ def _pick_provider_group(provider_name: str, act_type: str, request_id: int) -> 
     raise RuntimeError("UNKNOWN_PROVIDER")
 
 
-def _build_provider_message(provider_name: str, term: str, act_type: str) -> str:
+def _build_provider_message(provider_name: str, term: str, act_type: str) -> str | None:
     if provider_name == "PROVIDER1":
         provider_type = provider_label_for_type(act_type)
         return f"{term} {provider_type}"
@@ -115,29 +117,49 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
     raise RuntimeError("UNKNOWN_PROVIDER")
 
 
+def _provider3_tipo_acta(act_type: str) -> str:
+    act_type = (act_type or "").upper().strip()
+
+    mapping = {
+        "NACIMIENTO": "nacimiento",
+        "NACIMIENTO FOLIO": "nacimiento",
+        "MATRIMONIO": "matrimonio",
+        "MATRIMONIO FOLIO": "matrimonio",
+        "DEFUNCION": "defuncion",
+        "DEFUNCION FOLIO": "defuncion",
+        "DIVORCIO": "divorcio",
+        "DIVORCIO FOLIO": "divorcio",
+    }
+    return mapping.get(act_type, "nacimiento")
+
+
 def _process_provider3(req):
     client = Provider3Client()
 
-    tipo_acta = "nacimiento"
-    result = client.generar_por_curp(
-        curp=req.curp,
-        tipo_acta=tipo_acta,
-        folio1=False,
-        folio2=False,
-        reverso=True,
-        margen=True,
-    )
+    if is_chain(req.curp):
+        result = client.generar_por_cadena(
+            cadena=req.curp,
+            folio1=False,
+            folio2=False,
+            reverso=True,
+            margen=True,
+        )
+    else:
+        tipo_acta = _provider3_tipo_acta(req.act_type)
+        result = client.generar_por_curp(
+            curp=req.curp,
+            tipo_acta=tipo_acta,
+            folio1=False,
+            folio2=False,
+            reverso=True,
+            margen=True,
+        )
 
     pdf_b64 = result.get("pdf") or ""
     if not pdf_b64:
         raise RuntimeError(f"PROVIDER3_NO_PDF: {result}")
 
     pdf_bytes = decode_pdf_base64(pdf_b64)
-
-    # Aquí guardas pdf_bytes donde manejes archivos
-    # por ejemplo en disk, S3, DB, etc.
-    # output_path = f"storage/actas/{req.id}.pdf"
-    # Path(output_path).write_bytes(pdf_bytes)
 
     return {
         "remaining": result.get("remaining"),
@@ -169,7 +191,41 @@ def process_request(request_id: int):
         print("WORKER_PROVIDER_GROUP_ID =", provider_group_id, flush=True)
         print("WORKER_TEXT_TO_PROVIDER =", text_to_provider, flush=True)
 
-        send_group_text(provider_group_id, text_to_provider)
+        if provider_name in ("PROVIDER1", "PROVIDER2"):
+            send_group_text(provider_group_id, text_to_provider)
+            return
+
+        if provider_name == "PROVIDER3":
+            provider3_result = _process_provider3(req)
+        
+            pdf_bytes = provider3_result["pdf_bytes"]
+            safe_media_b64 = base64.b64encode(pdf_bytes).decode()
+        
+            if req.source_group_id:
+                send_group_document_base64(
+                    req.source_group_id,
+                    safe_media_b64,
+                    filename=f"{req.curp}.pdf",
+                    caption=""
+                )
+            else:
+                send_document_base64(
+                    req.requester_wa_id,
+                    safe_media_b64,
+                    filename=f"{req.curp}.pdf",
+                    caption=""
+                )
+        
+            req.provider_media_url = "BASE64_PROVIDER3"
+            req.pdf_url = None
+            req.status = "DONE"
+            req.error_message = None
+            req.updated_at = datetime.utcnow()
+            db.commit()
+        
+            return
+
+        raise RuntimeError("UNKNOWN_PROVIDER")
 
     except Exception as e:
         req = db.query(RequestLog).filter(RequestLog.id == request_id).first()
