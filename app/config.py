@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     PROVIDER2_GROUP_1: str = ""
     PROVIDER2_GROUP_2: str = ""
 
+    # PROVEEDOR 3
+    PROVIDER3_BASE_URL: str = "https://jungladocsdanny.site"
+    PROVIDER3_EMAIL: str = ""
+    PROVIDER3_PASSWORD: str = ""
+    PROVIDER3_PHPSESSID: str = ""
+    PROVIDER3_DEFAULT_TIPO_ACTA: str = "nacimiento"
+    PROVIDER3_TIMEOUT_LOGIN: int = 60
+    PROVIDER3_TIMEOUT_GENERATE: int = 120
+
     PROVIDER_NO_RECORD_TEXT: str = (
         "NO HAY REGISTROS DISPONIBLES|"
         "NO SE ENCONTRO EL ACTA EN SISTEMA|"
