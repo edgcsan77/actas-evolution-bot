@@ -1,13 +1,14 @@
 import base64
 from datetime import datetime, timedelta
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Body
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import Base, engine, get_db
-from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting
+from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting
 from app.queue import request_queue
 from app.worker import process_request
+
 from app.utils.curp import (
     extract_request_terms,
     detect_act_type,
@@ -755,8 +756,88 @@ def startup():
         _get_or_create_provider(db, "PROVIDER1", True)
         _get_or_create_provider(db, "PROVIDER2", False)
         _get_or_create_provider(db, "PROVIDER3", False)
+
+        current = _get_app_setting(db, "PROVIDER3_PHPSESSID", "")
+        if not current and settings.PROVIDER3_PHPSESSID:
+            _set_app_setting(db, "PROVIDER3_PHPSESSID", settings.PROVIDER3_PHPSESSID)
     finally:
         db.close()
+
+
+@app.get("/panel/provider3/session")
+def get_provider3_session(db: Session = Depends(get_db)):
+    current = _get_app_setting(db, "PROVIDER3_PHPSESSID", settings.PROVIDER3_PHPSESSID)
+    masked = ""
+
+    if current:
+        if len(current) <= 8:
+            masked = "*" * len(current)
+        else:
+            masked = current[:4] + ("*" * (len(current) - 8)) + current[-4:]
+
+    return {
+        "ok": True,
+        "phpsessid_masked": masked,
+        "has_value": bool(current),
+    }
+
+
+@app.post("/panel/provider3/session")
+def update_provider3_session(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    phpsessid = (payload.get("phpsessid") or "").strip()
+
+    if not phpsessid:
+        return {"ok": False, "error": "PHPSESSID_EMPTY"}
+
+    _set_app_setting(db, "PROVIDER3_PHPSESSID", phpsessid)
+
+    return {
+        "ok": True,
+        "message": "PHPSESSID actualizado",
+    }
+
+
+@app.post("/panel/provider3/test")
+def test_provider3_session(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    from app.services.provider3 import Provider3Client
+
+    curp = (payload.get("curp") or "").strip().upper()
+    tipo_acta = (payload.get("tipo_acta") or "nacimiento").strip().lower()
+
+    if not curp:
+        return {"ok": False, "error": "CURP_EMPTY"}
+
+    phpsessid = _get_app_setting(db, "PROVIDER3_PHPSESSID", settings.PROVIDER3_PHPSESSID)
+    client = Provider3Client(phpsessid=phpsessid)
+
+    try:
+        result = client.generar_por_curp(
+            curp=curp,
+            tipo_acta=tipo_acta,
+            folio1=False,
+            folio2=False,
+            reverso=True,
+            margen=True,
+        )
+
+        has_pdf = bool(result.get("pdf"))
+        return {
+            "ok": True,
+            "has_pdf": has_pdf,
+            "remaining": result.get("remaining"),
+            "keys": list(result.keys()),
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": str(e),
+        }
         
 
 @app.get("/health")
@@ -898,6 +979,31 @@ def _get_or_create_provider(db: Session, provider_name: str, default_enabled: bo
     db.add(row)
     db.commit()
     db.refresh(row)
+    return row
+
+
+def _get_app_setting(db: Session, key: str, default: str = "") -> str:
+    row = db.query(AppSetting).filter(AppSetting.key == key).first()
+    if not row or row.value is None:
+        return default
+    return row.value.strip()
+
+
+def _set_app_setting(db: Session, key: str, value: str):
+    row = db.query(AppSetting).filter(AppSetting.key == key).first()
+
+    if row:
+        row.value = value
+        row.updated_at = datetime.utcnow()
+    else:
+        row = AppSetting(
+            key=key,
+            value=value,
+            updated_at=datetime.utcnow(),
+        )
+        db.add(row)
+
+    db.commit()
     return row
 
 
