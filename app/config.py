@@ -16,22 +16,21 @@ class Settings(BaseSettings):
 
     ADMIN_PHONE: str = ""
 
-    # PROVEEDOR 1 (anterior)
+    # PROVIDER 1
     PROVIDER_GROUP_NACIMIENTO_1: str = ""
     PROVIDER_GROUP_NACIMIENTO_2: str = ""
     PROVIDER_GROUP_NACIMIENTO_3: str = ""
     PROVIDER_GROUP_ESPECIALES: str = ""
 
-    # PROVEEDOR 2 (nuevo)
+    # PROVIDER 2
     PROVIDER2_GROUP_1: str = ""
     PROVIDER2_GROUP_2: str = ""
 
-    # PROVEEDOR 3
-    PROVIDER3_BASE_URL: str = "https://jungladocsdanny.site"
+    # PROVIDER 3
+    PROVIDER3_BASE_URL: str = ""
     PROVIDER3_EMAIL: str = ""
     PROVIDER3_PASSWORD: str = ""
     PROVIDER3_PHPSESSID: str = ""
-    PROVIDER3_DEFAULT_TIPO_ACTA: str = "nacimiento"
     PROVIDER3_TIMEOUT_LOGIN: int = 60
     PROVIDER3_TIMEOUT_GENERATE: int = 120
 
