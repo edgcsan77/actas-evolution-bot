@@ -252,16 +252,17 @@ def _panel_type_rows(rows: list[RequestLog]) -> list[dict]:
 
 
 GROUP_NAME_MAP = {
-    "120363406806549379@g.us": "ACTAS PRUEBAS 1",
-    "120363425323721713@g.us": "ACTAS PRUEBAS 2",
-    "120363407066931119@g.us": "ACTAS PRUEBAS 3",
-    "120363426725671842@g.us": "PROV PRUEBAS 1",
-    "120363408272742958@g.us": "PROV PRUEBAS 2",
-    "120363423566277284@g.us": "PROV NORMAL 1",
-    "120363423915019779@g.us": "PROV NORMAL 2",
-    "120363424509175054@g.us": "PROV NORMAL 3",
-    "120363426176817361@g.us": "PROV NORMAL 4",
-    "120363409870423163@g.us": "PROV ESPECIAL 1",
+    "120363406806549379@g.us": "Actas Pruebas 1",
+    "120363425323721713@g.us": "Actas Pruebas 2",
+    "120363407066931119@g.us": "Actas Pruebas 3",
+    "120363423379615090@g.us": "Prov Mesino",
+    "120363426725671842@g.us": "Prov Pruebas 1",
+    "120363408272742958@g.us": "Prov Pruebas 2",
+    "120363423566277284@g.us": "Prov Normal 1",
+    "120363423915019779@g.us": "Prov Normal 2",
+    "120363424509175054@g.us": "Prov Normal 3",
+    "120363426176817361@g.us": "Prov Normal 4",
+    "120363409870423163@g.us": "Prov Especial 1",
     "120363422785755828@g.us": "Gpo. No. 4 Karen",
     "120363426949877636@g.us": "Gpo. No. 11 Morelos",
     "120363425014097597@g.us": "Gpo. No. 7 Karen Marvin",
@@ -303,6 +304,20 @@ GROUP_NAME_MAP = {
     "120363406276735177@g.us": "Gpo. No. 22 Servi Todo",
     "120363423160777316@g.us": "Gpo. No. 15 Cancun",
     "120363406102408537@g.us": "Gpo. No. 10 Miguel",
+    "120363422772430647@g.us": "Gpo. No. 19 Kedetalle",
+    "120363408638261814@g.us": "Gpo. No. 30 Gestoria AC",
+    "120363408050310070@g.us": "Gpo. No. 45 Sercomex",
+    "120363406424667967@g.us": "Gpo. No. 53 Carlos Treviño",
+    "120363423784091430@g.us": "Gpo. No. 62 Nordik Leal",
+    "120363424864418952@g.us": "Gpo. No. 25 Gestoria Martinez",
+    "120363427994370611@g.us": "Gpo. No. 61 Mely",
+    "120363422330207518@g.us": "Gpo. No. 23 Delfino",
+    "120363408311828293@g.us": "Gpo. No. 49 Armando",
+    "120363405736245075@g.us": "Gpo. No. 43 Cibert San Luis",
+    "120363404351044596@g.us": "Gpo. No. 34 Zenitran",
+    "120363409641104856@g.us": "Gpo. No. 9 Diego",
+    "120363422789316023@g.us": "Gpo. No. 16 Vallarta",
+    "120363424015683577@g.us": "Gpo. No. 21 Ana Pineda",
 }
 
 
@@ -1567,6 +1582,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 dup_msg = (
                     f"⏳ Ya existe una solicitud en proceso\n"
                     f"Dato: {term}\n"
+                    f"Tipo: {act_type}"
                 )
         
                 if source_group_id:
@@ -1592,6 +1608,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 limit_msg = (
                     f"⚠️ Ya alcanzaste el máximo de intentos para este dato.\n"
                     f"Dato: {term}\n"
+                    f"Tipo: {act_type}"
                 )
         
                 if source_group_id:
@@ -1644,6 +1661,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 retry_msg = (
                     f"🔁 Reintentando solicitud\n"
                     f"Dato: {term}\n"
+                    f"Tipo: {act_type}"
                 )
         
                 if source_group_id:
@@ -1678,6 +1696,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 dup_msg = (
                     f"⏳ Ya existe una solicitud en proceso\n"
                     f"Dato: {term}\n"
+                    f"Tipo: {act_type}"
                 )
             
                 if source_group_id:
