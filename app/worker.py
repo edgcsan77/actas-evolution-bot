@@ -142,6 +142,16 @@ def _provider3_tipo_acta(act_type: str) -> str:
 
 def _process_provider3(req, db):
     phpsessid = _get_app_setting(db, "PROVIDER3_PHPSESSID", settings.PROVIDER3_PHPSESSID)
+
+    masked = ""
+    if phpsessid:
+        if len(phpsessid) <= 8:
+            masked = "*" * len(phpsessid)
+        else:
+            masked = phpsessid[:4] + ("*" * (len(phpsessid) - 8)) + phpsessid[-4:]
+    
+    print("PROVIDER3_PHPSESSID_MASKED =", masked, flush=True)
+    
     client = Provider3Client(phpsessid=phpsessid)
 
     if is_chain(req.curp):
