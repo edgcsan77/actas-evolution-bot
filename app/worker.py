@@ -10,6 +10,36 @@ from app.utils.provider_format import provider2_command
 from app.services.provider3 import Provider3Client, decode_pdf_base64
 
 
+def provider3_keepalive_job():
+    db = SessionLocal()
+
+    try:
+        phpsessid = _get_app_setting(
+            db,
+            "PROVIDER3_PHPSESSID",
+            settings.PROVIDER3_PHPSESSID
+        )
+
+        if not phpsessid:
+            print("KEEPALIVE_SKIP_NO_SID", flush=True)
+            return {"ok": False}
+
+        client = Provider3Client(phpsessid=phpsessid)
+
+        result = client.keepalive()
+
+        print("KEEPALIVE_OK", flush=True)
+
+        return {"ok": True}
+
+    except Exception as e:
+        print("KEEPALIVE_ERROR", str(e), flush=True)
+        return {"ok": False, "error": str(e)}
+
+    finally:
+        db.close()
+        
+
 def _get_or_create_provider(db, provider_name: str, default_enabled: bool):
     row = db.query(ProviderSetting).filter(ProviderSetting.provider_name == provider_name).first()
     if row:
