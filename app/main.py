@@ -1924,6 +1924,19 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         is_admin_command = text_upper.startswith("/")
 
         terms = extract_request_terms(text_body)
+        problem = detect_identifier_problem(text_body)
+
+        if not terms:
+            if problem:
+                if source_group_id:
+                    send_group_text(source_group_id, problem)
+                else:
+                    send_text(requester_wa_id, problem)
+        
+                return {"ok": True, "ignored": "invalid_identifier"}
+        
+            # Conversación natural: no marcar como error
+            return {"ok": True, "ignored": "natural_text"}
 
         if not bot_is_open() and terms and not is_provider_message and not is_admin_command:
             msg = (
