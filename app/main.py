@@ -2,6 +2,7 @@ import base64
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Depends, Body
 from sqlalchemy.orm import Session
+from app.worker import provider3_keepalive_job
 
 from app.config import settings
 from app.db import Base, engine, get_db
@@ -35,6 +36,17 @@ app = FastAPI(title=settings.APP_NAME)
 
 
 PANEL_TZ = "America/Monterrey"
+
+
+@app.post("/cron/provider3/keepalive")
+def cron_provider3_keepalive(request: Request):
+
+    secret = request.headers.get("x-keepalive-secret", "").strip()
+
+    if settings.PROVIDER3_KEEPALIVE_SECRET and secret != settings.PROVIDER3_KEEPALIVE_SECRET:
+        return {"ok": False, "error": "unauthorized"}
+
+    return provider3_keepalive_job()
 
 
 def bot_is_open():
