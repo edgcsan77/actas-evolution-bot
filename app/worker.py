@@ -157,8 +157,13 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
 def _provider3_flags(act_type: str) -> dict:
     act_type = (act_type or "").upper().strip()
 
+    is_folio = (
+        "FOLIO" in act_type
+        or "FOLIADA" in act_type
+    )
+
     return {
-        "folio1": "FOLIO" in act_type,
+        "folio1": is_folio,
         "folio2": False,
         "reverso": True,
         "margen": True,
