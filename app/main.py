@@ -1433,9 +1433,9 @@ def panel_actas(
       }}
     }
 
-    function clearBroadcast() {{
+    function clearBroadcast() {
       document.getElementById("broadcastMessage").value = "";
-    }}
+    }
 
     setInterval(() => {{
       location.reload();
