@@ -1330,7 +1330,7 @@ def panel_actas(
 
   </div>
 
-    <script>
+  <script>
       async function toggleProvider(provider, action) {{
         const url = `/panel/provider/${{provider}}/${{action}}`;
     
@@ -1440,7 +1440,7 @@ def panel_actas(
       setInterval(() => {{
         location.reload();
       }}, 30000);
-    </script>
+  </script>
 </body>
 </html>
     """
