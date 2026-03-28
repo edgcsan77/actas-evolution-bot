@@ -1087,7 +1087,7 @@ def panel_actas(
     
               <div class="provider-grid">
                 <div class="provider-card">
-                  <div class="provider-name">PROVIDER1</div>
+                  <div class="provider-name">ADMID DIGITAL</div>
                   <div class="provider-actions">
                     <button class="btn btn-success" onclick="toggleProvider('PROVIDER1','on')">Activar</button>
                     <button class="btn btn-danger" onclick="toggleProvider('PROVIDER1','off')">Desactivar</button>
@@ -1095,7 +1095,7 @@ def panel_actas(
                 </div>
     
                 <div class="provider-card">
-                  <div class="provider-name">PROVIDER2</div>
+                  <div class="provider-name">AUSTRAM BOT</div>
                   <div class="provider-actions">
                     <button class="btn btn-success" onclick="toggleProvider('PROVIDER2','on')">Activar</button>
                     <button class="btn btn-danger" onclick="toggleProvider('PROVIDER2','off')">Desactivar</button>
@@ -1103,7 +1103,7 @@ def panel_actas(
                 </div>
     
                 <div class="provider-card">
-                  <div class="provider-name">PROVIDER3</div>
+                  <div class="provider-name">AUSTRAM WEB</div>
                   <div class="provider-actions">
                     <button class="btn btn-success" onclick="toggleProvider('PROVIDER3','on')">Activar</button>
                     <button class="btn btn-danger" onclick="toggleProvider('PROVIDER3','off')">Desactivar</button>
@@ -1825,9 +1825,9 @@ def _providers_status_text(db: Session) -> str:
 
     return (
         "⚙️ Estado de proveedores\n"
-        f"PROVIDER1: {s1}\n"
-        f"PROVIDER2: {s2}\n"
-        f"PROVIDER3: {s3}"
+        f"ADMID DIGITAL: {s1}\n"
+        f"AUSTRAM BOT: {s2}\n"
+        f"AUSTRAM WEB: {s3}"
     )
 
 
