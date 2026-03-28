@@ -1670,6 +1670,14 @@ def _deliver_text_result(req: RequestLog, text: str):
 def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = None):
     filename = filename or f"{req.curp}.pdf"
 
+    tiempo = ""
+    if req.created_at:
+        delta = datetime.utcnow() - req.created_at
+        segundos = int(delta.total_seconds())
+        tiempo = f"⏱️ Tiempo de proceso: {segundos} s"
+
+    caption_text = tiempo
+
     is_base64 = not pdf_data.startswith("http")
 
     if req.source_group_id:
@@ -1678,14 +1686,14 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
                 req.source_group_id,
                 pdf_data,
                 filename=filename,
-                caption=""
+                caption=caption_text
             )
         else:
             send_group_document(
                 req.source_group_id,
                 pdf_data,
                 filename=filename,
-                caption=""
+                caption=caption_text
             )
     else:
         if is_base64:
@@ -1693,14 +1701,14 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
                 req.requester_wa_id,
                 pdf_data,
                 filename=filename,
-                caption=""
+                caption=caption_text
             )
         else:
             send_document(
                 req.requester_wa_id,
                 pdf_data,
                 filename=filename,
-                caption=""
+                caption=caption_text
             )
 
 
