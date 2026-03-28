@@ -1674,15 +1674,14 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
 
     if req.created_at:
         delta = datetime.utcnow() - req.created_at
-        total_seconds = max(0, int(delta.total_seconds()))
+        total_seconds = max(0.0, delta.total_seconds())
 
-        minutes = total_seconds // 60
-        seconds = total_seconds % 60
-
-        if minutes > 0:
-            tiempo = f"{minutes} min {seconds} s"
+        if total_seconds >= 60:
+            minutes = int(total_seconds // 60)
+            seconds = total_seconds % 60
+            tiempo = f"{minutes} min {seconds:.2f} s"
         else:
-            tiempo = f"{seconds} s"
+            tiempo = f"{total_seconds:.2f} s"
 
         caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
 
