@@ -1958,7 +1958,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         if not bot_is_open() and terms and not is_provider_message and not is_admin_command:
             msg = (
                 "🚀 *DOCU EXPRES*\n"
-                "El sistema se encuentra en actualizaciones en la página del Registro Civil"
+                "El sistema está cerrado.\n\n"
+                "Horario de solicitudes:\n"
+                "🕗 8:00 AM - 10:00 PM\n"
+                "Horario América/Monterrey."
             )
 
             if source_group_id:
