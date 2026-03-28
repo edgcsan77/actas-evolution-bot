@@ -281,19 +281,35 @@ def process_request(request_id: int):
             pdf_bytes = provider3_result["pdf_bytes"]
             safe_media_b64 = base64.b64encode(pdf_bytes).decode()
         
+            total_seconds = 0
+            if req.created_at:
+                total_seconds = max(0, int((datetime.utcnow() - req.created_at).total_seconds()))
+        
+            minutes = total_seconds // 60
+            seconds = total_seconds % 60
+        
+            if minutes > 0:
+                tiempo = f"{minutes} min {seconds} s"
+            else:
+                tiempo = f"{seconds} s"
+        
+            caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
+        
+            print("PROVIDER3_CAPTION =", caption_text, flush=True)
+        
             if req.source_group_id:
                 send_group_document_base64(
                     req.source_group_id,
                     safe_media_b64,
                     filename=f"{req.curp}.pdf",
-                    caption=""
+                    caption=caption_text
                 )
             else:
                 send_document_base64(
                     req.requester_wa_id,
                     safe_media_b64,
                     filename=f"{req.curp}.pdf",
-                    caption=""
+                    caption=caption_text
                 )
         
             req.provider_media_url = "BASE64_PROVIDER3"
