@@ -9,18 +9,17 @@ def normalize_text(text: str) -> str:
     return text
 
 
+CURP_REGEX = r"[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2}"
+NUM20_REGEX = r"\d{20}"
+
+
 def detect_act_type(text: str) -> str:
     t = normalize_text(text)
     t_nospace = re.sub(r"\s+", "", t)
 
-    # -----------------------------
-    # FOLIO primero
-    # -----------------------------
-    # Si solo ponen "folio" o "foliado", asumir NACIMIENTO FOLIO
     if ("FOLIO" in t_nospace or "FOLIADO" in t_nospace) and not any(x in t_nospace for x in ["NAC", "MAT", "DEF", "DIV"]):
         return "NACIMIENTO FOLIO"
 
-    # NACIMIENTO FOLIO
     if any(x in t_nospace for x in [
         "NACIMIENTOFOLIO", "NACIMIENTOCONFOLIO", "ACTADENACIMIENTOFOLIO",
         "NACIMFOLIO", "NACFOLIO", "FOLIONACIMIENTO", "FOLIONAC",
@@ -29,28 +28,24 @@ def detect_act_type(text: str) -> str:
     ]):
         return "NACIMIENTO FOLIO"
 
-    # MATRIMONIO FOLIO
     if any(x in t_nospace for x in [
         "MATRIMONIOFOLIO", "ACTADEMATRIMONIOFOLIO",
         "MATRIFOLIO", "MATFOLIO", "FOLIOMATRIMONIO", "FOLIOMAT"
     ]):
         return "MATRIMONIO FOLIO"
 
-    # DEFUNCION FOLIO
     if any(x in t_nospace for x in [
         "DEFUNCIONFOLIO", "ACTADEDEFUNCIONFOLIO",
         "DEFFOLIO", "DEFUNFOLIO", "FOLIODEFUNCION", "FOLIODEF"
     ]):
         return "DEFUNCION FOLIO"
 
-    # DIVORCIO FOLIO
     if any(x in t_nospace for x in [
         "DIVORCIOFOLIO", "ACTADEDIVORCIOFOLIO",
         "DIVFOLIO", "DIVORFOLIO", "FOLIODIVORCIO", "FOLIODIV"
     ]):
         return "DIVORCIO FOLIO"
 
-    # Variantes más flexibles: tipo + folio en cualquier orden
     if "FOLIO" in t_nospace or "FOLIADO" in t_nospace:
         if any(x in t_nospace for x in ["NACIMIENTO", "NACIM", "NAC"]):
             return "NACIMIENTO FOLIO"
@@ -61,9 +56,6 @@ def detect_act_type(text: str) -> str:
         if any(x in t_nospace for x in ["DIVORCIO", "DIVOR", "DIV"]):
             return "DIVORCIO FOLIO"
 
-    # -----------------------------
-    # SIN FOLIO
-    # -----------------------------
     if any(x in t_nospace for x in [
         "NACIMIENTO", "ACTADENACIMIENTO", "NACIM", "NAC"
     ]):
@@ -84,7 +76,6 @@ def detect_act_type(text: str) -> str:
     ]):
         return "DIVORCIO"
 
-    # Por defecto
     return "NACIMIENTO"
 
 
@@ -108,6 +99,12 @@ def _remove_type_words(line: str) -> str:
     x = normalize_text(line)
 
     patterns = [
+        r"CODIGO\s+DE\s+VERIFICACION",
+        r"CODIGO\s+VERIFICACION",
+        r"VERIFICACION",
+        r"IDENTIFICADOR\s+ELECTRONICO",
+        r"IDENTIFICADOR",
+        r"CADENA",
         r"NACIMIENTO\s*FOLIO",
         r"MATRIMONIO\s*FOLIO",
         r"DEFUNCION\s*FOLIO",
@@ -135,19 +132,22 @@ def _remove_type_words(line: str) -> str:
 
 def is_chain(term: str) -> bool:
     term = (term or "").strip()
-    return term.isdigit() and len(term) == 20
+    return bool(re.fullmatch(NUM20_REGEX, term))
+
+
+def is_curp(term: str) -> bool:
+    term = normalize_text(term)
+    return bool(re.fullmatch(CURP_REGEX, term))
 
 
 def _extract_identifier_from_line(line: str) -> str | None:
     cleaned = _remove_type_words(line)
 
-    # CURP estricta
-    m = re.search(r"\b([A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2})\b", cleaned)
+    m = re.search(rf"\b({CURP_REGEX})\b", cleaned)
     if m:
         return m.group(1)
 
-    # cadena 20 dígitos
-    m = re.search(r"\b(\d{20})\b", cleaned)
+    m = re.search(rf"\b({NUM20_REGEX})\b", cleaned)
     if m:
         return m.group(1)
 
@@ -173,11 +173,11 @@ def extract_request_terms(text: str) -> list[str]:
 def extract_identifier_loose(text: str) -> str | None:
     text = normalize_text(text)
 
-    m = re.search(r"\b([A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2})\b", text)
+    m = re.search(rf"\b({CURP_REGEX})\b", text)
     if m:
         return m.group(1)
 
-    m = re.search(r"\b(\d{20})\b", text)
+    m = re.search(rf"\b({NUM20_REGEX})\b", text)
     if m:
         return m.group(1)
 
@@ -190,53 +190,135 @@ def extract_identifier_from_filename(filename: str) -> str | None:
 
     name = normalize_text(filename)
 
-    m = re.search(r"\b([A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2})\b", name)
+    m = re.search(rf"\b({CURP_REGEX})\b", name)
     if m:
         return m.group(1)
 
-    m = re.search(r"\b(\d{20})\b", name)
+    m = re.search(rf"\b({NUM20_REGEX})\b", name)
     if m:
         return m.group(1)
 
     return None
+
+
+def seems_like_identifier_attempt(text: str) -> bool:
+    t = normalize_text(text)
+
+    # Palabras que indican que el usuario sí quiso mandar un dato
+    keywords = [
+        "CURP",
+        "CADENA",
+        "IDENTIFICADOR",
+        "IDENTIFICADOR ELECTRONICO",
+        "CODIGO",
+        "CODIGO DE VERIFICACION",
+        "VERIFICACION",
+        "ACTA",
+        "NACIMIENTO",
+        "MATRIMONIO",
+        "DEFUNCION",
+        "DIVORCIO",
+        "FOLIO",
+    ]
+    if any(k in t for k in keywords):
+        return True
+
+    # Si trae un bloque largo de números, probablemente intentó mandar cadena/código
+    if re.search(r"\d{8,25}", t):
+        return True
+
+    # Si trae mezcla de letras y números tipo CURP rara
+    if re.search(r"[A-Z]{3,}\d{2,}[A-Z0-9]{2,}", t):
+        return True
+
+    return False
 
 
 def detect_identifier_problem(text: str) -> str | None:
     t = normalize_text(text)
     cleaned = _remove_type_words(t)
 
-    # 1) cadenas numéricas parecidas pero no de 20 dígitos
-    digit_runs = re.findall(r"\d{8,25}", cleaned)
-    for d in digit_runs:
-        if len(d) != 20:
-            return (
-                "⚠️ La cadena parece incompleta o incorrecta.\n"
-                "Debe tener exactamente 20 dígitos."
-            )
+    # Si es conversación natural y no parece intento de dato, no marcar error
+    if not seems_like_identifier_attempt(text):
+        return None
 
-    # 2) posibles CURP incompletas: patrón parecido, pero longitud incorrecta
-    curp_like = re.findall(r"[A-Z]{1,4}\d{2,6}[HM]?[A-Z]{0,6}[A-Z0-9]{0,2}", cleaned)
-    for token in curp_like:
-        token = token.strip()
+    # Solo CURP
+    if "CURP" in t:
+        m = re.search(r"[A-Z0-9]+", cleaned)
+        token = m.group(0) if m else ""
+
         if not token:
-            continue
-
-        # ignorar si ya es CURP válida
-        if re.fullmatch(r"[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2}", token):
-            continue
-
-        # si parece CURP pero no mide 18
-        if 10 <= len(token) <= 17 or 19 <= len(token) <= 21:
             return (
-                "⚠️ La CURP parece incompleta o incorrecta.\n"
-                "Debe tener exactamente 18 caracteres."
+                "⚠️ No se detectó una CURP válida.\n\n"
+                "La CURP debe tener exactamente 18 caracteres.\n"
+                "4 letras, 6 dígitos, 6 letras y 2 caracteres alfanuméricos"
             )
 
-    # 3) solo números, pero no 20
-    if re.fullmatch(r"\d+", cleaned):
-        return (
-            "⚠️ La cadena parece incorrecta.\n"
-            "Debe tener exactamente 20 dígitos."
-        )
+        if not re.fullmatch(CURP_REGEX, token):
+            return (
+                "⚠️ La CURP parece incompleta o incorrecta.\n\n"
+                "La CURP debe tener exactamente 18 caracteres.\n"
+                "4 letras, 6 dígitos, 6 letras y 2 caracteres alfanuméricos"
+            )
 
-    return None
+    # Solo cadena / identificador / código de verificación
+    if any(x in t for x in [
+        "CADENA",
+        "IDENTIFICADOR ELECTRONICO",
+        "IDENTIFICADOR",
+        "CODIGO DE VERIFICACION",
+        "CODIGO VERIFICACION",
+        "VERIFICACION",
+    ]):
+        digit_runs = re.findall(r"\d+", cleaned)
+        token = max(digit_runs, key=len) if digit_runs else ""
+
+        if not token:
+            return (
+                "⚠️ No se detectó una cadena válida.\n\n"
+                "La cadena, identificador electrónico o código de verificación debe tener exactamente 20 dígitos.\n"
+            )
+
+        if len(token) != 20:
+            return (
+                "⚠️ La cadena, identificador electrónico o código de verificación parece incompleto o incorrecto.\n\n"
+                "Debe tener exactamente 20 dígitos.\n"
+            )
+
+    # Números parecidos pero mal
+    digit_runs = re.findall(r"\d{1,25}", cleaned)
+    for d in digit_runs:
+        if len(d) != 20 and len(d) >= 8:
+            return (
+                "⚠️ La cadena, identificador electrónico o código de verificación parece incompleto o incorrecto.\n\n"
+                "Debe tener exactamente 20 dígitos.\n"
+            )
+
+    # Tokens parecidos a CURP pero mal
+    tokens = re.findall(r"[A-Z0-9]{8,25}", cleaned)
+    for token in tokens:
+        if re.fullmatch(CURP_REGEX, token):
+            continue
+        if re.fullmatch(NUM20_REGEX, token):
+            continue
+
+        has_letters = bool(re.search(r"[A-Z]", token))
+        has_digits = bool(re.search(r"\d", token))
+
+        if has_letters and has_digits:
+            return (
+                "⚠️ La CURP parece incompleta o incorrecta.\n\n"
+                "La CURP debe tener exactamente 18 caracteres.\n"
+                "4 letras, 6 dígitos, 6 letras y 2 caracteres alfanuméricos"
+            )
+
+    return (
+        "⚠️ No se detectó un dato válido.\n\n"
+        "Envía solo uno de estos formatos:\n\n"
+        "CURP:\n"
+        "AEHN810107MJCCRR09\n"
+        "Cadena / Identificador electrónico:\n"
+        "16102000120260027590\n\n"
+        "Código de verificación:\n"
+        "11610200011990009010"
+    )
