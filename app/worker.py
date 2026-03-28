@@ -323,6 +323,26 @@ def process_request(request_id: int):
     
                 return
 
+            if err.startswith("PROVIDER3_SESSION_INVALID_OR_EXPIRED:"):
+                req.status = "ERROR"
+                req.error_message = err
+                db.commit()
+    
+                msg = (
+                    f"⚠️ Solicitud sin éxito en Registro Civil\n"
+                    f"Dato: {req.curp}\n"
+                    f"Tipo: {req.act_type}\n\n"
+                    f"Reenviar nuevamente"
+                )
+    
+                if req.source_group_id:
+                    send_group_text(req.source_group_id, msg)
+                else:
+                    from app.services.evolution import send_text
+                    send_text(req.requester_wa_id, msg)
+    
+                return
+
             req.status = "ERROR"
             req.error_message = err
             db.commit()
