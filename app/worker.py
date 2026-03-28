@@ -1,4 +1,5 @@
 import base64
+import time
 from datetime import datetime
 
 from app.db import SessionLocal
@@ -198,24 +199,39 @@ def _process_provider3(req, db):
     client = Provider3Client(phpsessid=phpsessid)
     flags = _provider3_flags(req.act_type)
 
-    if is_chain(req.curp):
-        result = client.generar_por_cadena(
-            cadena=req.curp,
-            folio1=flags["folio1"],
-            folio2=flags["folio2"],
-            reverso=flags["reverso"],
-            margen=flags["margen"],
-        )
-    else:
-        tipo_acta = _provider3_tipo_acta(req.act_type)
-        result = client.generar_por_curp(
-            curp=req.curp,
-            tipo_acta=tipo_acta,
-            folio1=flags["folio1"],
-            folio2=flags["folio2"],
-            reverso=flags["reverso"],
-            margen=flags["margen"],
-        )
+    def _run_request():
+        if is_chain(req.curp):
+            return client.generar_por_cadena(
+                cadena=req.curp,
+                folio1=flags["folio1"],
+                folio2=flags["folio2"],
+                reverso=flags["reverso"],
+                margen=flags["margen"],
+            )
+        else:
+            tipo_acta = _provider3_tipo_acta(req.act_type)
+            return client.generar_por_curp(
+                curp=req.curp,
+                tipo_acta=tipo_acta,
+                folio1=flags["folio1"],
+                folio2=flags["folio2"],
+                reverso=flags["reverso"],
+                margen=flags["margen"],
+            )
+
+    time.sleep(2)
+
+    try:
+        result = _run_request()
+    except RuntimeError as e:
+        err = str(e)
+
+        if err.startswith("PROVIDER3_RATE_LIMIT"):
+            print("PROVIDER3_RATE_LIMIT_RETRYING", flush=True)
+            time.sleep(6)
+            result = _run_request()
+        else:
+            raise
 
     pdf_b64 = result.get("pdf") or ""
     if not pdf_b64:
