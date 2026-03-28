@@ -154,6 +154,17 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
     raise RuntimeError("UNKNOWN_PROVIDER")
 
 
+def _provider3_flags(act_type: str) -> dict:
+    act_type = (act_type or "").upper().strip()
+
+    return {
+        "folio1": "FOLIO" in act_type,
+        "folio2": False,
+        "reverso": True,
+        "margen": True,
+    }
+
+
 def _provider3_tipo_acta(act_type: str) -> str:
     act_type = (act_type or "").upper().strip()
 
@@ -179,28 +190,29 @@ def _process_provider3(req, db):
             masked = "*" * len(phpsessid)
         else:
             masked = phpsessid[:4] + ("*" * (len(phpsessid) - 8)) + phpsessid[-4:]
-    
+
     print("PROVIDER3_PHPSESSID_MASKED =", masked, flush=True)
-    
+
     client = Provider3Client(phpsessid=phpsessid)
+    flags = _provider3_flags(req.act_type)
 
     if is_chain(req.curp):
         result = client.generar_por_cadena(
             cadena=req.curp,
-            folio1=False,
-            folio2=False,
-            reverso=True,
-            margen=True,
+            folio1=flags["folio1"],
+            folio2=flags["folio2"],
+            reverso=flags["reverso"],
+            margen=flags["margen"],
         )
     else:
         tipo_acta = _provider3_tipo_acta(req.act_type)
         result = client.generar_por_curp(
             curp=req.curp,
             tipo_acta=tipo_acta,
-            folio1=False,
-            folio2=False,
-            reverso=True,
-            margen=True,
+            folio1=flags["folio1"],
+            folio2=flags["folio2"],
+            reverso=flags["reverso"],
+            margen=flags["margen"],
         )
 
     pdf_b64 = result.get("pdf") or ""
