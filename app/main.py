@@ -1331,10 +1331,10 @@ def panel_actas(
   </div>
 
   <script>
-    async function toggleProvider(provider, action) {
+    async function toggleProvider(provider, action) {{
       const url = `/panel/provider/${provider}/${action}`;
 
-      try {
+      try {{
         const res = await fetch(url, {{ method: "POST" }});
         const data = await res.json();
 
@@ -1346,9 +1346,9 @@ def panel_actas(
       }} catch (e) {{
         alert("No se pudo conectar con el servidor");
       }}
-    }
+    }}
 
-    async function refreshSID() {
+    async function refreshSID() {{
       const sid = prompt("Pega el nuevo PHPSESSID");
       if (!sid) return;
 
@@ -1374,9 +1374,9 @@ def panel_actas(
       }} catch (e) {{
         alert("No se pudo conectar con el servidor");
       }}
-    }
+    }}
 
-    async function sendBroadcast(type) {
+    async function sendBroadcast(type) {{
       const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
       if (!ok) return;
 
@@ -1395,9 +1395,9 @@ def panel_actas(
       }} catch (e) {{
         alert("No se pudo conectar con el servidor");
       }}
-    }
+    }}
 
-    async function sendFreeBroadcast() {
+    async function sendFreeBroadcast() {{
       const textarea = document.getElementById("broadcastMessage");
       const message = textarea.value.trim();
 
@@ -1431,11 +1431,11 @@ def panel_actas(
       }} catch (e) {{
         alert("No se pudo conectar con el servidor");
       }}
-    }
+    }}
 
-    function clearBroadcast() {
+    function clearBroadcast() {{
       document.getElementById("broadcastMessage").value = "";
-    }
+    }}
 
     setInterval(() => {{
       location.reload();
