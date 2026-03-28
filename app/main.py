@@ -497,9 +497,13 @@ def panel_broadcast_suspendido():
 
 
 @app.post("/panel/broadcast/free")
-def panel_broadcast_free():
+async def panel_broadcast_free(request: Request):
     try:
-        payload = request.get_json(silent=True) or {}
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
         message_text = (payload.get("message") or "").strip()
 
         if not message_text:
