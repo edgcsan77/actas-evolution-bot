@@ -39,11 +39,35 @@ class Provider3Client:
                 path="/",
             )
 
+    def keepalive(self) -> dict:
+        url = f"{self.base_url}/user_proxy.php"
+    
+        resp = self.session.get(
+            url,
+            timeout=settings.PROVIDER3_TIMEOUT_LOGIN
+        )
+    
+        if resp.status_code == 401:
+            raise RuntimeError("PROVIDER3_KEEPALIVE_SESSION_INVALID")
+    
+        if resp.status_code == 429:
+            raise RuntimeError("PROVIDER3_KEEPALIVE_RATE_LIMIT")
+    
+        resp.raise_for_status()
+    
+        try:
+            return resp.json()
+        except Exception:
+            return {
+                "ok": True,
+                "status_code": resp.status_code
+            }
+
     def login(self, captcha: str) -> dict:
         payload = {
             "email": settings.PROVIDER3_EMAIL,
             "password": settings.PROVIDER3_PASSWORD,
-            "captcha": captcha,
+            "captcha": (captcha or "").strip(),
         }
 
         resp = self.session.post(
@@ -171,31 +195,6 @@ class Provider3Client:
             return resp.json()
         except Exception as exc:
             raise RuntimeError(f"CADENA_NO_JSON: {resp.text[:500]}") from exc
-
-
-def keepalive(self) -> dict:
-    url = f"{self.base_url}/user_proxy.php"
-
-    resp = self.session.get(
-        url,
-        timeout=settings.PROVIDER3_TIMEOUT_LOGIN
-    )
-
-    if resp.status_code == 401:
-        raise RuntimeError("PROVIDER3_KEEPALIVE_SESSION_INVALID")
-
-    if resp.status_code == 429:
-        raise RuntimeError("PROVIDER3_KEEPALIVE_RATE_LIMIT")
-
-    resp.raise_for_status()
-
-    try:
-        return resp.json()
-    except Exception:
-        return {
-            "ok": True,
-            "status_code": resp.status_code
-        }
 
 
 def decode_pdf_base64(pdf_b64: str) -> bytes:
