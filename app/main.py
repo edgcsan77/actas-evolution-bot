@@ -1356,6 +1356,8 @@ def panel_actas(
       </div>
     
       <script>
+        let broadcastRunning = false;
+    
         async function toggleProvider(provider, action) {
           const url = `/panel/provider/${provider}/${action}`;
     
@@ -1404,6 +1406,8 @@ def panel_actas(
         async function sendBroadcast(type) {
           const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
           if (!ok) return;
+
+          broadcastRunning = true;
     
           try {
             const res = await fetch(`/panel/broadcast/${type}`, {
@@ -1420,6 +1424,8 @@ def panel_actas(
           } catch (e) {
             alert("No se pudo conectar con el servidor");
           }
+
+          broadcastRunning = false;
         }
     
         async function sendFreeBroadcast() {
@@ -1433,6 +1439,8 @@ def panel_actas(
     
           const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
           if (!ok) return;
+
+          broadcastRunning = true;
     
           try {
             const res = await fetch("/panel/broadcast/free", {
@@ -1456,6 +1464,8 @@ def panel_actas(
           } catch (e) {
             alert("No se pudo conectar con el servidor");
           }
+
+          broadcastRunning = false;
         }
     
         function clearBroadcast() {
@@ -1463,7 +1473,9 @@ def panel_actas(
         }
     
         setInterval(() => {
-          location.reload();
+          if (!broadcastRunning) {
+            location.reload();
+          }
         }, 30000);
       </script>
     </body>
