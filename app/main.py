@@ -1331,115 +1331,115 @@ def panel_actas(
   </div>
 
   <script>
-      async function toggleProvider(provider, action) {{
-        const url = `/panel/provider/${{provider}}/${{action}}`;
-    
-        try {{
-          const res = await fetch(url, {{ method: "POST" }});
-          const data = await res.json();
-    
-          if (data.ok) {{
-            location.reload();
-          }} else {{
-            alert("Error cambiando proveedor");
-          }}
-        }} catch (e) {{
-          alert("No se pudo conectar con el servidor");
+    async function toggleProvider(provider, action) {
+      const url = `/panel/provider/${provider}/${action}`;
+
+      try {
+        const res = await fetch(url, {{ method: "POST" }});
+        const data = await res.json();
+
+        if (data.ok) {{
+          location.reload();
+        }} else {{
+          alert("Error cambiando proveedor");
         }}
+      }} catch (e) {{
+        alert("No se pudo conectar con el servidor");
       }}
-    
-      async function refreshSID() {{
-        const sid = prompt("Pega el nuevo PHPSESSID");
-        if (!sid) return;
-    
-        try {{
-          const res = await fetch("/panel/provider3/session", {{
-            method: "POST",
-            headers: {{
-              "Content-Type": "application/json"
-            }},
-            body: JSON.stringify({{
-              phpsessid: sid
-            }})
-          }});
-    
-          const data = await res.json();
-    
-          if (data.ok) {{
-            alert("SID actualizada");
-            location.reload();
-          }} else {{
-            alert("Error actualizando SID");
-          }}
-        }} catch (e) {{
-          alert("No se pudo conectar con el servidor");
+    }
+
+    async function refreshSID() {
+      const sid = prompt("Pega el nuevo PHPSESSID");
+      if (!sid) return;
+
+      try {{
+        const res = await fetch("/panel/provider3/session", {{
+          method: "POST",
+          headers: {{
+            "Content-Type": "application/json"
+          }},
+          body: JSON.stringify({{
+            phpsessid: sid
+          }})
+        }});
+
+        const data = await res.json();
+
+        if (data.ok) {{
+          alert("SID actualizada");
+          location.reload();
+        }} else {{
+          alert("Error actualizando SID");
         }}
+      }} catch (e) {{
+        alert("No se pudo conectar con el servidor");
       }}
-    
-      async function sendBroadcast(type) {{
-        const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
-        if (!ok) return;
-    
-        try {{
-          const res = await fetch(`/panel/broadcast/${{type}}`, {{
-            method: "POST"
-          }});
-    
-          const data = await res.json();
-    
-          if (data.ok) {{
-            alert(`Enviado: ${{data.sent_count}}\nFallidos: ${{data.failed_count}}`);
-          }} else {{
-            alert(data.error || "Error en envío masivo");
-          }}
-        }} catch (e) {{
-          alert("No se pudo conectar con el servidor");
+    }
+
+    async function sendBroadcast(type) {
+      const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
+      if (!ok) return;
+
+      try {{
+        const res = await fetch(`/panel/broadcast/${type}`, {{
+          method: "POST"
+        }});
+
+        const data = await res.json();
+
+        if (data.ok) {{
+          alert(`Enviado: ${'{'}data.sent_count{'}'}\\nFallidos: ${'{'}data.failed_count{'}'}`);
+        }} else {{
+          alert(data.error || "Error en envío masivo");
         }}
+      }} catch (e) {{
+        alert("No se pudo conectar con el servidor");
       }}
-    
-      async function sendFreeBroadcast() {{
-        const textarea = document.getElementById("broadcastMessage");
-        const message = textarea.value.trim();
-    
-        if (!message) {{
-          alert("Escribe un mensaje");
-          return;
+    }
+
+    async function sendFreeBroadcast() {
+      const textarea = document.getElementById("broadcastMessage");
+      const message = textarea.value.trim();
+
+      if (!message) {{
+        alert("Escribe un mensaje");
+        return;
+      }}
+
+      const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
+      if (!ok) return;
+
+      try {{
+        const res = await fetch("/panel/broadcast/free", {{
+          method: "POST",
+          headers: {{
+            "Content-Type": "application/json"
+          }},
+          body: JSON.stringify({{
+            message: message
+          }})
+        }});
+
+        const data = await res.json();
+
+        if (data.ok) {{
+          alert(`Enviado: ${'{'}data.sent_count{'}'}\\nFallidos: ${'{'}data.failed_count{'}'}`);
+          textarea.value = "";
+        }} else {{
+          alert(data.error || "Error en envío masivo");
         }}
-    
-        const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
-        if (!ok) return;
-    
-        try {{
-          const res = await fetch("/panel/broadcast/free", {{
-            method: "POST",
-            headers: {{
-              "Content-Type": "application/json"
-            }},
-            body: JSON.stringify({{
-              message: message
-            }})
-          }});
-    
-          const data = await res.json();
-    
-          if (data.ok) {{
-            alert(`Enviado: ${{data.sent_count}}\nFallidos: ${{data.failed_count}}`);
-            textarea.value = "";
-          }} else {{
-            alert(data.error || "Error en envío masivo");
-          }}
-        }} catch (e) {{
-          alert("No se pudo conectar con el servidor");
-        }}
+      }} catch (e) {{
+        alert("No se pudo conectar con el servidor");
       }}
-    
-      function clearBroadcast() {{
-        document.getElementById("broadcastMessage").value = "";
-      }}
-    
-      setInterval(() => {{
-        location.reload();
-      }}, 30000);
+    }
+
+    function clearBroadcast() {
+      document.getElementById("broadcastMessage").value = "";
+    }
+
+    setInterval(() => {{
+      location.reload();
+    }}, 30000);
   </script>
 </body>
 </html>
