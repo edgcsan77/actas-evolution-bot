@@ -1,6 +1,6 @@
 import base64
 from datetime import datetime, timedelta
-from fastapi import FastAPI, Depends, Body
+from fastapi import FastAPI, Depends, Body, Request
 from sqlalchemy.orm import Session
 from app.worker import provider3_keepalive_job
 
