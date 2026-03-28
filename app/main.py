@@ -1,14 +1,18 @@
+import os
 import base64
 from datetime import datetime, timedelta
-from fastapi import FastAPI, Depends, Body, Request
+from zoneinfo import ZoneInfo
+
+from fastapi import FastAPI, Depends, Body, Request, BackgroundTasks
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
-from app.worker import provider3_keepalive_job
+from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.db import Base, engine, get_db
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting
 from app.queue import request_queue, redis_conn
-from app.worker import process_request
+from app.worker import process_request, provider3_keepalive_job
 
 from app.utils.curp import (
     extract_request_terms,
@@ -25,16 +29,10 @@ from app.services.evolution import (
     send_group_text,
     send_document_base64,
     send_group_document_base64,
-    get_media_base64
+    get_media_base64,
 )
 
-from fastapi.responses import HTMLResponse
-from zoneinfo import ZoneInfo
-from sqlalchemy.exc import IntegrityError
-
 app = FastAPI(title=settings.APP_NAME)
-
-
 PANEL_TZ = "America/Monterrey"
 
 
@@ -454,7 +452,7 @@ def _broadcast_target_groups() -> list[str]:
     return out
 
 
-def _broadcast_to_groups(message_text: str) -> dict:
+def _run_broadcast_job(message_text: str):
     sent = []
     failed = []
 
@@ -472,32 +470,48 @@ def _broadcast_to_groups(message_text: str) -> dict:
                 "error": str(e),
             })
 
-    return {
-        "ok": True,
-        "sent_count": len(sent),
-        "failed_count": len(failed),
-        "sent": sent,
-        "failed": failed,
-    }
+    print(
+        "BROADCAST_FINISHED",
+        {
+            "sent_count": len(sent),
+            "failed_count": len(failed),
+        },
+        flush=True,
+    )
 
 
 @app.post("/panel/broadcast/activas")
-def panel_broadcast_activas():
-    return _broadcast_to_groups(BROADCAST_ACTIVAS_MSG)
+def panel_broadcast_activas(background_tasks: BackgroundTasks):
+    background_tasks.add_task(_run_broadcast_job, BROADCAST_ACTIVAS_MSG)
+    return {
+        "ok": True,
+        "queued": True,
+        "message": "Envío masivo en segundo plano iniciado",
+    }
 
 
 @app.post("/panel/broadcast/mantenimiento")
-def panel_broadcast_mantenimiento():
-    return _broadcast_to_groups(BROADCAST_MANTENIMIENTO_MSG)
+def panel_broadcast_mantenimiento(background_tasks: BackgroundTasks):
+    background_tasks.add_task(_run_broadcast_job, BROADCAST_MANTENIMIENTO_MSG)
+    return {
+        "ok": True,
+        "queued": True,
+        "message": "Envío masivo en segundo plano iniciado",
+    }
 
 
 @app.post("/panel/broadcast/suspendido")
-def panel_broadcast_suspendido():
-    return _broadcast_to_groups(BROADCAST_SUSPENDIDO_MSG)
+def panel_broadcast_suspendido(background_tasks: BackgroundTasks):
+    background_tasks.add_task(_run_broadcast_job, BROADCAST_SUSPENDIDO_MSG)
+    return {
+        "ok": True,
+        "queued": True,
+        "message": "Envío masivo en segundo plano iniciado",
+    }
 
 
 @app.post("/panel/broadcast/free")
-async def panel_broadcast_free(request: Request):
+async def panel_broadcast_free(request: Request, background_tasks: BackgroundTasks):
     try:
         try:
             payload = await request.json()
@@ -509,7 +523,13 @@ async def panel_broadcast_free(request: Request):
         if not message_text:
             return {"ok": False, "error": "Mensaje vacío"}
 
-        return _broadcast_to_groups(message_text)
+        background_tasks.add_task(_run_broadcast_job, message_text)
+
+        return {
+            "ok": True,
+            "queued": True,
+            "message": "Envío masivo en segundo plano iniciado",
+        }
 
     except Exception as e:
         print("panel_broadcast_free error:", repr(e), flush=True)
@@ -525,940 +545,956 @@ def panel_actas(
     act_type: str = "",
     db: Session = Depends(get_db),
 ):
-    time_min, time_max, view = _panel_period_bounds(view)
-
-    rows = _query_requests_for_panel(
-        db=db,
-        time_min=time_min,
-        time_max=time_max,
-        group_jid=group_jid or None,
-        provider_name=provider_name or None,
-        status=status or None,
-        act_type=act_type or None,
-    ).order_by(RequestLog.created_at.desc()).all()
-
-    summary = _panel_summary_from_rows(rows)
-    by_group = _panel_group_rows(rows)
-    by_provider = _panel_provider_rows(rows)
-    by_type = _panel_type_rows(rows)
-
-    latest = rows[:100]
-
-    subtitle = (
-        f"Vista semanal ({PANEL_TZ})" if view == "week"
-        else f"Vista diaria ({_panel_day_str()}, {PANEL_TZ})"
-    )
-
-    provider_states = _providers_status_text(db).replace("\n", "<br>")
-
-    html = f"""
-<!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <title>Panel Actas</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-      :root {{
-        --bg: #f4f6f8;
-        --card: #ffffff;
-        --text: #1f2937;
-        --muted: #6b7280;
-        --line: #e5e7eb;
-    
-        --primary: #334155;
-        --primary-dark: #1e293b;
-    
-        --success: #166534;
-        --success-dark: #14532d;
-    
-        --warning: #a16207;
-        --warning-dark: #854d0e;
-    
-        --danger: #991b1b;
-        --danger-dark: #7f1d1d;
-    
-        --shadow: 0 8px 24px rgba(15, 23, 42, 0.07);
-        --radius: 18px;
-      }}
-    
-      * {{
-        box-sizing: border-box;
-      }}
-    
-      body {{
-        margin: 0;
-        font-family: Arial, sans-serif;
-        background: var(--bg);
-        color: var(--text);
-      }}
-    
-      .wrap {{
-        max-width: 1500px;
-        margin: 0 auto;
-        padding: 16px;
-      }}
-    
-      .hero {{
-        background: linear-gradient(135deg, #1f2937 0%, #334155 55%, #475569 100%);
-        color: white;
-        border-radius: 24px;
-        padding: 22px;
-        margin-bottom: 18px;
-        box-shadow: var(--shadow);
-      }}
-    
-      .hero-top {{
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: 16px;
-        flex-wrap: wrap;
-      }}
-    
-      .hero h1 {{
-        margin: 0 0 8px;
-        font-size: 1.9rem;
-      }}
-    
-      .hero-sub {{
-        color: rgba(255,255,255,.88);
-        font-size: .98rem;
-      }}
-    
-      .toolbar {{
-        margin-top: 16px;
-        display: flex;
-        gap: 10px;
-        flex-wrap: wrap;
-      }}
-    
-      .tool-link {{
-        text-decoration: none;
-        padding: 10px 16px;
-        border-radius: 12px;
-        background: rgba(255,255,255,.10);
-        color: white;
-        font-weight: 700;
-        border: 1px solid rgba(255,255,255,.14);
-        transition: .2s ease;
-      }}
-    
-      .tool-link:hover {{
-        background: rgba(255,255,255,.16);
-      }}
-    
-      .tool-link-active {{
-        background: #ffffff;
-        color: var(--primary-dark);
-        border-color: #ffffff;
-      }}
-    
-      .grid-hero {{
-        display: grid;
-        grid-template-columns: 1.2fr 1fr;
-        gap: 16px;
-        margin-top: 18px;
-      }}
-    
-      .glass {{
-        background: rgba(255,255,255,.08);
-        border: 1px solid rgba(255,255,255,.10);
-        border-radius: 20px;
-        padding: 18px;
-        backdrop-filter: blur(8px);
-      }}
-    
-      .section-title {{
-        margin: 0 0 14px;
-        font-size: 1rem;
-        font-weight: 800;
-        letter-spacing: .2px;
-      }}
-    
-      .provider-grid {{
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 12px;
-      }}
-    
-      .provider-card {{
-        background: rgba(255,255,255,.08);
-        border: 1px solid rgba(255,255,255,.12);
-        border-radius: 16px;
-        padding: 14px;
-      }}
-    
-      .provider-name {{
-        font-weight: 800;
-        margin-bottom: 10px;
-        font-size: .98rem;
-      }}
-    
-      .provider-actions {{
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-      }}
-    
-      .status-panel {{
-        margin-top: 14px;
-        padding: 12px 14px;
-        border-radius: 14px;
-        background: rgba(255,255,255,.08);
-        border: 1px solid rgba(255,255,255,.10);
-        color: rgba(255,255,255,.94);
-        font-size: .92rem;
-        line-height: 1.5;
-      }}
-    
-      .broadcast-grid {{
-        display: grid;
-        gap: 12px;
-      }}
-    
-      .broadcast-buttons {{
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 10px;
-      }}
-    
-      .broadcast-free {{
-        display: grid;
-        gap: 10px;
-      }}
-    
-      .broadcast-free textarea {{
-        width: 100%;
-        min-height: 140px;
-        border: 1px solid #d1d5db;
-        border-radius: 14px;
-        padding: 12px 14px;
-        resize: vertical;
-        font: inherit;
-        color: var(--text);
-        background: white;
-      }}
-    
-      .box {{
-        background: var(--card);
-        border-radius: var(--radius);
-        box-shadow: var(--shadow);
-        overflow: hidden;
-        margin-bottom: 16px;
-        border: 1px solid #eef2f7;
-      }}
-    
-      .head {{
-        padding: 16px 18px;
-        border-bottom: 1px solid var(--line);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 10px;
-        flex-wrap: wrap;
-        background: #fafbfc;
-      }}
-    
-      .head strong {{
-        font-size: 1rem;
-      }}
-    
-      .filters {{
-        display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: 10px;
-        padding: 16px;
-      }}
-    
-      .filters input,
-      .filters select,
-      .input,
-      .textarea {{
-        width: 100%;
-        padding: 11px 12px;
-        border: 1px solid #d1d5db;
-        border-radius: 12px;
-        font: inherit;
-        background: white;
-        color: var(--text);
-        outline: none;
-      }}
-    
-      .filters input:focus,
-      .filters select:focus,
-      .input:focus,
-      .textarea:focus {{
-        border-color: var(--primary);
-        box-shadow: 0 0 0 3px rgba(51, 65, 85, .10);
-      }}
-    
-      .cards {{
-        display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: 12px;
-        margin-bottom: 16px;
-      }}
-    
-      .card {{
-        background: var(--card);
-        border-radius: 18px;
-        padding: 16px;
-        box-shadow: var(--shadow);
-        border: 1px solid var(--line);
-        position: relative;
-      }}
-    
-      .card::before {{
-        content: "";
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 4px;
-        border-radius: 18px 18px 0 0;
-        background: #cbd5e1;
-      }}
-    
-      .label {{
-        color: var(--muted);
-        font-size: .88rem;
-        margin-bottom: 8px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: .3px;
-      }}
-    
-      .value {{
-        font-size: 1.9rem;
-        font-weight: 800;
-        line-height: 1;
-      }}
-    
-      .table-wrap {{
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-      }}
-    
-      table {{
-        width: 100%;
-        border-collapse: collapse;
-        min-width: 820px;
-      }}
-    
-      th, td {{
-        padding: 12px;
-        border-bottom: 1px solid var(--line);
-        text-align: left;
-        vertical-align: top;
-        font-size: .95rem;
-      }}
-    
-      th {{
-        background: #1f2937;
-        color: white;
-        position: sticky;
-        top: 0;
-        z-index: 1;
-      }}
-    
-      tr:hover td {{
-        background: #f9fafb;
-      }}
-    
-      .right {{
-        text-align: right;
-      }}
-    
-      .mono {{
-        font-family: Consolas, Monaco, monospace;
-        font-size: .9rem;
-      }}
-    
-      .small {{
-        color: var(--muted);
-        font-size: .84rem;
-        line-height: 1.45;
-      }}
-    
-      .status-q {{
-        color: #a16207;
-        font-weight: 800;
-      }}
-    
-      .status-p {{
-        color: #334155;
-        font-weight: 800;
-      }}
-    
-      .status-d {{
-        color: #166534;
-        font-weight: 800;
-      }}
-    
-      .status-e {{
-        color: #991b1b;
-        font-weight: 800;
-      }}
-    
-      .btn {{
-        border: none;
-        border-radius: 12px;
-        padding: 10px 14px;
-        font-weight: 800;
-        font-size: .95rem;
-        cursor: pointer;
-        transition: .2s ease;
-        font-family: inherit;
-      }}
-    
-      .btn:hover {{
-        transform: translateY(-1px);
-      }}
-    
-      .btn-primary {{
-        background: var(--primary);
-        color: white;
-      }}
-    
-      .btn-primary:hover {{
-        background: var(--primary-dark);
-      }}
-    
-      .btn-success {{
-        background: var(--success);
-        color: white;
-      }}
-    
-      .btn-success:hover {{
-        background: var(--success-dark);
-      }}
-    
-      .btn-danger {{
-        background: var(--danger);
-        color: white;
-      }}
-    
-      .btn-danger:hover {{
-        background: var(--danger-dark);
-      }}
-    
-      .btn-warning {{
-        background: var(--warning);
-        color: white;
-      }}
-    
-      .btn-warning:hover {{
-        background: var(--warning-dark);
-      }}
-    
-      .btn-light {{
-        background: #e5e7eb;
-        color: #111827;
-      }}
-    
-      .btn-light:hover {{
-        background: #d1d5db;
-      }}
-    
-      .actions-row {{
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-      }}
-    
-      .helper {{
-        color: rgba(255,255,255,.82);
-        font-size: .86rem;
-        line-height: 1.45;
-      }}
-    
-      @media (max-width: 1200px) {{
-        .grid-hero {{
-          grid-template-columns: 1fr;
-        }}
-    
-        .provider-grid {{
-          grid-template-columns: 1fr;
-        }}
-    
-        .broadcast-buttons {{
-          grid-template-columns: 1fr;
-        }}
-    
-        .cards {{
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-        }}
-      }}
-    
-      @media (max-width: 900px) {{
-        .wrap {{
-          padding: 12px;
-        }}
-    
-        .hero {{
-          padding: 18px;
-          border-radius: 20px;
-        }}
-    
-        .hero h1 {{
-          font-size: 1.45rem;
-        }}
-    
-        .cards {{
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }}
-    
-        .filters {{
-          grid-template-columns: 1fr;
-        }}
-    
-        .head {{
-          padding: 14px 16px;
-        }}
-    
-        .card {{
-          padding: 14px;
-        }}
-    
-        .value {{
-          font-size: 1.6rem;
-        }}
-      }}
-    
-      @media (max-width: 560px) {{
-        .cards {{
-          grid-template-columns: 1fr;
-        }}
-    
-        .tool-link,
-        .btn {{
-          width: 100%;
-          justify-content: center;
-        }}
-    
-        .provider-actions,
-        .actions-row {{
-          flex-direction: column;
-        }}
-      }}
-    </style>
-</head>
-<body>
-  <div class="wrap">
-
-    <div class="hero">
-      <div class="hero-top">
-        <div>
-          <h1>Panel de Actas</h1>
-          <div class="hero-sub">{_esc(subtitle)}</div>
-        </div>
-      </div>
-
-      <div class="toolbar">
-        <a href="/panel?view=day" class="tool-link {'tool-link-active' if view == 'day' else ''}">Hoy</a>
-        <a href="/panel?view=week" class="tool-link {'tool-link-active' if view == 'week' else ''}">Semana</a>
-      </div>
-
-      <div class="grid-hero">
-        <div class="glass">
-          <h3 class="section-title">Proveedores</h3>
-
-          <div class="provider-grid">
-            <div class="provider-card">
-              <div class="provider-name">PROVIDER1</div>
-              <div class="provider-actions">
-                <button class="btn btn-success" onclick="toggleProvider('PROVIDER1','on')">Activar</button>
-                <button class="btn btn-danger" onclick="toggleProvider('PROVIDER1','off')">Desactivar</button>
-              </div>
-            </div>
-
-            <div class="provider-card">
-              <div class="provider-name">PROVIDER2</div>
-              <div class="provider-actions">
-                <button class="btn btn-success" onclick="toggleProvider('PROVIDER2','on')">Activar</button>
-                <button class="btn btn-danger" onclick="toggleProvider('PROVIDER2','off')">Desactivar</button>
-              </div>
-            </div>
-
-            <div class="provider-card">
-              <div class="provider-name">PROVIDER3</div>
-              <div class="provider-actions">
-                <button class="btn btn-success" onclick="toggleProvider('PROVIDER3','on')">Activar</button>
-                <button class="btn btn-danger" onclick="toggleProvider('PROVIDER3','off')">Desactivar</button>
-                <button class="btn btn-warning" onclick="refreshSID()">Actualizar SID</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="status-panel">
-            <strong>Estado actual</strong><br><br>
-            {provider_states}
-          </div>
-        </div>
-
-        <div class="glass">
-          <h3 class="section-title">Mensajes masivos</h3>
-
-          <div class="broadcast-grid">
+    try:
+        time_min, time_max, view = _panel_period_bounds(view)
+    
+        rows = _query_requests_for_panel(
+            db=db,
+            time_min=time_min,
+            time_max=time_max,
+            group_jid=group_jid or None,
+            provider_name=provider_name or None,
+            status=status or None,
+            act_type=act_type or None,
+        ).order_by(RequestLog.created_at.desc()).all()
+    
+        summary = _panel_summary_from_rows(rows)
+        by_group = _panel_group_rows(rows)
+        by_provider = _panel_provider_rows(rows)
+        by_type = _panel_type_rows(rows)
+    
+        latest = rows[:100]
+    
+        subtitle = (
+            f"Vista semanal ({PANEL_TZ})" if view == "week"
+            else f"Vista diaria ({_panel_day_str()}, {PANEL_TZ})"
+        )
+    
+        provider_states = _esc(_providers_status_text(db)).replace("\n", "<br>")
+    
+        html = f"""
+    <!doctype html>
+    <html lang="es">
+    <head>
+      <meta charset="utf-8">
+      <title>Panel Actas</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          :root {{
+            --bg: #f4f6f8;
+            --card: #ffffff;
+            --text: #1f2937;
+            --muted: #6b7280;
+            --line: #e5e7eb;
+        
+            --primary: #334155;
+            --primary-dark: #1e293b;
+        
+            --success: #166534;
+            --success-dark: #14532d;
+        
+            --warning: #a16207;
+            --warning-dark: #854d0e;
+        
+            --danger: #991b1b;
+            --danger-dark: #7f1d1d;
+        
+            --shadow: 0 8px 24px rgba(15, 23, 42, 0.07);
+            --radius: 18px;
+          }}
+        
+          * {{
+            box-sizing: border-box;
+          }}
+        
+          body {{
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+          }}
+        
+          .wrap {{
+            max-width: 1500px;
+            margin: 0 auto;
+            padding: 16px;
+          }}
+        
+          .hero {{
+            background: linear-gradient(135deg, #1f2937 0%, #334155 55%, #475569 100%);
+            color: white;
+            border-radius: 24px;
+            padding: 22px;
+            margin-bottom: 18px;
+            box-shadow: var(--shadow);
+          }}
+        
+          .hero-top {{
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+            flex-wrap: wrap;
+          }}
+        
+          .hero h1 {{
+            margin: 0 0 8px;
+            font-size: 1.9rem;
+          }}
+        
+          .hero-sub {{
+            color: rgba(255,255,255,.88);
+            font-size: .98rem;
+          }}
+        
+          .toolbar {{
+            margin-top: 16px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+          }}
+        
+          .tool-link {{
+            text-decoration: none;
+            padding: 10px 16px;
+            border-radius: 12px;
+            background: rgba(255,255,255,.10);
+            color: white;
+            font-weight: 700;
+            border: 1px solid rgba(255,255,255,.14);
+            transition: .2s ease;
+          }}
+        
+          .tool-link:hover {{
+            background: rgba(255,255,255,.16);
+          }}
+        
+          .tool-link-active {{
+            background: #ffffff;
+            color: var(--primary-dark);
+            border-color: #ffffff;
+          }}
+        
+          .grid-hero {{
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            gap: 16px;
+            margin-top: 18px;
+          }}
+        
+          .glass {{
+            background: rgba(255,255,255,.08);
+            border: 1px solid rgba(255,255,255,.10);
+            border-radius: 20px;
+            padding: 18px;
+            backdrop-filter: blur(8px);
+          }}
+        
+          .section-title {{
+            margin: 0 0 14px;
+            font-size: 1rem;
+            font-weight: 800;
+            letter-spacing: .2px;
+          }}
+        
+          .provider-grid {{
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+          }}
+        
+          .provider-card {{
+            background: rgba(255,255,255,.08);
+            border: 1px solid rgba(255,255,255,.12);
+            border-radius: 16px;
+            padding: 14px;
+          }}
+        
+          .provider-name {{
+            font-weight: 800;
+            margin-bottom: 10px;
+            font-size: .98rem;
+          }}
+        
+          .provider-actions {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+          }}
+        
+          .status-panel {{
+            margin-top: 14px;
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: rgba(255,255,255,.08);
+            border: 1px solid rgba(255,255,255,.10);
+            color: rgba(255,255,255,.94);
+            font-size: .92rem;
+            line-height: 1.5;
+          }}
+        
+          .broadcast-grid {{
+            display: grid;
+            gap: 12px;
+          }}
+        
+          .broadcast-buttons {{
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+          }}
+        
+          .broadcast-free {{
+            display: grid;
+            gap: 10px;
+          }}
+        
+          .broadcast-free textarea {{
+            width: 100%;
+            min-height: 140px;
+            border: 1px solid #d1d5db;
+            border-radius: 14px;
+            padding: 12px 14px;
+            resize: vertical;
+            font: inherit;
+            color: var(--text);
+            background: white;
+          }}
+        
+          .box {{
+            background: var(--card);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            overflow: hidden;
+            margin-bottom: 16px;
+            border: 1px solid #eef2f7;
+          }}
+        
+          .head {{
+            padding: 16px 18px;
+            border-bottom: 1px solid var(--line);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            background: #fafbfc;
+          }}
+        
+          .head strong {{
+            font-size: 1rem;
+          }}
+        
+          .filters {{
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 10px;
+            padding: 16px;
+          }}
+        
+          .filters input,
+          .filters select,
+          .input,
+          .textarea {{
+            width: 100%;
+            padding: 11px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 12px;
+            font: inherit;
+            background: white;
+            color: var(--text);
+            outline: none;
+          }}
+        
+          .filters input:focus,
+          .filters select:focus,
+          .input:focus,
+          .textarea:focus {{
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(51, 65, 85, .10);
+          }}
+        
+          .cards {{
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+          }}
+        
+          .card {{
+            background: var(--card);
+            border-radius: 18px;
+            padding: 16px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--line);
+            position: relative;
+          }}
+        
+          .card::before {{
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            border-radius: 18px 18px 0 0;
+            background: #cbd5e1;
+          }}
+        
+          .label {{
+            color: var(--muted);
+            font-size: .88rem;
+            margin-bottom: 8px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .3px;
+          }}
+        
+          .value {{
+            font-size: 1.9rem;
+            font-weight: 800;
+            line-height: 1;
+          }}
+        
+          .table-wrap {{
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+          }}
+        
+          table {{
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 820px;
+          }}
+        
+          th, td {{
+            padding: 12px;
+            border-bottom: 1px solid var(--line);
+            text-align: left;
+            vertical-align: top;
+            font-size: .95rem;
+          }}
+        
+          th {{
+            background: #1f2937;
+            color: white;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+          }}
+        
+          tr:hover td {{
+            background: #f9fafb;
+          }}
+        
+          .right {{
+            text-align: right;
+          }}
+        
+          .mono {{
+            font-family: Consolas, Monaco, monospace;
+            font-size: .9rem;
+          }}
+        
+          .small {{
+            color: var(--muted);
+            font-size: .84rem;
+            line-height: 1.45;
+          }}
+        
+          .status-q {{
+            color: #a16207;
+            font-weight: 800;
+          }}
+        
+          .status-p {{
+            color: #334155;
+            font-weight: 800;
+          }}
+        
+          .status-d {{
+            color: #166534;
+            font-weight: 800;
+          }}
+        
+          .status-e {{
+            color: #991b1b;
+            font-weight: 800;
+          }}
+        
+          .btn {{
+            border: none;
+            border-radius: 12px;
+            padding: 10px 14px;
+            font-weight: 800;
+            font-size: .95rem;
+            cursor: pointer;
+            transition: .2s ease;
+            font-family: inherit;
+          }}
+        
+          .btn:hover {{
+            transform: translateY(-1px);
+          }}
+        
+          .btn-primary {{
+            background: var(--primary);
+            color: white;
+          }}
+        
+          .btn-primary:hover {{
+            background: var(--primary-dark);
+          }}
+        
+          .btn-success {{
+            background: var(--success);
+            color: white;
+          }}
+        
+          .btn-success:hover {{
+            background: var(--success-dark);
+          }}
+        
+          .btn-danger {{
+            background: var(--danger);
+            color: white;
+          }}
+        
+          .btn-danger:hover {{
+            background: var(--danger-dark);
+          }}
+        
+          .btn-warning {{
+            background: var(--warning);
+            color: white;
+          }}
+        
+          .btn-warning:hover {{
+            background: var(--warning-dark);
+          }}
+        
+          .btn-light {{
+            background: #e5e7eb;
+            color: #111827;
+          }}
+        
+          .btn-light:hover {{
+            background: #d1d5db;
+          }}
+        
+          .actions-row {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+          }}
+        
+          .helper {{
+            color: rgba(255,255,255,.82);
+            font-size: .86rem;
+            line-height: 1.45;
+          }}
+        
+          @media (max-width: 1200px) {{
+            .grid-hero {{
+              grid-template-columns: 1fr;
+            }}
+        
+            .provider-grid {{
+              grid-template-columns: 1fr;
+            }}
+        
+            .broadcast-buttons {{
+              grid-template-columns: 1fr;
+            }}
+        
+            .cards {{
+              grid-template-columns: repeat(3, minmax(0, 1fr));
+            }}
+          }}
+        
+          @media (max-width: 900px) {{
+            .wrap {{
+              padding: 12px;
+            }}
+        
+            .hero {{
+              padding: 18px;
+              border-radius: 20px;
+            }}
+        
+            .hero h1 {{
+              font-size: 1.45rem;
+            }}
+        
+            .cards {{
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+            }}
+        
+            .filters {{
+              grid-template-columns: 1fr;
+            }}
+        
+            .head {{
+              padding: 14px 16px;
+            }}
+        
+            .card {{
+              padding: 14px;
+            }}
+        
+            .value {{
+              font-size: 1.6rem;
+            }}
+          }}
+        
+          @media (max-width: 560px) {{
+            .cards {{
+              grid-template-columns: 1fr;
+            }}
+        
+            .tool-link,
+            .btn {{
+              width: 100%;
+              justify-content: center;
+            }}
+        
+            .provider-actions,
+            .actions-row {{
+              flex-direction: column;
+            }}
+          }}
+        </style>
+    </head>
+    <body>
+      <div class="wrap">
+    
+        <div class="hero">
+          <div class="hero-top">
             <div>
-              <div class="helper" style="margin-bottom:10px;">Envía mensajes predefinidos a todos los grupos activos.</div>
-              <div class="broadcast-buttons">
-                <button class="btn btn-primary" onclick="sendBroadcast('activas')">Enviar promoción</button>
-                <button class="btn btn-warning" onclick="sendBroadcast('mantenimiento')">Enviar mantenimiento</button>
-                <button class="btn btn-danger" onclick="sendBroadcast('suspendido')">Enviar suspendido</button>
-              </div>
+              <h1>Panel de Actas</h1>
+              <div class="hero-sub">{_esc(subtitle)}</div>
             </div>
-
-            <div class="broadcast-free">
-              <div>
-                <strong>Mensaje libre</strong>
-                <div class="helper" style="margin-top:6px;">
-                  Escribe un mensaje personalizado para enviarlo masivamente.
+          </div>
+    
+          <div class="toolbar">
+            <a href="/panel?view=day" class="tool-link {'tool-link-active' if view == 'day' else ''}">Hoy</a>
+            <a href="/panel?view=week" class="tool-link {'tool-link-active' if view == 'week' else ''}">Semana</a>
+          </div>
+    
+          <div class="grid-hero">
+            <div class="glass">
+              <h3 class="section-title">Proveedores</h3>
+    
+              <div class="provider-grid">
+                <div class="provider-card">
+                  <div class="provider-name">PROVIDER1</div>
+                  <div class="provider-actions">
+                    <button class="btn btn-success" onclick="toggleProvider('PROVIDER1','on')">Activar</button>
+                    <button class="btn btn-danger" onclick="toggleProvider('PROVIDER1','off')">Desactivar</button>
+                  </div>
+                </div>
+    
+                <div class="provider-card">
+                  <div class="provider-name">PROVIDER2</div>
+                  <div class="provider-actions">
+                    <button class="btn btn-success" onclick="toggleProvider('PROVIDER2','on')">Activar</button>
+                    <button class="btn btn-danger" onclick="toggleProvider('PROVIDER2','off')">Desactivar</button>
+                  </div>
+                </div>
+    
+                <div class="provider-card">
+                  <div class="provider-name">PROVIDER3</div>
+                  <div class="provider-actions">
+                    <button class="btn btn-success" onclick="toggleProvider('PROVIDER3','on')">Activar</button>
+                    <button class="btn btn-danger" onclick="toggleProvider('PROVIDER3','off')">Desactivar</button>
+                    <button class="btn btn-warning" onclick="refreshSID()">Actualizar SID</button>
+                  </div>
                 </div>
               </div>
-
-              <textarea
-                id="broadcastMessage"
-                placeholder="Escribe aquí el mensaje que deseas enviar a todos los grupos..."
-              ></textarea>
-
-              <div class="actions-row">
-                <button class="btn btn-success" onclick="sendFreeBroadcast()">Enviar mensaje libre</button>
-                <button class="btn btn-light" onclick="clearBroadcast()">Limpiar</button>
+    
+              <div class="status-panel">
+                <strong>Estado actual</strong><br><br>
+                {provider_states}
+              </div>
+            </div>
+    
+            <div class="glass">
+              <h3 class="section-title">Mensajes masivos</h3>
+    
+              <div class="broadcast-grid">
+                <div>
+                  <div class="helper" style="margin-bottom:10px;">Envía mensajes predefinidos a todos los grupos activos.</div>
+                  <div class="broadcast-buttons">
+                    <button class="btn btn-primary" onclick="sendBroadcast('activas')">Enviar promoción</button>
+                    <button class="btn btn-warning" onclick="sendBroadcast('mantenimiento')">Enviar mantenimiento</button>
+                    <button class="btn btn-danger" onclick="sendBroadcast('suspendido')">Enviar suspendido</button>
+                  </div>
+                </div>
+    
+                <div class="broadcast-free">
+                  <div>
+                    <strong>Mensaje libre</strong>
+                    <div class="helper" style="margin-top:6px;">
+                      Escribe un mensaje personalizado para enviarlo masivamente.
+                    </div>
+                  </div>
+    
+                  <textarea
+                    id="broadcastMessage"
+                    placeholder="Escribe aquí el mensaje que deseas enviar a todos los grupos..."
+                  ></textarea>
+    
+                  <div class="actions-row">
+                    <button class="btn btn-success" onclick="sendFreeBroadcast()">Enviar mensaje libre</button>
+                    <button class="btn btn-light" onclick="clearBroadcast()">Limpiar</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
+    
+        <form class="box" method="get" action="/panel">
+          <div class="head">
+            <strong>Filtros</strong>
+          </div>
+          <div class="filters">
+            <input type="hidden" name="view" value="{_esc(view)}">
+            <input name="group_jid" placeholder="Grupo cliente" value="{_esc(group_jid)}">
+            <input name="provider_name" placeholder="Proveedor" value="{_esc(provider_name)}">
+            <input name="status" placeholder="Estado" value="{_esc(status)}">
+            <input name="act_type" placeholder="Tipo de acta" value="{_esc(act_type)}">
+            <button type="submit" class="btn btn-primary">Filtrar</button>
+          </div>
+        </form>
+    
+        <div class="cards">
+          <div class="card"><div class="label">Total</div><div class="value">{summary["total"]}</div></div>
+          <div class="card"><div class="label">En cola</div><div class="value">{summary["queued"]}</div></div>
+          <div class="card"><div class="label">Procesando</div><div class="value">{summary["processing"]}</div></div>
+          <div class="card"><div class="label">Hecho</div><div class="value">{summary["done"]}</div></div>
+          <div class="card"><div class="label">Error</div><div class="value">{summary["error"]}</div></div>
+        </div>
+    
+        <div class="box">
+          <div class="head"><strong>Resumen por proveedor</strong></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Proveedor</th>
+                  <th class="right">Total</th>
+                  <th class="right">EN COLA</th>
+                  <th class="right">PROCESANDO</th>
+                  <th class="right">HECHO</th>
+                  <th class="right">ERROR</th>
+                </tr>
+              </thead>
+              <tbody>
+        """
+    
+        if by_provider:
+            for r in by_provider:
+                html += f"""
+                <tr>
+                  <td>{_esc(r["provider_name"])}</td>
+                  <td class="right">{r["total"]}</td>
+                  <td class="right">{r["queued"]}</td>
+                  <td class="right">{r["processing"]}</td>
+                  <td class="right">{r["done"]}</td>
+                  <td class="right">{r["error"]}</td>
+                </tr>
+                """
+        else:
+            html += '<tr><td colspan="6">Sin datos.</td></tr>'
+    
+        html += """
+              </tbody>
+            </table>
+          </div>
+        </div>
+        """
+    
+        html += """
+        <div class="box">
+          <div class="head"><strong>Resumen por tipo de acta</strong></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tipo</th>
+                  <th class="right">Total</th>
+                  <th class="right">EN COLA</th>
+                  <th class="right">PROCESANDO</th>
+                  <th class="right">HECHO</th>
+                  <th class="right">ERROR</th>
+                </tr>
+              </thead>
+              <tbody>
+        """
+    
+        if by_type:
+            for r in by_type:
+                html += f"""
+                <tr>
+                  <td>{_esc(r["act_type"])}</td>
+                  <td class="right">{r["total"]}</td>
+                  <td class="right">{r["queued"]}</td>
+                  <td class="right">{r["processing"]}</td>
+                  <td class="right">{r["done"]}</td>
+                  <td class="right">{r["error"]}</td>
+                </tr>
+                """
+        else:
+            html += '<tr><td colspan="6">Sin datos.</td></tr>'
+    
+        html += """
+              </tbody>
+            </table>
+          </div>
+        </div>
+        """
+    
+        html += """
+        <div class="box">
+          <div class="head"><strong>Resumen por grupo cliente</strong></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Grupo</th>
+                  <th class="right">Total</th>
+                  <th class="right">EN COLA</th>
+                  <th class="right">PROCESANDO</th>
+                  <th class="right">HECHO</th>
+                  <th class="right">ERROR</th>
+                  <th>Última actualización</th>
+                </tr>
+              </thead>
+              <tbody>
+        """
+    
+        if by_group:
+            for r in by_group:
+                html += f"""
+                <tr>
+                  <td>{_esc(_group_name(r["group_jid"]))}</td>
+                  <td class="right">{r["total"]}</td>
+                  <td class="right">{r["queued"]}</td>
+                  <td class="right">{r["processing"]}</td>
+                  <td class="right">{r["done"]}</td>
+                  <td class="right">{r["error"]}</td>
+                  <td>{_esc(_fmt_dt(r["last_update"]))}</td>
+                </tr>
+                """
+        else:
+            html += '<tr><td colspan="7">Sin datos.</td></tr>'
+    
+        html += """
+              </tbody>
+            </table>
+          </div>
+        </div>
+        """
+    
+        html += """
+        <div class="box">
+          <div class="head"><strong>Solicitudes recientes</strong></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Dato</th>
+                  <th>Tipo</th>
+                  <th>Estado</th>
+                  <th>Grupo cliente</th>
+                  <th>Proveedor</th>
+                  <th>Grupo proveedor</th>
+                  <th>Mensaje proveedor</th>
+                  <th>Creado</th>
+                  <th>Actualizado</th>
+                  <th>Error</th>
+                </tr>
+              </thead>
+              <tbody>
+        """
+    
+        if latest:
+            for r in latest:
+                status_class = {
+                    "QUEUED": "status-q",
+                    "PROCESSING": "status-p",
+                    "DONE": "status-d",
+                    "ERROR": "status-e",
+                }.get(r.status, "")
+    
+                html += f"""
+                <tr>
+                  <td>{r.id}</td>
+                  <td class="mono">{_esc(r.curp)}</td>
+                  <td>{_esc(r.act_type)}</td>
+                  <td class="{status_class}">{_esc(r.status)}</td>
+                  <td>{_esc(_group_name(r.source_group_id))}</td>
+                  <td>{_esc(r.provider_name)}</td>
+                  <td>{_esc(_group_name(r.provider_group_id))}</td>
+                  <td class="small">{_esc(r.provider_message)}</td>
+                  <td>{_esc(_fmt_dt(r.created_at))}</td>
+                  <td>{_esc(_fmt_dt(r.updated_at))}</td>
+                  <td class="small">{_esc(r.error_message)}</td>
+                </tr>
+                """
+        else:
+            html += '<tr><td colspan="11">Sin solicitudes en este periodo.</td></tr>'
+    
+        html += """
+              </tbody>
+            </table>
+          </div>
+        </div>
+    
       </div>
-    </div>
-
-    <form class="box" method="get" action="/panel">
-      <div class="head">
-        <strong>Filtros</strong>
-      </div>
-      <div class="filters">
-        <input type="hidden" name="view" value="{_esc(view)}">
-        <input name="group_jid" placeholder="Grupo cliente" value="{_esc(group_jid)}">
-        <input name="provider_name" placeholder="Proveedor" value="{_esc(provider_name)}">
-        <input name="status" placeholder="Estado" value="{_esc(status)}">
-        <input name="act_type" placeholder="Tipo de acta" value="{_esc(act_type)}">
-        <button type="submit" class="btn btn-primary">Filtrar</button>
-      </div>
-    </form>
-
-    <div class="cards">
-      <div class="card"><div class="label">Total</div><div class="value">{summary["total"]}</div></div>
-      <div class="card"><div class="label">En cola</div><div class="value">{summary["queued"]}</div></div>
-      <div class="card"><div class="label">Procesando</div><div class="value">{summary["processing"]}</div></div>
-      <div class="card"><div class="label">Hecho</div><div class="value">{summary["done"]}</div></div>
-      <div class="card"><div class="label">Error</div><div class="value">{summary["error"]}</div></div>
-    </div>
-
-    <div class="box">
-      <div class="head"><strong>Resumen por proveedor</strong></div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Proveedor</th>
-              <th class="right">Total</th>
-              <th class="right">EN COLA</th>
-              <th class="right">PROCESANDO</th>
-              <th class="right">HECHO</th>
-              <th class="right">ERROR</th>
-            </tr>
-          </thead>
-          <tbody>
-    """
-
-    if by_provider:
-        for r in by_provider:
-            html += f"""
-            <tr>
-              <td>{_esc(r["provider_name"])}</td>
-              <td class="right">{r["total"]}</td>
-              <td class="right">{r["queued"]}</td>
-              <td class="right">{r["processing"]}</td>
-              <td class="right">{r["done"]}</td>
-              <td class="right">{r["error"]}</td>
-            </tr>
-            """
-    else:
-        html += '<tr><td colspan="6">Sin datos.</td></tr>'
-
-    html += """
-          </tbody>
-        </table>
-      </div>
-    </div>
-    """
-
-    html += """
-    <div class="box">
-      <div class="head"><strong>Resumen por tipo de acta</strong></div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Tipo</th>
-              <th class="right">Total</th>
-              <th class="right">EN COLA</th>
-              <th class="right">PROCESANDO</th>
-              <th class="right">HECHO</th>
-              <th class="right">ERROR</th>
-            </tr>
-          </thead>
-          <tbody>
-    """
-
-    if by_type:
-        for r in by_type:
-            html += f"""
-            <tr>
-              <td>{_esc(r["act_type"])}</td>
-              <td class="right">{r["total"]}</td>
-              <td class="right">{r["queued"]}</td>
-              <td class="right">{r["processing"]}</td>
-              <td class="right">{r["done"]}</td>
-              <td class="right">{r["error"]}</td>
-            </tr>
-            """
-    else:
-        html += '<tr><td colspan="6">Sin datos.</td></tr>'
-
-    html += """
-          </tbody>
-        </table>
-      </div>
-    </div>
-    """
-
-    html += """
-    <div class="box">
-      <div class="head"><strong>Resumen por grupo cliente</strong></div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Grupo</th>
-              <th class="right">Total</th>
-              <th class="right">EN COLA</th>
-              <th class="right">PROCESANDO</th>
-              <th class="right">HECHO</th>
-              <th class="right">ERROR</th>
-              <th>Última actualización</th>
-            </tr>
-          </thead>
-          <tbody>
-    """
-
-    if by_group:
-        for r in by_group:
-            html += f"""
-            <tr>
-              <td>{_esc(_group_name(r["group_jid"]))}</td>
-              <td class="right">{r["total"]}</td>
-              <td class="right">{r["queued"]}</td>
-              <td class="right">{r["processing"]}</td>
-              <td class="right">{r["done"]}</td>
-              <td class="right">{r["error"]}</td>
-              <td>{_esc(_fmt_dt(r["last_update"]))}</td>
-            </tr>
-            """
-    else:
-        html += '<tr><td colspan="7">Sin datos.</td></tr>'
-
-    html += """
-          </tbody>
-        </table>
-      </div>
-    </div>
-    """
-
-    html += """
-    <div class="box">
-      <div class="head"><strong>Solicitudes recientes</strong></div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Dato</th>
-              <th>Tipo</th>
-              <th>Estado</th>
-              <th>Grupo cliente</th>
-              <th>Proveedor</th>
-              <th>Grupo proveedor</th>
-              <th>Mensaje proveedor</th>
-              <th>Creado</th>
-              <th>Actualizado</th>
-              <th>Error</th>
-            </tr>
-          </thead>
-          <tbody>
-    """
-
-    if latest:
-        for r in latest:
-            status_class = {
-                "QUEUED": "status-q",
-                "PROCESSING": "status-p",
-                "DONE": "status-d",
-                "ERROR": "status-e",
-            }.get(r.status, "")
-
-            html += f"""
-            <tr>
-              <td>{r.id}</td>
-              <td class="mono">{_esc(r.curp)}</td>
-              <td>{_esc(r.act_type)}</td>
-              <td class="{status_class}">{_esc(r.status)}</td>
-              <td>{_esc(_group_name(r.source_group_id))}</td>
-              <td>{_esc(r.provider_name)}</td>
-              <td>{_esc(_group_name(r.provider_group_id))}</td>
-              <td class="small">{_esc(r.provider_message)}</td>
-              <td>{_esc(_fmt_dt(r.created_at))}</td>
-              <td>{_esc(_fmt_dt(r.updated_at))}</td>
-              <td class="small">{_esc(r.error_message)}</td>
-            </tr>
-            """
-    else:
-        html += '<tr><td colspan="11">Sin solicitudes en este periodo.</td></tr>'
-
-    html += """
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-  </div>
-
-  <script>
-    async function toggleProvider(provider, action) {
-      const url = `/panel/provider/${provider}/${action}`;
-
-      try {
-        const res = await fetch(url, { method: "POST" });
-        const data = await res.json();
-
-        if (data.ok) {
+    
+      <script>
+        async function toggleProvider(provider, action) {
+          const url = `/panel/provider/${provider}/${action}`;
+    
+          try {
+            const res = await fetch(url, { method: "POST" });
+            const data = await res.json();
+    
+            if (data.ok) {
+              location.reload();
+            } else {
+              alert("Error cambiando proveedor");
+            }
+          } catch (e) {
+            alert("No se pudo conectar con el servidor");
+          }
+        }
+    
+        async function refreshSID() {
+          const sid = prompt("Pega el nuevo PHPSESSID");
+          if (!sid) return;
+    
+          try {
+            const res = await fetch("/panel/provider3/session", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                phpsessid: sid
+              })
+            });
+    
+            const data = await res.json();
+    
+            if (data.ok) {
+              alert("SID actualizada");
+              location.reload();
+            } else {
+              alert(data.error || "Error actualizando SID");
+            }
+          } catch (e) {
+            alert("No se pudo conectar con el servidor");
+          }
+        }
+    
+        async function sendBroadcast(type) {
+          const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
+          if (!ok) return;
+    
+          try {
+            const res = await fetch(`/panel/broadcast/${type}`, {
+              method: "POST"
+            });
+    
+            const data = await res.json();
+    
+            if (data.ok) {
+              alert(data.message || "Envío iniciado");
+            } else {
+              alert(data.error || "Error en envío masivo");
+            }
+          } catch (e) {
+            alert("No se pudo conectar con el servidor");
+          }
+        }
+    
+        async function sendFreeBroadcast() {
+          const textarea = document.getElementById("broadcastMessage");
+          const message = textarea.value.trim();
+    
+          if (!message) {
+            alert("Escribe un mensaje");
+            return;
+          }
+    
+          const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
+          if (!ok) return;
+    
+          try {
+            const res = await fetch("/panel/broadcast/free", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                message: message
+              })
+            });
+    
+            const data = await res.json();
+    
+            if (data.ok) {
+              alert(data.message || "Envío iniciado");
+              textarea.value = "";
+            } else {
+              alert(data.error || "Error en envío masivo");
+            }
+          } catch (e) {
+            alert("No se pudo conectar con el servidor");
+          }
+        }
+    
+        function clearBroadcast() {
+          document.getElementById("broadcastMessage").value = "";
+        }
+    
+        setInterval(() => {
           location.reload();
-        } else {
-          alert("Error cambiando proveedor");
-        }
-      } catch (e) {
-        alert("No se pudo conectar con el servidor");
-      }
-    }
-
-    async function refreshSID() {
-      const sid = prompt("Pega el nuevo PHPSESSID");
-      if (!sid) return;
-
-      try {
-        const res = await fetch("/panel/provider3/session", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            phpsessid: sid
-          })
-        });
-
-        const data = await res.json();
-
-        if (data.ok) {
-          alert("SID actualizada");
-          location.reload();
-        } else {
-          alert("Error actualizando SID");
-        }
-      } catch (e) {
-        alert("No se pudo conectar con el servidor");
-      }
-    }
-
-    async function sendBroadcast(type) {
-      const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
-      if (!ok) return;
-
-      try {
-        const res = await fetch(`/panel/broadcast/${type}`, {
-          method: "POST"
-        });
-
-        const data = await res.json();
-
-        if (data.ok) {
-          alert(`Enviado: ${data.sent_count}\nFallidos: ${data.failed_count}`);
-        } else {
-          alert(data.error || "Error en envío masivo");
-        }
-      } catch (e) {
-        alert("No se pudo conectar con el servidor");
-      }
-    }
-
-    async function sendFreeBroadcast() {
-      const textarea = document.getElementById("broadcastMessage");
-      const message = textarea.value.trim();
-
-      if (!message) {
-        alert("Escribe un mensaje");
-        return;
-      }
-
-      const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
-      if (!ok) return;
-
-      try {
-        const res = await fetch("/panel/broadcast/free", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            message: message
-          })
-        });
-
-        const data = await res.json();
-
-        if (data.ok) {
-          alert(`Enviado: ${data.sent_count}\nFallidos: ${data.failed_count}`);
-          textarea.value = "";
-        } else {
-          alert(data.error || "Error en envío masivo");
-        }
-      } catch (e) {
-        alert("No se pudo conectar con el servidor");
-      }
-    }
-
-    function clearBroadcast() {
-      document.getElementById("broadcastMessage").value = "";
-    }
-
-    setInterval(() => {
-      location.reload();
-    }, 30000);
-  </script>
-</body>
-</html>
-    """
-    return HTMLResponse(content=html)
+        }, 30000);
+      </script>
+    </body>
+    </html>
+        """
+        return HTMLResponse(content=html)
+        
+    except Exception as e:
+        print("panel_actas error:", repr(e), flush=True)
+        return HTMLResponse(
+            content=f"<pre>Error en /panel: {str(e)}</pre>",
+            status_code=500,
+        )
 
 
 @app.post("/panel/provider3/update-sid")
-async def update_provider3_sid(payload: dict):
-    sid = payload.get("phpsessid")
+def update_provider3_sid(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    sid = (payload.get("phpsessid") or "").strip()
+
     if not sid:
         return {"ok": False, "error": "SID vacía"}
 
-    os.environ["PROVIDER3_PHPSESSID"] = sid
-    return {"ok": True}
+    _set_app_setting(db, "PROVIDER3_PHPSESSID", sid)
+
+    return {
+        "ok": True,
+        "message": "SID actualizada",
+    }
 
 
 @app.post("/panel/provider/{provider_name}/on")
