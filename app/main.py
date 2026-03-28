@@ -1335,111 +1335,111 @@ def panel_actas(
       const url = `/panel/provider/${provider}/${action}`;
 
       try {
-        const res = await fetch(url, {{ method: "POST" }});
+        const res = await fetch(url, { method: "POST" });
         const data = await res.json();
 
-        if (data.ok) {{
+        if (data.ok) {
           location.reload();
-        }} else {{
+        } else {
           alert("Error cambiando proveedor");
-        }}
-      }} catch (e) {{
+        }
+      } catch (e) {
         alert("No se pudo conectar con el servidor");
-      }}
+      }
     }
 
     async function refreshSID() {
       const sid = prompt("Pega el nuevo PHPSESSID");
       if (!sid) return;
 
-      try {{
-        const res = await fetch("/panel/provider3/session", {{
+      try {
+        const res = await fetch("/panel/provider3/session", {
           method: "POST",
-          headers: {{
+          headers: {
             "Content-Type": "application/json"
-          }},
-          body: JSON.stringify({{
+          },
+          body: JSON.stringify({
             phpsessid: sid
-          }})
-        }});
+          })
+        });
 
         const data = await res.json();
 
-        if (data.ok) {{
+        if (data.ok) {
           alert("SID actualizada");
           location.reload();
-        }} else {{
+        } else {
           alert("Error actualizando SID");
-        }}
-      }} catch (e) {{
+        }
+      } catch (e) {
         alert("No se pudo conectar con el servidor");
-      }}
+      }
     }
 
     async function sendBroadcast(type) {
       const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
       if (!ok) return;
 
-      try {{
-        const res = await fetch(`/panel/broadcast/${type}`, {{
+      try {
+        const res = await fetch(`/panel/broadcast/${type}`, {
           method: "POST"
-        }});
+        });
 
         const data = await res.json();
 
-        if (data.ok) {{
-          alert(`Enviado: ${'{'}data.sent_count{'}'}\\nFallidos: ${'{'}data.failed_count{'}'}`);
-        }} else {{
+        if (data.ok) {
+          alert(`Enviado: ${data.sent_count}\nFallidos: ${data.failed_count}`);
+        } else {
           alert(data.error || "Error en envío masivo");
-        }}
-      }} catch (e) {{
+        }
+      } catch (e) {
         alert("No se pudo conectar con el servidor");
-      }}
+      }
     }
 
     async function sendFreeBroadcast() {
       const textarea = document.getElementById("broadcastMessage");
       const message = textarea.value.trim();
 
-      if (!message) {{
+      if (!message) {
         alert("Escribe un mensaje");
         return;
-      }}
+      }
 
       const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
       if (!ok) return;
 
-      try {{
-        const res = await fetch("/panel/broadcast/free", {{
+      try {
+        const res = await fetch("/panel/broadcast/free", {
           method: "POST",
-          headers: {{
+          headers: {
             "Content-Type": "application/json"
-          }},
-          body: JSON.stringify({{
+          },
+          body: JSON.stringify({
             message: message
-          }})
-        }});
+          })
+        });
 
         const data = await res.json();
 
-        if (data.ok) {{
-          alert(`Enviado: ${'{'}data.sent_count{'}'}\\nFallidos: ${'{'}data.failed_count{'}'}`);
+        if (data.ok) {
+          alert(`Enviado: ${data.sent_count}\nFallidos: ${data.failed_count}`);
           textarea.value = "";
-        }} else {{
+        } else {
           alert(data.error || "Error en envío masivo");
-        }}
-      }} catch (e) {{
+        }
+      } catch (e) {
         alert("No se pudo conectar con el servidor");
-      }}
+      }
     }
 
     function clearBroadcast() {
       document.getElementById("broadcastMessage").value = "";
     }
 
-    setInterval(() => {{
+    setInterval(() => {
       location.reload();
-    }}, 30000);
+    }, 30000);
   </script>
 </body>
 </html>
