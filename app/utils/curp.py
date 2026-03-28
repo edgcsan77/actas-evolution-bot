@@ -17,7 +17,7 @@ def detect_act_type(text: str) -> str:
     t = normalize_text(text)
     t_nospace = re.sub(r"\s+", "", t)
 
-    if ("FOLIO" in t_nospace or "FOLIADO" in t_nospace) and not any(x in t_nospace for x in ["NAC", "MAT", "DEF", "DIV"]):
+    if ("FOLIO" in t_nospace or "FOLIADO" in t_nospace or "FOLIADA" in t_nospace) and not any(x in t_nospace for x in ["NAC", "MAT", "DEF", "DIV"]):
         return "NACIMIENTO FOLIO"
 
     if any(x in t_nospace for x in [
@@ -46,7 +46,7 @@ def detect_act_type(text: str) -> str:
     ]):
         return "DIVORCIO FOLIO"
 
-    if "FOLIO" in t_nospace or "FOLIADO" in t_nospace:
+    if "FOLIO" in t_nospace or "FOLIADO" in t_nospace or "FOLIADA" in t_nospace:
         if any(x in t_nospace for x in ["NACIMIENTO", "NACIM", "NAC"]):
             return "NACIMIENTO FOLIO"
         if any(x in t_nospace for x in ["MATRIMONIO", "MATRI", "MAT"]):
@@ -122,6 +122,7 @@ def _remove_type_words(line: str) -> str:
         r"DEFUNCION",
         r"DIVORCIO",
         r"NACIMI\w*",
+        r"FOLIADA",
     ]
 
     for p in patterns:
