@@ -173,6 +173,31 @@ class Provider3Client:
             raise RuntimeError(f"CADENA_NO_JSON: {resp.text[:500]}") from exc
 
 
+def keepalive(self) -> dict:
+    url = f"{self.base_url}/user_proxy.php"
+
+    resp = self.session.get(
+        url,
+        timeout=settings.PROVIDER3_TIMEOUT_LOGIN
+    )
+
+    if resp.status_code == 401:
+        raise RuntimeError("PROVIDER3_KEEPALIVE_SESSION_INVALID")
+
+    if resp.status_code == 429:
+        raise RuntimeError("PROVIDER3_KEEPALIVE_RATE_LIMIT")
+
+    resp.raise_for_status()
+
+    try:
+        return resp.json()
+    except Exception:
+        return {
+            "ok": True,
+            "status_code": resp.status_code
+        }
+
+
 def decode_pdf_base64(pdf_b64: str) -> bytes:
     raw = (pdf_b64 or "").strip()
 
