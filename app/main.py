@@ -1670,13 +1670,22 @@ def _deliver_text_result(req: RequestLog, text: str):
 def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = None):
     filename = filename or f"{req.curp}.pdf"
 
-    tiempo = ""
+    # calcular tiempo de proceso
+    caption_text = ""
+
     if req.created_at:
         delta = datetime.utcnow() - req.created_at
-        segundos = int(delta.total_seconds())
-        tiempo = f"⏱️ Tiempo de proceso: {segundos} s"
+        total_seconds = int(delta.total_seconds())
 
-    caption_text = tiempo
+        minutes = total_seconds // 60
+        seconds = total_seconds % 60
+
+        if minutes > 0:
+            tiempo = f"{minutes} min {seconds} s"
+        else:
+            tiempo = f"{seconds} s"
+
+        caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
 
     is_base64 = not pdf_data.startswith("http")
 
