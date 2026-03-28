@@ -278,7 +278,7 @@ DE 08:00 AM A 10:00 PM
 
 BROADCAST_MANTENIMIENTO_MSG = """🚧 *DOCU EXPRES EN MANTENIMIENTO*
 
-Por el momento el sistema se encuentra en mantenimiento o suspendido temporalmente.
+Por el momento el sistema se encuentra en mantenimiento temporalmente.
 
 Apenas quede restablecido les avisaremos por este medio.
 Gracias por su comprensión.
@@ -359,6 +359,17 @@ GROUP_NAME_MAP = {
     "120363409641104856@g.us": "Gpo. No. 9 Diego",
     "120363422789316023@g.us": "Gpo. No. 16 Vallarta",
     "120363424015683577@g.us": "Gpo. No. 21 Ana Pineda",
+    "120363424277043543@g.us": "Gpo. No. 26 Juan Carlos",
+    "120363430748954270@g.us": "Gpo. No. 50 Yuni",
+    "120363421058595249@g.us": "Gpo. No. 47 Airenet",
+    "120363422560457092@g.us": "Gpo. No. 29 Elaine",
+    "120363404803905766@g.us": "Gpo. No. 40 Imperio",
+    "120363424595029370@g.us": "Gpo. No. 54 Adriana",
+    "120363421296099572@g.us": "Gpo. No. 39 Susana",
+    "120363424674106871@g.us": "Gpo. No. 32 Papeleria Leo",
+    "120363424414421234@g.us": "Gpo. No. 5 Rosas Reclutador",
+    "120363407025228491@g.us": "Gpo. No. 1 Gestoria Docu Express",
+    "120363424851734635@g.us": "Gpo. No. 17 Svs. Digitales",
 }
 
 
@@ -483,6 +494,22 @@ def panel_broadcast_mantenimiento():
 @app.post("/panel/broadcast/suspendido")
 def panel_broadcast_suspendido():
     return _broadcast_to_groups(BROADCAST_SUSPENDIDO_MSG)
+
+
+@app.post("/panel/broadcast/free")
+def panel_broadcast_free():
+    try:
+        payload = request.get_json(silent=True) or {}
+        message_text = (payload.get("message") or "").strip()
+
+        if not message_text:
+            return {"ok": False, "error": "Mensaje vacío"}
+
+        return _broadcast_to_groups(message_text)
+
+    except Exception as e:
+        print("panel_broadcast_free error:", repr(e), flush=True)
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/panel", response_class=HTMLResponse)
@@ -612,6 +639,21 @@ def panel_actas(
         <button onclick="sendBroadcast('activas')">Enviar promoción</button>
         <button onclick="sendBroadcast('mantenimiento')">Enviar mantenimiento</button>
         <button onclick="sendBroadcast('suspendido')">Enviar suspendido</button>
+
+        <br><br>
+
+        <b>ENVÍO MASIVO LIBRE</b><br><br>
+        
+        <textarea
+          id="broadcastMessage"
+          rows="6"
+          style="width:100%; max-width:700px; padding:10px; border:1px solid #cbd5e1; border-radius:10px; resize:vertical;"
+          placeholder="Escribe aquí el mensaje que deseas enviar a todos los grupos..."
+        ></textarea>
+        
+        <br><br>
+        
+        <button onclick="sendFreeBroadcast()">Enviar mensaje libre</button>
 
       </div>
     </div>
@@ -876,6 +918,37 @@ def panel_actas(
       alert(`Enviado: ${data.sent_count}\nFallidos: ${data.failed_count}`);
     } else {
       alert("Error en envío masivo");
+    }
+  }
+
+  async function sendFreeBroadcast() {
+    const message = document.getElementById("broadcastMessage").value.trim();
+
+    if (!message) {
+      alert("Escribe un mensaje");
+      return;
+    }
+
+    const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
+    if (!ok) return;
+
+    const res = await fetch("/panel/broadcast/free", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        message: message
+      })
+    });
+
+    const data = await res.json();
+
+    if (data.ok) {
+      alert(`Enviado: ${data.sent_count}\nFallidos: ${data.failed_count}`);
+      document.getElementById("broadcastMessage").value = "";
+    } else {
+      alert(data.error || "Error en envío masivo");
     }
   }
 
