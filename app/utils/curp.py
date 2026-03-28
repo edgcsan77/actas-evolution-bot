@@ -251,14 +251,14 @@ def detect_identifier_problem(text: str) -> str | None:
         if not token:
             return (
                 "⚠️ No se detectó una CURP válida.\n\n"
-                "La CURP debe tener exactamente 18 caracteres.\n"
+                "La CURP debe tener exactamente 18 caracteres:\n"
                 "4 letras, 6 dígitos, 6 letras y 2 caracteres alfanuméricos"
             )
 
         if not re.fullmatch(CURP_REGEX, token):
             return (
                 "⚠️ La CURP parece incompleta o incorrecta.\n\n"
-                "La CURP debe tener exactamente 18 caracteres.\n"
+                "La CURP debe tener exactamente 18 caracteres:\n"
                 "4 letras, 6 dígitos, 6 letras y 2 caracteres alfanuméricos"
             )
 
@@ -309,7 +309,7 @@ def detect_identifier_problem(text: str) -> str | None:
         if has_letters and has_digits:
             return (
                 "⚠️ La CURP parece incompleta o incorrecta.\n\n"
-                "La CURP debe tener exactamente 18 caracteres.\n"
+                "La CURP debe tener exactamente 18 caracteres:\n"
                 "4 letras, 6 dígitos, 6 letras y 2 caracteres alfanuméricos"
             )
 
