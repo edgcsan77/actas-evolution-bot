@@ -7,7 +7,7 @@ from app.worker import provider3_keepalive_job
 from app.config import settings
 from app.db import Base, engine, get_db
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting
-from app.queue import request_queue
+from app.queue import request_queue, redis_conn
 from app.worker import process_request
 
 from app.utils.curp import (
@@ -263,6 +263,35 @@ def _panel_type_rows(rows: list[RequestLog]) -> list[dict]:
     return out
 
 
+BROADCAST_ACTIVAS_MSG = """*SERVICIO DE ACTAS SUPER RAPIDAS SALIENDO EN SEGUNDOS*
+⚡⚡⚡MANDEN, MANDEN💫💫
+
+*SOLICITALAS POR:*
+*CURP*
+*CADENA (Identificador Electrónico)*
+*CODIGO DE VERIFICACION*
+*CON FOLIO O SIN FOLIO.*
+
+HORARIOS DE LUNES A SABADO
+DE 08:00 AM A 10:00 PM
+"""
+
+BROADCAST_MANTENIMIENTO_MSG = """🚧 *DOCU EXPRES EN MANTENIMIENTO*
+
+Por el momento el sistema se encuentra en mantenimiento o suspendido temporalmente.
+
+Apenas quede restablecido les avisaremos por este medio.
+Gracias por su comprensión.
+"""
+
+BROADCAST_SUSPENDIDO_MSG = """⛔ *DOCU EXPRES SUSPENDIDO TEMPORALMENTE*
+
+Por el momento el servicio está suspendido temporalmente.
+En cuanto vuelva a operar les avisaremos por este medio.
+Gracias por su paciencia.
+"""
+
+
 GROUP_NAME_MAP = {
     "120363406806549379@g.us": "Actas Pruebas 1",
     "120363425323721713@g.us": "Actas Pruebas 2",
@@ -393,6 +422,69 @@ def panel_api_actas(
     }
 
 
+def _broadcast_target_groups() -> list[str]:
+    out = []
+
+    excluded_words = (
+        "PROV",
+        "PRUEBA",
+        "PRUEBAS",
+        "TEST",
+    )
+
+    for gid, name in GROUP_NAME_MAP.items():
+        name_up = (name or "").strip().upper()
+
+        if any(word in name_up for word in excluded_words):
+            continue
+
+        out.append(gid)
+
+    return out
+
+
+def _broadcast_to_groups(message_text: str) -> dict:
+    sent = []
+    failed = []
+
+    for gid in _broadcast_target_groups():
+        try:
+            send_group_text(gid, message_text)
+            sent.append({
+                "group_jid": gid,
+                "group_name": _group_name(gid),
+            })
+        except Exception as e:
+            failed.append({
+                "group_jid": gid,
+                "group_name": _group_name(gid),
+                "error": str(e),
+            })
+
+    return {
+        "ok": True,
+        "sent_count": len(sent),
+        "failed_count": len(failed),
+        "sent": sent,
+        "failed": failed,
+    }
+
+
+@app.post("/panel/broadcast/activas")
+def panel_broadcast_activas():
+    return _broadcast_to_groups(BROADCAST_ACTIVAS_MSG)
+
+
+@app.post("/panel/broadcast/mantenimiento")
+def panel_broadcast_mantenimiento():
+    return _broadcast_to_groups(BROADCAST_MANTENIMIENTO_MSG)
+
+
+@app.post("/panel/broadcast/suspendido")
+def panel_broadcast_suspendido():
+    return _broadcast_to_groups(BROADCAST_SUSPENDIDO_MSG)
+
+
 @app.get("/panel", response_class=HTMLResponse)
 def panel_actas(
     view: str = "day",
@@ -513,6 +605,13 @@ def panel_actas(
         <br><br>
 
         {provider_states}
+
+        <br><br>
+
+        <b>ENVÍOS MASIVOS</b><br>
+        <button onclick="sendBroadcast('activas')">Enviar promoción</button>
+        <button onclick="sendBroadcast('mantenimiento')">Enviar mantenimiento</button>
+        <button onclick="sendBroadcast('suspendido')">Enviar suspendido</button>
 
       </div>
     </div>
@@ -718,7 +817,6 @@ def panel_actas(
 
 
   <script>
-
   async function toggleProvider(provider, action) {
 
     const url = `/panel/provider/${provider}/${action}`;
@@ -743,7 +841,7 @@ def panel_actas(
 
     if(!sid) return;
 
-    const res = await fetch("/panel/provider3/update-sid", {
+    const res = await fetch("/panel/provider3/session", {
         method: "POST",
         headers: {
             "Content-Type": "application/json"
@@ -762,6 +860,23 @@ def panel_actas(
         alert("Error actualizando SID");
     }
 
+  }
+
+  async function sendBroadcast(type) {
+    const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
+    if (!ok) return;
+
+    const res = await fetch(`/panel/broadcast/${type}`, {
+      method: "POST"
+    });
+
+    const data = await res.json();
+
+    if (data.ok) {
+      alert(`Enviado: ${data.sent_count}\nFallidos: ${data.failed_count}`);
+    } else {
+      alert("Error en envío masivo");
+    }
   }
 
   setInterval(() => {
@@ -1118,6 +1233,15 @@ def _resolve_requester_wa_id(data: dict, key: dict, is_group: bool) -> str:
     return _normalize_wa_actor(remote_jid)
 
 
+def webhook_msg_seen(msg_id: str) -> bool:
+    if not msg_id:
+        return False
+
+    key = f"wa:webhook:msg:{msg_id}"
+    created = redis_conn.set(key, "1", ex=300, nx=True)
+    return not bool(created)
+
+
 @app.post("/webhook/evolution")
 async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
     try:
@@ -1135,6 +1259,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         from_me = key.get("fromMe", False)
         participant = key.get("participant", "")
         msg_id = key.get("id", "")
+
+        if webhook_msg_seen(msg_id):
+            print("IGNORED_REASON = duplicate_msg_id", flush=True)
+            print("IGNORED_MSG_ID =", msg_id, flush=True)
+            return {"ok": True, "ignored": "duplicate_msg_id"}
         
         is_group = remote_jid.endswith("@g.us")
         source_chat_id = remote_jid
@@ -1607,10 +1736,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         act_type = detect_act_type(text_body)
         print("REQUEST_ACT_TYPE =", act_type, flush=True)
 
+        created_any = False
+
         for term in terms:
             print("PROCESSING_TERM =", term, flush=True)
         
-            last_done = get_last_done_request(db, term, act_type)
+            #last_done = get_last_done_request(db, term, act_type)
         
             base_request_key = build_request_key(term, act_type, source_chat_id)
         
@@ -1703,6 +1834,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 db.commit()
         
                 request_queue.enqueue(process_request, error_existing.id)
+                created_any = True
         
                 print("REQUEUED_EXISTING_REQUEST_ID =", error_existing.id, flush=True)
                 print("REQUEUED_EXISTING_TERM =", error_existing.curp, flush=True)
@@ -1757,24 +1889,28 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 continue
         
             request_queue.enqueue(process_request, row.id)
+            created_any = True
         
             print("ENQUEUED_REQUEST_ID =", row.id, flush=True)
             print("ENQUEUED_TERM =", row.curp, flush=True)
             print("ENQUEUED_TYPE =", row.act_type, flush=True)
             print("ENQUEUED_SOURCE_GROUP =", row.source_group_id, flush=True)
 
-        actor = push_name or requester_wa_id
-        ack_msg = (
-            f"🚀 DOCU EXPRES\n"
-            f"Solicitud recibida de {actor}.\n"
-            f"Esto puede tardar unos segundos..."
-        )
+        if created_any:
+            actor = push_name or requester_wa_id
+            ack_msg = (
+                f"🚀 DOCU EXPRES\n"
+                f"Solicitud recibida de {actor}.\n"
+                f"Esto puede tardar unos segundos..."
+            )
         
-        if source_group_id:
-            send_group_text(source_group_id, ack_msg)
+            if source_group_id:
+                send_group_text(source_group_id, ack_msg)
+            else:
+                send_text(requester_wa_id, ack_msg)
         else:
-            send_text(requester_wa_id, ack_msg)
-            
+            print("IGNORED_REASON = nothing_created", flush=True)
+        
         return {"ok": True}
 
     except Exception as e:
