@@ -2270,6 +2270,48 @@ def panel_blocked_groups():
     return {"ok": True, "items": rows}
 
 
+def _unwrap_message(msg: dict) -> dict:
+    current = msg or {}
+
+    while isinstance(current, dict):
+        if "documentMessage" in current:
+            return current
+
+        if "documentWithCaptionMessage" in current:
+            inner = current.get("documentWithCaptionMessage", {})
+            current = inner.get("message", {}) or {}
+            continue
+
+        if "ephemeralMessage" in current:
+            inner = current.get("ephemeralMessage", {})
+            current = inner.get("message", {}) or {}
+            continue
+
+        if "viewOnceMessage" in current:
+            inner = current.get("viewOnceMessage", {})
+            current = inner.get("message", {}) or {}
+            continue
+
+        if "viewOnceMessageV2" in current:
+            inner = current.get("viewOnceMessageV2", {})
+            current = inner.get("message", {}) or {}
+            continue
+
+        if "viewOnceMessageV2Extension" in current:
+            inner = current.get("viewOnceMessageV2Extension", {})
+            current = inner.get("message", {}) or {}
+            continue
+
+        if "editedMessage" in current:
+            inner = current.get("editedMessage", {})
+            current = inner.get("message", {}) or {}
+            continue
+
+        break
+
+    return current
+    
+
 @app.post("/webhook/evolution")
 async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
     try:
@@ -2392,15 +2434,19 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             # 1) INTENTAR DETECTAR PDF
             doc = None
 
-            if "documentMessage" in message:
-                doc = message.get("documentMessage")
-            elif "documentWithCaptionMessage" in message:
-                doc_wrap = message.get("documentWithCaptionMessage", {})
+            msg_unwrapped = _unwrap_message(message)
+
+            if "documentMessage" in msg_unwrapped:
+                doc = msg_unwrapped.get("documentMessage")
+
+            elif "documentWithCaptionMessage" in msg_unwrapped:
+                doc_wrap = msg_unwrapped.get("documentWithCaptionMessage", {})
                 doc = doc_wrap.get("message", {}).get("documentMessage")
-            elif "extendedTextMessage" in message:
-                ext = message.get("extendedTextMessage", {})
-                ctx = ext.get("contextInfo", {})
-                quoted = ctx.get("quotedMessage", {})
+
+            elif "extendedTextMessage" in msg_unwrapped:
+                ext = msg_unwrapped.get("extendedTextMessage", {})
+                ctx = ext.get("contextInfo", {}) or {}
+                quoted = _unwrap_message(ctx.get("quotedMessage", {}) or {})
 
                 if "documentMessage" in quoted:
                     doc = quoted.get("documentMessage")
