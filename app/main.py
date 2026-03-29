@@ -13,6 +13,7 @@ from app.db import Base, engine, get_db
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting
 from app.queue import request_queue, redis_conn
 from app.worker import process_request, provider3_keepalive_job
+from app.services.provider3 import Provider3Client
 
 from app.utils.curp import (
     extract_request_terms,
@@ -1658,7 +1659,6 @@ def test_provider3_session(
     payload: dict = Body(...),
     db: Session = Depends(get_db),
 ):
-    from app.services.provider3 import Provider3Client
 
     curp = (payload.get("curp") or "").strip().upper()
     tipo_acta = (payload.get("tipo_acta") or "nacimiento").strip().lower()
@@ -1878,6 +1878,8 @@ def _set_app_setting(db: Session, key: str, value: str):
 
 
 def _providers_status_text(db: Session) -> str:
+    from app.services.provider3 import Provider3Client
+
     p1 = _get_or_create_provider(db, "PROVIDER1", True)
     p2 = _get_or_create_provider(db, "PROVIDER2", False)
     p3 = _get_or_create_provider(db, "PROVIDER3", False)
@@ -1886,10 +1888,30 @@ def _providers_status_text(db: Session) -> str:
     s2 = "ON" if p2.is_enabled else "OFF"
     s3 = "ON" if p3.is_enabled else "OFF"
 
+    provider3_extra = ""
+
+    try:
+        phpsessid = _get_app_setting(db, "PROVIDER3_PHPSESSID", settings.PROVIDER3_PHPSESSID)
+        if phpsessid:
+            client = Provider3Client(phpsessid=phpsessid)
+            lic = client.get_licenses()
+
+            curp_left = lic.get("acta_curp")
+            cadena_left = lic.get("acta_cadena")
+
+            provider3_extra = (
+                f" | CURP restantes: {curp_left if curp_left is not None else 'N/D'}"
+                f" | CADENA restantes: {cadena_left if cadena_left is not None else 'N/D'}"
+            )
+        else:
+            provider3_extra = " | SIN PHPSESSID"
+    except Exception as e:
+        provider3_extra = f" | ERROR LICENCIAS: {str(e)}"
+
     return (
         f"ADMID DIGITAL: {s1}\n"
         f"AUSTRAM BOT: {s2}\n"
-        f"AUSTRAM WEB: {s3}"
+        f"AUSTRAM WEB: {s3}{provider3_extra}"
     )
 
 
