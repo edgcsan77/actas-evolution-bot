@@ -34,6 +34,34 @@ from app.services.evolution import (
 
 app = FastAPI(title=settings.APP_NAME)
 PANEL_TZ = "America/Monterrey"
+BLOCKED_GROUPS_KEY = "blocked_groups_no_response"
+
+
+def is_group_blocked(group_jid: str) -> bool:
+    if not group_jid:
+        return False
+    return bool(redis_conn.sismember(BLOCKED_GROUPS_KEY, group_jid))
+
+
+def block_group(group_jid: str):
+    if not group_jid:
+        redis_conn.sadd(BLOCKED_GROUPS_KEY, group_jid)
+
+
+def unblock_group(group_jid: str):
+    if not group_jid:
+        redis_conn.srem(BLOCKED_GROUPS_KEY, group_jid)
+
+
+def list_blocked_groups() -> list[str]:
+    vals = redis_conn.smembers(BLOCKED_GROUPS_KEY) or set()
+    out = []
+    for v in vals:
+        if isinstance(v, bytes):
+            v = v.decode()
+        out.append(v)
+    out.sort()
+    return out
 
 
 @app.post("/cron/provider3/keepalive")
@@ -1269,6 +1297,8 @@ def panel_actas(
                   <th class="right">HECHO</th>
                   <th class="right">ERROR</th>
                   <th>Última actualización</th>
+                  <th>Bloqueo</th>
+                  <th>Acción</th>
                 </tr>
               </thead>
               <tbody>
@@ -1276,6 +1306,15 @@ def panel_actas(
     
         if by_group:
             for r in by_group:
+                blocked = is_group_blocked(r["group_jid"])
+                blocked_text = "BLOQUEADO" if blocked else "ACTIVO"
+        
+                action_btn = (
+                    f'<button class="btn btn-success" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'unblock\')">Desbloquear</button>'
+                    if blocked
+                    else f'<button class="btn btn-danger" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'block\')">Bloquear</button>'
+                )
+        
                 html += f"""
                 <tr>
                   <td>{_esc(_group_name(r["group_jid"]))}</td>
@@ -1285,10 +1324,12 @@ def panel_actas(
                   <td class="right">{r["done"]}</td>
                   <td class="right">{r["error"]}</td>
                   <td>{_esc(_fmt_dt(r["last_update"]))}</td>
+                  <td>{blocked_text}</td>
+                  <td>{action_btn}</td>
                 </tr>
                 """
         else:
-            html += '<tr><td colspan="7">Sin datos.</td></tr>'
+            html += '<tr><td colspan="9">Sin datos.</td></tr>'
     
         html += """
               </tbody>
@@ -1470,6 +1511,31 @@ def panel_actas(
     
         function clearBroadcast() {
           document.getElementById("broadcastMessage").value = "";
+        }
+
+        async function toggleGroupBlock(groupJid, action) {
+          const msg = action === "block"
+            ? "¿Bloquear este grupo? El bot dejará de responder silenciosamente."
+            : "¿Desbloquear este grupo?";
+        
+          const ok = confirm(msg);
+          if (!ok) return;
+        
+          try {
+            const res = await fetch(`/panel/group/${encodeURIComponent(groupJid)}/${action}`, {
+              method: "POST"
+            });
+        
+            const data = await res.json();
+        
+            if (data.ok) {
+              location.reload();
+            } else {
+              alert(data.error || "Error cambiando estado del grupo");
+            }
+          } catch (e) {
+            alert("No se pudo conectar con el servidor");
+          }
         }
     
         setInterval(() => {
@@ -1869,6 +1935,29 @@ def webhook_msg_seen(msg_id: str) -> bool:
     return not bool(created)
 
 
+@app.post("/panel/group/{group_jid}/block")
+def panel_block_group(group_jid: str):
+    block_group(group_jid)
+    return {"ok": True, "group_jid": group_jid, "blocked": True}
+
+
+@app.post("/panel/group/{group_jid}/unblock")
+def panel_unblock_group(group_jid: str):
+    unblock_group(group_jid)
+    return {"ok": True, "group_jid": group_jid, "blocked": False}
+
+
+@app.get("/panel/groups/blocked")
+def panel_blocked_groups():
+    rows = []
+    for gid in list_blocked_groups():
+        rows.append({
+            "group_jid": gid,
+            "group_name": _group_name(gid),
+        })
+    return {"ok": True, "items": rows}
+
+
 @app.post("/webhook/evolution")
 async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
     try:
@@ -1895,6 +1984,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         is_group = remote_jid.endswith("@g.us")
         source_chat_id = remote_jid
         source_group_id = remote_jid if is_group else None
+
+        if is_group and is_group_blocked(source_group_id):
+            print("IGNORED_REASON = group_blocked", flush=True)
+            print("IGNORED_GROUP =", source_group_id, flush=True)
+            return {"ok": True, "ignored": "group_blocked"}
+        
         requester_wa_id = _resolve_requester_wa_id(data, key, is_group)
 
         print("ADMIN_DEBUG_REMOTE_JID =", remote_jid, flush=True)
