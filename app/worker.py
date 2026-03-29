@@ -288,9 +288,9 @@ def process_request(request_id: int):
             if total_seconds >= 60:
                 minutes = int(total_seconds // 60)
                 seconds = total_seconds % 60
-                tiempo = f"{minutes} min {seconds:.2f} s"
+                tiempo = f"{minutes} min {seconds:.2f} segundos"
             else:
-                tiempo = f"{total_seconds:.2f} s"
+                tiempo = f"{total_seconds:.2f} segundos"
         
             caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
         
