@@ -2028,7 +2028,12 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
     caption_text = ""
 
     if req.created_at:
-        delta = _mx_now() - req.created_at
+        created_at = req.created_at
+
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=ZoneInfo("America/Monterrey"))
+
+        delta = _mx_now() - created_at
         total_seconds = max(0.0, delta.total_seconds())
 
         if total_seconds >= 60:
