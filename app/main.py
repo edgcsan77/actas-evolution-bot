@@ -2572,6 +2572,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 )
                 return {"ok": True, "provider_result": "no_record"}
 
+            print("PROVIDER_RAW_MESSAGE_KEYS =", list(message.keys()), flush=True)
+            print("PROVIDER_RAW_MESSAGE =", message, flush=True)
             print("PROVIDER_UNHANDLED_MESSAGE =", message, flush=True)
             return {"ok": True, "ignored": "provider_unhandled_message"}
 
