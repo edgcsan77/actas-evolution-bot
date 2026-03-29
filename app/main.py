@@ -2039,7 +2039,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         terms = extract_request_terms(text_body)
         problem = detect_identifier_problem(text_body)
 
-        if not terms:
+        if not terms and not is_admin_command:
             if problem:
                 if source_group_id:
                     send_group_text(source_group_id, problem)
