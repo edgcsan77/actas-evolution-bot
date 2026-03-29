@@ -1984,12 +1984,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         is_group = remote_jid.endswith("@g.us")
         source_chat_id = remote_jid
         source_group_id = remote_jid if is_group else None
-
-        if is_group and is_group_blocked(source_group_id):
-            print("IGNORED_REASON = group_blocked", flush=True)
-            print("IGNORED_GROUP =", source_group_id, flush=True)
-            return {"ok": True, "ignored": "group_blocked"}
-        
         requester_wa_id = _resolve_requester_wa_id(data, key, is_group)
 
         print("ADMIN_DEBUG_REMOTE_JID =", remote_jid, flush=True)
@@ -2034,6 +2028,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         provider_groups = _all_provider_groups()
         is_provider_message = source_chat_id in provider_groups
         is_admin_command = text_upper.startswith("/")
+
+        if is_group and is_group_blocked(source_group_id) and not (is_admin_command and _is_admin(requester_wa_id, from_me)):
+            print("IGNORED_REASON = group_blocked", flush=True)
+            print("IGNORED_GROUP =", source_group_id, flush=True)
+            return {"ok": True, "ignored": "group_blocked"}
 
         terms = extract_request_terms(text_body)
         problem = detect_identifier_problem(text_body)
