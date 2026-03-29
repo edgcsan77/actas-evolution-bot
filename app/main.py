@@ -2549,6 +2549,13 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 print("PROVIDER_PDF_BASE64_LEN =", len(safe_media_b64), flush=True)
                 
                 _deliver_pdf_result(open_req, safe_media_b64, filename=filename or f"{open_req.curp}.pdf")
+                
+                open_req.pdf_url = None
+                open_req.provider_media_url = "BASE64_FROM_MEDIA_MESSAGE"
+                open_req.status = "DONE"
+                open_req.updated_at = _mx_now()
+                db.commit()
+                
                 return {"ok": True, "provider_result": "pdf_delivered"}
 
             # 2) SI NO HAY PDF, INTENTAR TEXTO
