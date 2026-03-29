@@ -40,28 +40,26 @@ BLOCKED_GROUPS_KEY = "blocked_groups_no_response"
 def is_group_blocked(group_jid: str) -> bool:
     if not group_jid:
         return False
-    return bool(redis_conn.sismember(BLOCKED_GROUPS_KEY, group_jid))
+
+    blocked = redis_conn.sismember(BLOCKED_GROUPS_KEY, group_jid)
+    print("IS_GROUP_BLOCKED_CHECK =", group_jid, "=>", blocked, flush=True)
+    return bool(blocked)
 
 
 def block_group(group_jid: str):
     if not group_jid:
-        redis_conn.sadd(BLOCKED_GROUPS_KEY, group_jid)
+        return
+    redis_conn.sadd(BLOCKED_GROUPS_KEY, group_jid)
+    print("GROUP_BLOCKED =", group_jid, flush=True)
+    print("BLOCKED_GROUPS_NOW =", redis_conn.smembers(BLOCKED_GROUPS_KEY), flush=True)
 
 
 def unblock_group(group_jid: str):
     if not group_jid:
-        redis_conn.srem(BLOCKED_GROUPS_KEY, group_jid)
-
-
-def list_blocked_groups() -> list[str]:
-    vals = redis_conn.smembers(BLOCKED_GROUPS_KEY) or set()
-    out = []
-    for v in vals:
-        if isinstance(v, bytes):
-            v = v.decode()
-        out.append(v)
-    out.sort()
-    return out
+        return
+    redis_conn.srem(BLOCKED_GROUPS_KEY, group_jid)
+    print("GROUP_UNBLOCKED =", group_jid, flush=True)
+    print("BLOCKED_GROUPS_NOW =", redis_conn.smembers(BLOCKED_GROUPS_KEY), flush=True)
 
 
 @app.post("/cron/provider3/keepalive")
@@ -1937,12 +1935,14 @@ def webhook_msg_seen(msg_id: str) -> bool:
 
 @app.post("/panel/group/{group_jid}/block")
 def panel_block_group(group_jid: str):
+    print("PANEL_BLOCK_GROUP =", group_jid, flush=True)
     block_group(group_jid)
     return {"ok": True, "group_jid": group_jid, "blocked": True}
 
 
 @app.post("/panel/group/{group_jid}/unblock")
 def panel_unblock_group(group_jid: str):
+    print("PANEL_UNBLOCK_GROUP =", group_jid, flush=True)
     unblock_group(group_jid)
     return {"ok": True, "group_jid": group_jid, "blocked": False}
 
@@ -2028,6 +2028,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         provider_groups = _all_provider_groups()
         is_provider_message = source_chat_id in provider_groups
         is_admin_command = text_upper.startswith("/")
+
+        print("WEBHOOK_SOURCE_GROUP_ID =", source_group_id, flush=True)
+        print("WEBHOOK_IS_GROUP_BLOCKED =", is_group_blocked(source_group_id), flush=True)
 
         if is_group and is_group_blocked(source_group_id) and not (is_admin_command and _is_admin(requester_wa_id, from_me)):
             print("IGNORED_REASON = group_blocked", flush=True)
