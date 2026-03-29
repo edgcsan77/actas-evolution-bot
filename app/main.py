@@ -1603,7 +1603,6 @@ def panel_actas(
         
                 html += f"""
                 <tr>
-                  <td>{_esc(_group_name(r["group_jid"]))}</td>
                   <td>
                     <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}">
                       {_esc(_group_name(r["group_jid"]))}
