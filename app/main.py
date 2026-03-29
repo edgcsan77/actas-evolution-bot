@@ -42,7 +42,6 @@ def is_group_blocked(group_jid: str) -> bool:
         return False
 
     blocked = redis_conn.sismember(BLOCKED_GROUPS_KEY, group_jid)
-    print("IS_GROUP_BLOCKED_CHECK =", group_jid, "=>", blocked, flush=True)
     return bool(blocked)
 
 
