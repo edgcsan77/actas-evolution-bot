@@ -1401,7 +1401,7 @@ def panel_actas(
     
               <div class="provider-grid">
                 <div class="provider-card">
-                  <div class="provider-name">ADMID DIGITAL</div>
+                  <div class="provider-name">PROVEEDOR WHATSAPP</div>
                   <div class="provider-actions">
                     <button class="btn btn-success" onclick="toggleProvider('PROVIDER1','on')">Activar</button>
                     <button class="btn btn-danger" onclick="toggleProvider('PROVIDER1','off')">Desactivar</button>
@@ -2031,10 +2031,17 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
         created_at = req.created_at
 
         if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=ZoneInfo("America/Monterrey"))
+            created_at = created_at.replace(tzinfo=ZoneInfo("UTC"))
 
+        created_at = created_at.astimezone(ZoneInfo("America/Monterrey"))
         delta = _mx_now() - created_at
         total_seconds = max(0.0, delta.total_seconds())
+
+        print("REQ_CREATED_AT_RAW =", req.created_at, flush=True)
+        print("REQ_CREATED_AT_TZINFO =", req.created_at.tzinfo if req.created_at else None, flush=True)
+        print("MX_NOW =", _mx_now(), flush=True)
+        print("CREATED_AT_FIXED =", created_at, flush=True)
+        print("DELTA_SECONDS =", total_seconds, flush=True)
 
         if total_seconds >= 60:
             minutes = int(total_seconds // 60)
@@ -2206,7 +2213,7 @@ def _providers_status_text(db: Session) -> str:
         provider3_extra = f" | ERROR LICENCIAS: {str(e)}"
 
     return (
-        f"ADMID DIGITAL: {s1}\n"
+        f"PROVEEDOR WHATSAPP: {s1}\n"
         f"AUSTRAM BOT: {s2}\n"
         f"AUSTRAM WEB: {s3}{provider3_extra}"
     )
