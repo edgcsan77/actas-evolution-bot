@@ -1606,7 +1606,7 @@ def panel_actas(
                   <td>{_esc(_group_name(r["group_jid"]))}</td>
                   <td>
                     <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}">
-                    {_esc(r["group_name"])}
+                      {_esc(_group_name(r["group_jid"]))}
                     </a>
                   </td>
                   <td class="right">{r["total"]}</td>
