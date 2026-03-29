@@ -10,6 +10,7 @@ class Provider3Client:
         self.login_url = f"{self.base_url}/login_proxy.php"
         self.acta_curp_url = f"{self.base_url}/service_proxy.php?type=acta-curp"
         self.acta_cadena_url = f"{self.base_url}/service_proxy.php?type=acta-cadena"
+        self.user_url = f"{self.base_url}/user_proxy.php"
 
         self.session = requests.Session()
         self.session.headers.update({
@@ -62,6 +63,28 @@ class Provider3Client:
                 "ok": True,
                 "status_code": resp.status_code
             }
+
+    def get_licenses(self) -> dict:
+        resp = self.session.get(
+            self.user_url,
+            timeout=settings.PROVIDER3_TIMEOUT_LOGIN
+        )
+    
+        if resp.status_code == 401:
+            raise RuntimeError("PROVIDER3_LICENSES_SESSION_INVALID")
+    
+        if resp.status_code == 429:
+            raise RuntimeError("PROVIDER3_LICENSES_RATE_LIMIT")
+    
+        resp.raise_for_status()
+    
+        data = resp.json()
+        licenses = data.get("licenses") or {}
+    
+        return {
+            "acta_curp": licenses.get("acta_curp"),
+            "acta_cadena": licenses.get("acta_cadena"),
+        }
 
     def login(self, captcha: str) -> dict:
         payload = {
