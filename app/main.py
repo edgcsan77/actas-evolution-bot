@@ -2375,8 +2375,17 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             "/PROVIDER2 ON",
             "/PROVIDER2 OFF",
         )
+
+        print("EARLY_EVENT =", event, flush=True)
+        print("EARLY_MSG_ID =", msg_id, flush=True)
+        print("EARLY_FROM_ME =", from_me, flush=True)
+        print("EARLY_REMOTE_JID =", remote_jid, flush=True)
+        print("EARLY_MESSAGE_KEYS =", list(message.keys()), flush=True)
         
         if from_me and not any(text_upper.startswith(cmd) for cmd in admin_commands):
+            print("IGNORED_REASON = from_me", flush=True)
+            print("IGNORED_FROM_ME_REMOTE_JID =", remote_jid, flush=True)
+            print("IGNORED_FROM_ME_MSG_ID =", msg_id, flush=True)
             return {"ok": True, "ignored": "from_me"}
 
         provider_groups = _all_provider_groups()
