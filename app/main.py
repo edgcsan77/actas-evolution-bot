@@ -2433,26 +2433,36 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             # 1) INTENTAR DETECTAR PDF
             doc = None
-
+            media_message_id = msg_id
+            
             msg_unwrapped = _unwrap_message(message)
-
+            
             if "documentMessage" in msg_unwrapped:
                 doc = msg_unwrapped.get("documentMessage")
-
+                media_message_id = msg_id
+            
             elif "documentWithCaptionMessage" in msg_unwrapped:
                 doc_wrap = msg_unwrapped.get("documentWithCaptionMessage", {})
                 doc = doc_wrap.get("message", {}).get("documentMessage")
-
+                media_message_id = msg_id
+            
             elif "extendedTextMessage" in msg_unwrapped:
                 ext = msg_unwrapped.get("extendedTextMessage", {})
                 ctx = ext.get("contextInfo", {}) or {}
                 quoted = _unwrap_message(ctx.get("quotedMessage", {}) or {})
-
+            
+                quoted_msg_id = ctx.get("stanzaId", "") or ctx.get("quotedStanzaID", "") or ""
+            
                 if "documentMessage" in quoted:
                     doc = quoted.get("documentMessage")
+                    media_message_id = quoted_msg_id or msg_id
+            
                 elif "documentWithCaptionMessage" in quoted:
                     doc_wrap = quoted.get("documentWithCaptionMessage", {})
                     doc = doc_wrap.get("message", {}).get("documentMessage")
+                    media_message_id = quoted_msg_id or msg_id
+            
+            print("MEDIA_MESSAGE_ID_USED =", media_message_id, flush=True)
 
             if doc:
                 filename = doc.get("fileName") or ""
@@ -2493,7 +2503,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     print("PROVIDER_PDF_WITHOUT_MATCH =", filename, flush=True)
                     return {"ok": True, "ignored": "provider_pdf_without_match"}
 
-                media_json = get_media_base64("document", msg_id)
+                media_json = get_media_base64("document", media_message_id)
                 media_b64 = (
                     media_json.get("base64")
                     or media_json.get("data")
