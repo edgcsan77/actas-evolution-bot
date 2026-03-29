@@ -1401,7 +1401,7 @@ def panel_actas(
     
               <div class="provider-grid">
                 <div class="provider-card">
-                  <div class="provider-name">PROVEEDOR WHATSAPP</div>
+                  <div class="provider-name">PROVEEDOR WA EMERGENCIA 1</div>
                   <div class="provider-actions">
                     <button class="btn btn-success" onclick="toggleProvider('PROVIDER1','on')">Activar</button>
                     <button class="btn btn-danger" onclick="toggleProvider('PROVIDER1','off')">Desactivar</button>
@@ -2213,7 +2213,7 @@ def _providers_status_text(db: Session) -> str:
         provider3_extra = f" | ERROR LICENCIAS: {str(e)}"
 
     return (
-        f"PROVEEDOR WHATSAPP: {s1}\n"
+        f"PROVEEDOR WA EMERGENCIA 1: {s1}\n"
         f"AUSTRAM BOT: {s2}\n"
         f"AUSTRAM WEB: {s3}{provider3_extra}"
     )
