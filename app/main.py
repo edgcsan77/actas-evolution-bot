@@ -1679,9 +1679,9 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
         if total_seconds >= 60:
             minutes = int(total_seconds // 60)
             seconds = total_seconds % 60
-            tiempo = f"{minutes} min {seconds:.2f} s"
+            tiempo = f"{minutes} min {seconds:.2f} segundos"
         else:
-            tiempo = f"{total_seconds:.2f} s"
+            tiempo = f"{total_seconds:.2f} segundos"
 
         caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
 
