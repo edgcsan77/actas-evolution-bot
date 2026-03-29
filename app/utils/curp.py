@@ -190,12 +190,16 @@ def extract_identifier_from_filename(filename: str) -> str | None:
         return None
 
     name = normalize_text(filename)
+    name = name.replace(".PDF", " ")
+    name = name.replace("_", " ")
+    name = name.replace("-", " ")
+    name = " ".join(name.split())
 
-    m = re.search(rf"\b({CURP_REGEX})\b", name)
+    m = re.search(rf"(?<![A-Z0-9])({CURP_REGEX})(?![A-Z0-9])", name)
     if m:
         return m.group(1)
 
-    m = re.search(rf"\b({NUM20_REGEX})\b", name)
+    m = re.search(rf"(?<!\d)({NUM20_REGEX})(?!\d)", name)
     if m:
         return m.group(1)
 
