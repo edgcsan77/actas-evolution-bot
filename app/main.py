@@ -287,6 +287,42 @@ def _panel_type_rows(rows: list[RequestLog]) -> list[dict]:
     return out
 
 
+def _panel_daily_group_rows(rows: list[RequestLog]) -> list[dict]:
+    data = {}
+
+    for r in rows:
+        day = r.created_at.strftime("%Y-%m-%d") if r.created_at else "SIN_FECHA"
+        gid = r.source_group_id or "PRIVADO"
+        key = (day, gid)
+
+        if key not in data:
+            data[key] = {
+                "day": day,
+                "group_jid": gid,
+                "total": 0,
+                "queued": 0,
+                "processing": 0,
+                "done": 0,
+                "error": 0,
+            }
+
+        item = data[key]
+        item["total"] += 1
+
+        if r.status == "QUEUED":
+            item["queued"] += 1
+        elif r.status == "PROCESSING":
+            item["processing"] += 1
+        elif r.status == "DONE":
+            item["done"] += 1
+        elif r.status == "ERROR":
+            item["error"] += 1
+
+    out = list(data.values())
+    out.sort(key=lambda x: (x["day"], x["group_jid"]), reverse=True)
+    return out
+
+
 BROADCAST_ACTIVAS_MSG = """*SERVICIO DE ACTAS SUPER RAPIDAS SALIENDO EN SEGUNDOS*
 ⚡⚡⚡MANDEN, MANDEN💫💫
 
@@ -428,6 +464,7 @@ def panel_api_actas(
     by_group = _panel_group_rows(rows)
     by_provider = _panel_provider_rows(rows)
     by_type = _panel_type_rows(rows)
+    by_day_group = _panel_daily_group_rows(rows)
 
     latest = []
     for r in rows[:100]:
@@ -453,6 +490,7 @@ def panel_api_actas(
         "by_group": by_group,
         "by_provider": by_provider,
         "by_type": by_type,
+        "by_day_group": by_day_group,
         "latest": latest,
     }
 
@@ -588,6 +626,7 @@ def panel_actas(
         by_group = _panel_group_rows(rows)
         by_provider = _panel_provider_rows(rows)
         by_type = _panel_type_rows(rows)
+        by_day_group = _panel_daily_group_rows(rows)
     
         latest = rows[:100]
     
@@ -1329,6 +1368,48 @@ def panel_actas(
         else:
             html += '<tr><td colspan="9">Sin datos.</td></tr>'
     
+        html += """
+              </tbody>
+            </table>
+          </div>
+        </div>
+        """
+
+        html += """
+        <div class="box">
+          <div class="head"><strong>Desglose diario por grupo cliente</strong></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Grupo</th>
+                  <th class="right">Total</th>
+                  <th class="right">EN COLA</th>
+                  <th class="right">PROCESANDO</th>
+                  <th class="right">HECHO</th>
+                  <th class="right">ERROR</th>
+                </tr>
+              </thead>
+              <tbody>
+        """
+
+        if by_day_group:
+            for r in by_day_group:
+                html += f"""
+                <tr>
+                  <td>{_esc(r["day"])}</td>
+                  <td>{_esc(_group_name(r["group_jid"]))}</td>
+                  <td class="right">{r["total"]}</td>
+                  <td class="right">{r["queued"]}</td>
+                  <td class="right">{r["processing"]}</td>
+                  <td class="right">{r["done"]}</td>
+                  <td class="right">{r["error"]}</td>
+                </tr>
+                """
+        else:
+            html += '<tr><td colspan="7">Sin datos.</td></tr>'
+
         html += """
               </tbody>
             </table>
