@@ -613,6 +613,8 @@ GROUP_NAME_MAP = {
     "120363424509175054@g.us": "Prov Normal 3",
     "120363426176817361@g.us": "Prov Normal 4",
     "120363409870423163@g.us": "Prov Especial 1",
+    "120363408639542108@g.us": "Prov Emergencia 1",
+    "120363427054214985@g.us": "Prov Emergencia 2",
     "120363422785755828@g.us": "Gpo. No. 4 Karen",
     "120363426949877636@g.us": "Gpo. No. 11 Morelos",
     "120363425014097597@g.us": "Gpo. No. 7 Karen Marvin",
@@ -645,7 +647,7 @@ GROUP_NAME_MAP = {
     "120363404620511153@g.us": "Gpo. No. 11 Max",
     "120363424829883028@g.us": "Gpo. No. 12 Max",
     "120363407417260200@g.us": "Gpo. No. 13 Max",
-    "120363422073988332@g.us": "Gpo. No. Day",
+    "120363422073988332@g.us": "Gpo. No. 13 Day",
     "120363423887399966@g.us": "Gpo. No. 2 Lesli",
     "120363407701598429@g.us": "Gpo. No. 20 Altas IMSS",
     "120363425702893567@g.us": "Gpo. No. 46 Papeleria MC",
@@ -679,6 +681,12 @@ GROUP_NAME_MAP = {
     "120363424414421234@g.us": "Gpo. No. 5 Rosas Reclutador",
     "120363407025228491@g.us": "Gpo. No. 1 Gestoria Docu Express",
     "120363424851734635@g.us": "Gpo. No. 17 Svs. Digitales",
+    "120363424333002785@g.us": "Gpo. No. 33 Miscelanea Batallon",
+    "120363401894657087@g.us": "Gpo. No. 36 Belladira",
+    "120363408050345917@g.us": "Gpo. No. 35 Melani",
+    "120363423353879965@g.us": "Gpo. No. 44 Nadia",
+    "120363422771877743@g.us": "Gpo. No. 48 Aliados Rurales",
+    "120363408050345917@g.us": "Gpo. No. 35 Disponible",
 }
 
 
