@@ -683,7 +683,7 @@ GROUP_NAME_MAP = {
     "120363424851734635@g.us": "Gpo. No. 17 Svs. Digitales",
     "120363424333002785@g.us": "Gpo. No. 33 Miscelanea Batallon",
     "120363401894657087@g.us": "Gpo. No. 36 Belladira",
-    "120363408050345917@g.us": "Gpo. No. 35 Melani",
+    "120363408050345917@g.us": "Gpo. No. 33 Melani",
     "120363423353879965@g.us": "Gpo. No. 44 Nadia",
     "120363422771877743@g.us": "Gpo. No. 48 Aliados Rurales",
     "120363408050345917@g.us": "Gpo. No. 35 Disponible",
