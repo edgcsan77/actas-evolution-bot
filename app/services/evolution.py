@@ -146,7 +146,7 @@ def send_document_base64(number: str, media_b64: str, filename: str = "acta.pdf"
     }
 
     print("SEND_DOCUMENT_BASE64_CAPTION =", repr(caption), flush=True)
-    print("SEND_DOCUMENT_BASE64_PAYLOAD =", payload, flush=True)
+    #print("SEND_DOCUMENT_BASE64_PAYLOAD =", payload, flush=True)
 
     resp = requests.post(url, headers=_headers(), json=payload, timeout=60)
 
@@ -170,7 +170,7 @@ def send_group_document_base64(group_jid: str, media_b64: str, filename: str = "
     }
 
     print("SEND_GROUP_DOCUMENT_BASE64_CAPTION =", repr(caption), flush=True)
-    print("SEND_GROUP_DOCUMENT_BASE64_PAYLOAD =", payload, flush=True)
+    #print("SEND_GROUP_DOCUMENT_BASE64_PAYLOAD =", payload, flush=True)
 
     resp = requests.post(url, headers=_headers(), json=payload, timeout=60)
 
