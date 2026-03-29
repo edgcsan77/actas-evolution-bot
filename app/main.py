@@ -1887,7 +1887,6 @@ def _providers_status_text(db: Session) -> str:
     s3 = "ON" if p3.is_enabled else "OFF"
 
     return (
-        "⚙️ Estado de proveedores\n"
         f"ADMID DIGITAL: {s1}\n"
         f"AUSTRAM BOT: {s2}\n"
         f"AUSTRAM WEB: {s3}"
