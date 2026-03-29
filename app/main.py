@@ -38,6 +38,26 @@ PANEL_TZ = "America/Monterrey"
 BLOCKED_GROUPS_KEY = "blocked_groups_no_response"
 
 
+def _mx_now():
+    return datetime.now(ZoneInfo("America/Monterrey"))
+
+
+DAYS_ES = {
+    0: "LUNES",
+    1: "MARTES",
+    2: "MIÉRCOLES",
+    3: "JUEVES",
+    4: "VIERNES",
+    5: "SÁBADO",
+    6: "DOMINGO",
+}
+
+
+def _day_name_es_from_date(day_str: str) -> str:
+    dt = datetime.strptime(day_str, "%Y-%m-%d")
+    return DAYS_ES[dt.weekday()]
+
+
 def is_group_blocked(group_jid: str) -> bool:
     if not group_jid:
         return False
@@ -321,6 +341,223 @@ def _panel_daily_group_rows(rows: list[RequestLog]) -> list[dict]:
     out = list(data.values())
     out.sort(key=lambda x: (x["day"], x["group_jid"]), reverse=True)
     return out
+
+
+def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str) -> dict:
+    days = {}
+    time_min, time_max, _ = _panel_period_bounds(view)
+
+    cur = time_min
+    while cur < time_max:
+        day_str = cur.strftime("%Y-%m-%d")
+        days[day_str] = {
+            "day_name": _day_name_es_from_date(day_str),
+            "date": day_str,
+            "total": 0,
+            "done": 0,
+            "error": 0,
+            "queued": 0,
+            "processing": 0,
+        }
+        cur += timedelta(days=1)
+
+    for r in rows:
+        if (r.source_group_id or "PRIVADO") != group_jid:
+            continue
+
+        if not r.created_at:
+            continue
+
+        day_str = r.created_at.strftime("%Y-%m-%d")
+        if day_str not in days:
+            continue
+
+        item = days[day_str]
+        item["total"] += 1
+
+        if r.status == "DONE":
+            item["done"] += 1
+        elif r.status == "ERROR":
+            item["error"] += 1
+        elif r.status == "QUEUED":
+            item["queued"] += 1
+        elif r.status == "PROCESSING":
+            item["processing"] += 1
+
+    rows_out = list(days.values())
+    rows_out.sort(key=lambda x: x["date"])
+
+    totals = {
+        "total": sum(x["total"] for x in rows_out),
+        "done": sum(x["done"] for x in rows_out),
+        "error": sum(x["error"] for x in rows_out),
+        "queued": sum(x["queued"] for x in rows_out),
+        "processing": sum(x["processing"] for x in rows_out),
+    }
+
+    return {
+        "group_jid": group_jid,
+        "group_name": _group_name(group_jid),
+        "rows": rows_out,
+        "totals": totals,
+        "date_from": time_min.strftime("%Y-%m-%d"),
+        "date_to": (time_max - timedelta(days=1)).strftime("%Y-%m-%d"),
+        "view": view,
+    }
+
+
+@app.get("/panel/group-detail", response_class=HTMLResponse)
+def panel_group_detail(
+    group_jid: str = "",
+    view: str = "week",
+    db: Session = Depends(get_db),
+):
+    if not group_jid:
+        return HTMLResponse("<pre>Falta group_jid</pre>", status_code=400)
+
+    time_min, time_max, view = _panel_period_bounds(view)
+
+    rows = _query_requests_for_panel(
+        db=db,
+        time_min=time_min,
+        time_max=time_max,
+    ).order_by(RequestLog.created_at.asc()).all()
+
+    detail = _panel_detail_for_group(rows, group_jid, view)
+
+    title = detail["group_name"]
+    subtitle = (
+        f"Historial semanal: {detail['date_from']} a {detail['date_to']} ({PANEL_TZ})"
+        if view == "week"
+        else f"Historial diario: {detail['date_from']} ({PANEL_TZ})"
+    )
+
+    html = f"""
+    <!doctype html>
+    <html lang="es">
+    <head>
+      <meta charset="utf-8">
+      <title>{_esc(title)}</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        body {{
+          font-family: Arial, sans-serif;
+          background: #f4f6f8;
+          margin: 0;
+          padding: 16px;
+          color: #1f2937;
+        }}
+        .wrap {{
+          max-width: 1400px;
+          margin: 0 auto;
+        }}
+        .hero {{
+          background: linear-gradient(135deg, #061533 0%, #0b1f4d 100%);
+          color: white;
+          border-radius: 22px;
+          padding: 20px 24px;
+          margin-bottom: 18px;
+        }}
+        .hero a {{
+          color: white;
+          text-decoration: none;
+          font-weight: 700;
+          display: inline-block;
+          margin-bottom: 14px;
+        }}
+        .hero h1 {{
+          margin: 0 0 8px;
+          font-size: 2rem;
+        }}
+        .hero-sub {{
+          color: rgba(255,255,255,.9);
+          font-size: 1rem;
+        }}
+        .box {{
+          background: white;
+          border-radius: 20px;
+          overflow: hidden;
+          box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+        }}
+        table {{
+          width: 100%;
+          border-collapse: collapse;
+        }}
+        th, td {{
+          padding: 16px;
+          border-bottom: 1px solid #e5e7eb;
+          text-align: left;
+          font-size: 1rem;
+        }}
+        th {{
+          background: #061533;
+          color: white;
+        }}
+        .right {{
+          text-align: right;
+        }}
+        .total-row td {{
+          font-weight: 800;
+          background: #f8fafc;
+        }}
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="hero">
+          <a href="/panel?view={_esc(view)}">← Volver al historial</a>
+          <h1>{_esc(title)}</h1>
+          <div class="hero-sub">{_esc(subtitle)}</div>
+        </div>
+
+        <div class="box">
+          <table>
+            <thead>
+              <tr>
+                <th>Día</th>
+                <th>Fecha</th>
+                <th class="right">Total</th>
+                <th class="right">Hecho</th>
+                <th class="right">Error</th>
+                <th class="right">En cola</th>
+                <th class="right">Procesando</th>
+              </tr>
+            </thead>
+            <tbody>
+    """
+
+    for r in detail["rows"]:
+        html += f"""
+              <tr>
+                <td>{_esc(r["day_name"])}</td>
+                <td>{_esc(r["date"])}</td>
+                <td class="right">{r["total"]}</td>
+                <td class="right">{r["done"]}</td>
+                <td class="right">{r["error"]}</td>
+                <td class="right">{r["queued"]}</td>
+                <td class="right">{r["processing"]}</td>
+              </tr>
+        """
+
+    t = detail["totals"]
+    html += f"""
+              <tr class="total-row">
+                <td colspan="2">TOTAL</td>
+                <td class="right">{t["total"]}</td>
+                <td class="right">{t["done"]}</td>
+                <td class="right">{t["error"]}</td>
+                <td class="right">{t["queued"]}</td>
+                <td class="right">{t["processing"]}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </body>
+    </html>
+    """
+
+    return HTMLResponse(content=html)
 
 
 BROADCAST_ACTIVAS_MSG = """*SERVICIO DE ACTAS SUPER RAPIDAS SALIENDO EN SEGUNDOS*
@@ -1399,7 +1636,11 @@ def panel_actas(
                 html += f"""
                 <tr>
                   <td>{_esc(r["day"])}</td>
-                  <td>{_esc(_group_name(r["group_jid"]))}</td>
+                  <td>
+                    <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}">
+                      {_esc(r["group_name"])}
+                    </a>
+                  </td>
                   <td class="right">{r["total"]}</td>
                   <td class="right">{r["queued"]}</td>
                   <td class="right">{r["processing"]}</td>
@@ -1658,7 +1899,7 @@ def update_provider3_sid(
 def panel_provider_on(provider_name: str, db: Session = Depends(get_db)):
     row = _get_or_create_provider(db, provider_name.upper(), provider_name.upper() == "PROVIDER1")
     row.is_enabled = True
-    row.updated_at = datetime.utcnow()
+    row.updated_at = _mx_now()
     db.commit()
     return {"ok": True, "provider": provider_name.upper(), "enabled": True}
 
@@ -1667,7 +1908,7 @@ def panel_provider_on(provider_name: str, db: Session = Depends(get_db)):
 def panel_provider_off(provider_name: str, db: Session = Depends(get_db)):
     row = _get_or_create_provider(db, provider_name.upper(), provider_name.upper() == "PROVIDER1")
     row.is_enabled = False
-    row.updated_at = datetime.utcnow()
+    row.updated_at = _mx_now()
     db.commit()
     return {"ok": True, "provider": provider_name.upper(), "enabled": False}
 
@@ -1817,7 +2058,7 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
     caption_text = ""
 
     if req.created_at:
-        delta = datetime.utcnow() - req.created_at
+        delta = _mx_now() - req.created_at
         total_seconds = max(0.0, delta.total_seconds())
 
         if total_seconds >= 60:
@@ -1924,8 +2165,8 @@ def _get_or_create_provider(db: Session, provider_name: str, default_enabled: bo
     row = ProviderSetting(
         provider_name=provider_name,
         is_enabled=default_enabled,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=_mx_now(),
+        updated_at=_mx_now(),
     )
     db.add(row)
     db.commit()
@@ -1945,12 +2186,12 @@ def _set_app_setting(db: Session, key: str, value: str):
 
     if row:
         row.value = value
-        row.updated_at = datetime.utcnow()
+        row.updated_at = _mx_now()
     else:
         row = AppSetting(
             key=key,
             value=value,
-            updated_at=datetime.utcnow(),
+            updated_at=_mx_now(),
         )
         db.add(row)
 
@@ -2272,7 +2513,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 open_req.pdf_url = None
                 open_req.provider_media_url = "BASE64_FROM_MEDIA_MESSAGE"
                 open_req.status = "DONE"
-                open_req.updated_at = datetime.utcnow()
+                open_req.updated_at = _mx_now()
                 db.commit()
                 
                 print("PROVIDER_PDF_MATCHED_REQ_ID =", open_req.id, flush=True)
@@ -2306,7 +2547,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                 open_req.status = "ERROR"
                 open_req.error_message = text_body.strip()
-                open_req.updated_at = datetime.utcnow()
+                open_req.updated_at = _mx_now()
                 db.commit()
 
                 _deliver_text_result(
@@ -2477,7 +2718,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 _reply_to_origin(source_group_id, requester_wa_id, "⚠️ No encontré solicitud previa para ese dato.")
             else:
                 last.status = "QUEUED"
-                last.updated_at = datetime.utcnow()
+                last.updated_at = _mx_now()
                 db.commit()
                 request_queue.enqueue(process_request, last.id)
                 _reply_to_origin(source_group_id, requester_wa_id, f"🔁 Reintentando folio {last.id}")
@@ -2497,7 +2738,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             row = _get_or_create_provider(db, "PROVIDER1", True)
             row.is_enabled = True
-            row.updated_at = datetime.utcnow()
+            row.updated_at = _mx_now()
             db.commit()
 
             _reply_to_origin(source_group_id, requester_wa_id, "✅ PROVIDER1 activado")
@@ -2509,7 +2750,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             row = _get_or_create_provider(db, "PROVIDER1", True)
             row.is_enabled = False
-            row.updated_at = datetime.utcnow()
+            row.updated_at = _mx_now()
             db.commit()
 
             _reply_to_origin(source_group_id, requester_wa_id, "✅ PROVIDER1 desactivado")
@@ -2521,7 +2762,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             row = _get_or_create_provider(db, "PROVIDER2", False)
             row.is_enabled = True
-            row.updated_at = datetime.utcnow()
+            row.updated_at = _mx_now()
             db.commit()
 
             _reply_to_origin(source_group_id, requester_wa_id, "✅ PROVIDER2 activado")
@@ -2533,7 +2774,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             row = _get_or_create_provider(db, "PROVIDER2", False)
             row.is_enabled = False
-            row.updated_at = datetime.utcnow()
+            row.updated_at = _mx_now()
             db.commit()
 
             _reply_to_origin(source_group_id, requester_wa_id, "✅ PROVIDER2 desactivado")
@@ -2659,7 +2900,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             if error_existing:
                 error_existing.request_key = request_key
                 error_existing.status = "QUEUED"
-                error_existing.updated_at = datetime.utcnow()
+                error_existing.updated_at = _mx_now()
                 error_existing.error_message = None
                 error_existing.evolution_message_id = msg_id
                 error_existing.requester_wa_id = requester_wa_id
@@ -2671,7 +2912,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 error_existing.provider_message = None
                 error_existing.provider_media_url = None
                 error_existing.pdf_url = None
-                error_existing.expires_at = datetime.utcnow() + timedelta(days=settings.HISTORY_DAYS)
+                error_existing.expires_at = _mx_now() + timedelta(days=settings.HISTORY_DAYS)
                 db.commit()
         
                 request_queue.enqueue(process_request, error_existing.id)
@@ -2705,7 +2946,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 source_group_id=source_group_id,
                 evolution_message_id=msg_id,
                 status="QUEUED",
-                expires_at=datetime.utcnow() + timedelta(days=settings.HISTORY_DAYS),
+                expires_at=_mx_now() + timedelta(days=settings.HISTORY_DAYS),
             )
         
             db.add(row)
