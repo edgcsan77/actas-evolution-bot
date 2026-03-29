@@ -42,6 +42,14 @@ def _mx_now():
     return datetime.now(ZoneInfo("America/Monterrey"))
 
 
+def _to_panel_tz(dt):
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(ZoneInfo(PANEL_TZ))
+
+
 DAYS_ES = {
     0: "LUNES",
     1: "MARTES",
@@ -136,7 +144,8 @@ def _fmt_dt(dt):
     if not dt:
         return ""
     try:
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
+        local_dt = _to_panel_tz(dt)
+        return local_dt.strftime("%Y-%m-%d %H:%M:%S") if local_dt else ""
     except Exception:
         return str(dt)
 
@@ -311,7 +320,8 @@ def _panel_daily_group_rows(rows: list[RequestLog]) -> list[dict]:
     data = {}
 
     for r in rows:
-        day = r.created_at.strftime("%Y-%m-%d") if r.created_at else "SIN_FECHA"
+        local_dt = _to_panel_tz(r.created_at)
+        day = local_dt.strftime("%Y-%m-%d") if local_dt else "SIN_FECHA"
         gid = r.source_group_id or "PRIVADO"
         key = (day, gid)
 
@@ -319,6 +329,7 @@ def _panel_daily_group_rows(rows: list[RequestLog]) -> list[dict]:
             data[key] = {
                 "day": day,
                 "group_jid": gid,
+                "group_name": _group_name(gid),
                 "total": 0,
                 "queued": 0,
                 "processing": 0,
@@ -368,7 +379,8 @@ def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str) -
         if not r.created_at:
             continue
 
-        day_str = r.created_at.strftime("%Y-%m-%d")
+        local_dt = _to_panel_tz(r.created_at)
+        day_str = local_dt.strftime("%Y-%m-%d")
         if day_str not in days:
             continue
 
