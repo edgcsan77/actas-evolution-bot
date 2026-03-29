@@ -219,11 +219,39 @@ def _panel_summary_from_rows(rows: list[RequestLog]) -> dict:
 def _panel_group_rows(rows: list[RequestLog]) -> list[dict]:
     data = {}
 
+    # precargar todos los grupos conocidos
+    for gid, name in GROUP_NAME_MAP.items():
+        data[gid] = {
+            "group_jid": gid,
+            "group_name": name,
+            "total": 0,
+            "queued": 0,
+            "processing": 0,
+            "done": 0,
+            "error": 0,
+            "last_update": None,
+        }
+
+    # opcional: incluir privado
+    data["PRIVADO"] = {
+        "group_jid": "PRIVADO",
+        "group_name": "PRIVADO",
+        "total": 0,
+        "queued": 0,
+        "processing": 0,
+        "done": 0,
+        "error": 0,
+        "last_update": None,
+    }
+
+    # sumar actividad real
     for r in rows:
         gid = r.source_group_id or "PRIVADO"
+
         if gid not in data:
             data[gid] = {
                 "group_jid": gid,
+                "group_name": _group_name(gid),
                 "total": 0,
                 "queued": 0,
                 "processing": 0,
@@ -248,7 +276,12 @@ def _panel_group_rows(rows: list[RequestLog]) -> list[dict]:
             item["last_update"] = r.updated_at
 
     out = list(data.values())
-    out.sort(key=lambda x: (-x["total"], x["group_jid"]))
+
+    # si no quieres mostrar PRIVADO cuando está en cero
+    out = [x for x in out if x["group_jid"] != "PRIVADO" or x["total"] > 0]
+
+    # primero los que tienen actividad, luego los que están en cero
+    out.sort(key=lambda x: ((x["total"] == 0), -x["total"], x["group_name"]))
     return out
 
 
@@ -1613,7 +1646,7 @@ def panel_actas(
                 <tr>
                   <td>
                     <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}">
-                      {_esc(_group_name(r["group_jid"]))}
+                      {_esc(r["group_name"])}
                     </a>
                   </td>
                   <td class="right">{r["total"]}</td>
