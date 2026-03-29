@@ -1604,6 +1604,11 @@ def panel_actas(
                 html += f"""
                 <tr>
                   <td>{_esc(_group_name(r["group_jid"]))}</td>
+                  <td>
+                    <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}">
+                    {_esc(r["group_name"])}
+                    </a>
+                  </td>
                   <td class="right">{r["total"]}</td>
                   <td class="right">{r["queued"]}</td>
                   <td class="right">{r["processing"]}</td>
@@ -1617,52 +1622,6 @@ def panel_actas(
         else:
             html += '<tr><td colspan="9">Sin datos.</td></tr>'
     
-        html += """
-              </tbody>
-            </table>
-          </div>
-        </div>
-        """
-
-        html += """
-        <div class="box">
-          <div class="head"><strong>Desglose diario por grupo cliente</strong></div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Fecha</th>
-                  <th>Grupo</th>
-                  <th class="right">Total</th>
-                  <th class="right">EN COLA</th>
-                  <th class="right">PROCESANDO</th>
-                  <th class="right">HECHO</th>
-                  <th class="right">ERROR</th>
-                </tr>
-              </thead>
-              <tbody>
-        """
-
-        if by_day_group:
-            for r in by_day_group:
-                html += f"""
-                <tr>
-                  <td>{_esc(r["day"])}</td>
-                  <td>
-                    <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}">
-                      {_esc(r["group_name"])}
-                    </a>
-                  </td>
-                  <td class="right">{r["total"]}</td>
-                  <td class="right">{r["queued"]}</td>
-                  <td class="right">{r["processing"]}</td>
-                  <td class="right">{r["done"]}</td>
-                  <td class="right">{r["error"]}</td>
-                </tr>
-                """
-        else:
-            html += '<tr><td colspan="7">Sin datos.</td></tr>'
-
         html += """
               </tbody>
             </table>
