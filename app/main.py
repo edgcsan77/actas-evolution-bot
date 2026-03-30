@@ -1,5 +1,7 @@
 import os
 import base64
+import time
+import random
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -46,7 +48,7 @@ def _to_panel_tz(dt):
     if not dt:
         return None
     if dt.tzinfo is None:
-        return dt
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
     return dt.astimezone(ZoneInfo(PANEL_TZ))
 
 
@@ -92,11 +94,12 @@ def unblock_group(group_jid: str):
 
 @app.post("/cron/provider3/keepalive")
 def cron_provider3_keepalive(request: Request):
-
     secret = request.headers.get("x-keepalive-secret", "").strip()
 
     if settings.PROVIDER3_KEEPALIVE_SECRET and secret != settings.PROVIDER3_KEEPALIVE_SECRET:
         return {"ok": False, "error": "unauthorized"}
+
+    time.sleep(random.uniform(10, 35))
 
     return provider3_keepalive_job()
 
@@ -216,14 +219,25 @@ def _panel_summary_from_rows(rows: list[RequestLog]) -> dict:
     return out
 
 
-def _panel_group_rows(rows: list[RequestLog]) -> list[dict]:
+def _panel_group_rows(rows: list[RequestLog], include_all_groups: bool = False) -> list[dict]:
     data = {}
 
-    # precargar todos los grupos conocidos
-    for gid, name in GROUP_NAME_MAP.items():
-        data[gid] = {
-            "group_jid": gid,
-            "group_name": name,
+    if include_all_groups:
+        for gid, name in GROUP_NAME_MAP.items():
+            data[gid] = {
+                "group_jid": gid,
+                "group_name": name,
+                "total": 0,
+                "queued": 0,
+                "processing": 0,
+                "done": 0,
+                "error": 0,
+                "last_update": None,
+            }
+
+        data["PRIVADO"] = {
+            "group_jid": "PRIVADO",
+            "group_name": "PRIVADO",
             "total": 0,
             "queued": 0,
             "processing": 0,
@@ -232,19 +246,6 @@ def _panel_group_rows(rows: list[RequestLog]) -> list[dict]:
             "last_update": None,
         }
 
-    # opcional: incluir privado
-    data["PRIVADO"] = {
-        "group_jid": "PRIVADO",
-        "group_name": "PRIVADO",
-        "total": 0,
-        "queued": 0,
-        "processing": 0,
-        "done": 0,
-        "error": 0,
-        "last_update": None,
-    }
-
-    # sumar actividad real
     for r in rows:
         gid = r.source_group_id or "PRIVADO"
 
@@ -277,10 +278,10 @@ def _panel_group_rows(rows: list[RequestLog]) -> list[dict]:
 
     out = list(data.values())
 
-    # si no quieres mostrar PRIVADO cuando está en cero
-    out = [x for x in out if x["group_jid"] != "PRIVADO" or x["total"] > 0]
+    if not include_all_groups:
+        out = [x for x in out if x["total"] > 0]
 
-    # primero los que tienen actividad, luego los que están en cero
+    out = [x for x in out if x["group_jid"] != "PRIVADO" or x["total"] > 0]
     out.sort(key=lambda x: ((x["total"] == 0), -x["total"], x["group_name"]))
     return out
 
@@ -719,7 +720,6 @@ GROUP_NAME_MAP = {
     "120363408050345917@g.us": "Gpo. No. 33 Melani",
     "120363423353879965@g.us": "Gpo. No. 44 Nadia",
     "120363422771877743@g.us": "Gpo. No. 48 Aliados Rurales",
-    "120363408050345917@g.us": "Gpo. No. 35 Disponible",
 }
 
 
@@ -754,7 +754,6 @@ def panel_api_actas(
     by_group = _panel_group_rows(rows)
     by_provider = _panel_provider_rows(rows)
     by_type = _panel_type_rows(rows)
-    by_day_group = _panel_daily_group_rows(rows)
 
     latest = []
     for r in rows[:100]:
@@ -780,7 +779,6 @@ def panel_api_actas(
         "by_group": by_group,
         "by_provider": by_provider,
         "by_type": by_type,
-        "by_day_group": by_day_group,
         "latest": latest,
     }
 
@@ -897,6 +895,7 @@ def panel_actas(
     provider_name: str = "",
     status: str = "",
     act_type: str = "",
+    group_mode: str = "active",
     db: Session = Depends(get_db),
 ):
     try:
@@ -913,10 +912,10 @@ def panel_actas(
         ).order_by(RequestLog.created_at.desc()).all()
     
         summary = _panel_summary_from_rows(rows)
-        by_group = _panel_group_rows(rows)
+        include_all_groups = (group_mode == "all")
+        by_group = _panel_group_rows(rows, include_all_groups=include_all_groups)
         by_provider = _panel_provider_rows(rows)
         by_type = _panel_type_rows(rows)
-        by_day_group = _panel_daily_group_rows(rows)
     
         latest = rows[:100]
     
@@ -1515,6 +1514,7 @@ def panel_actas(
           </div>
           <div class="filters">
             <input type="hidden" name="view" value="{_esc(view)}">
+            <input type="hidden" name="group_mode" value="{_esc(group_mode)}">
             <input name="group_jid" placeholder="Grupo cliente" value="{_esc(group_jid)}">
             <input name="provider_name" placeholder="Proveedor" value="{_esc(provider_name)}">
             <input name="status" placeholder="Estado" value="{_esc(status)}">
@@ -1606,6 +1606,37 @@ def panel_actas(
         html += """
               </tbody>
             </table>
+          </div>
+        </div>
+        """
+
+        html += f"""
+        <div class="box">
+          <div class="head"><strong>Vista de grupos</strong></div>
+          <div class="filters">
+            <a class="btn btn-primary" href="/panel?view={_esc(view)}&group_mode=all&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
+              Ver todos los grupos
+            </a>
+            <a class="btn btn-success" href="/panel?view={_esc(view)}&group_mode=active&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
+              Ver solo grupos que compraron en el día
+            </a>
+          </div>
+        </div>
+        """
+
+        all_blocked = are_all_client_groups_blocked()
+
+        toggle_all_btn = (
+            '<button class="btn btn-success" onclick="toggleAllGroups()">Desbloquear todos los grupos</button>'
+            if all_blocked
+            else '<button class="btn btn-danger" onclick="toggleAllGroups()">Bloquear todos los grupos</button>'
+        )
+        
+        html += f"""
+        <div class="box">
+          <div class="head"><strong>Control masivo de grupos</strong></div>
+          <div class="filters">
+            {toggle_all_btn}
           </div>
         </div>
         """
@@ -1868,6 +1899,28 @@ def panel_actas(
             alert("No se pudo conectar con el servidor");
           }
         }
+
+        async function toggleAllGroups() {
+          const ok = confirm("¿Seguro que deseas cambiar el estado de todos los grupos cliente?");
+          if (!ok) return;
+        
+          try {
+            const res = await fetch("/panel/groups/toggle-all", {
+              method: "POST"
+            });
+        
+            const data = await res.json();
+        
+            if (data.ok) {
+              alert(data.message || "Estado actualizado");
+              location.reload();
+            } else {
+              alert(data.error || "Error actualizando grupos");
+            }
+          } catch (e) {
+            alert("No se pudo conectar con el servidor");
+          }
+        }
     
         setInterval(() => {
           if (!broadcastRunning) {
@@ -2077,12 +2130,6 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
         created_at = created_at.astimezone(ZoneInfo("America/Monterrey"))
         delta = _mx_now() - created_at
         total_seconds = max(0.0, delta.total_seconds())
-
-        print("REQ_CREATED_AT_RAW =", req.created_at, flush=True)
-        print("REQ_CREATED_AT_TZINFO =", req.created_at.tzinfo if req.created_at else None, flush=True)
-        print("MX_NOW =", _mx_now(), flush=True)
-        print("CREATED_AT_FIXED =", created_at, flush=True)
-        print("DELTA_SECONDS =", total_seconds, flush=True)
 
         if total_seconds >= 60:
             minutes = int(total_seconds // 60)
@@ -2298,6 +2345,64 @@ def webhook_msg_seen(msg_id: str) -> bool:
     return not bool(created)
 
 
+def block_all_client_groups():
+    excluded_words = ("PROV", "PRUEBA", "PRUEBAS", "TEST")
+    for gid, name in GROUP_NAME_MAP.items():
+        name_up = (name or "").strip().upper()
+        if any(word in name_up for word in excluded_words):
+            continue
+        redis_conn.sadd(BLOCKED_GROUPS_KEY, gid)
+
+
+def unblock_all_client_groups():
+    excluded_words = ("PROV", "PRUEBA", "PRUEBAS", "TEST")
+    for gid, name in GROUP_NAME_MAP.items():
+        name_up = (name or "").strip().upper()
+        if any(word in name_up for word in excluded_words):
+            continue
+        redis_conn.srem(BLOCKED_GROUPS_KEY, gid)
+
+
+def are_all_client_groups_blocked() -> bool:
+    excluded_words = ("PROV", "PRUEBA", "PRUEBAS", "TEST")
+    client_groups = []
+
+    for gid, name in GROUP_NAME_MAP.items():
+        name_up = (name or "").strip().upper()
+        if any(word in name_up for word in excluded_words):
+            continue
+        client_groups.append(gid)
+
+    if not client_groups:
+        return False
+
+    return all(is_group_blocked(gid) for gid in client_groups)
+
+
+def list_blocked_groups() -> list[str]:
+    values = redis_conn.smembers(BLOCKED_GROUPS_KEY) or set()
+    out = []
+    for v in values:
+        if isinstance(v, bytes):
+            out.append(v.decode("utf-8", errors="ignore"))
+        else:
+            out.append(str(v))
+    out.sort()
+    return out
+    
+
+@app.post("/panel/groups/toggle-all")
+def panel_toggle_all_groups():
+    blocked = are_all_client_groups_blocked()
+
+    if blocked:
+        unblock_all_client_groups()
+        return {"ok": True, "blocked": False, "message": "Todos los grupos fueron desbloqueados"}
+    else:
+        block_all_client_groups()
+        return {"ok": True, "blocked": True, "message": "Todos los grupos fueron bloqueados"}
+
+
 @app.post("/panel/group/{group_jid}/block")
 def panel_block_group(group_jid: str):
     print("PANEL_BLOCK_GROUP =", group_jid, flush=True)
@@ -2485,7 +2590,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             doc = None
             media_message_id = msg_id
             
-            msg_unwrapped = _unwrap_message(message)
+            msg_unwrapped = _unwrap_message(message) or message
             
             if "documentMessage" in msg_unwrapped:
                 doc = msg_unwrapped.get("documentMessage")
@@ -2580,7 +2685,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 print("PDF_HEADER =", pdf_bytes[:8], flush=True)
                 print("PDF_BYTES_LEN =", len(pdf_bytes), flush=True)
                 
-                if not pdf_bytes.startswith(b"%PDF"):
+                if b"%PDF" not in pdf_bytes[:20]:
                     print("PROVIDER_PDF_INVALID_BINARY", flush=True)
                     return {"ok": True, "ignored": "provider_pdf_invalid_binary"}
                 
@@ -2590,6 +2695,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 open_req.provider_media_url = "BASE64_FROM_MEDIA_MESSAGE"
                 open_req.status = "DONE"
                 open_req.updated_at = _mx_now()
+                
                 db.commit()
                 
                 print("PROVIDER_PDF_MATCHED_REQ_ID =", open_req.id, flush=True)
@@ -2597,12 +2703,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 print("PROVIDER_PDF_BASE64_LEN =", len(safe_media_b64), flush=True)
                 
                 _deliver_pdf_result(open_req, safe_media_b64, filename=filename or f"{open_req.curp}.pdf")
-                
-                open_req.pdf_url = None
-                open_req.provider_media_url = "BASE64_FROM_MEDIA_MESSAGE"
-                open_req.status = "DONE"
-                open_req.updated_at = _mx_now()
-                db.commit()
                 
                 return {"ok": True, "provider_result": "pdf_delivered"}
 
