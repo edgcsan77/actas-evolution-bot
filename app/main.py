@@ -2462,14 +2462,20 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
 
     caption_text = ""
 
+    NO_TIME_CAPTION_GROUPS = {
+        "120363408668441985@g.us",
+        "120363421166637606@g.us",
+    }
+
     if req.created_at:
         created_at = req.created_at
 
         if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=ZoneInfo("UTC"))
+            created_at = created_at.replace(tzinfo=timezone.utc)
 
-        created_at = created_at.astimezone(ZoneInfo("America/Monterrey"))
-        delta = _utc_now_naive() - created_at
+        now_local = datetime.now(ZoneInfo("America/Monterrey"))
+        created_at_local = created_at.astimezone(ZoneInfo("America/Monterrey"))
+        delta = now_local - created_at_local
         total_seconds = max(0.0, delta.total_seconds())
 
         if total_seconds >= 60:
@@ -2478,11 +2484,6 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
             tiempo = f"{minutes} min {seconds:.2f} segundos"
         else:
             tiempo = f"{total_seconds:.2f} segundos"
-
-        NO_TIME_CAPTION_GROUPS = {
-            "120363408668441985@g.us",
-            "120363421166637606@g.us",
-        }
 
         if req.source_group_id not in NO_TIME_CAPTION_GROUPS:
             caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
@@ -3226,10 +3227,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 if not already_sent:
                     print("PROVIDER_PDF_DUPLICATE_IGNORED =", pdf_dedupe_key, flush=True)
                     return {"ok": True, "ignored": "provider_pdf_duplicate"}
-                
-                if open_req.status == "DONE":
-                    print("PROVIDER_PDF_ALREADY_DONE_REQ_ID =", open_req.id, flush=True)
-                    return {"ok": True, "ignored": "provider_pdf_already_done"}
                 
                 media_json = get_media_base64("document", media_message_id)
                 media_b64 = (
