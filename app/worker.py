@@ -282,28 +282,56 @@ def _handle_group_promotion_after_done(req, db, instance_name: str):
 
     available = max(0, (promo.total_actas or 0) - (promo.used_actas or 0))
 
-    if available <= 50 and not promo.warning_sent_50 and available > 0:
-        msg = (
-            f"⚠️ *Aviso de saldo de promoción*\n\n"
-            f"Estimado, su paquete promocional de *{promo.total_actas} actas* está por agotarse.\n\n"
-            f"Actualmente cuenta con *{available} actas disponibles*.\n\n"
-            f"Para evitar interrupciones en el servicio, les recomendamos realizar su recarga con anticipación.\n\n"
-            f"Quedamos atentos."
-        )
-        send_group_text(req.source_group_id, msg, instance_name=instance_name)
-        promo.warning_sent_50 = True
+    msg = None
 
     if available <= 0 and not promo.warning_sent_0:
         msg = (
-            f"⚠️ *Promoción agotada*\n\n"
-            f"Estimado, su paquete promocional de *{promo.total_actas} actas* ha sido consumido en su totalidad.\n\n"
+            f"❌ *Paquete agotado*\n\n"
+            f"Tu paquete promocional de *{promo.total_actas} actas* ha sido consumido en su totalidad.\n\n"
             f"Para continuar con el servicio, es necesario realizar una nueva recarga.\n\n"
             f"Quedamos atentos."
         )
-        send_group_text(req.source_group_id, msg, instance_name=instance_name)
         promo.warning_sent_0 = True
 
+    elif available <= 10 and not promo.warning_sent_10:
+        msg = (
+            f"🚨 *Saldo crítico*\n\n"
+            f"Tu paquete promocional cuenta actualmente con solo *{available} actas disponibles*.\n\n"
+            f"Es importante realizar tu recarga cuanto antes para no quedarte sin servicio.\n\n"
+            f"Quedamos atentos."
+        )
+        promo.warning_sent_10 = True
+
+    elif available <= 50 and not promo.warning_sent_50:
+        msg = (
+            f"⚠️ *Aviso importante de saldo*\n\n"
+            f"Tu paquete promocional cuenta actualmente con *{available} actas disponibles*.\n\n"
+            f"Para evitar interrupciones en el servicio, te recomendamos realizar tu recarga a la brevedad.\n\n"
+            f"Quedamos atentos."
+        )
+        promo.warning_sent_50 = True
+
+    elif available <= 100 and not promo.warning_sent_100:
+        msg = (
+            f"⚠️ *Aviso de saldo*\n\n"
+            f"Tu paquete promocional cuenta actualmente con *{available} actas disponibles*.\n\n"
+            f"Te recomendamos considerar tu próxima recarga con anticipación para evitar interrupciones.\n\n"
+            f"Quedamos atentos."
+        )
+        promo.warning_sent_100 = True
+
+    elif available <= 200 and not promo.warning_sent_200:
+        msg = (
+            f"ℹ️ *Aviso de saldo*\n\n"
+            f"Actualmente cuentas con *{available} actas disponibles* de tu paquete promocional.\n\n"
+            f"Quedamos atentos."
+        )
+        promo.warning_sent_200 = True
+
     db.commit()
+
+    if msg:
+        send_group_text(req.source_group_id, msg, instance_name=instance_name)
 
 
 def process_request(request_id: int):
