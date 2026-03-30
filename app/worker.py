@@ -4,7 +4,7 @@ import random
 from datetime import datetime
 
 from app.db import SessionLocal
-from app.models import RequestLog, ProviderSetting, AppSetting
+from app.models import RequestLog, ProviderSetting, AppSetting, GroupPromotion
 from app.services.evolution import send_group_text, send_document_base64, send_group_document_base64
 from app.config import settings
 from app.utils.curp import provider_label_for_type, is_chain
@@ -261,6 +261,51 @@ def _process_provider3(req, db):
     }
     
 
+def _handle_group_promotion_after_done(req, db, instance_name: str):
+    if not req.source_group_id:
+        return
+
+    promo = (
+        db.query(GroupPromotion)
+        .filter(
+            GroupPromotion.group_jid == req.source_group_id,
+            GroupPromotion.is_active == True
+        )
+        .first()
+    )
+
+    if not promo:
+        return
+
+    promo.used_actas = (promo.used_actas or 0) + 1
+    promo.updated_at = _mx_now()
+
+    available = max(0, (promo.total_actas or 0) - (promo.used_actas or 0))
+
+    if available <= 50 and not promo.warning_sent_50 and available > 0:
+        msg = (
+            f"⚠️ *Aviso de saldo de promoción*\n\n"
+            f"Estimado, su paquete promocional de *{promo.total_actas} actas* está por agotarse.\n\n"
+            f"Actualmente cuenta con *{available} actas disponibles*.\n\n"
+            f"Para evitar interrupciones en el servicio, les recomendamos realizar su recarga con anticipación.\n\n"
+            f"Quedamos atentos."
+        )
+        send_group_text(req.source_group_id, msg, instance_name=instance_name)
+        promo.warning_sent_50 = True
+
+    if available <= 0 and not promo.warning_sent_0:
+        msg = (
+            f"⚠️ *Promoción agotada*\n\n"
+            f"Estimado, su paquete promocional de *{promo.total_actas} actas* ha sido consumido en su totalidad.\n\n"
+            f"Para continuar con el servicio, es necesario realizar una nueva recarga.\n\n"
+            f"Quedamos atentos."
+        )
+        send_group_text(req.source_group_id, msg, instance_name=instance_name)
+        promo.warning_sent_0 = True
+
+    db.commit()
+
+
 def process_request(request_id: int):
     db = SessionLocal()
     try:
@@ -332,6 +377,8 @@ def process_request(request_id: int):
             req.error_message = None
             req.updated_at = _mx_now()
             db.commit()
+
+            _handle_group_promotion_after_done(req, db, instance_name)
         
             return
 
