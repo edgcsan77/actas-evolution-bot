@@ -10,6 +10,7 @@ from app.config import settings
 from app.utils.curp import provider_label_for_type, is_chain
 from app.utils.provider_format import provider2_command
 from app.services.provider3 import Provider3Client, decode_pdf_base64
+from app.queue import redis_conn
 
 from zoneinfo import ZoneInfo
 
@@ -389,11 +390,36 @@ def process_request(request_id: int):
                 tiempo = f"{minutes} min {seconds:.2f} segundos"
             else:
                 tiempo = f"{total_seconds:.2f} segundos"
-        
-            caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
-        
+
+            NO_TIME_CAPTION_GROUPS = {
+                "120363408668441985@g.us",
+                "120363421166637606@g.us",
+            }
+            
+            caption_text = ""
+            if req.source_group_id not in NO_TIME_CAPTION_GROUPS:
+                caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
+                
             print("PROVIDER3_CAPTION =", caption_text, flush=True)
         
+            delivery_key = f"provider3_delivery:{req.id}:{req.curp}:{req.source_group_id or req.requester_wa_id}"
+            first_delivery = redis_conn.set(delivery_key, "1", ex=3600, nx=True)
+            
+            if not first_delivery:
+                print("PROVIDER3_DUPLICATE_DELIVERY_IGNORED =", delivery_key, flush=True)
+                return
+            
+            print(
+                "PROVIDER3_DELIVERING_TO =",
+                {
+                    "req_id": req.id,
+                    "source_group_id": req.source_group_id,
+                    "requester_wa_id": req.requester_wa_id,
+                    "curp": req.curp,
+                },
+                flush=True,
+            )
+            
             if req.source_group_id:
                 send_group_document_base64(
                     req.source_group_id,
@@ -449,6 +475,7 @@ def process_request(request_id: int):
                 else:
                     from app.services.evolution import send_text
                     send_text(req.requester_wa_id, msg)
+                    
                 return
 
             if err.startswith("PROVIDER3_RATE_LIMIT"):
