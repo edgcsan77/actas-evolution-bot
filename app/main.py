@@ -3599,6 +3599,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 source_group_id=source_group_id,
                 evolution_message_id=msg_id,
                 status="QUEUED",
+                created_at=_utc_now_naive(),
+                updated_at=_utc_now_naive(),
                 expires_at=_utc_now_naive() + timedelta(days=settings.HISTORY_DAYS),
             )
         
