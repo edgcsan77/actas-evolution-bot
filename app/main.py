@@ -2532,10 +2532,18 @@ def _promotion_badge_html(promo: GroupPromotion | None) -> str:
         color = "#991b1b"
         bg = "#fee2e2"
         label = f"Agotada · {available} disponibles"
+    elif available <= 10:
+        color = "#991b1b"
+        bg = "#fee2e2"
+        label = f"Crítico · {available} disponibles"
     elif available <= 50:
         color = "#92400e"
         bg = "#fef3c7"
         label = f"Precaución · {available} disponibles"
+    elif available <= 100:
+        color = "#92400e"
+        bg = "#fef3c7"
+        label = f"Bajo · {available} disponibles"
     else:
         color = "#166534"
         bg = "#dcfce7"
@@ -2716,7 +2724,10 @@ def panel_set_group_promotion(
         row.total_actas = total_actas
         row.used_actas = 0
         row.price_per_piece = price_per_piece
+        row.warning_sent_200 = False
+        row.warning_sent_100 = False
         row.warning_sent_50 = False
+        row.warning_sent_10 = False
         row.warning_sent_0 = False
         row.is_active = True
         row.updated_at = _mx_now()
@@ -2727,7 +2738,10 @@ def panel_set_group_promotion(
             total_actas=total_actas,
             used_actas=0,
             price_per_piece=price_per_piece,
+            warning_sent_200=False,
+            warning_sent_100=False,
             warning_sent_50=False,
+            warning_sent_10=False,
             warning_sent_0=False,
             is_active=True,
         )
@@ -2763,7 +2777,10 @@ def panel_recharge_group_promotion(
 
     row.total_actas = available_now + extra_actas
     row.used_actas = 0
+    row.warning_sent_200 = False
+    row.warning_sent_100 = False
     row.warning_sent_50 = False
+    row.warning_sent_10 = False
     row.warning_sent_0 = False
     row.is_active = True
     row.updated_at = _mx_now()
