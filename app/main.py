@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.db import Base, engine, get_db
-from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting
+from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion
 from app.queue import request_queue, redis_conn
 from app.worker import process_request, provider3_keepalive_job
 from app.services.provider3 import Provider3Client
@@ -479,6 +479,14 @@ def panel_group_detail(
     if not group_jid:
         return HTMLResponse("<pre>Falta group_jid</pre>", status_code=400)
 
+    promo = _get_group_promotion(db, group_jid)
+    promo_html = _promotion_badge_html(promo)
+    promo_name = _esc(promo.promo_name if promo else "")
+    promo_total = promo.total_actas if promo else 0
+    promo_used = promo.used_actas if promo else 0
+    promo_available = _promotion_available(promo) if promo else 0
+    promo_price = _esc(promo.price_per_piece if promo else "")
+
     time_min, time_max, view = _panel_period_bounds(view)
 
     rows = _query_requests_for_panel(
@@ -542,6 +550,54 @@ def panel_group_detail(
           border-radius: 20px;
           overflow: hidden;
           box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+          margin-bottom: 18px;
+        }}
+        .head {{
+          padding: 16px 18px;
+          border-bottom: 1px solid #e5e7eb;
+          background: #fafbfc;
+        }}
+        .filters {{
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 10px;
+          padding: 16px;
+        }}
+        .filters input {{
+          width: 100%;
+          padding: 11px 12px;
+          border: 1px solid #d1d5db;
+          border-radius: 12px;
+          font: inherit;
+          background: white;
+          color: #1f2937;
+          outline: none;
+        }}
+        .filters input:focus {{
+          border-color: #334155;
+          box-shadow: 0 0 0 3px rgba(51, 65, 85, .10);
+        }}
+        .btn {{
+          border: none;
+          border-radius: 12px;
+          padding: 10px 14px;
+          font-weight: 800;
+          font-size: .95rem;
+          cursor: pointer;
+          font-family: inherit;
+        }}
+        .btn-primary {{
+          background: #334155;
+          color: white;
+        }}
+        .btn-success {{
+          background: #166534;
+          color: white;
+        }}
+        .small {{
+          color: #6b7280;
+          font-size: .84rem;
+          line-height: 1.45;
         }}
         table {{
           width: 100%;
@@ -564,6 +620,11 @@ def panel_group_detail(
           font-weight: 800;
           background: #f8fafc;
         }}
+        @media (max-width: 900px) {{
+          .filters {{
+            grid-template-columns: 1fr;
+          }}
+        }}
       </style>
     </head>
     <body>
@@ -572,6 +633,40 @@ def panel_group_detail(
           <a href="/panel?view={_esc(view)}">← Volver al historial</a>
           <h1>{_esc(title)}</h1>
           <div class="hero-sub">{_esc(subtitle)}</div>
+        </div>
+
+        <div class="box">
+          <div class="head"><strong>Promoción del grupo</strong></div>
+          <div class="filters">
+            <div>
+              <div class="small">Estado</div>
+              <div style="margin-top:8px;">{promo_html}</div>
+            </div>
+            <div>
+              <div class="small">Promoción</div>
+              <div style="margin-top:8px;font-weight:800;">{promo_name or 'Sin nombre'}</div>
+            </div>
+            <div>
+              <div class="small">Total / Usadas / Disponibles</div>
+              <div style="margin-top:8px;font-weight:800;">{promo_total} / {promo_used} / {promo_available}</div>
+            </div>
+            <div>
+              <div class="small">Precio</div>
+              <div style="margin-top:8px;font-weight:800;">{promo_price or 'N/D'}</div>
+            </div>
+          </div>
+
+          <div class="filters">
+            <input id="promo_name" placeholder="Nombre de promoción" value="{promo_name}">
+            <input id="promo_total" placeholder="Total de actas" type="number" min="1" value="{promo_total if promo_total else ''}">
+            <input id="promo_price" placeholder="Precio por pieza o bloque" value="{promo_price}">
+            <button type="button" class="btn btn-primary" onclick="savePromotion('{group_jid}')">Guardar promoción</button>
+          </div>
+
+          <div class="filters" style="grid-template-columns: 1fr 220px;">
+            <input id="promo_recharge" placeholder="Recargar actas" type="number" min="1">
+            <button type="button" class="btn btn-success" onclick="rechargePromotion('{group_jid}')">Recargar promoción</button>
+          </div>
         </div>
 
         <div class="box">
@@ -617,6 +712,76 @@ def panel_group_detail(
           </table>
         </div>
       </div>
+
+      <script>
+        async function savePromotion(groupJid) {{
+          const promoName = document.getElementById("promo_name")?.value?.trim() || "";
+          const totalActas = document.getElementById("promo_total")?.value?.trim() || "";
+          const pricePerPiece = document.getElementById("promo_price")?.value?.trim() || "";
+
+          if (!totalActas) {{
+            alert("Ingresa el total de actas");
+            return;
+          }}
+
+          try {{
+            const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/promotion`, {{
+              method: "POST",
+              headers: {{
+                "Content-Type": "application/json"
+              }},
+              body: JSON.stringify({{
+                promo_name: promoName,
+                total_actas: totalActas,
+                price_per_piece: pricePerPiece
+              }})
+            }});
+
+            const data = await res.json();
+
+            if (data.ok) {{
+              alert(data.message || "Promoción guardada");
+              location.reload();
+            }} else {{
+              alert(data.error || "Error guardando promoción");
+            }}
+          }} catch (e) {{
+            alert("No se pudo conectar con el servidor");
+          }}
+        }}
+
+        async function rechargePromotion(groupJid) {{
+          const extraActas = document.getElementById("promo_recharge")?.value?.trim() || "";
+
+          if (!extraActas) {{
+            alert("Ingresa cuántas actas deseas recargar");
+            return;
+          }}
+
+          try {{
+            const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/promotion/recharge`, {{
+              method: "POST",
+              headers: {{
+                "Content-Type": "application/json"
+              }},
+              body: JSON.stringify({{
+                extra_actas: extraActas
+              }})
+            }});
+
+            const data = await res.json();
+
+            if (data.ok) {{
+              alert(data.message || "Recarga aplicada");
+              location.reload();
+            }} else {{
+              alert(data.error || "Error aplicando recarga");
+            }}
+          }} catch (e) {{
+            alert("No se pudo conectar con el servidor");
+          }}
+        }}
+      </script>
     </body>
     </html>
     """
@@ -908,6 +1073,23 @@ async def panel_broadcast_free(request: Request, background_tasks: BackgroundTas
         return {"ok": False, "error": str(e)}
 
 
+def _promotion_summary_map(db: Session) -> dict[str, dict]:
+    rows = db.query(GroupPromotion).filter(GroupPromotion.is_active == True).all()
+    out = {}
+
+    for r in rows:
+        available = max(0, (r.total_actas or 0) - (r.used_actas or 0))
+        out[r.group_jid] = {
+            "promo_name": r.promo_name or "",
+            "total_actas": r.total_actas or 0,
+            "used_actas": r.used_actas or 0,
+            "available": available,
+            "html": _promotion_badge_html(r),
+        }
+
+    return out
+
+
 @app.get("/panel", response_class=HTMLResponse)
 def panel_actas(
     view: str = "day",
@@ -936,6 +1118,7 @@ def panel_actas(
         by_group = _panel_group_rows(rows, include_all_groups=include_all_groups)
         by_provider = _panel_provider_rows(rows)
         by_type = _panel_type_rows(rows)
+        promo_map = _promotion_summary_map(db)
     
         latest = rows[:100]
     
@@ -1730,6 +1913,7 @@ def panel_actas(
                   <th class="right">PROCESANDO</th>
                   <th class="right">HECHO</th>
                   <th class="right">ERROR</th>
+                  <th>Promoción</th>
                   <th>Última actualización</th>
                   <th>Bloqueo</th>
                   <th>Acción</th>
@@ -1748,6 +1932,9 @@ def panel_actas(
                     if blocked
                     else f'<button class="btn btn-danger" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'block\')">Bloquear</button>'
                 )
+
+                promo_info = promo_map.get(r["group_jid"])
+                promo_cell = promo_info["html"] if promo_info else '<span style="color:#6b7280;font-weight:700;">Sin promoción</span>'
         
                 html += f"""
                 <tr>
@@ -1761,6 +1948,7 @@ def panel_actas(
                   <td class="right">{r["processing"]}</td>
                   <td class="right">{r["done"]}</td>
                   <td class="right">{r["error"]}</td>
+                  <td>{promo_cell}</td>
                   <td>{_esc(_fmt_dt(r["last_update"]))}</td>
                   <td>{blocked_text}</td>
                   <td>{action_btn}</td>
@@ -2320,6 +2508,49 @@ def _get_or_create_provider(db: Session, provider_name: str, default_enabled: bo
     return row
 
 
+def _get_group_promotion(db: Session, group_jid: str) -> GroupPromotion | None:
+    if not group_jid:
+        return None
+
+    return (
+        db.query(GroupPromotion)
+        .filter(
+            GroupPromotion.group_jid == group_jid,
+            GroupPromotion.is_active == True
+        )
+        .first()
+    )
+
+
+def _promotion_available(promo: GroupPromotion) -> int:
+    return max(0, (promo.total_actas or 0) - (promo.used_actas or 0))
+
+
+def _promotion_badge_html(promo: GroupPromotion | None) -> str:
+    if not promo:
+        return '<span style="color:#6b7280;font-weight:700;">Sin promoción</span>'
+
+    available = _promotion_available(promo)
+
+    if available <= 0:
+        color = "#991b1b"
+        bg = "#fee2e2"
+        label = f"Agotada · {available} disponibles"
+    elif available <= 50:
+        color = "#92400e"
+        bg = "#fef3c7"
+        label = f"Precaución · {available} disponibles"
+    else:
+        color = "#166534"
+        bg = "#dcfce7"
+        label = f"Activa · {available} disponibles"
+
+    return (
+        f'<span style="display:inline-block;padding:6px 10px;border-radius:999px;'
+        f'font-weight:800;font-size:.82rem;color:{color};background:{bg};">{label}</span>'
+    )
+
+
 def _get_app_setting(db: Session, key: str, default: str = "") -> str:
     row = db.query(AppSetting).filter(AppSetting.key == key).first()
     if not row or row.value is None:
@@ -2468,6 +2699,88 @@ def list_blocked_groups() -> list[str]:
     out.sort()
     return out
     
+
+@app.post("/panel/group/{group_jid}/promotion")
+def panel_set_group_promotion(
+    group_jid: str,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    total_actas = int(payload.get("total_actas") or 0)
+    promo_name = (payload.get("promo_name") or "").strip()
+    price_per_piece = (payload.get("price_per_piece") or "").strip()
+
+    if total_actas <= 0:
+        return {"ok": False, "error": "TOTAL_ACTAS_INVALID"}
+
+    row = db.query(GroupPromotion).filter(GroupPromotion.group_jid == group_jid).first()
+
+    if row:
+        row.promo_name = promo_name or row.promo_name
+        row.total_actas = total_actas
+        row.used_actas = 0
+        row.price_per_piece = price_per_piece
+        row.warning_sent_50 = False
+        row.warning_sent_0 = False
+        row.is_active = True
+        row.updated_at = _mx_now()
+    else:
+        row = GroupPromotion(
+            group_jid=group_jid,
+            promo_name=promo_name,
+            total_actas=total_actas,
+            used_actas=0,
+            price_per_piece=price_per_piece,
+            warning_sent_50=False,
+            warning_sent_0=False,
+            is_active=True,
+        )
+        db.add(row)
+
+    db.commit()
+
+    return {
+        "ok": True,
+        "message": "Promoción guardada correctamente",
+        "group_jid": group_jid,
+        "total_actas": total_actas,
+    }
+
+
+@app.post("/panel/group/{group_jid}/promotion/recharge")
+def panel_recharge_group_promotion(
+    group_jid: str,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    extra_actas = int(payload.get("extra_actas") or 0)
+
+    if extra_actas <= 0:
+        return {"ok": False, "error": "EXTRA_ACTAS_INVALID"}
+
+    row = db.query(GroupPromotion).filter(GroupPromotion.group_jid == group_jid).first()
+
+    if not row:
+        return {"ok": False, "error": "PROMOTION_NOT_FOUND"}
+
+    available_now = _promotion_available(row)
+
+    row.total_actas = available_now + extra_actas
+    row.used_actas = 0
+    row.warning_sent_50 = False
+    row.warning_sent_0 = False
+    row.is_active = True
+    row.updated_at = _mx_now()
+
+    db.commit()
+
+    return {
+        "ok": True,
+        "message": f"Recarga aplicada. Nuevo saldo: {row.total_actas}",
+        "group_jid": group_jid,
+        "total_actas": row.total_actas,
+    }
+
 
 @app.post("/panel/groups/toggle-all")
 def panel_toggle_all_groups():
