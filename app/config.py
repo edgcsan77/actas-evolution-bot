@@ -40,6 +40,7 @@ class Settings(BaseSettings):
         "NO SE ENCONTRO EL ACTA EN SISTEMA|"
         "NO SE ENCONTRÓ EL ACTA EN SISTEMA|"
         "ACTA NO ENCONTRADA|"
+        "DOCUMENTO NO ENCONTRADO|"
         "SIN REGISTRO"
     )
 
