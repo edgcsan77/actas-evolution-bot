@@ -234,8 +234,6 @@ def _process_provider3(req, db):
                 margen=flags["margen"],
             )
 
-    time.sleep(random.uniform(1.8, 4.2))
-
     try:
         result = _run_request()
     except RuntimeError as e:
@@ -243,7 +241,7 @@ def _process_provider3(req, db):
 
         if err.startswith("PROVIDER3_RATE_LIMIT"):
             print("PROVIDER3_RATE_LIMIT_RETRYING", flush=True)
-            time.sleep(random.uniform(5.5, 8.5))
+            time.sleep(2)
             result = _run_request()
         else:
             raise
