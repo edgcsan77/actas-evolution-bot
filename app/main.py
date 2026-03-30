@@ -2479,7 +2479,13 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
         else:
             tiempo = f"{total_seconds:.2f} segundos"
 
-        caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
+        NO_TIME_CAPTION_GROUPS = {
+            "120363408668441985@g.us",
+            "120363421166637606@g.us",
+        }
+
+        if req.source_group_id not in NO_TIME_CAPTION_GROUPS:
+            caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
 
     print("PDF_CAPTION =", caption_text, flush=True)
 
@@ -3191,7 +3197,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         .filter(
                             RequestLog.provider_group_id == source_chat_id,
                             RequestLog.curp == filename_id,
-                            RequestLog.status.in_(["PROCESSING", "QUEUED", "PENDING"])
+                            RequestLog.status == "PROCESSING"
                         )
                         .order_by(RequestLog.created_at.desc())
                         .first()
@@ -3203,7 +3209,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         .filter(
                             RequestLog.provider_group_id == source_chat_id,
                             RequestLog.curp == provider_id,
-                            RequestLog.status.in_(["PROCESSING", "QUEUED", "PENDING"])
+                            RequestLog.status == "PROCESSING"
                         )
                         .order_by(RequestLog.created_at.desc())
                         .first()
@@ -3212,7 +3218,19 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 if not open_req:
                     print("PROVIDER_PDF_WITHOUT_MATCH =", filename, flush=True)
                     return {"ok": True, "ignored": "provider_pdf_without_match"}
-
+                
+                match_term = filename_id or provider_id or open_req.curp or "NO_TERM"
+                pdf_dedupe_key = f"provider_pdf:{source_chat_id}:{match_term}:{filename or 'nofile'}"
+                
+                already_sent = redis_conn.set(pdf_dedupe_key, "1", ex=3600, nx=True)
+                if not already_sent:
+                    print("PROVIDER_PDF_DUPLICATE_IGNORED =", pdf_dedupe_key, flush=True)
+                    return {"ok": True, "ignored": "provider_pdf_duplicate"}
+                
+                if open_req.status == "DONE":
+                    print("PROVIDER_PDF_ALREADY_DONE_REQ_ID =", open_req.id, flush=True)
+                    return {"ok": True, "ignored": "provider_pdf_already_done"}
+                
                 media_json = get_media_base64("document", media_message_id)
                 media_b64 = (
                     media_json.get("base64")
