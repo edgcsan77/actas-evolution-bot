@@ -261,7 +261,7 @@ def _process_provider3(req, db):
     }
     
 
-def _handle_group_promotion_after_done(req, db, instance_name: str):
+def _handle_group_promotion_after_done(req, db):
     if not req.source_group_id:
         return
 
@@ -331,7 +331,7 @@ def _handle_group_promotion_after_done(req, db, instance_name: str):
     db.commit()
 
     if msg:
-        send_group_text(req.source_group_id, msg, instance_name=instance_name)
+        send_group_text(req.source_group_id, msg)
 
 
 def process_request(request_id: int):
@@ -406,7 +406,7 @@ def process_request(request_id: int):
             req.updated_at = _mx_now()
             db.commit()
 
-            _handle_group_promotion_after_done(req, db, instance_name)
+            _handle_group_promotion_after_done(req, db)
         
             return
 
