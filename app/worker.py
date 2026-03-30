@@ -290,10 +290,11 @@ def _handle_group_promotion_after_done(req, db):
         msg = (
             f"❌ *Paquete agotado*\n\n"
             f"Tu paquete promocional de *{promo.total_actas} actas* ha sido consumido en su totalidad.\n\n"
-            f"Para continuar con el servicio, es necesario realizar una nueva recarga.\n\n"
+            f"El grupo quedará bloqueado automáticamente hasta nueva recarga o activación.\n\n"
             f"Quedamos atentos."
         )
         promo.warning_sent_0 = True
+        promo.is_active = False
 
     elif available <= 10 and not promo.warning_sent_10:
         msg = (
@@ -331,6 +332,13 @@ def _handle_group_promotion_after_done(req, db):
         promo.warning_sent_200 = True
 
     db.commit()
+
+    if available <= 0:
+        try:
+            from app.main import block_group
+            block_group(req.source_group_id)
+        except Exception as block_exc:
+            print("PROMOTION_AUTO_BLOCK_ERROR =", str(block_exc), flush=True)
 
     if msg:
         send_group_text(req.source_group_id, msg)
