@@ -935,6 +935,7 @@ GROUP_NAME_MAP = {
     "120363422771877743@g.us": "Gpo. No. 48 Aliados Rurales",
     "120363427738529897@g.us": "Gpo. No. 63 Grupo Maya 2",
     "120363426763609841@g.us": "Gpo. No. 27 Comida Master",
+    "120363425053127323@g.us": "Gpo. No. 64 Panchinko Actas",
 }
 
 
