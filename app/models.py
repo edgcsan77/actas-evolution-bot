@@ -84,8 +84,13 @@ class GroupPromotion(Base):
     total_actas = Column(Integer, nullable=False, default=0)
     used_actas = Column(Integer, nullable=False, default=0)
     price_per_piece = Column(String(30), nullable=True)
+
+    warning_sent_200 = Column(Boolean, default=False, nullable=False)
+    warning_sent_100 = Column(Boolean, default=False, nullable=False)
     warning_sent_50 = Column(Boolean, default=False, nullable=False)
+    warning_sent_10 = Column(Boolean, default=False, nullable=False)
     warning_sent_0 = Column(Boolean, default=False, nullable=False)
+
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
