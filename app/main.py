@@ -2009,8 +2009,8 @@ def panel_actas(
                     promo_cell = f"""
                     <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}"
                        class="btn btn-success"
-                       style="padding:6px 12px; font-size:13px; border-radius:16px; text-decoration:none;">
-                       + Promoción
+                       style="color:white;padding:6px 12px; font-size:13px; border-radius:16px; text-decoration:none;">
+                       +Promoción
                     </a>
                     """
         
