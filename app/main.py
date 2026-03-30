@@ -1999,19 +1999,20 @@ def panel_actas(
                 )
         
                 if promo_info:
-                    promo_cell = (
-                        f'{promo_info["html"]}<br>'
-                        f'<span class="small">'
-                        f'Total: {promo_info["total_actas"]} · '
-                        f'Usadas: {promo_info["used_actas"]} · '
-                        f'Disponibles: {promo_info["available"]}'
-                        f'</span>'
-                    )
+                    status = "Activa" if promo_info["available"] > 0 else "Agotada"
+
+                    promo_cell = f"""
+                    <span class="badge bg-success">{status}</span><br>
+                    <b>{promo_info["used_actas"]} / {promo_info["total_actas"]}</b>
+                    """
                 else:
-                    promo_cell = (
-                        f'<a href="/panel/group-detail?group_jid={r["group_jid"]}&view={view}" '
-                        f'class="btn btn-warning">Activar promoción</a>'
-                    )
+                    promo_cell = f"""
+                    <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}"
+                       class="btn btn-success"
+                       style="padding:6px 12px; font-size:13px; border-radius:16px; text-decoration:none;">
+                       + Promoción
+                    </a>
+                    """
         
                 html += f"""
                 <tr>
