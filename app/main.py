@@ -1079,13 +1079,20 @@ def _promotion_summary_map(db: Session) -> dict[str, dict]:
 
     for r in rows:
         available = max(0, (r.total_actas or 0) - (r.used_actas or 0))
-        out[r.group_jid] = {
+
+        payload = {
             "promo_name": r.promo_name or "",
             "total_actas": r.total_actas or 0,
             "used_actas": r.used_actas or 0,
             "available": available,
             "html": _promotion_badge_html(r),
         }
+
+        raw_key = (r.group_jid or "").strip()
+        clean_key = raw_key.replace("@g.us", "")
+
+        out[raw_key] = payload
+        out[clean_key] = payload
 
     return out
 
@@ -1931,8 +1938,23 @@ def panel_actas(
                     else f'<button class="btn btn-danger" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'block\')">Bloquear</button>'
                 )
 
-                promo_info = promo_map.get(r["group_jid"])
-                promo_cell = promo_info["html"] if promo_info else '<span style="color:#6b7280;font-weight:700;">Sin promoción</span>'
+                group_key = (r["group_jid"] or "").replace("@g.us", "").strip()
+                promo_info = (
+                    promo_map.get(r["group_jid"])
+                    or promo_map.get(group_key)
+                )
+
+                if promo_info:
+                    promo_cell = (
+                        f'{promo_info["html"]}<br>'
+                        f'<span class="small">'
+                        f'Total: {promo_info["total_actas"]} · '
+                        f'Usadas: {promo_info["used_actas"]} · '
+                        f'Disponibles: {promo_info["available"]}'
+                        f'</span>'
+                    )
+                else:
+                    promo_cell = '<span style="color:#6b7280;font-weight:700;">Sin promoción</span>'
         
                 html += f"""
                 <tr>
@@ -1951,7 +1973,7 @@ def panel_actas(
                 </tr>
                 """
         else:
-            html += '<tr><td colspan="9">Sin datos.</td></tr>'
+            html += '<tr><td colspan="8">Sin datos.</td></tr>'
     
         html += """
               </tbody>
