@@ -818,7 +818,7 @@ def panel_group_detail(
           if (!ok) return;
         
           try {{
-            const res = await fetch(`/panel/group/${encodeURIComponent(groupJid)}/promotion/remove`, {{
+            const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/promotion/remove`, {{
               method: "POST"
             }});
         
