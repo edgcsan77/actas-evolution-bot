@@ -18,8 +18,11 @@ def provider2_command(term: str, act_type: str) -> str:
       1 Marco y reverso
       2 Marco, reverso y folio
     """
+
+    term = (term or "").strip()
     act_type = normalize_text(act_type)
 
+    # CADENA / IDENTIFICADOR ELECTRÓNICO
     if is_chain(term):
         if "FOLIO" in act_type:
             return f"{term} 2"
@@ -36,5 +39,9 @@ def provider2_command(term: str, act_type: str) -> str:
         "DIVORCIO FOLIO": "8",
     }
 
-    cmd = mapping.get(act_type, "1")
+    cmd = mapping.get(act_type)
+
+    if not cmd:
+        cmd = "1"
+
     return f"{term} {cmd}"
