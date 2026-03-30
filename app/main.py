@@ -2,7 +2,7 @@ import os
 import base64
 import time
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Depends, Body, Request, BackgroundTasks
@@ -40,16 +40,32 @@ PANEL_TZ = "America/Monterrey"
 BLOCKED_GROUPS_KEY = "blocked_groups_no_response"
 
 
+def _utc_now_naive():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def _mx_now():
-    return datetime.now(ZoneInfo("America/Monterrey"))
+    return datetime.now(ZoneInfo(PANEL_TZ))
 
 
 def _to_panel_tz(dt):
     if not dt:
         return None
+
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+        dt = dt.replace(tzinfo=timezone.utc)
+
     return dt.astimezone(ZoneInfo(PANEL_TZ))
+
+
+def _panel_to_utc_naive(dt):
+    if not dt:
+        return None
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo(PANEL_TZ))
+
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 DAYS_ES = {
@@ -157,14 +173,20 @@ def _panel_period_bounds(view: str):
     view = (view or "day").strip().lower()
 
     if view == "week":
-        start = _panel_week_start()
-        end = _panel_week_end()
-        return start, end, "week"
+        local_start = _panel_week_start()
+        local_end = _panel_week_end()
+        utc_start = _panel_to_utc_naive(local_start)
+        utc_end = _panel_to_utc_naive(local_end)
+        return utc_start, utc_end, "week"
 
     now = _panel_now()
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = start + timedelta(days=1)
-    return start, end, "day"
+    local_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    local_end = local_start + timedelta(days=1)
+
+    utc_start = _panel_to_utc_naive(local_start)
+    utc_end = _panel_to_utc_naive(local_end)
+
+    return utc_start, utc_end, "day"
 
 
 def _query_requests_for_panel(
@@ -408,10 +430,18 @@ def _panel_daily_group_rows(rows: list[RequestLog]) -> list[dict]:
 
 def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str) -> dict:
     days = {}
-    time_min, time_max, _ = _panel_period_bounds(view)
 
-    cur = time_min
-    while cur < time_max:
+    now_local = _panel_now()
+
+    if (view or "day").strip().lower() == "week":
+        local_start = _panel_week_start(now_local)
+        local_end = _panel_week_end(now_local)
+    else:
+        local_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        local_end = local_start + timedelta(days=1)
+
+    cur = local_start
+    while cur < local_end:
         day_str = cur.strftime("%Y-%m-%d")
         days[day_str] = {
             "day_name": _day_name_es_from_date(day_str),
@@ -464,8 +494,8 @@ def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str) -
         "group_name": _group_name(group_jid),
         "rows": rows_out,
         "totals": totals,
-        "date_from": time_min.strftime("%Y-%m-%d"),
-        "date_to": (time_max - timedelta(days=1)).strftime("%Y-%m-%d"),
+        "date_from": local_start.strftime("%Y-%m-%d"),
+        "date_to": (local_end - timedelta(days=1)).strftime("%Y-%m-%d"),
         "view": view,
     }
 
@@ -2245,7 +2275,7 @@ def update_provider3_sid(
 def panel_provider_on(provider_name: str, db: Session = Depends(get_db)):
     row = _get_or_create_provider(db, provider_name.upper(), provider_name.upper() == "PROVIDER1")
     row.is_enabled = True
-    row.updated_at = _mx_now()
+    row.updated_at = _utc_now_naive()
     db.commit()
     return {"ok": True, "provider": provider_name.upper(), "enabled": True}
 
@@ -2254,7 +2284,7 @@ def panel_provider_on(provider_name: str, db: Session = Depends(get_db)):
 def panel_provider_off(provider_name: str, db: Session = Depends(get_db)):
     row = _get_or_create_provider(db, provider_name.upper(), provider_name.upper() == "PROVIDER1")
     row.is_enabled = False
-    row.updated_at = _mx_now()
+    row.updated_at = _utc_now_naive()
     db.commit()
     return {"ok": True, "provider": provider_name.upper(), "enabled": False}
 
@@ -2410,7 +2440,7 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
             created_at = created_at.replace(tzinfo=ZoneInfo("UTC"))
 
         created_at = created_at.astimezone(ZoneInfo("America/Monterrey"))
-        delta = _mx_now() - created_at
+        delta = _utc_now_naive() - created_at
         total_seconds = max(0.0, delta.total_seconds())
 
         if total_seconds >= 60:
@@ -2517,8 +2547,8 @@ def _get_or_create_provider(db: Session, provider_name: str, default_enabled: bo
     row = ProviderSetting(
         provider_name=provider_name,
         is_enabled=default_enabled,
-        created_at=_mx_now(),
-        updated_at=_mx_now(),
+        created_at=_utc_now_naive(),
+        updated_at=_utc_now_naive(),
     )
     db.add(row)
     db.commit()
@@ -2589,12 +2619,12 @@ def _set_app_setting(db: Session, key: str, value: str):
 
     if row:
         row.value = value
-        row.updated_at = _mx_now()
+        row.updated_at = _utc_now_naive()
     else:
         row = AppSetting(
             key=key,
             value=value,
-            updated_at=_mx_now(),
+            updated_at=_utc_now_naive(),
         )
         db.add(row)
 
@@ -2752,7 +2782,7 @@ def panel_set_group_promotion(
         row.warning_sent_10 = False
         row.warning_sent_0 = False
         row.is_active = True
-        row.updated_at = _mx_now()
+        row.updated_at = _utc_now_naive()
     else:
         row = GroupPromotion(
             group_jid=group_jid,
@@ -2805,7 +2835,7 @@ def panel_recharge_group_promotion(
     row.warning_sent_10 = False
     row.warning_sent_0 = False
     row.is_active = True
-    row.updated_at = _mx_now()
+    row.updated_at = _utc_now_naive()
 
     db.commit()
 
@@ -3120,7 +3150,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 open_req.pdf_url = None
                 open_req.provider_media_url = "BASE64_FROM_MEDIA_MESSAGE"
                 open_req.status = "DONE"
-                open_req.updated_at = _mx_now()
+                open_req.updated_at = _utc_now_naive()
                 
                 db.commit()
                 
@@ -3156,7 +3186,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                 open_req.status = "ERROR"
                 open_req.error_message = text_body.strip()
-                open_req.updated_at = _mx_now()
+                open_req.updated_at = _utc_now_naive()
                 db.commit()
 
                 _deliver_text_result(
@@ -3341,7 +3371,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 _reply_to_origin(source_group_id, requester_wa_id, "⚠️ No encontré solicitud previa para ese dato.")
             else:
                 last.status = "QUEUED"
-                last.updated_at = _mx_now()
+                last.updated_at = _utc_now_naive()
                 db.commit()
                 request_queue.enqueue(process_request, last.id)
                 _reply_to_origin(source_group_id, requester_wa_id, f"🔁 Reintentando folio {last.id}")
@@ -3361,7 +3391,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             row = _get_or_create_provider(db, "PROVIDER1", True)
             row.is_enabled = True
-            row.updated_at = _mx_now()
+            row.updated_at = _utc_now_naive()
             db.commit()
 
             _reply_to_origin(source_group_id, requester_wa_id, "✅ PROVIDER1 activado")
@@ -3373,7 +3403,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             row = _get_or_create_provider(db, "PROVIDER1", True)
             row.is_enabled = False
-            row.updated_at = _mx_now()
+            row.updated_at = _utc_now_naive()
             db.commit()
 
             _reply_to_origin(source_group_id, requester_wa_id, "✅ PROVIDER1 desactivado")
@@ -3385,7 +3415,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             row = _get_or_create_provider(db, "PROVIDER2", False)
             row.is_enabled = True
-            row.updated_at = _mx_now()
+            row.updated_at = _utc_now_naive()
             db.commit()
 
             _reply_to_origin(source_group_id, requester_wa_id, "✅ PROVIDER2 activado")
@@ -3397,7 +3427,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             row = _get_or_create_provider(db, "PROVIDER2", False)
             row.is_enabled = False
-            row.updated_at = _mx_now()
+            row.updated_at = _utc_now_naive()
             db.commit()
 
             _reply_to_origin(source_group_id, requester_wa_id, "✅ PROVIDER2 desactivado")
@@ -3523,7 +3553,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             if error_existing:
                 error_existing.request_key = request_key
                 error_existing.status = "QUEUED"
-                error_existing.updated_at = _mx_now()
+                error_existing.updated_at = _utc_now_naive()
                 error_existing.error_message = None
                 error_existing.evolution_message_id = msg_id
                 error_existing.requester_wa_id = requester_wa_id
@@ -3535,7 +3565,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 error_existing.provider_message = None
                 error_existing.provider_media_url = None
                 error_existing.pdf_url = None
-                error_existing.expires_at = _mx_now() + timedelta(days=settings.HISTORY_DAYS)
+                error_existing.expires_at = _utc_now_naive() + timedelta(days=settings.HISTORY_DAYS)
                 db.commit()
         
                 request_queue.enqueue(process_request, error_existing.id)
@@ -3569,7 +3599,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 source_group_id=source_group_id,
                 evolution_message_id=msg_id,
                 status="QUEUED",
-                expires_at=_mx_now() + timedelta(days=settings.HISTORY_DAYS),
+                expires_at=_utc_now_naive() + timedelta(days=settings.HISTORY_DAYS),
             )
         
             db.add(row)
