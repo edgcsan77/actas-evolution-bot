@@ -389,6 +389,23 @@ class Provider3Client:
 
             raise RuntimeError(f"PROVIDER3_NO_RECORD: {message[:500]}")
 
+        if resp.status_code == 403:
+            body_text = (resp.text or "").strip()
+
+            try:
+                data = resp.json()
+            except Exception:
+                data = {}
+
+            message = (
+                data.get("message")
+                or data.get("error")
+                or body_text
+                or "SIN_CONSULTAS_DISPONIBLES"
+            )
+
+            raise RuntimeError(f"PROVIDER3_NO_CREDITS: {message[:500]}")
+
         resp.raise_for_status()
         return self._parse_json_or_raise(resp, "CURP_NO_JSON")
 
@@ -452,6 +469,23 @@ class Provider3Client:
                 raise RuntimeError(f"PROVIDER3_SESSION_INVALID_OR_EXPIRED: {message[:500]}")
         
             raise RuntimeError(f"PROVIDER3_NO_RECORD: {message[:500]}")
+
+        if resp.status_code == 403:
+            body_text = (resp.text or "").strip()
+
+            try:
+                data = resp.json()
+            except Exception:
+                data = {}
+
+            message = (
+                data.get("message")
+                or data.get("error")
+                or body_text
+                or "SIN_CONSULTAS_DISPONIBLES"
+            )
+
+            raise RuntimeError(f"PROVIDER3_NO_CREDITS: {message[:500]}")
 
         resp.raise_for_status()
         return self._parse_json_or_raise(resp, "CADENA_NO_JSON")
