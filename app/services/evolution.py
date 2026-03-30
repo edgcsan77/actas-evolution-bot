@@ -47,11 +47,12 @@ def send_text(number: str, text: str):
 def send_document(number: str, pdf_url: str, filename: str = "acta.pdf", caption: str = ""):
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{settings.EVOLUTION_INSTANCE}"
 
-    # descargar el PDF
     r = requests.get(pdf_url, timeout=60)
     r.raise_for_status()
 
-    # convertir a base64
+    if b"%PDF" not in r.content[:20]:
+        raise ValueError("La URL no devolvió un PDF válido")
+
     media_b64 = base64.b64encode(r.content).decode()
 
     payload = {
@@ -97,6 +98,9 @@ def send_group_document(group_jid: str, pdf_url: str, filename: str = "acta.pdf"
     r = requests.get(pdf_url, timeout=60)
     r.raise_for_status()
 
+    if b"%PDF" not in r.content[:20]:
+        raise ValueError("La URL no devolvió un PDF válido")
+
     media_b64 = base64.b64encode(r.content).decode()
 
     payload = {
@@ -128,7 +132,16 @@ def get_media_base64(media_type: str, message_id: str):
         },
         "convertToMp4": False
     }
+
+    print("GET_MEDIA_BASE64_URL =", url, flush=True)
+    print("GET_MEDIA_BASE64_MESSAGE_ID =", message_id, flush=True)
+    print("GET_MEDIA_BASE64_PAYLOAD =", payload, flush=True)
+
     resp = requests.post(url, headers=_headers(), json=payload, timeout=60)
+
+    print("GET_MEDIA_BASE64_STATUS =", resp.status_code, flush=True)
+    print("GET_MEDIA_BASE64_BODY =", resp.text[:1000], flush=True)
+
     resp.raise_for_status()
     return resp.json()
 
@@ -136,17 +149,24 @@ def get_media_base64(media_type: str, message_id: str):
 def send_document_base64(number: str, media_b64: str, filename: str = "acta.pdf", caption: str = ""):
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{settings.EVOLUTION_INSTANCE}"
 
+    raw = (media_b64 or "").strip()
+    if raw.startswith("data:"):
+        raw = raw.split(",", 1)[1]
+
+    raw = raw.replace("\n", "").replace("\r", "").strip()
+
     payload = {
         "number": _normalize_number(number),
         "mediatype": "document",
         "mimetype": "application/pdf",
         "caption": caption,
         "fileName": filename,
-        "media": media_b64,
+        "media": raw,
     }
 
     print("SEND_DOCUMENT_BASE64_CAPTION =", repr(caption), flush=True)
-    #print("SEND_DOCUMENT_BASE64_PAYLOAD =", payload, flush=True)
+    print("SEND_DOCUMENT_BASE64_FILENAME =", filename, flush=True)
+    print("SEND_DOCUMENT_BASE64_B64_LEN =", len(raw), flush=True)
 
     resp = requests.post(url, headers=_headers(), json=payload, timeout=60)
 
@@ -160,17 +180,24 @@ def send_document_base64(number: str, media_b64: str, filename: str = "acta.pdf"
 def send_group_document_base64(group_jid: str, media_b64: str, filename: str = "acta.pdf", caption: str = ""):
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{settings.EVOLUTION_INSTANCE}"
 
+    raw = (media_b64 or "").strip()
+    if raw.startswith("data:"):
+        raw = raw.split(",", 1)[1]
+
+    raw = raw.replace("\n", "").replace("\r", "").strip()
+
     payload = {
         "number": _normalize_number(group_jid),
         "mediatype": "document",
         "mimetype": "application/pdf",
         "caption": caption,
         "fileName": filename,
-        "media": media_b64,
+        "media": raw,
     }
 
     print("SEND_GROUP_DOCUMENT_BASE64_CAPTION =", repr(caption), flush=True)
-    #print("SEND_GROUP_DOCUMENT_BASE64_PAYLOAD =", payload, flush=True)
+    print("SEND_GROUP_DOCUMENT_BASE64_FILENAME =", filename, flush=True)
+    print("SEND_GROUP_DOCUMENT_BASE64_B64_LEN =", len(raw), flush=True)
 
     resp = requests.post(url, headers=_headers(), json=payload, timeout=60)
 
