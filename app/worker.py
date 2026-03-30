@@ -381,7 +381,7 @@ def process_request(request_id: int):
         
             pdf_bytes = provider3_result["pdf_bytes"]
             safe_media_b64 = base64.b64encode(pdf_bytes).decode()
-
+        
             total_seconds = max(0.0, time.perf_counter() - process_started_ts)
         
             if total_seconds >= 60:
@@ -390,25 +390,25 @@ def process_request(request_id: int):
                 tiempo = f"{minutes} min {seconds:.2f} segundos"
             else:
                 tiempo = f"{total_seconds:.2f} segundos"
-
+        
             NO_TIME_CAPTION_GROUPS = {
                 "120363408668441985@g.us",
                 "120363421166637606@g.us",
             }
-            
+        
             caption_text = ""
             if req.source_group_id not in NO_TIME_CAPTION_GROUPS:
                 caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
-                
+        
             print("PROVIDER3_CAPTION =", caption_text, flush=True)
         
             delivery_key = f"provider3_delivery:{req.id}:{req.curp}:{req.source_group_id or req.requester_wa_id}"
             first_delivery = redis_conn.set(delivery_key, "1", ex=3600, nx=True)
-            
+        
             if not first_delivery:
                 print("PROVIDER3_DUPLICATE_DELIVERY_IGNORED =", delivery_key, flush=True)
                 return
-            
+        
             print(
                 "PROVIDER3_DELIVERING_TO =",
                 {
@@ -419,7 +419,7 @@ def process_request(request_id: int):
                 },
                 flush=True,
             )
-            
+        
             if req.source_group_id:
                 send_group_document_base64(
                     req.source_group_id,
@@ -441,12 +441,12 @@ def process_request(request_id: int):
             req.error_message = None
             req.updated_at = _utc_now_naive()
             db.commit()
-
+        
             try:
                 _handle_group_promotion_after_done(req, db)
             except Exception as promo_exc:
                 print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
-
+        
             return
 
         raise RuntimeError("UNKNOWN_PROVIDER")
