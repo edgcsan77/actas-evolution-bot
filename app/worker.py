@@ -1,5 +1,6 @@
 import base64
 import time
+import random
 from datetime import datetime
 
 from app.db import SessionLocal
@@ -9,6 +10,12 @@ from app.config import settings
 from app.utils.curp import provider_label_for_type, is_chain
 from app.utils.provider_format import provider2_command
 from app.services.provider3 import Provider3Client, decode_pdf_base64
+
+from zoneinfo import ZoneInfo
+
+
+def _mx_now():
+    return datetime.now(ZoneInfo("America/Monterrey"))
 
 
 def provider3_keepalive_job():
@@ -23,13 +30,21 @@ def provider3_keepalive_job():
 
         if not phpsessid:
             print("KEEPALIVE_SKIP_NO_SID", flush=True)
-            return {"ok": False}
+            return {"ok": False, "error": "no_sid"}
 
         client = Provider3Client(phpsessid=phpsessid)
 
-        result = client.keepalive()
+        warm = client.warm_session(with_user_check=False)
+        print("KEEPALIVE_WARM =", warm, flush=True)
 
-        print("KEEPALIVE_OK", flush=True)
+        result = client.keepalive(jitter_seconds=(0.2, 1.2))
+        print("KEEPALIVE_OK =", result, flush=True)
+
+        try:
+            licenses = client.get_licenses()
+            print("KEEPALIVE_LICENSES =", licenses, flush=True)
+        except Exception as lic_exc:
+            print("KEEPALIVE_LICENSES_ERROR =", str(lic_exc), flush=True)
 
         return {"ok": True}
 
@@ -49,8 +64,8 @@ def _get_or_create_provider(db, provider_name: str, default_enabled: bool):
     row = ProviderSetting(
         provider_name=provider_name,
         is_enabled=default_enabled,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=_mx_now(),
+        updated_at=_mx_now(),
     )
     db.add(row)
     db.commit()
@@ -219,7 +234,7 @@ def _process_provider3(req, db):
                 margen=flags["margen"],
             )
 
-    time.sleep(2)
+    time.sleep(random.uniform(1.8, 4.2))
 
     try:
         result = _run_request()
@@ -228,7 +243,7 @@ def _process_provider3(req, db):
 
         if err.startswith("PROVIDER3_RATE_LIMIT"):
             print("PROVIDER3_RATE_LIMIT_RETRYING", flush=True)
-            time.sleep(6)
+            time.sleep(random.uniform(5.5, 8.5))
             result = _run_request()
         else:
             raise
@@ -254,7 +269,7 @@ def process_request(request_id: int):
             return
 
         req.status = "PROCESSING"
-        req.updated_at = datetime.utcnow()
+        req.updated_at = _mx_now()
         db.commit()
 
         provider_name = _pick_provider_name(db, req.id)
@@ -264,7 +279,7 @@ def process_request(request_id: int):
         req.provider_name = provider_name
         req.provider_group_id = provider_group_id
         req.provider_message = text_to_provider
-        req.updated_at = datetime.utcnow()
+        req.updated_at = _mx_now()
         db.commit()
 
         print("WORKER_PROVIDER_NAME =", provider_name, flush=True)
@@ -283,7 +298,7 @@ def process_request(request_id: int):
         
             total_seconds = 0.0
             if req.created_at:
-                total_seconds = max(0.0, (datetime.utcnow() - req.created_at).total_seconds())
+                total_seconds = max(0.0, (_mx_now() - req.created_at).total_seconds())
         
             if total_seconds >= 60:
                 minutes = int(total_seconds // 60)
@@ -315,7 +330,7 @@ def process_request(request_id: int):
             req.pdf_url = None
             req.status = "DONE"
             req.error_message = None
-            req.updated_at = datetime.utcnow()
+            req.updated_at = _mx_now()
             db.commit()
         
             return
@@ -327,7 +342,7 @@ def process_request(request_id: int):
         err = str(e)
     
         if req:
-            req.updated_at = datetime.utcnow()
+            req.updated_at = _mx_now()
     
             if err.startswith("PROVIDER3_NO_RECORD:"):
                 req.status = "ERROR"
@@ -377,7 +392,7 @@ def process_request(request_id: int):
                     f"⚠️ Solicitud sin éxito en Registro Civil\n"
                     f"Dato: {req.curp}\n"
                     f"Tipo: {req.act_type}\n\n"
-                    f"Reenviar nuevamente"
+                    f"Reenviar nuevamente en unos minutos"
                 )
     
                 if req.source_group_id:
