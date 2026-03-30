@@ -122,7 +122,9 @@ def _remove_type_words(line: str) -> str:
         r"DEFUNCION",
         r"DIVORCIO",
         r"NACIMI\w*",
+        r"FOLIADO",
         r"FOLIADA",
+        r"FOLIO",
     ]
 
     for p in patterns:
@@ -163,10 +165,16 @@ def extract_request_terms(text: str) -> list[str]:
         lines = [text.strip()] if text.strip() else []
 
     found = []
+
     for line in lines:
-        term = _extract_identifier_from_line(line)
-        if term and term not in found:
-            found.append(term)
+        cleaned = _remove_type_words(line)
+
+        curps = re.findall(rf"\b({CURP_REGEX})\b", cleaned)
+        nums20 = re.findall(rf"\b({NUM20_REGEX})\b", cleaned)
+
+        for term in curps + nums20:
+            if term not in found:
+                found.append(term)
 
     return found
 
@@ -233,7 +241,7 @@ def seems_like_identifier_attempt(text: str) -> bool:
         return True
 
     # Si trae mezcla de letras y números tipo CURP rara
-    if re.search(r"[A-Z]{3,}\d{2,}[A-Z0-9]{2,}", t):
+    if re.search(r"\b[A-Z]{4}\d{4,}[A-Z0-9]{4,}\b", t):
         return True
 
     return False
