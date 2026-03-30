@@ -1373,6 +1373,39 @@ def panel_actas(
           a.btn:hover {{
             text-decoration: none !important;
           }}
+
+          .group-mode-bar {{
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            padding: 16px;
+          }}
+        
+          .group-mode-link {{
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 14px;
+            border-radius: 12px;
+            background: #f8fafc;
+            border: 1px solid #dbe3ee;
+            color: #1d4ed8;
+            font-weight: 700;
+            text-decoration: none !important;
+            transition: .2s ease;
+          }}
+        
+          .group-mode-link:hover {{
+            background: #eff6ff;
+            border-color: #bfdbfe;
+            text-decoration: none !important;
+          }}
+        
+          .group-mode-link-active {{
+            background: #dbeafe;
+            border-color: #93c5fd;
+            color: #1e3a8a;
+          }}
         
           @media (max-width: 1200px) {{
             .grid-hero {{
@@ -1457,8 +1490,8 @@ def panel_actas(
           </div>
     
           <div class="toolbar">
-            <a href="/panel?view=day" class="tool-link {'tool-link-active' if view == 'day' else ''}">Hoy</a>
-            <a href="/panel?view=week" class="tool-link {'tool-link-active' if view == 'week' else ''}">Semana</a>
+            <a href="/panel?view=day&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'day' else ''}">Hoy</a>
+            <a href="/panel?view=week&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'week' else ''}">Semana</a>
           </div>
     
           <div class="grid-hero">
@@ -1639,12 +1672,14 @@ def panel_actas(
         html += f"""
         <div class="box">
           <div class="head"><strong>Vista de grupos</strong></div>
-          <div class="filters">
-            <a class="btn btn-primary" href="/panel?view={_esc(view)}&group_mode=all&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
+          <div class="group-mode-bar">
+            <a class="group-mode-link {'group-mode-link-active' if group_mode == 'all' else ''}"
+               href="/panel?view={_esc(view)}&group_mode=all&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
               Ver todos los grupos
             </a>
-            <a class="btn btn-success" href="/panel?view={_esc(view)}&group_mode=active&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
-              Ver solo grupos que compraron en el día
+            <a class="group-mode-link {'group-mode-link-active' if group_mode == 'active' else ''}"
+               href="/panel?view={_esc(view)}&group_mode=active&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
+              Solo grupos con compras del día
             </a>
           </div>
         </div>
@@ -1660,8 +1695,11 @@ def panel_actas(
         
         html += f"""
         <div class="box">
-          <div class="head"><strong>Control masivo de grupos</strong></div>
-          <div class="filters">
+          <div class="head">
+            <strong>Control masivo de grupos</strong>
+            <span class="small">Bloquea o desbloquea todos los grupos cliente con un solo clic</span>
+          </div>
+          <div class="group-mode-bar">
             {toggle_all_btn}
           </div>
         </div>
