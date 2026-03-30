@@ -1,5 +1,5 @@
-from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean
+from sqlalchemy.sql import func
 
 from app.db import Base
 
@@ -10,7 +10,7 @@ class AuthorizedUser(Base):
     id = Column(Integer, primary_key=True)
     wa_id = Column(String(50), unique=True, nullable=False, index=True)
     name = Column(String(150), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, server_default=func.now())
 
 
 class AuthorizedGroup(Base):
@@ -19,7 +19,7 @@ class AuthorizedGroup(Base):
     id = Column(Integer, primary_key=True)
     group_jid = Column(String(120), unique=True, nullable=False, index=True)
     group_name = Column(String(150), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, server_default=func.now())
 
 
 class ProviderSetting(Base):
@@ -28,8 +28,8 @@ class ProviderSetting(Base):
     id = Column(Integer, primary_key=True, index=True)
     provider_name = Column(String, unique=True, index=True, nullable=False)
     is_enabled = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 class AppSetting(Base):
@@ -37,7 +37,7 @@ class AppSetting(Base):
 
     key = Column(String, primary_key=True, index=True)
     value = Column(Text, nullable=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 class RequestLog(Base):
@@ -65,10 +65,11 @@ class RequestLog(Base):
     pdf_url = Column(Text, nullable=True)
 
     status = Column(String(20), default="QUEUED", index=True)
+    status = Column(String(20), default="QUEUED", nullable=False, index=True)
     error_message = Column(Text, nullable=True)
 
-    resent_from_history = Column(Boolean, default=False)
+    resent_from_history = Column(Boolean, default=False, nullable=False)
 
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), index=True)
     expires_at = Column(DateTime, nullable=False)
