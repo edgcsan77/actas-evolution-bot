@@ -1909,8 +1909,8 @@ def panel_actas(
                 <tr>
                   <th>Grupo</th>
                   <th class="right">Total</th>
-                  <th class="right">EN COLA</th>
-                  <th class="right">PROCESANDO</th>
+                  #<th class="right">EN COLA</th>
+                  #<th class="right">PROCESANDO</th>
                   <th class="right">HECHO</th>
                   <th class="right">ERROR</th>
                   <th>Promoción</th>
