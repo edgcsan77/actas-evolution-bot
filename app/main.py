@@ -902,8 +902,8 @@ GROUP_NAME_MAP = {
     "120363408668441985@g.us": "Gpo. No. 42 Arturo",
     "120363404207028239@g.us": "Gpo. No. 24 Beto",
     "120363421694580090@g.us": "Gpo. No. 37 Loez",
-    "120363427788039518@g.us": "Docify Mx 1",
-    "120363424360403186@g.us": "Docify Mx 2",
+    "120363427788039518@g.us": "Docify Mx 1 - Oziel",
+    "120363424360403186@g.us": "Docify Mx 2 - Aaron",
     "120363406562422137@g.us": "Gpo. No. 1 Max",
     "120363406732530093@g.us": "Gpo. No. 2 Max",
     "120363424567042045@g.us": "Gpo. No. 3 Max",
@@ -959,7 +959,7 @@ GROUP_NAME_MAP = {
     "120363427738529897@g.us": "Gpo. No. 63 Grupo Maya 2",
     "120363426763609841@g.us": "Gpo. No. 27 Comida Master",
     "120363425053127323@g.us": "Gpo. No. 64 Panchinko Actas",
-    "120363407565721999@g.us": "Docify Mx 3",
+    "120363407565721999@g.us": "Docify Mx 3 - Eduardo",
 }
 
 
