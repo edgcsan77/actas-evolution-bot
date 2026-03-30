@@ -403,9 +403,9 @@ def process_request(request_id: int):
             print("PROVIDER3_CAPTION =", caption_text, flush=True)
         
             delivery_key = f"provider3_delivery:{req.id}:{req.curp}:{req.source_group_id or req.requester_wa_id}"
-            first_delivery = redis_conn.set(delivery_key, "1", ex=3600, nx=True)
         
-            if not first_delivery:
+            # Si ya se entregó antes, no volver a mandar
+            if redis_conn.exists(delivery_key):
                 print("PROVIDER3_DUPLICATE_DELIVERY_IGNORED =", delivery_key, flush=True)
                 return
         
@@ -420,20 +420,40 @@ def process_request(request_id: int):
                 flush=True,
             )
         
-            if req.source_group_id:
-                send_group_document_base64(
-                    req.source_group_id,
-                    safe_media_b64,
-                    filename=f"{req.curp}.pdf",
-                    caption=caption_text
-                )
-            else:
-                send_document_base64(
-                    req.requester_wa_id,
-                    safe_media_b64,
-                    filename=f"{req.curp}.pdf",
-                    caption=caption_text
-                )
+            send_ok = False
+        
+            for attempt in range(3):
+                try:
+                    if req.source_group_id:
+                        send_group_document_base64(
+                            req.source_group_id,
+                            safe_media_b64,
+                            filename=f"{req.curp}.pdf",
+                            caption=caption_text
+                        )
+                    else:
+                        send_document_base64(
+                            req.requester_wa_id,
+                            safe_media_b64,
+                            filename=f"{req.curp}.pdf",
+                            caption=caption_text
+                        )
+        
+                    send_ok = True
+                    print(f"PROVIDER3_SEND_OK_ATTEMPT_{attempt+1} =", req.id, flush=True)
+                    break
+        
+                except Exception as e:
+                    print(f"PDF_SEND_ATTEMPT_{attempt+1}_ERROR =", str(e), flush=True)
+                    if attempt == 2:
+                        raise
+                    time.sleep(2)
+        
+            if not send_ok:
+                raise RuntimeError("PROVIDER3_PDF_SEND_FAILED")
+        
+            # Marcar duplicado solo después de envío exitoso
+            redis_conn.set(delivery_key, "1", ex=3600)
         
             req.provider_media_url = "BASE64_PROVIDER3"
             req.pdf_url = None
