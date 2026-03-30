@@ -341,6 +341,8 @@ def process_request(request_id: int):
         if not req:
             return
 
+        process_started_ts = time.perf_counter()
+
         req.status = "PROCESSING"
         req.updated_at = _mx_now()
         db.commit()
@@ -368,10 +370,8 @@ def process_request(request_id: int):
         
             pdf_bytes = provider3_result["pdf_bytes"]
             safe_media_b64 = base64.b64encode(pdf_bytes).decode()
-        
-            total_seconds = 0.0
-            if req.created_at:
-                total_seconds = max(0.0, (_mx_now() - req.created_at).total_seconds())
+
+            total_seconds = max(0.0, time.perf_counter() - process_started_ts)
         
             if total_seconds >= 60:
                 minutes = int(total_seconds // 60)
