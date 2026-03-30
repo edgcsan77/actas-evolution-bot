@@ -458,7 +458,10 @@ def process_request(request_id: int):
     
                 return
 
-            if err.startswith("PROVIDER3_SESSION_INVALID_OR_EXPIRED:"):
+            if (
+                err.startswith("PROVIDER3_SESSION_INVALID_OR_EXPIRED:")
+                or err.startswith("PROVIDER3_NO_CREDITS:")
+            ):
                 req.status = "ERROR"
                 req.error_message = err
                 db.commit()
