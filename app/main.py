@@ -672,7 +672,7 @@ GROUP_NAME_MAP = {
     "120363425014097597@g.us": "Gpo. No. 7 Karen Marvin",
     "120363425275514736@g.us": "Gpo. No. 8 Ana Marvin",
     "120363406182077605@g.us": "Gpo. No. 12 Marvin",
-    "120363425721043776@g.us": "Gpo. No. 3 Rodolfo",
+    "120363425721043776@g.us": "Gpo. No. 3 Gestoria Maya 1",
     "120363424204506742@g.us": "Gpo. No. 51 PR Mesino",
     "120363403551029435@g.us": "Gpo. No. 18 Barranco",
     "120363421166637606@g.us": "Gpo. No. 14 Hiro",
@@ -735,9 +735,11 @@ GROUP_NAME_MAP = {
     "120363424851734635@g.us": "Gpo. No. 17 Svs. Digitales",
     "120363424333002785@g.us": "Gpo. No. 33 Miscelanea Batallon",
     "120363401894657087@g.us": "Gpo. No. 36 Belladira",
-    "120363408050345917@g.us": "Gpo. No. 33 Melani",
+    "120363408050345917@g.us": "Gpo. No. 33 Docs",
     "120363423353879965@g.us": "Gpo. No. 44 Nadia",
     "120363422771877743@g.us": "Gpo. No. 48 Aliados Rurales",
+    "120363427738529897@g.us": "Gpo. No. 63 Grupo Maya 2",
+    "120363426763609841@g.us": "Gpo. No. 27 Comida Master",
 }
 
 
