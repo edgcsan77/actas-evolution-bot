@@ -73,3 +73,19 @@ class RequestLog(Base):
     created_at = Column(DateTime, server_default=func.now(), index=True)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), index=True)
     expires_at = Column(DateTime, nullable=False)
+
+
+class GroupPromotion(Base):
+    __tablename__ = "group_promotions"
+
+    id = Column(Integer, primary_key=True)
+    group_jid = Column(String(120), unique=True, nullable=False, index=True)
+    promo_name = Column(String(150), nullable=True)
+    total_actas = Column(Integer, nullable=False, default=0)
+    used_actas = Column(Integer, nullable=False, default=0)
+    price_per_piece = Column(String(30), nullable=True)
+    warning_sent_50 = Column(Boolean, default=False, nullable=False)
+    warning_sent_0 = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
