@@ -222,8 +222,22 @@ def _panel_summary_from_rows(rows: list[RequestLog]) -> dict:
 def _panel_group_rows(rows: list[RequestLog], include_all_groups: bool = False) -> list[dict]:
     data = {}
 
+    excluded_words = (
+        "PROV",
+        "PRUEBA",
+        "PRUEBAS",
+        "TEST",
+    )
+
+    def _is_hidden_group(name: str) -> bool:
+        name_up = (name or "").strip().upper()
+        return any(word in name_up for word in excluded_words)
+
     if include_all_groups:
         for gid, name in GROUP_NAME_MAP.items():
+            if _is_hidden_group(name):
+                continue
+
             data[gid] = {
                 "group_jid": gid,
                 "group_name": name,
@@ -248,11 +262,15 @@ def _panel_group_rows(rows: list[RequestLog], include_all_groups: bool = False) 
 
     for r in rows:
         gid = r.source_group_id or "PRIVADO"
+        group_name = _group_name(gid)
+
+        if gid != "PRIVADO" and _is_hidden_group(group_name):
+            continue
 
         if gid not in data:
             data[gid] = {
                 "group_jid": gid,
-                "group_name": _group_name(gid),
+                "group_name": group_name,
                 "total": 0,
                 "queued": 0,
                 "processing": 0,
@@ -1347,6 +1365,14 @@ def panel_actas(
             font-size: .86rem;
             line-height: 1.45;
           }}
+
+          a.btn {{
+            text-decoration: none !important;
+          }}
+        
+          a.btn:hover {{
+            text-decoration: none !important;
+          }}
         
           @media (max-width: 1200px) {{
             .grid-hero {{
@@ -2347,6 +2373,7 @@ def webhook_msg_seen(msg_id: str) -> bool:
 
 def block_all_client_groups():
     excluded_words = ("PROV", "PRUEBA", "PRUEBAS", "TEST")
+
     for gid, name in GROUP_NAME_MAP.items():
         name_up = (name or "").strip().upper()
         if any(word in name_up for word in excluded_words):
@@ -2356,6 +2383,7 @@ def block_all_client_groups():
 
 def unblock_all_client_groups():
     excluded_words = ("PROV", "PRUEBA", "PRUEBAS", "TEST")
+
     for gid, name in GROUP_NAME_MAP.items():
         name_up = (name or "").strip().upper()
         if any(word in name_up for word in excluded_words):
