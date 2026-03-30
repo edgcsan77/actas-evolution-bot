@@ -13,11 +13,33 @@ def request_acta(curp: str, act_type: str, request_id: int) -> dict:
         "Authorization": f"Bearer {settings.PROVIDER_API_TOKEN}",
         "Content-Type": "application/json",
     }
+
     payload = {
         "request_id": request_id,
         "curp": curp,
         "act_type": act_type,
     }
-    resp = requests.post(settings.PROVIDER_API_URL, headers=headers, json=payload, timeout=60)
+
+    print("PROVIDER_REQUEST_URL =", settings.PROVIDER_API_URL, flush=True)
+    print("PROVIDER_REQUEST_PAYLOAD =", payload, flush=True)
+
+    resp = requests.post(
+        settings.PROVIDER_API_URL,
+        headers=headers,
+        json=payload,
+        timeout=60
+    )
+
+    print("PROVIDER_RESPONSE_STATUS =", resp.status_code, flush=True)
+    print("PROVIDER_RESPONSE_BODY =", resp.text[:1000], flush=True)
+
     resp.raise_for_status()
-    return resp.json()
+
+    try:
+        return resp.json()
+    except Exception:
+        return {
+            "ok": False,
+            "error": "Proveedor devolvió respuesta no JSON",
+            "raw": resp.text[:1000]
+        }
