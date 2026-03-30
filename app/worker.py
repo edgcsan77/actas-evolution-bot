@@ -1,7 +1,7 @@
 import base64
 import time
 import random
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.db import SessionLocal
 from app.models import RequestLog, ProviderSetting, AppSetting, GroupPromotion
@@ -12,6 +12,10 @@ from app.utils.provider_format import provider2_command
 from app.services.provider3 import Provider3Client, decode_pdf_base64
 
 from zoneinfo import ZoneInfo
+
+
+def _utc_now_naive():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _mx_now():
@@ -64,8 +68,8 @@ def _get_or_create_provider(db, provider_name: str, default_enabled: bool):
     row = ProviderSetting(
         provider_name=provider_name,
         is_enabled=default_enabled,
-        created_at=_mx_now(),
-        updated_at=_mx_now(),
+        created_at=_utc_now_naive(),
+        updated_at=_utc_now_naive(),
     )
     db.add(row)
     db.commit()
@@ -276,7 +280,7 @@ def _handle_group_promotion_after_done(req, db):
         return
 
     promo.used_actas = (promo.used_actas or 0) + 1
-    promo.updated_at = _mx_now()
+    promo.updated_at = _utc_now_naive()
 
     available = max(0, (promo.total_actas or 0) - (promo.used_actas or 0))
 
@@ -342,7 +346,7 @@ def process_request(request_id: int):
         process_started_ts = time.perf_counter()
 
         req.status = "PROCESSING"
-        req.updated_at = _mx_now()
+        req.updated_at = _utc_now_naive()
         db.commit()
 
         provider_name = _pick_provider_name(db, req.id)
@@ -352,7 +356,7 @@ def process_request(request_id: int):
         req.provider_name = provider_name
         req.provider_group_id = provider_group_id
         req.provider_message = text_to_provider
-        req.updated_at = _mx_now()
+        req.updated_at = _utc_now_naive()
         db.commit()
 
         print("WORKER_PROVIDER_NAME =", provider_name, flush=True)
@@ -401,7 +405,7 @@ def process_request(request_id: int):
             req.pdf_url = None
             req.status = "DONE"
             req.error_message = None
-            req.updated_at = _mx_now()
+            req.updated_at = _utc_now_naive()
             db.commit()
 
             try:
@@ -418,7 +422,7 @@ def process_request(request_id: int):
         err = str(e)
     
         if req:
-            req.updated_at = _mx_now()
+            req.updated_at = _utc_now_naive()
     
             if err.startswith("PROVIDER3_NO_RECORD:"):
                 req.status = "ERROR"
