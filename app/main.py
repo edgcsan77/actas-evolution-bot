@@ -1503,7 +1503,7 @@ def panel_actas(
     
           <div class="toolbar">
             <a href="/panel?view=day&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'day' else ''}">Hoy</a>
-            <a href="/panel?view=week&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'week' else ''}">Semana</a>
+            <a href="/panel?view=week&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'week' else ''}">Semana actual</a>
           </div>
     
           <div class="grid-hero">
