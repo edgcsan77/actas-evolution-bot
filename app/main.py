@@ -693,9 +693,10 @@ def panel_group_detail(
             <button type="button" class="btn btn-primary" onclick="savePromotion('{group_jid}')">Guardar promoción</button>
           </div>
 
-          <div class="filters" style="grid-template-columns: 1fr 220px;">
+          <div class="filters" style="grid-template-columns: 1fr 220px 220px;">
             <input id="promo_recharge" placeholder="Recargar actas" type="number" min="1">
             <button type="button" class="btn btn-success" onclick="rechargePromotion('{group_jid}')">Recargar promoción</button>
+            <button type="button" class="btn btn-danger" onclick="removePromotion('{group_jid}')">Quitar promoción</button>
           </div>
         </div>
 
@@ -806,6 +807,28 @@ def panel_group_detail(
               location.reload();
             }} else {{
               alert(data.error || "Error aplicando recarga");
+            }}
+          }} catch (e) {{
+            alert("No se pudo conectar con el servidor");
+          }}
+        }}
+
+        async function removePromotion(groupJid) {{
+          const ok = confirm("¿Seguro que deseas quitar la promoción de este grupo?");
+          if (!ok) return;
+        
+          try {{
+            const res = await fetch(`/panel/group/${encodeURIComponent(groupJid)}/promotion/remove`, {{
+              method: "POST"
+            }});
+        
+            const data = await res.json();
+        
+            if (data.ok) {{
+              alert(data.message || "Promoción desactivada");
+              location.reload();
+            }} else {{
+              alert(data.error || "Error quitando promoción");
             }}
           }} catch (e) {{
             alert("No se pudo conectar con el servidor");
@@ -2802,11 +2825,63 @@ def panel_set_group_promotion(
 
     db.commit()
 
+    try:
+        unblock_group(group_jid)
+    except Exception as unblock_exc:
+        print("PROMOTION_AUTO_UNBLOCK_ERROR =", str(unblock_exc), flush=True)
+
+    try:
+        promo_label = promo_name or "paquete promocional"
+        send_group_text(
+            group_jid,
+            (
+                f"✅ *Promoción activada*\n\n"
+                f"Tu *{promo_label}* ya fue activado correctamente.\n"
+                f"Cuentas con *{total_actas} actas disponibles*.\n\n"
+                f"Gracias por tu preferencia."
+            )
+        )
+    except Exception as notify_exc:
+        print("PROMOTION_ACTIVATION_NOTIFY_ERROR =", str(notify_exc), flush=True)
+
     return {
         "ok": True,
         "message": "Promoción guardada correctamente",
         "group_jid": group_jid,
         "total_actas": total_actas,
+    }
+
+
+@app.post("/panel/group/{group_jid}/promotion/remove")
+def panel_remove_group_promotion(
+    group_jid: str,
+    db: Session = Depends(get_db),
+):
+    row = db.query(GroupPromotion).filter(GroupPromotion.group_jid == group_jid).first()
+
+    if not row:
+        return {"ok": False, "error": "PROMOTION_NOT_FOUND"}
+
+    row.is_active = False
+    row.updated_at = _utc_now_naive()
+    db.commit()
+
+    try:
+        send_group_text(
+            group_jid,
+            (
+                f"⛔ *Promoción desactivada*\n\n"
+                f"Tu paquete promocional ha sido desactivado por administración.\n\n"
+                f"Para reactivar el servicio será necesaria una nueva activación o recarga."
+            )
+        )
+    except Exception as notify_exc:
+        print("PROMOTION_REMOVE_NOTIFY_ERROR =", str(notify_exc), flush=True)
+
+    return {
+        "ok": True,
+        "message": "Promoción desactivada correctamente",
+        "group_jid": group_jid,
     }
 
 
@@ -2839,6 +2914,24 @@ def panel_recharge_group_promotion(
     row.updated_at = _utc_now_naive()
 
     db.commit()
+
+    try:
+        unblock_group(group_jid)
+    except Exception as unblock_exc:
+        print("PROMOTION_RECHARGE_UNBLOCK_ERROR =", str(unblock_exc), flush=True)
+
+    try:
+        send_group_text(
+            group_jid,
+            (
+                f"🔄 *Recarga aplicada*\n\n"
+                f"Tu paquete promocional fue recargado correctamente.\n"
+                f"Ahora cuentas con *{row.total_actas} actas disponibles*.\n\n"
+                f"Gracias por tu preferencia."
+            )
+        )
+    except Exception as notify_exc:
+        print("PROMOTION_RECHARGE_NOTIFY_ERROR =", str(notify_exc), flush=True)
 
     return {
         "ok": True,
