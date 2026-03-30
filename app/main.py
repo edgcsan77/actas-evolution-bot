@@ -1942,8 +1942,6 @@ def panel_actas(
                     </a>
                   </td>
                   <td class="right">{r["total"]}</td>
-                  <td class="right">{r["queued"]}</td>
-                  <td class="right">{r["processing"]}</td>
                   <td class="right">{r["done"]}</td>
                   <td class="right">{r["error"]}</td>
                   <td>{promo_cell}</td>
