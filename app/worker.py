@@ -406,8 +406,11 @@ def process_request(request_id: int):
             req.updated_at = _mx_now()
             db.commit()
 
-            _handle_group_promotion_after_done(req, db)
-        
+            try:
+                _handle_group_promotion_after_done(req, db)
+            except Exception as promo_exc:
+                print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
+
             return
 
         raise RuntimeError("UNKNOWN_PROVIDER")
