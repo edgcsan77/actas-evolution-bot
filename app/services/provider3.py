@@ -369,17 +369,24 @@ class Provider3Client:
 
         if resp.status_code == 400:
             body_text = (resp.text or "").strip()
+        
             try:
                 data = resp.json()
             except Exception:
                 data = {}
-
+        
             message = (
                 data.get("message")
                 or data.get("error")
                 or body_text
                 or "ACTA_NO_LOCALIZADA"
             )
+        
+            msg_up = message.upper()
+        
+            if "SID CAIDO" in msg_up or "SID CAÍDO" in msg_up:
+                raise RuntimeError(f"PROVIDER3_SESSION_INVALID_OR_EXPIRED: {message[:500]}")
+
             raise RuntimeError(f"PROVIDER3_NO_RECORD: {message[:500]}")
 
         resp.raise_for_status()
@@ -426,17 +433,24 @@ class Provider3Client:
 
         if resp.status_code == 400:
             body_text = (resp.text or "").strip()
+        
             try:
                 data = resp.json()
             except Exception:
                 data = {}
-
+        
             message = (
                 data.get("message")
                 or data.get("error")
                 or body_text
                 or "ACTA_NO_LOCALIZADA"
             )
+        
+            msg_up = message.upper()
+        
+            if "SID CAIDO" in msg_up or "SID CAÍDO" in msg_up:
+                raise RuntimeError(f"PROVIDER3_SESSION_INVALID_OR_EXPIRED: {message[:500]}")
+        
             raise RuntimeError(f"PROVIDER3_NO_RECORD: {message[:500]}")
 
         resp.raise_for_status()
