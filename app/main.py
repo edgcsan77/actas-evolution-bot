@@ -1991,13 +1991,13 @@ def panel_actas(
                     if blocked
                     else f'<button class="btn btn-danger" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'block\')">Bloquear</button>'
                 )
-
+        
                 group_key = (r["group_jid"] or "").replace("@g.us", "").strip()
                 promo_info = (
                     promo_map.get(r["group_jid"])
                     or promo_map.get(group_key)
                 )
-
+        
                 if promo_info:
                     promo_cell = (
                         f'{promo_info["html"]}<br>'
@@ -2008,7 +2008,10 @@ def panel_actas(
                         f'</span>'
                     )
                 else:
-                    promo_cell = '<span style="color:#6b7280;font-weight:700;">Sin promoción</span>'
+                    promo_cell = (
+                        f'<a href="/panel/group-detail?group_jid={r["group_jid"]}&view={view}" '
+                        f'class="btn btn-warning">Activar promoción</a>'
+                    )
         
                 html += f"""
                 <tr>
