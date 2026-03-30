@@ -1406,6 +1406,16 @@ def panel_actas(
             border-color: #93c5fd;
             color: #1e3a8a;
           }}
+
+          .table-wrap td a {{
+            color: #1d4ed8;
+            text-decoration: none !important;
+            font-weight: 700;
+          }}
+        
+          .table-wrap td a:hover {{
+            color: #1e3a8a;
+          }}
         
           @media (max-width: 1200px) {{
             .grid-hero {{
