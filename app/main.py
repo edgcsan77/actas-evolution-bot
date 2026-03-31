@@ -204,19 +204,32 @@ def _query_requests_for_panel(
     )
 
     if group_jid:
-        q = q.filter(RequestLog.source_group_id == group_jid)
+        val = group_jid.strip()
+
+        matching_group_ids = [
+            gid for gid, name in GROUP_NAME_MAP.items()
+            if val.lower() in gid.lower() or val.lower() in name.lower()
+        ]
+
+        if matching_group_ids:
+            q = q.filter(RequestLog.source_group_id.in_(matching_group_ids))
+        else:
+            q = q.filter(RequestLog.source_group_id.ilike(f"%{val}%"))
 
     if provider_name:
-        q = q.filter(RequestLog.provider_name == provider_name)
+        val = provider_name.strip()
+        q = q.filter(RequestLog.provider_name.ilike(f"%{val}%"))
 
     if status:
-        q = q.filter(RequestLog.status == status)
+        val = status.strip()
+        q = q.filter(RequestLog.status.ilike(f"%{val}%"))
 
     if act_type:
-        q = q.filter(RequestLog.act_type == act_type)
+        val = act_type.strip()
+        q = q.filter(RequestLog.act_type.ilike(f"%{val}%"))
 
     return q
-
+    
 
 def _panel_summary_from_rows(rows: list[RequestLog]) -> dict:
     out = {
