@@ -2835,6 +2835,19 @@ def panel_set_group_promotion(
         )
         db.add(row)
 
+    available = max(0, (row.total_actas or 0) - (row.used_actas or 0))
+
+    if available <= 200:
+        row.warning_sent_200 = True
+    if available <= 100:
+        row.warning_sent_100 = True
+    if available <= 50:
+        row.warning_sent_50 = True
+    if available <= 10:
+        row.warning_sent_10 = True
+    if available <= 0:
+        row.warning_sent_0 = True
+
     db.commit()
 
     try:
@@ -2849,7 +2862,7 @@ def panel_set_group_promotion(
             (
                 f"✅ *Promoción activada*\n\n"
                 f"Tu *{promo_label}* ya fue activado correctamente.\n"
-                f"Cuentas con *{total_actas} actas disponibles*.\n\n"
+                f"Cuentas con *{available} actas disponibles*.\n\n"
                 f"Gracias por tu preferencia."
             )
         )
@@ -2861,6 +2874,7 @@ def panel_set_group_promotion(
         "message": "Promoción guardada correctamente",
         "group_jid": group_jid,
         "total_actas": total_actas,
+        "available": available,
     }
 
 
