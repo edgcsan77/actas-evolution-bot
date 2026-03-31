@@ -514,15 +514,63 @@ def panel_promotions_report(db: Session = Depends(get_db)):
     <html>
     <head>
         <title>Reporte de Promociones</title>
+
         <style>
-        body { font-family: Arial; }
-        table { border-collapse: collapse; width: 100%; }
-        th, td { border:1px solid #ccc; padding:8px; text-align:left; }
-        th { background:#f2f2f2; }
+        body {
+            font-family: Arial;
+            padding: 20px;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top:20px;
+        }
+
+        th, td {
+            border:1px solid #ccc;
+            padding:10px;
+            text-align:left;
+        }
+
+        th {
+            background:#f2f2f2;
+        }
+
+        .print-btn {
+            font-size:22px;
+            padding:14px 28px;
+            background:#2ecc71;
+            color:white;
+            border:none;
+            border-radius:8px;
+            cursor:pointer;
+            margin-bottom:20px;
+            font-weight:600;
+        }
+
+        .print-btn:hover {
+            background:#27ae60;
+        }
+
+        @media print {
+            .print-btn {
+                display:none;
+            }
+        }
+
         </style>
+
     </head>
+
     <body>
+
+    <button class="print-btn" onclick="window.print()">
+    🖨 Imprimir reporte
+    </button>
+
     <h2>Reporte de Grupos con Promoción</h2>
+
     <table>
     <tr>
         <th>Grupo</th>
@@ -535,12 +583,12 @@ def panel_promotions_report(db: Session = Depends(get_db)):
     """
 
     for p in promos:
-
+        group_name = GROUP_NAME_MAP.get(p.group_jid, p.group_jid)
         disponibles = (p.total_actas or 0) - (p.used_actas or 0)
 
         html += f"""
         <tr>
-            <td>{p.group_jid}</td>
+            <td>{group_name}</td>
             <td>{p.promo_name or "-"}</td>
             <td>{p.total_actas}</td>
             <td>{p.used_actas}</td>
@@ -551,8 +599,7 @@ def panel_promotions_report(db: Session = Depends(get_db)):
 
     html += """
     </table>
-    <br>
-    <button onclick="window.print()">Imprimir</button>
+
     </body>
     </html>
     """
