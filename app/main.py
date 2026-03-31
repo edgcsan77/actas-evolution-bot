@@ -500,6 +500,66 @@ def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str) -
     }
 
 
+@app.get("/panel/promotions/report")
+def panel_promotions_report(db: Session = Depends(get_db)):
+
+    promos = (
+        db.query(GroupPromotion)
+        .filter(GroupPromotion.is_active == True)
+        .order_by(GroupPromotion.promo_name)
+        .all()
+    )
+
+    html = """
+    <html>
+    <head>
+        <title>Reporte de Promociones</title>
+        <style>
+        body { font-family: Arial; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border:1px solid #ccc; padding:8px; text-align:left; }
+        th { background:#f2f2f2; }
+        </style>
+    </head>
+    <body>
+    <h2>Reporte de Grupos con Promoción</h2>
+    <table>
+    <tr>
+        <th>Grupo</th>
+        <th>Promoción</th>
+        <th>Total Actas</th>
+        <th>Usadas</th>
+        <th>Disponibles</th>
+        <th>Precio</th>
+    </tr>
+    """
+
+    for p in promos:
+
+        disponibles = (p.total_actas or 0) - (p.used_actas or 0)
+
+        html += f"""
+        <tr>
+            <td>{p.group_jid}</td>
+            <td>{p.promo_name or "-"}</td>
+            <td>{p.total_actas}</td>
+            <td>{p.used_actas}</td>
+            <td>{disponibles}</td>
+            <td>{p.price_per_piece or "-"}</td>
+        </tr>
+        """
+
+    html += """
+    </table>
+    <br>
+    <button onclick="window.print()">Imprimir</button>
+    </body>
+    </html>
+    """
+
+    return HTMLResponse(html)
+
+
 @app.get("/panel/group-detail", response_class=HTMLResponse)
 def panel_group_detail(
     group_jid: str = "",
@@ -1751,6 +1811,7 @@ def panel_actas(
           <div class="toolbar">
             <a href="/panel?view=day&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'day' else ''}">Hoy</a>
             <a href="/panel?view=week&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'week' else ''}">Semana actual</a>
+            <a href="/panel/promotions/report" class="tool-link" target="_blank">Promociones</a>
           </div>
     
           <div class="grid-hero">
