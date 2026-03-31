@@ -274,6 +274,7 @@ def _handle_group_promotion_after_done(req, db):
             GroupPromotion.group_jid == req.source_group_id,
             GroupPromotion.is_active == True
         )
+        .with_for_update()
         .first()
     )
 
@@ -342,7 +343,13 @@ def _handle_group_promotion_after_done(req, db):
             print("PROMOTION_AUTO_BLOCK_ERROR =", str(block_exc), flush=True)
 
     if msg:
-        send_group_text(req.source_group_id, msg)
+        notify_key = f"promo_notify:{req.source_group_id}:{available}"
+        first_notify = redis_conn.set(notify_key, "1", ex=1800, nx=True)
+
+        if first_notify:
+            send_group_text(req.source_group_id, msg)
+        else:
+            print("PROMOTION_NOTIFY_DUPLICATE_IGNORED =", notify_key, flush=True)
 
 
 def process_request(request_id: int):
