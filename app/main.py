@@ -254,7 +254,11 @@ def _panel_summary_from_rows(rows: list[RequestLog]) -> dict:
     return out
 
 
-def _panel_group_rows(rows: list[RequestLog], include_all_groups: bool = False) -> list[dict]:
+def _panel_group_rows(
+    rows: list[RequestLog],
+    include_all_groups: bool = False,
+    has_active_filters: bool = False,
+) -> list[dict]:
     data = {}
 
     excluded_words = (
@@ -268,7 +272,7 @@ def _panel_group_rows(rows: list[RequestLog], include_all_groups: bool = False) 
         name_up = (name or "").strip().upper()
         return any(word in name_up for word in excluded_words)
 
-    if include_all_groups:
+    if include_all_groups and not has_active_filters:
         for gid, name in GROUP_NAME_MAP.items():
             if _is_hidden_group(name):
                 continue
@@ -331,11 +335,12 @@ def _panel_group_rows(rows: list[RequestLog], include_all_groups: bool = False) 
 
     out = list(data.values())
 
-    if not include_all_groups:
+    if has_active_filters or not include_all_groups:
         out = [x for x in out if x["total"] > 0]
 
     out = [x for x in out if x["group_jid"] != "PRIVADO" or x["total"] > 0]
     out.sort(key=lambda x: ((x["total"] == 0), -x["total"], x["group_name"]))
+    
     return out
 
 
@@ -1298,8 +1303,21 @@ def panel_actas(
         ).order_by(RequestLog.created_at.desc()).all()
     
         summary = _panel_summary_from_rows(rows)
+        
         include_all_groups = (group_mode == "all")
-        by_group = _panel_group_rows(rows, include_all_groups=include_all_groups)
+        has_active_filters = any([
+            (group_jid or "").strip(),
+            (provider_name or "").strip(),
+            (status or "").strip(),
+            (act_type or "").strip(),
+        ])
+        
+        by_group = _panel_group_rows(
+            rows,
+            include_all_groups=include_all_groups,
+            has_active_filters=has_active_filters,
+        )
+        
         by_provider = _panel_provider_rows(rows)
         by_type = _panel_type_rows(rows)
         promo_map = _promotion_summary_map(db)
