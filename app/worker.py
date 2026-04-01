@@ -4,6 +4,8 @@ import random
 from datetime import datetime, timezone
 
 from app.db import SessionLocal
+from sqlalchemy.orm import Session
+
 from app.models import RequestLog, ProviderSetting, AppSetting, GroupPromotion
 from app.services.evolution import send_group_text, send_document_base64, send_group_document_base64
 from app.config import settings
