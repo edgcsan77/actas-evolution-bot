@@ -40,7 +40,7 @@ def _is_curp_term(value: str | None) -> bool:
     return bool(CURP_RE.match(v))
 
 
-def _fallback_to_provider3_web(req, db):
+def _fallback_to_provider3_web(req, db, process_started_ts):
     req.provider_name = "PROVIDER3"
     req.provider_group_id = None
     req.provider_message = None
@@ -763,7 +763,7 @@ def process_request(request_id: int):
                     return
         
                 print("PROVIDER4_SKIPPED_NON_CURP_FALLBACK_PROVIDER3 =", req.curp, flush=True)
-                _fallback_to_provider3_web(req, db)
+                _fallback_to_provider3_web(req, db, process_started_ts)
                 return
         
             provider4_started_ts = time.perf_counter()
@@ -803,7 +803,7 @@ def process_request(request_id: int):
                         return
         
                     print("PROVIDER4_NOT_CURP_FALLBACK_TO_PROVIDER3 =", req.curp, flush=True)
-                    _fallback_to_provider3_web(req, db)
+                    _fallback_to_provider3_web(req, db, process_started_ts)
                     return
         
                 fallback_errors = (
@@ -849,7 +849,7 @@ def process_request(request_id: int):
                         {"req_id": req.id, "elapsed": p4_elapsed, "err": p4_err},
                         flush=True,
                     )
-                    _fallback_to_provider3_web(req, db)
+                    _fallback_to_provider3_web(req, db, process_started_ts)
                     return
         
                 raise
