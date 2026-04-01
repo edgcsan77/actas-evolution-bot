@@ -519,6 +519,144 @@ def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str) -
     }
 
 
+@app.post("/panel/promotions/remove")
+def panel_remove_shared_promotion(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    client_key = (payload.get("client_key") or "").strip().upper()
+
+    if not client_key:
+        return {"ok": False, "error": "CLIENT_KEY_REQUIRED"}
+
+    rows = (
+        db.query(GroupPromotion)
+        .filter(GroupPromotion.client_key == client_key)
+        .all()
+    )
+
+    if not rows:
+        return {"ok": False, "error": "PROMOTION_NOT_FOUND"}
+
+    for row in rows:
+        row.is_active = False
+        row.updated_at = _utc_now_naive()
+
+    db.commit()
+
+    try:
+        _notify_client_groups_main(
+            rows,
+            "⚠️ *Promoción desactivada*\n\nLa promoción compartida de este cliente fue desactivada."
+        )
+    except Exception as e:
+        print("PROMOTION_REMOVE_NOTIFY_ERROR =", str(e), flush=True)
+
+    return {"ok": True, "client_key": client_key}
+
+
+@app.post("/panel/promotions/apply")
+def panel_apply_shared_promotion(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    selected_group_jids = payload.get("selected_group_jids") or []
+    promo_name = (payload.get("promo_name") or "").strip()
+    price_per_piece = (payload.get("price_per_piece") or "").strip()
+    client_key = (payload.get("client_key") or "").strip().upper()
+    total_actas = int(payload.get("total_actas") or 0)
+
+    if not selected_group_jids:
+        return {"ok": False, "error": "NO_GROUPS_SELECTED"}
+
+    if total_actas <= 0:
+        return {"ok": False, "error": "TOTAL_ACTAS_INVALID"}
+
+    if not client_key:
+        client_key = _promo_client_key(None, promo_name, promo_name or "PROMOCION_COMPARTIDA")
+
+    rows = []
+
+    for group_jid in selected_group_jids:
+        row = (
+            db.query(GroupPromotion)
+            .filter(GroupPromotion.group_jid == group_jid)
+            .first()
+        )
+
+        if not row:
+            row = GroupPromotion(
+                group_jid=group_jid,
+                promo_name=promo_name,
+                client_key=client_key,
+                total_actas=total_actas,
+                used_actas=0,
+                price_per_piece=price_per_piece,
+                warning_sent_200=False,
+                warning_sent_100=False,
+                warning_sent_50=False,
+                warning_sent_10=False,
+                warning_sent_0=False,
+                is_active=True,
+                created_at=_utc_now_naive(),
+                updated_at=_utc_now_naive(),
+            )
+            db.add(row)
+            db.flush()
+        else:
+            row.promo_name = promo_name or row.promo_name
+            row.client_key = client_key
+            row.total_actas = total_actas
+            row.used_actas = 0
+            row.price_per_piece = price_per_piece
+            row.warning_sent_200 = False
+            row.warning_sent_100 = False
+            row.warning_sent_50 = False
+            row.warning_sent_10 = False
+            row.warning_sent_0 = False
+            row.is_active = True
+            row.updated_at = _utc_now_naive()
+
+        rows.append(row)
+
+    db.commit()
+
+    rows = (
+        db.query(GroupPromotion)
+        .filter(GroupPromotion.client_key == client_key)
+        .all()
+    )
+
+    try:
+        _unblock_client_groups_main(rows)
+    except Exception as unblock_exc:
+        print("PROMOTION_AUTO_UNBLOCK_ERROR =", str(unblock_exc), flush=True)
+
+    try:
+        promo_label = promo_name or "paquete promocional"
+        _notify_client_groups_main(
+            rows,
+            (
+                f"✅ *Promoción activada*\n\n"
+                f"Tu *{promo_label}* ya fue activado correctamente.\n"
+                f"Cuentas con *{total_actas} actas disponibles*.\n\n"
+                f"Este saldo aplica para todos los grupos asociados a este cliente.\n"
+                f"Cliente unificado: *{client_key}*.\n\n"
+                f"Gracias por tu preferencia."
+            )
+        )
+    except Exception as notify_exc:
+        print("PROMOTION_ACTIVATION_NOTIFY_ERROR =", str(notify_exc), flush=True)
+
+    return {
+        "ok": True,
+        "message": "Promoción compartida aplicada correctamente",
+        "client_key": client_key,
+        "total_actas": total_actas,
+        "groups": selected_group_jids,
+    }
+
+
 @app.get("/panel/promotions/report")
 def panel_promotions_report(db: Session = Depends(get_db)):
 
@@ -1980,6 +2118,41 @@ def panel_actas(
             <button type="submit" class="btn btn-primary">Filtrar</button>
           </div>
         </form>
+
+        html += """
+        <div class="box">
+          <div class="head">
+            <strong>Promoción compartida</strong>
+          </div>
+        
+          <div class="filters" style="margin-bottom:12px;">
+            <input id="sharedPromoName" placeholder="Nombre de promoción">
+            <input id="sharedPromoClientKey" placeholder="Cliente unificado (ej. LAZARO)">
+            <input id="sharedPromoTotalActas" type="number" placeholder="Total de actas">
+            <input id="sharedPromoPricePerPiece" placeholder="Precio por pieza">
+          </div>
+        
+          <div class="helper" style="margin-bottom:10px;">
+            Selecciona los grupos que compartirán el mismo saldo.
+          </div>
+        
+          <div id="sharedPromoGroups" style="max-height:260px;overflow:auto;border:1px solid #ddd;padding:10px;border-radius:12px;background:#fff;">
+        """
+        for gid, name in GROUP_NAME_MAP.items():
+            html += f'''
+            <label style="display:block;margin-bottom:6px;">
+              <input type="checkbox" class="shared-promo-group" value="{gid}">
+              {_esc(name)}
+            </label>
+            '''
+        html += """
+          </div>
+        
+          <div class="actions-row" style="margin-top:12px;">
+            <button class="btn btn-success" onclick="applySharedPromotion()">Aplicar promoción compartida</button>
+          </div>
+        </div>
+        """
     
         <div class="cards">
           <div class="card"><div class="label">Total</div><div class="value">{summary["total"]}</div></div>
@@ -2404,12 +2577,60 @@ def panel_actas(
             alert("No se pudo conectar con el servidor");
           }
         }
+
+        async function applySharedPromotion() {
+          const selected = Array.from(document.querySelectorAll(".shared-promo-group:checked"))
+            .map(el => el.value);
+        
+          const promo_name = document.getElementById("sharedPromoName").value || "";
+          const client_key = document.getElementById("sharedPromoClientKey").value || "";
+          const total_actas = Number(document.getElementById("sharedPromoTotalActas").value || 0);
+          const price_per_piece = document.getElementById("sharedPromoPricePerPiece").value || "";
+        
+          if (!selected.length) {
+            alert("Selecciona al menos un grupo");
+            return;
+          }
+        
+          if (!total_actas || total_actas <= 0) {
+            alert("Ingresa un total de actas válido");
+            return;
+          }
+        
+          try {
+            const res = await fetch("/panel/promotions/apply", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                selected_group_jids: selected,
+                promo_name,
+                client_key,
+                total_actas,
+                price_per_piece
+              })
+            });
+        
+            const data = await res.json();
+        
+            if (data.ok) {
+              alert("Promoción compartida aplicada correctamente");
+              location.reload();
+            } else {
+              alert(data.error || "No se pudo aplicar la promoción");
+            }
+          } catch (e) {
+            alert("No se pudo conectar con el servidor");
+          }
+        }
     
         setInterval(() => {
           if (!broadcastRunning) {
             location.reload();
           }
         }, 30000);
+
       </script>
     </body>
     </html>
@@ -2747,6 +2968,32 @@ def _get_group_promotion(db: Session, group_jid: str) -> GroupPromotion | None:
         )
         .first()
     )
+
+
+def _promo_client_key(group_jid: str | None, promo_name: str | None = None, client_key: str | None = None) -> str:
+    return (client_key or promo_name or group_jid or "").strip().upper()
+
+
+def _notify_client_groups_main(rows: list, message: str):
+    sent = set()
+    for row in rows:
+        gid = (row.group_jid or "").strip()
+        if gid and gid not in sent:
+            try:
+                send_group_text(gid, message)
+                sent.add(gid)
+            except Exception as e:
+                print("PROMO_NOTIFY_GROUP_ERROR =", gid, str(e), flush=True)
+
+
+def _unblock_client_groups_main(rows: list):
+    for row in rows:
+        gid = (row.group_jid or "").strip()
+        if gid:
+            try:
+                unblock_group(gid)
+            except Exception as e:
+                print("PROMO_AUTO_UNBLOCK_ERROR =", gid, str(e), flush=True)
 
 
 def _promotion_available(promo: GroupPromotion) -> int:
