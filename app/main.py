@@ -2815,6 +2815,27 @@ def panel_actas(
         
         document.addEventListener("DOMContentLoaded", () => {
           filterSharedPromoGroups();
+
+          const sections = [
+            "grupoClienteBody",
+            "promoCompartidaBody",
+            "solicitudesRecientesBody"
+          ];
+        
+          sections.forEach(id => {
+            const body = document.getElementById(id);
+            const head = body?.previousElementSibling;
+        
+            if (!body || !head) return;
+        
+            const state = localStorage.getItem(id);
+        
+            if (state === "closed") {
+              body.classList.remove("open");
+              body.classList.add("closed");
+              head.classList.add("closed");
+            }
+          });
         });
 
         function toggleSection(bodyId, headEl) {
@@ -2826,11 +2847,13 @@ def panel_actas(
           if (isClosed) {
             body.classList.remove("closed");
             body.classList.add("open");
-            headEl.classList.remove("closed");
+            headEl.classList.remove("closed");    
+            localStorage.setItem(bodyId, "open");
           } else {
             body.classList.remove("open");
             body.classList.add("closed");
             headEl.classList.add("closed");
+            localStorage.setItem(bodyId, "closed");
           }
         }
     
