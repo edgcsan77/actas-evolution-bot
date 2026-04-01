@@ -1940,6 +1940,32 @@ def panel_actas(
               .table-wrap td a:hover {{
                 color: #1e3a8a;
               }}
+
+              .badge {{
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                padding: 4px 10px;
+                border-radius: 999px;
+                font-size: 12px;
+                font-weight: 700;
+                white-space: nowrap;
+              }}
+            
+              .badge-light {{
+                background: #eef2ff;
+                color: #3730a3;
+              }}
+            
+              .badge-warning {{
+                background: #fff7ed;
+                color: #c2410c;
+              }}
+            
+              .badge-danger {{
+                background: #fef2f2;
+                color: #b91c1c;
+              }}
             
               @media (max-width: 1200px) {{
                 .grid-hero {{
@@ -2123,6 +2149,7 @@ def panel_actas(
         <div class="box">
           <div class="head">
             <strong>Promoción compartida</strong>
+            <span class="small">Asigna un mismo saldo promocional a varios grupos del mismo cliente.</span>
           </div>
         
           <div class="filters" style="margin-bottom:12px;">
@@ -2132,17 +2159,84 @@ def panel_actas(
             <input id="sharedPromoPricePerPiece" placeholder="Precio por pieza">
           </div>
         
-          <div class="helper" style="margin-bottom:10px;">
-            Selecciona los grupos que compartirán el mismo saldo.
+          <div class="box" style="padding:14px; margin-top:8px; background:#f8fafc; border:1px solid #e5e7eb;">
+            <div style="display:grid; grid-template-columns: 1.2fr auto auto auto; gap:10px; align-items:center;">
+              <input
+                id="sharedPromoSearch"
+                placeholder="Buscar grupo por nombre..."
+                oninput="filterSharedPromoGroups()"
+              >
+        
+              <label style="display:flex;align-items:center;gap:6px;font-size:14px;">
+                <input type="checkbox" id="filterNormalGroups" checked onchange="filterSharedPromoGroups()">
+                Normales
+              </label>
+        
+              <label style="display:flex;align-items:center;gap:6px;font-size:14px;">
+                <input type="checkbox" id="filterTestGroups" onchange="filterSharedPromoGroups()">
+                Pruebas
+              </label>
+        
+              <label style="display:flex;align-items:center;gap:6px;font-size:14px;">
+                <input type="checkbox" id="filterProviderGroups" onchange="filterSharedPromoGroups()">
+                Proveedores
+              </label>
+            </div>
+        
+            <div class="helper" style="margin-top:10px;">
+              Selecciona los grupos que compartirán el mismo saldo. Por defecto se muestran solo grupos normales.
+            </div>
           </div>
         
-          <div id="sharedPromoGroups" style="max-height:260px;overflow:auto;border:1px solid #ddd;padding:10px;border-radius:12px;background:#fff;">
+          <div
+            id="sharedPromoGroups"
+            style="max-height:360px;overflow:auto;border:1px solid #e5e7eb;padding:12px;border-radius:14px;background:#fff;margin-top:12px;"
+          >
         """
-        for gid, name in GROUP_NAME_MAP.items():
+        for gid, name in sorted(GROUP_NAME_MAP.items(), key=lambda x: x[1].lower()):
+            group_name = (name or "").strip()
+            upper_name = group_name.upper()
+        
+            is_test = (
+                "PRUEBA" in upper_name
+                or "PRUEBAS" in upper_name
+                or "TEST" in upper_name
+            )
+        
+            is_provider = (
+                upper_name.startswith("PROV ")
+                or "PROV " in upper_name
+                or "PROVEEDOR" in upper_name
+            )
+        
+            group_kind = "normal"
+            badge_text = "Normal"
+            badge_class = "badge-light"
+        
+            if is_test:
+                group_kind = "test"
+                badge_text = "Prueba"
+                badge_class = "badge-warning"
+            elif is_provider:
+                group_kind = "provider"
+                badge_text = "Proveedor"
+                badge_class = "badge-danger"
+        
             html += f'''
-            <label style="display:block;margin-bottom:6px;">
-              <input type="checkbox" class="shared-promo-group" value="{gid}">
-              {_esc(name)}
+            <label
+              class="shared-promo-item"
+              data-name="{_esc(group_name).lower()}"
+              data-kind="{group_kind}"
+              style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;border:1px solid #eef2f7;border-radius:12px;margin-bottom:8px;background:#fff;"
+            >
+              <span style="display:flex;align-items:center;gap:10px;min-width:0;">
+                <input type="checkbox" class="shared-promo-group" value="{gid}">
+                <span style="display:flex;flex-direction:column;min-width:0;">
+                  <span style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{_esc(group_name)}</span>
+                  <span style="font-size:12px;color:#6b7280;">{gid}</span>
+                </span>
+              </span>
+              <span class="badge {badge_class}">{badge_text}</span>
             </label>
             '''
         html += """
@@ -2150,6 +2244,7 @@ def panel_actas(
         
           <div class="actions-row" style="margin-top:12px;">
             <button class="btn btn-success" onclick="applySharedPromotion()">Aplicar promoción compartida</button>
+            <button class="btn btn-light" type="button" onclick="clearSharedPromotionSelection()">Limpiar selección</button>
           </div>
         </div>
         """
@@ -2625,6 +2720,52 @@ def panel_actas(
             alert("No se pudo conectar con el servidor");
           }
         }
+
+        function filterSharedPromoGroups() {
+          const search = (document.getElementById("sharedPromoSearch")?.value || "").trim().toLowerCase();
+          const showNormal = document.getElementById("filterNormalGroups")?.checked;
+          const showTest = document.getElementById("filterTestGroups")?.checked;
+          const showProvider = document.getElementById("filterProviderGroups")?.checked;
+        
+          const items = document.querySelectorAll(".shared-promo-item");
+        
+          items.forEach(item => {
+            const name = item.dataset.name || "";
+            const kind = item.dataset.kind || "normal";
+        
+            const matchesSearch = !search || name.includes(search);
+        
+            let matchesKind = false;
+            if (kind === "normal" && showNormal) matchesKind = true;
+            if (kind === "test" && showTest) matchesKind = true;
+            if (kind === "provider" && showProvider) matchesKind = true;
+        
+            item.style.display = (matchesSearch && matchesKind) ? "flex" : "none";
+          });
+        }
+        
+        function clearSharedPromotionSelection() {
+          document.querySelectorAll(".shared-promo-group").forEach(el => {
+            el.checked = false;
+          });
+        
+          const searchInput = document.getElementById("sharedPromoSearch");
+          if (searchInput) searchInput.value = "";
+        
+          const normal = document.getElementById("filterNormalGroups");
+          const test = document.getElementById("filterTestGroups");
+          const provider = document.getElementById("filterProviderGroups");
+        
+          if (normal) normal.checked = true;
+          if (test) test.checked = false;
+          if (provider) provider.checked = false;
+        
+          filterSharedPromoGroups();
+        }
+        
+        document.addEventListener("DOMContentLoaded", () => {
+          filterSharedPromoGroups();
+        });
     
         setInterval(() => {
           if (!broadcastRunning) {
