@@ -660,31 +660,32 @@ def process_request(request_id: int):
         if provider_name == "PROVIDER4":
             if not _is_curp_term(req.curp):
                 enabled = _enabled_providers(db)
-            
+        
                 if "PROVIDER3" not in enabled:
                     print("NO_PROVIDER_FOR_CHAIN_OR_CODE =", req.curp, flush=True)
-            
+        
                     msg = (
                         "⚠️ *Formato no disponible actualmente*\n\n"
                         "Las consultas por *cadena o código de verificación* "
                         "no están disponibles en este momento.\n\n"
                         "Intenta nuevamente más tarde o realiza la búsqueda por *CURP*."
                     )
-            
+        
                     if req.source_group_id:
                         send_group_text(req.source_group_id, msg)
                     else:
-                        send_group_text(req.requester_wa_id, msg)
-            
+                        from app.services.evolution import send_text
+                        send_text(req.requester_wa_id, msg)
+        
                     req.status = "ERROR"
                     req.error_message = "NO_PROVIDER_FOR_CHAIN_OR_CODE"
                     req.updated_at = _utc_now_naive()
                     db.commit()
-            
+        
                     return
-            
+        
                 print("PROVIDER4_SKIPPED_NON_CURP_FALLBACK_PROVIDER3 =", req.curp, flush=True)
-            
+        
                 _start_provider3_flow(req, db)
                 return
         
@@ -695,8 +696,29 @@ def process_request(request_id: int):
             except Exception as p4_exc:
                 p4_err = str(p4_exc)
                 p4_elapsed = time.perf_counter() - provider4_started_ts
+                enabled = _enabled_providers(db)
         
                 if p4_err.startswith("PROVIDER4_NOT_CURP"):
+                    if "PROVIDER3" not in enabled:
+                        msg = (
+                            "⚠️ *Formato no disponible actualmente*\n\n"
+                            "Las consultas por *cadena o código de verificación* "
+                            "no están disponibles en este momento.\n\n"
+                            "Intenta nuevamente más tarde o realiza la búsqueda por *CURP*."
+                        )
+        
+                        if req.source_group_id:
+                            send_group_text(req.source_group_id, msg)
+                        else:
+                            from app.services.evolution import send_text
+                            send_text(req.requester_wa_id, msg)
+        
+                        req.status = "ERROR"
+                        req.error_message = "NO_PROVIDER_FOR_CHAIN_OR_CODE"
+                        req.updated_at = _utc_now_naive()
+                        db.commit()
+                        return
+        
                     print("PROVIDER4_NOT_CURP_FALLBACK_TO_PROVIDER3 =", req.curp, flush=True)
                     _start_provider3_flow(req, db)
                     return
@@ -713,6 +735,25 @@ def process_request(request_id: int):
                 )
         
                 if fallback_errors and p4_elapsed >= 150:
+                    if "PROVIDER3" not in enabled:
+                        msg = (
+                            "⚠️ *Proveedor temporalmente no disponible*\n\n"
+                            "La búsqueda no pudo completarse en este momento.\n\n"
+                            "Intenta nuevamente más tarde."
+                        )
+        
+                        if req.source_group_id:
+                            send_group_text(req.source_group_id, msg)
+                        else:
+                            from app.services.evolution import send_text
+                            send_text(req.requester_wa_id, msg)
+        
+                        req.status = "ERROR"
+                        req.error_message = f"PROVIDER4_TIMEOUT_NO_PROVIDER3:{p4_err}"
+                        req.updated_at = _utc_now_naive()
+                        db.commit()
+                        return
+        
                     print(
                         "PROVIDER4_TIMEOUT_FALLBACK_TO_PROVIDER3 =",
                         {"req_id": req.id, "elapsed": p4_elapsed, "err": p4_err},
