@@ -626,7 +626,10 @@ def process_request(request_id: int):
         if req:
             req.updated_at = _utc_now_naive()
     
-            if err.startswith("PROVIDER3_NO_RECORD:"):
+            if (
+                err.startswith("PROVIDER3_NO_RECORD:")
+                or err.startswith("PROVIDER4_NO_RECORD_DETECTED:")
+            ):
                 req.status = "ERROR"
                 req.error_message = err
                 db.commit()
