@@ -218,6 +218,16 @@ class Provider4Client:
 
         raise RuntimeError(f"PROVIDER4_HISTORY_FAILED: {last_error}")
 
+    def _folio_pdf_direct_url(self, term: str, tipoa: str) -> str:
+        tipo_map = {
+            "nacimiento": "NAC",
+            "matrimonio": "MAT",
+            "defuncion": "DEF",
+            "divorcio": "DIV",
+        }
+        code = tipo_map.get((tipoa or "").strip().lower(), "NAC")
+        return f"{self.BASE_URL}/servicio/ActasN/{term}_{code}_FOLIO.pdf"
+    
     def _history_row_for_term(self, history_html: str, term: str) -> str | None:
         term = (term or "").strip().upper()
         row_pattern = rf"<tr>.*?{re.escape(term)}.*?</tr>"
@@ -361,10 +371,18 @@ class Provider4Client:
             )
 
             if inc_folio:
+                direct_folio_url = self._folio_pdf_direct_url(term, tipoa)
+                print("PROVIDER4_DIRECT_FOLIO_URL =", direct_folio_url, flush=True)
+            
+                try:
+                    return self.download_pdf_bytes(direct_folio_url)
+                except Exception as direct_exc:
+                    print("PROVIDER4_DIRECT_FOLIO_FAILED =", str(direct_exc), flush=True)
+            
                 link = self._extract_folio_link(history_html, term)
                 if link:
-                    print("PROVIDER4_FINAL_DOWNLOAD_LINK =", link, flush=True)
-                    return self.download_pdf_bytes(link)
+                    print("PROVIDER4_FINAL_FOLIO_LINK =", link, flush=True)
+                    return self._download_foliated_pdf(link)
             else:
                 link = self._extract_pdf_link(history_html, term)
                 if link:
