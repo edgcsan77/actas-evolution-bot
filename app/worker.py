@@ -628,7 +628,7 @@ def process_request(request_id: int):
     
             if (
                 err.startswith("PROVIDER3_NO_RECORD:")
-                or err.startswith("PROVIDER4_NO_RECORD_DETECTED:")
+                or err.startswith("PROVIDER4_NO_RECORD:")
             ):
                 req.status = "ERROR"
                 req.error_message = err
