@@ -15,6 +15,9 @@ class Provider4Client:
     VGET_URL = f"{BASE_URL}/servicio/vGetOfi.php"
     HISTORY_URL = f"{BASE_URL}/servicio/vHistory.php?HID={HID}"
 
+    HISTORY_MAX_POLLS = 15
+    HISTORY_POLL_SLEEP = 3
+
     def __init__(self) -> None:
         self.session = requests.Session()
         self.session.headers.update({
@@ -227,6 +230,16 @@ class Provider4Client:
         }
         code = tipo_map.get((tipoa or "").strip().lower(), "NAC")
         return f"{self.BASE_URL}/servicio/ActasN/{term}_{code}_FOLIO.pdf"
+
+    def _normal_pdf_direct_url(self, term: str, tipoa: str) -> str:
+        tipo_map = {
+            "nacimiento": "NAC",
+            "matrimonio": "MAT",
+            "defuncion": "DEF",
+            "divorcio": "DIV",
+        }
+        code = tipo_map.get((tipoa or "").strip().lower(), "NAC")
+        return f"{self.BASE_URL}/servicio/d.php?f={term}_{code}"
     
     def _history_row_for_term(self, history_html: str, term: str) -> str | None:
         term = (term or "").strip().upper()
@@ -442,8 +455,26 @@ class Provider4Client:
         vget_html = self.submit_vget_form(html)
         print("PROVIDER4_VGET_HTML_PREVIEW =", vget_html[:1200], flush=True)
 
-        max_polls = 30
-        poll_sleep_seconds = 4
+        # 1) Intento directo inmediato
+        if inc_folio:
+            direct_folio_url = self._folio_pdf_direct_url(term, tipoa)
+            print("PROVIDER4_DIRECT_FOLIO_URL =", direct_folio_url, flush=True)
+
+            try:
+                return self.download_pdf_bytes(direct_folio_url)
+            except Exception as direct_exc:
+                print("PROVIDER4_DIRECT_FOLIO_FAILED =", str(direct_exc), flush=True)
+        else:
+            direct_normal_url = self._normal_pdf_direct_url(term, tipoa)
+            print("PROVIDER4_DIRECT_NORMAL_URL =", direct_normal_url, flush=True)
+
+            try:
+                return self.download_pdf_bytes(direct_normal_url)
+            except Exception as direct_exc:
+                print("PROVIDER4_DIRECT_NORMAL_FAILED =", str(direct_exc), flush=True)
+
+        max_polls = self.HISTORY_MAX_POLLS
+        poll_sleep_seconds = self.HISTORY_POLL_SLEEP
 
         for poll_attempt in range(max_polls):
             history_html = self.get_history_html()
@@ -453,20 +484,35 @@ class Provider4Client:
                 flush=True,
             )
 
+            # Si ya history marca no localizado, salir
+            if self._detect_no_result(history_html, term):
+                raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
+
             if inc_folio:
-                direct_folio_url = self._folio_pdf_direct_url(term, tipoa)
-                print("PROVIDER4_DIRECT_FOLIO_URL =", direct_folio_url, flush=True)
-            
-                try:
-                    return self.download_pdf_bytes(direct_folio_url)
-                except Exception as direct_exc:
-                    print("PROVIDER4_DIRECT_FOLIO_FAILED =", str(direct_exc), flush=True)
-            
+                # 2) Si ya aparece la fila, reintentar directa otra vez
+                row_html = self._history_row_for_term(history_html, term)
+                if row_html:
+                    try:
+                        return self.download_pdf_bytes(direct_folio_url)
+                    except Exception as direct_retry_exc:
+                        print("PROVIDER4_DIRECT_FOLIO_RETRY_FAILED =", str(direct_retry_exc), flush=True)
+
+                # 3) Si no, seguir con tu lógica anterior
                 link = self._extract_folio_link(history_html, term)
                 if link:
                     print("PROVIDER4_FINAL_FOLIO_LINK =", link, flush=True)
                     return self._download_foliated_pdf(link)
+
             else:
+                # 2) Si ya aparece la fila, reintentar directa otra vez
+                row_html = self._history_row_for_term(history_html, term)
+                if row_html:
+                    try:
+                        return self.download_pdf_bytes(direct_normal_url)
+                    except Exception as direct_retry_exc:
+                        print("PROVIDER4_DIRECT_NORMAL_RETRY_FAILED =", str(direct_retry_exc), flush=True)
+
+                # 3) Si no, seguir con tu lógica anterior
                 link = self._extract_pdf_link(history_html, term)
                 if link:
                     print("PROVIDER4_FINAL_DOWNLOAD_LINK =", link, flush=True)
@@ -482,7 +528,7 @@ class Provider4Client:
 
         if self._detect_no_result(final_history_html, term):
             raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
-        
+
         if inc_folio:
             raise RuntimeError(f"PROVIDER4_NO_FOLIO_LINK_FOR:{term}")
         else:
