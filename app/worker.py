@@ -533,6 +533,26 @@ def _start_provider3_flow(req, db):
     send_group_text(provider_group_id, text_to_provider)
 
 
+def _validate_act_type_pdf(pdf_bytes: bytes, act_type: str | None) -> bool:
+    text = pdf_bytes.decode(errors="ignore").upper()
+
+    act_type = (act_type or "").upper()
+
+    if "NAC" in act_type:
+        return "NACIMIENTO" in text
+
+    if "MAT" in act_type:
+        return "MATRIMONIO" in text
+
+    if "DIV" in act_type:
+        return "DIVORCIO" in text
+
+    if "DEF" in act_type:
+        return "DEFUNCION" in text or "DEFUNCIÓN" in text
+
+    return True
+
+
 def process_request(request_id: int):
     db = SessionLocal()
     try:
@@ -681,11 +701,9 @@ def process_request(request_id: int):
                     req.error_message = "NO_PROVIDER_FOR_CHAIN_OR_CODE"
                     req.updated_at = _utc_now_naive()
                     db.commit()
-        
                     return
         
                 print("PROVIDER4_SKIPPED_NON_CURP_FALLBACK_PROVIDER3 =", req.curp, flush=True)
-        
                 _start_provider3_flow(req, db)
                 return
         
@@ -693,6 +711,12 @@ def process_request(request_id: int):
         
             try:
                 provider4_result = _process_provider4(req, db)
+        
+                pdf_bytes = provider4_result["pdf_bytes"]
+        
+                if not _validate_act_type_pdf(pdf_bytes, req.act_type):
+                    raise RuntimeError("PROVIDER4_WRONG_ACT_TYPE")
+        
             except Exception as p4_exc:
                 p4_err = str(p4_exc)
                 p4_elapsed = time.perf_counter() - provider4_started_ts
@@ -731,14 +755,21 @@ def process_request(request_id: int):
                     or p4_err.startswith("PROVIDER4_NO_FOLIO_LINK_FOR:")
                     or p4_err.startswith("PROVIDER4_DOWNLOAD_FAILED:")
                     or p4_err.startswith("PROVIDER4_FOLIO_DOWNLOAD_FAILED:")
+                    or p4_err.startswith("PROVIDER4_WRONG_ACT_TYPE")
                     or "Read timed out" in p4_err
                 )
         
-                if fallback_errors and p4_elapsed >= 150:
+                # WRONG_ACT_TYPE debe caer a Provider3 aunque haya tardado poco
+                should_fallback = (
+                    p4_err.startswith("PROVIDER4_WRONG_ACT_TYPE")
+                    or (fallback_errors and p4_elapsed >= 150)
+                )
+        
+                if should_fallback:
                     if "PROVIDER3" not in enabled:
                         msg = (
                             "⚠️ *Proveedor temporalmente no disponible*\n\n"
-                            "La búsqueda no pudo completarse en este momento.\n\n"
+                            "La búsqueda no pudo completarse correctamente en este momento.\n\n"
                             "Intenta nuevamente más tarde."
                         )
         
@@ -749,13 +780,13 @@ def process_request(request_id: int):
                             send_text(req.requester_wa_id, msg)
         
                         req.status = "ERROR"
-                        req.error_message = f"PROVIDER4_TIMEOUT_NO_PROVIDER3:{p4_err}"
+                        req.error_message = f"PROVIDER4_FALLBACK_NO_PROVIDER3:{p4_err}"
                         req.updated_at = _utc_now_naive()
                         db.commit()
                         return
         
                     print(
-                        "PROVIDER4_TIMEOUT_FALLBACK_TO_PROVIDER3 =",
+                        "PROVIDER4_FALLBACK_TO_PROVIDER3 =",
                         {"req_id": req.id, "elapsed": p4_elapsed, "err": p4_err},
                         flush=True,
                     )
@@ -764,7 +795,6 @@ def process_request(request_id: int):
         
                 raise
         
-            pdf_bytes = provider4_result["pdf_bytes"]
             safe_media_b64 = base64.b64encode(pdf_bytes).decode()
         
             total_seconds = max(0.0, time.perf_counter() - process_started_ts)
