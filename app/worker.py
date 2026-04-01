@@ -18,8 +18,9 @@ from app.queue import redis_conn
 
 from zoneinfo import ZoneInfo
 
-PROVIDER4_TEST_GROUPS = set()
-
+PROVIDER4_TEST_GROUPS = {
+    "120363424360403186@g.us"
+}
 
 def _utc_now_naive():
     return datetime.now(timezone.utc).replace(tzinfo=None)
