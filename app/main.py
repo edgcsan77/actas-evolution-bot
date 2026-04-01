@@ -698,6 +698,7 @@ def panel_apply_shared_promotion(
     promo_name = (payload.get("promo_name") or "").strip()
     price_per_piece = (payload.get("price_per_piece") or "").strip()
     client_key = (payload.get("client_key") or "").strip().upper()
+    shared_key = (payload.get("shared_key") or "").strip().upper()
     total_actas = int(payload.get("total_actas") or 0)
 
     if not selected_group_jids:
@@ -709,8 +710,8 @@ def panel_apply_shared_promotion(
     if not client_key:
         client_key = _promo_client_key(None, promo_name, promo_name or "PROMOCION_COMPARTIDA")
 
-    # Este será el identificador real de la promoción compartida
-    shared_key = client_key
+    if not shared_key:
+        shared_key = client_key
 
     rows = []
 
@@ -2345,7 +2346,7 @@ def panel_actas(
           <div id="promoCompartidaBody" class="collapsible-body closed">
             <div class="filters" style="margin-bottom:12px;">
               <input id="sharedPromoName" placeholder="Nombre de promoción">
-              <input id="sharedPromoClientKey" placeholder="Cliente unificado (ej. LAZARO)">
+              <input id="sharedPromoClientKey" placeholder="Bolsa compartida">
               <input id="sharedPromoTotalActas" type="number" placeholder="Total de actas">
               <input id="sharedPromoPricePerPiece" placeholder="Precio por pieza">
             </div>
@@ -2895,6 +2896,7 @@ def panel_actas(
         
           const promo_name = document.getElementById("sharedPromoName").value || "";
           const client_key = document.getElementById("sharedPromoClientKey").value || "";
+          const shared_key = client_key.trim().toUpperCase();
           const total_actas = Number(document.getElementById("sharedPromoTotalActas").value || 0);
           const price_per_piece = document.getElementById("sharedPromoPricePerPiece").value || "";
         
@@ -2908,6 +2910,11 @@ def panel_actas(
             return;
           }
         
+          if (!shared_key) {
+            alert("Ingresa una clave compartida o cliente unificado");
+            return;
+          }
+        
           try {
             const res = await fetch("/panel/promotions/apply", {
               method: "POST",
@@ -2918,6 +2925,7 @@ def panel_actas(
                 selected_group_jids: selected,
                 promo_name,
                 client_key,
+                shared_key,
                 total_actas,
                 price_per_piece
               })
