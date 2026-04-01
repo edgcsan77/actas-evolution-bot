@@ -342,14 +342,25 @@ def _handle_group_promotion_after_done(req, db):
     if not promo:
         return
 
-    promo.used_actas = (promo.used_actas or 0) + 1
+    total_before = int(promo.total_actas or 0)
+    used_before = int(promo.used_actas or 0)
+    available_before = max(0, total_before - used_before)
+
+    promo.used_actas = used_before + 1
     promo.updated_at = _utc_now_naive()
 
-    available = max(0, (promo.total_actas or 0) - (promo.used_actas or 0))
+    available_after = max(0, total_before - int(promo.used_actas or 0))
 
     msg = None
+    notify_level = None
 
-    if available <= 0 and not promo.warning_sent_0:
+    crossed_0 = available_before > 0 and available_after <= 0 and not promo.warning_sent_0
+    crossed_10 = available_before > 10 and available_after <= 10 and not promo.warning_sent_10
+    crossed_50 = available_before > 50 and available_after <= 50 and not promo.warning_sent_50
+    crossed_100 = available_before > 100 and available_after <= 100 and not promo.warning_sent_100
+    crossed_200 = available_before > 200 and available_after <= 200 and not promo.warning_sent_200
+
+    if crossed_0:
         msg = (
             f"❌ *Paquete agotado*\n\n"
             f"Tu paquete promocional de *{promo.total_actas} actas* ha sido consumido en su totalidad.\n\n"
@@ -358,53 +369,58 @@ def _handle_group_promotion_after_done(req, db):
         )
         promo.warning_sent_0 = True
         promo.is_active = False
+        notify_level = "0"
 
-    elif available <= 10 and not promo.warning_sent_10:
+    elif crossed_10:
         msg = (
             f"🚨 *Saldo crítico*\n\n"
-            f"Tu paquete promocional cuenta actualmente con solo *{available} actas disponibles*.\n\n"
+            f"Tu paquete promocional cuenta actualmente con solo *{available_after} actas disponibles*.\n\n"
             f"Es importante realizar tu recarga cuanto antes para no quedarte sin servicio.\n\n"
             f"Quedamos atentos."
         )
         promo.warning_sent_10 = True
+        notify_level = "10"
 
-    elif available <= 50 and not promo.warning_sent_50:
+    elif crossed_50:
         msg = (
             f"⚠️ *Aviso importante de saldo*\n\n"
-            f"Tu paquete promocional cuenta actualmente con *{available} actas disponibles*.\n\n"
+            f"Tu paquete promocional cuenta actualmente con *{available_after} actas disponibles*.\n\n"
             f"Para evitar interrupciones en el servicio, te recomendamos realizar tu recarga a la brevedad.\n\n"
             f"Quedamos atentos."
         )
         promo.warning_sent_50 = True
+        notify_level = "50"
 
-    elif available <= 100 and not promo.warning_sent_100:
+    elif crossed_100:
         msg = (
             f"⚠️ *Aviso de saldo*\n\n"
-            f"Tu paquete promocional cuenta actualmente con *{available} actas disponibles*.\n\n"
+            f"Tu paquete promocional cuenta actualmente con *{available_after} actas disponibles*.\n\n"
             f"Te recomendamos considerar tu próxima recarga con anticipación para evitar interrupciones.\n\n"
             f"Quedamos atentos."
         )
         promo.warning_sent_100 = True
+        notify_level = "100"
 
-    elif available <= 200 and not promo.warning_sent_200:
+    elif crossed_200:
         msg = (
             f"ℹ️ *Aviso de saldo*\n\n"
-            f"Actualmente cuentas con *{available} actas disponibles* de tu paquete promocional.\n\n"
+            f"Actualmente cuentas con *{available_after} actas disponibles* de tu paquete promocional.\n\n"
             f"Quedamos atentos."
         )
         promo.warning_sent_200 = True
+        notify_level = "200"
 
     db.commit()
 
-    if available <= 0:
+    if crossed_0:
         try:
             from app.main import block_group
             block_group(req.source_group_id)
         except Exception as block_exc:
             print("PROMOTION_AUTO_BLOCK_ERROR =", str(block_exc), flush=True)
 
-    if msg:
-        notify_key = f"promo_notify:{req.source_group_id}:{available}"
+    if msg and notify_level:
+        notify_key = f"promo_notify:{req.source_group_id}:{notify_level}"
         first_notify = redis_conn.set(notify_key, "1", ex=1800, nx=True)
 
         if first_notify:
