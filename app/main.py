@@ -717,11 +717,9 @@ def panel_promotions_report(db: Session = Depends(get_db)):
         }
 
         </style>
-
     </head>
 
     <body>
-
     <button class="print-btn" onclick="window.print()">
     🖨 Imprimir reporte
     </button>
@@ -1416,8 +1414,8 @@ def _promotion_summary_map(db: Session) -> dict[str, dict]:
         out[clean_key] = payload
 
     return out
-
-
+                                                                                                        
+                    
 @app.get("/panel", response_class=HTMLResponse)
 def panel_actas(
     view: str = "day",
@@ -1471,1173 +1469,1173 @@ def panel_actas(
         provider_states = _esc(_providers_status_text(db)).replace("\n", "<br>")
     
         html = f"""
-    <!doctype html>
-    <html lang="es">
-    <head>
-      <meta charset="utf-8">
-      <title>Panel Actas</title>
-      <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-          :root {{
-            --bg: #f4f6f8;
-            --card: #ffffff;
-            --text: #1f2937;
-            --muted: #6b7280;
-            --line: #e5e7eb;
-        
-            --primary: #334155;
-            --primary-dark: #1e293b;
-        
-            --success: #166534;
-            --success-dark: #14532d;
-        
-            --warning: #a16207;
-            --warning-dark: #854d0e;
-        
-            --danger: #991b1b;
-            --danger-dark: #7f1d1d;
-        
-            --shadow: 0 8px 24px rgba(15, 23, 42, 0.07);
-            --radius: 18px;
-          }}
-        
-          * {{
-            box-sizing: border-box;
-          }}
-        
-          body {{
-            margin: 0;
-            font-family: Arial, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-          }}
-        
-          .wrap {{
-            max-width: 1500px;
-            margin: 0 auto;
-            padding: 16px;
-          }}
-        
-          .hero {{
-            background: linear-gradient(135deg, #1f2937 0%, #334155 55%, #475569 100%);
-            color: white;
-            border-radius: 24px;
-            padding: 22px;
-            margin-bottom: 18px;
-            box-shadow: var(--shadow);
-          }}
-        
-          .hero-top {{
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 16px;
-            flex-wrap: wrap;
-          }}
-        
-          .hero h1 {{
-            margin: 0 0 8px;
-            font-size: 1.9rem;
-          }}
-        
-          .hero-sub {{
-            color: rgba(255,255,255,.88);
-            font-size: .98rem;
-          }}
-        
-          .toolbar {{
-            margin-top: 16px;
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-          }}
-        
-          .tool-link {{
-            text-decoration: none;
-            padding: 10px 16px;
-            border-radius: 12px;
-            background: rgba(255,255,255,.10);
-            color: white;
-            font-weight: 700;
-            border: 1px solid rgba(255,255,255,.14);
-            transition: .2s ease;
-          }}
-        
-          .tool-link:hover {{
-            background: rgba(255,255,255,.16);
-          }}
-        
-          .tool-link-active {{
-            background: #ffffff;
-            color: var(--primary-dark);
-            border-color: #ffffff;
-          }}
-        
-          .grid-hero {{
-            display: grid;
-            grid-template-columns: 1.2fr 1fr;
-            gap: 16px;
-            margin-top: 18px;
-          }}
-        
-          .glass {{
-            background: rgba(255,255,255,.08);
-            border: 1px solid rgba(255,255,255,.10);
-            border-radius: 20px;
-            padding: 18px;
-            backdrop-filter: blur(8px);
-          }}
-        
-          .section-title {{
-            margin: 0 0 14px;
-            font-size: 1rem;
-            font-weight: 800;
-            letter-spacing: .2px;
-          }}
-        
-          .provider-grid {{
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 12px;
-          }}
-        
-          .provider-card {{
-            background: rgba(255,255,255,.08);
-            border: 1px solid rgba(255,255,255,.12);
-            border-radius: 16px;
-            padding: 14px;
-          }}
-        
-          .provider-name {{
-            font-weight: 800;
-            margin-bottom: 10px;
-            font-size: .98rem;
-          }}
-        
-          .provider-actions {{
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-          }}
-        
-          .status-panel {{
-            margin-top: 14px;
-            padding: 12px 14px;
-            border-radius: 14px;
-            background: rgba(255,255,255,.08);
-            border: 1px solid rgba(255,255,255,.10);
-            color: rgba(255,255,255,.94);
-            font-size: .92rem;
-            line-height: 1.5;
-          }}
-        
-          .broadcast-grid {{
-            display: grid;
-            gap: 12px;
-          }}
-        
-          .broadcast-buttons {{
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 10px;
-          }}
-        
-          .broadcast-free {{
-            display: grid;
-            gap: 10px;
-          }}
-        
-          .broadcast-free textarea {{
-            width: 100%;
-            min-height: 140px;
-            border: 1px solid #d1d5db;
-            border-radius: 14px;
-            padding: 12px 14px;
-            resize: vertical;
-            font: inherit;
-            color: var(--text);
-            background: white;
-          }}
-        
-          .box {{
-            background: var(--card);
-            border-radius: var(--radius);
-            box-shadow: var(--shadow);
-            overflow: hidden;
-            margin-bottom: 16px;
-            border: 1px solid #eef2f7;
-          }}
-        
-          .head {{
-            padding: 16px 18px;
-            border-bottom: 1px solid var(--line);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
-            background: #fafbfc;
-          }}
-        
-          .head strong {{
-            font-size: 1rem;
-          }}
-        
-          .filters {{
-            display: grid;
-            grid-template-columns: repeat(5, minmax(0, 1fr));
-            gap: 10px;
-            padding: 16px;
-          }}
-        
-          .filters input,
-          .filters select,
-          .input,
-          .textarea {{
-            width: 100%;
-            padding: 11px 12px;
-            border: 1px solid #d1d5db;
-            border-radius: 12px;
-            font: inherit;
-            background: white;
-            color: var(--text);
-            outline: none;
-          }}
-        
-          .filters input:focus,
-          .filters select:focus,
-          .input:focus,
-          .textarea:focus {{
-            border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(51, 65, 85, .10);
-          }}
-        
-          .cards {{
-            display: grid;
-            grid-template-columns: repeat(5, minmax(0, 1fr));
-            gap: 12px;
-            margin-bottom: 16px;
-          }}
-        
-          .card {{
-            background: var(--card);
-            border-radius: 18px;
-            padding: 16px;
-            box-shadow: var(--shadow);
-            border: 1px solid var(--line);
-            position: relative;
-          }}
-        
-          .card::before {{
-            content: "";
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            border-radius: 18px 18px 0 0;
-            background: #cbd5e1;
-          }}
-        
-          .label {{
-            color: var(--muted);
-            font-size: .88rem;
-            margin-bottom: 8px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: .3px;
-          }}
-        
-          .value {{
-            font-size: 1.9rem;
-            font-weight: 800;
-            line-height: 1;
-          }}
-        
-          .table-wrap {{
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-          }}
-        
-          table {{
-            width: 100%;
-            border-collapse: collapse;
-            min-width: 820px;
-          }}
-        
-          th, td {{
-            padding: 12px;
-            border-bottom: 1px solid var(--line);
-            text-align: left;
-            vertical-align: top;
-            font-size: .95rem;
-          }}
-        
-          th {{
-            background: #1f2937;
-            color: white;
-            position: sticky;
-            top: 0;
-            z-index: 1;
-          }}
-        
-          tr:hover td {{
-            background: #f9fafb;
-          }}
-        
-          .right {{
-            text-align: right;
-          }}
-        
-          .mono {{
-            font-family: Consolas, Monaco, monospace;
-            font-size: .9rem;
-          }}
-        
-          .small {{
-            color: var(--muted);
-            font-size: .84rem;
-            line-height: 1.45;
-          }}
-        
-          .status-q {{
-            color: #a16207;
-            font-weight: 800;
-          }}
-        
-          .status-p {{
-            color: #334155;
-            font-weight: 800;
-          }}
-        
-          .status-d {{
-            color: #166534;
-            font-weight: 800;
-          }}
-        
-          .status-e {{
-            color: #991b1b;
-            font-weight: 800;
-          }}
-        
-          .btn {{
-            border: none;
-            border-radius: 12px;
-            padding: 10px 14px;
-            font-weight: 800;
-            font-size: .95rem;
-            cursor: pointer;
-            transition: .2s ease;
-            font-family: inherit;
-          }}
-        
-          .btn:hover {{
-            transform: translateY(-1px);
-          }}
-        
-          .btn-primary {{
-            background: var(--primary);
-            color: white;
-          }}
-        
-          .btn-primary:hover {{
-            background: var(--primary-dark);
-          }}
-        
-          .btn-success {{
-            background: var(--success);
-            color: white;
-          }}
-        
-          .btn-success:hover {{
-            background: var(--success-dark);
-          }}
-        
-          .btn-danger {{
-            background: var(--danger);
-            color: white;
-          }}
-        
-          .btn-danger:hover {{
-            background: var(--danger-dark);
-          }}
-        
-          .btn-warning {{
-            background: var(--warning);
-            color: white;
-          }}
-        
-          .btn-warning:hover {{
-            background: var(--warning-dark);
-          }}
-        
-          .btn-light {{
-            background: #e5e7eb;
-            color: #111827;
-          }}
-        
-          .btn-light:hover {{
-            background: #d1d5db;
-          }}
-        
-          .actions-row {{
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-          }}
-        
-          .helper {{
-            color: rgba(255,255,255,.82);
-            font-size: .86rem;
-            line-height: 1.45;
-          }}
-
-          a.btn {{
-            text-decoration: none !important;
-          }}
-        
-          a.btn:hover {{
-            text-decoration: none !important;
-          }}
-
-          .group-mode-bar {{
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            padding: 16px;
-          }}
-        
-          .group-mode-link {{
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            padding: 10px 14px;
-            border-radius: 12px;
-            background: #f8fafc;
-            border: 1px solid #dbe3ee;
-            color: #1d4ed8;
-            font-weight: 700;
-            text-decoration: none !important;
-            transition: .2s ease;
-          }}
-        
-          .group-mode-link:hover {{
-            background: #eff6ff;
-            border-color: #bfdbfe;
-            text-decoration: none !important;
-          }}
-        
-          .group-mode-link-active {{
-            background: #dbeafe;
-            border-color: #93c5fd;
-            color: #1e3a8a;
-          }}
-
-          .table-wrap td a {{
-            color: #1d4ed8;
-            text-decoration: none !important;
-            font-weight: 700;
-          }}
-        
-          .table-wrap td a:hover {{
-            color: #1e3a8a;
-          }}
-        
-          @media (max-width: 1200px) {{
-            .grid-hero {{
-              grid-template-columns: 1fr;
-            }}
-        
-            .provider-grid {{
-              grid-template-columns: 1fr;
-            }}
-        
-            .broadcast-buttons {{
-              grid-template-columns: 1fr;
-            }}
-        
-            .cards {{
-              grid-template-columns: repeat(3, minmax(0, 1fr));
-            }}
-          }}
-        
-          @media (max-width: 900px) {{
-            .wrap {{
-              padding: 12px;
-            }}
-        
-            .hero {{
-              padding: 18px;
-              border-radius: 20px;
-            }}
-        
-            .hero h1 {{
-              font-size: 1.45rem;
-            }}
-        
-            .cards {{
-              grid-template-columns: repeat(2, minmax(0, 1fr));
-            }}
-        
-            .filters {{
-              grid-template-columns: 1fr;
-            }}
-        
-            .head {{
-              padding: 14px 16px;
-            }}
-        
-            .card {{
-              padding: 14px;
-            }}
-        
-            .value {{
-              font-size: 1.6rem;
-            }}
-          }}
-        
-          @media (max-width: 560px) {{
-            .cards {{
-              grid-template-columns: 1fr;
-            }}
-        
-            .tool-link,
-            .btn {{
-              width: 100%;
-              justify-content: center;
-            }}
-        
-            .provider-actions,
-            .actions-row {{
-              flex-direction: column;
-            }}
-          }}
-        </style>
-    </head>
+        <!doctype html>
+        <html lang="es">
+        <head>
+          <meta charset="utf-8">
+          <title>Panel Actas</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+              :root {{
+                --bg: #f4f6f8;
+                --card: #ffffff;
+                --text: #1f2937;
+                --muted: #6b7280;
+                --line: #e5e7eb;
+            
+                --primary: #334155;
+                --primary-dark: #1e293b;
+            
+                --success: #166534;
+                --success-dark: #14532d;
+            
+                --warning: #a16207;
+                --warning-dark: #854d0e;
+            
+                --danger: #991b1b;
+                --danger-dark: #7f1d1d;
+            
+                --shadow: 0 8px 24px rgba(15, 23, 42, 0.07);
+                --radius: 18px;
+              }}
+            
+              * {{
+                box-sizing: border-box;
+              }}
+            
+              body {{
+                margin: 0;
+                font-family: Arial, sans-serif;
+                background: var(--bg);
+                color: var(--text);
+              }}
+            
+              .wrap {{
+                max-width: 1500px;
+                margin: 0 auto;
+                padding: 16px;
+              }}
+            
+              .hero {{
+                background: linear-gradient(135deg, #1f2937 0%, #334155 55%, #475569 100%);
+                color: white;
+                border-radius: 24px;
+                padding: 22px;
+                margin-bottom: 18px;
+                box-shadow: var(--shadow);
+              }}
+            
+              .hero-top {{
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                gap: 16px;
+                flex-wrap: wrap;
+              }}
+            
+              .hero h1 {{
+                margin: 0 0 8px;
+                font-size: 1.9rem;
+              }}
+            
+              .hero-sub {{
+                color: rgba(255,255,255,.88);
+                font-size: .98rem;
+              }}
+            
+              .toolbar {{
+                margin-top: 16px;
+                display: flex;
+                gap: 10px;
+                flex-wrap: wrap;
+              }}
+            
+              .tool-link {{
+                text-decoration: none;
+                padding: 10px 16px;
+                border-radius: 12px;
+                background: rgba(255,255,255,.10);
+                color: white;
+                font-weight: 700;
+                border: 1px solid rgba(255,255,255,.14);
+                transition: .2s ease;
+              }}
+            
+              .tool-link:hover {{
+                background: rgba(255,255,255,.16);
+              }}
+            
+              .tool-link-active {{
+                background: #ffffff;
+                color: var(--primary-dark);
+                border-color: #ffffff;
+              }}
+            
+              .grid-hero {{
+                display: grid;
+                grid-template-columns: 1.2fr 1fr;
+                gap: 16px;
+                margin-top: 18px;
+              }}
+            
+              .glass {{
+                background: rgba(255,255,255,.08);
+                border: 1px solid rgba(255,255,255,.10);
+                border-radius: 20px;
+                padding: 18px;
+                backdrop-filter: blur(8px);
+              }}
+            
+              .section-title {{
+                margin: 0 0 14px;
+                font-size: 1rem;
+                font-weight: 800;
+                letter-spacing: .2px;
+              }}
+            
+              .provider-grid {{
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 12px;
+              }}
+            
+              .provider-card {{
+                background: rgba(255,255,255,.08);
+                border: 1px solid rgba(255,255,255,.12);
+                border-radius: 16px;
+                padding: 14px;
+              }}
+            
+              .provider-name {{
+                font-weight: 800;
+                margin-bottom: 10px;
+                font-size: .98rem;
+              }}
+            
+              .provider-actions {{
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+              }}
+            
+              .status-panel {{
+                margin-top: 14px;
+                padding: 12px 14px;
+                border-radius: 14px;
+                background: rgba(255,255,255,.08);
+                border: 1px solid rgba(255,255,255,.10);
+                color: rgba(255,255,255,.94);
+                font-size: .92rem;
+                line-height: 1.5;
+              }}
+            
+              .broadcast-grid {{
+                display: grid;
+                gap: 12px;
+              }}
+            
+              .broadcast-buttons {{
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 10px;
+              }}
+            
+              .broadcast-free {{
+                display: grid;
+                gap: 10px;
+              }}
+            
+              .broadcast-free textarea {{
+                width: 100%;
+                min-height: 140px;
+                border: 1px solid #d1d5db;
+                border-radius: 14px;
+                padding: 12px 14px;
+                resize: vertical;
+                font: inherit;
+                color: var(--text);
+                background: white;
+              }}
+            
+              .box {{
+                background: var(--card);
+                border-radius: var(--radius);
+                box-shadow: var(--shadow);
+                overflow: hidden;
+                margin-bottom: 16px;
+                border: 1px solid #eef2f7;
+              }}
+            
+              .head {{
+                padding: 16px 18px;
+                border-bottom: 1px solid var(--line);
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 10px;
+                flex-wrap: wrap;
+                background: #fafbfc;
+              }}
+            
+              .head strong {{
+                font-size: 1rem;
+              }}
+            
+              .filters {{
+                display: grid;
+                grid-template-columns: repeat(5, minmax(0, 1fr));
+                gap: 10px;
+                padding: 16px;
+              }}
+            
+              .filters input,
+              .filters select,
+              .input,
+              .textarea {{
+                width: 100%;
+                padding: 11px 12px;
+                border: 1px solid #d1d5db;
+                border-radius: 12px;
+                font: inherit;
+                background: white;
+                color: var(--text);
+                outline: none;
+              }}
+            
+              .filters input:focus,
+              .filters select:focus,
+              .input:focus,
+              .textarea:focus {{
+                border-color: var(--primary);
+                box-shadow: 0 0 0 3px rgba(51, 65, 85, .10);
+              }}
+            
+              .cards {{
+                display: grid;
+                grid-template-columns: repeat(5, minmax(0, 1fr));
+                gap: 12px;
+                margin-bottom: 16px;
+              }}
+            
+              .card {{
+                background: var(--card);
+                border-radius: 18px;
+                padding: 16px;
+                box-shadow: var(--shadow);
+                border: 1px solid var(--line);
+                position: relative;
+              }}
+            
+              .card::before {{
+                content: "";
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 4px;
+                border-radius: 18px 18px 0 0;
+                background: #cbd5e1;
+              }}
+            
+              .label {{
+                color: var(--muted);
+                font-size: .88rem;
+                margin-bottom: 8px;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: .3px;
+              }}
+            
+              .value {{
+                font-size: 1.9rem;
+                font-weight: 800;
+                line-height: 1;
+              }}
+            
+              .table-wrap {{
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+              }}
+            
+              table {{
+                width: 100%;
+                border-collapse: collapse;
+                min-width: 820px;
+              }}
+            
+              th, td {{
+                padding: 12px;
+                border-bottom: 1px solid var(--line);
+                text-align: left;
+                vertical-align: top;
+                font-size: .95rem;
+              }}
+            
+              th {{
+                background: #1f2937;
+                color: white;
+                position: sticky;
+                top: 0;
+                z-index: 1;
+              }}
+            
+              tr:hover td {{
+                background: #f9fafb;
+              }}
+            
+              .right {{
+                text-align: right;
+              }}
+            
+              .mono {{
+                font-family: Consolas, Monaco, monospace;
+                font-size: .9rem;
+              }}
+            
+              .small {{
+                color: var(--muted);
+                font-size: .84rem;
+                line-height: 1.45;
+              }}
+            
+              .status-q {{
+                color: #a16207;
+                font-weight: 800;
+              }}
+            
+              .status-p {{
+                color: #334155;
+                font-weight: 800;
+              }}
+            
+              .status-d {{
+                color: #166534;
+                font-weight: 800;
+              }}
+            
+              .status-e {{
+                color: #991b1b;
+                font-weight: 800;
+              }}
+            
+              .btn {{
+                border: none;
+                border-radius: 12px;
+                padding: 10px 14px;
+                font-weight: 800;
+                font-size: .95rem;
+                cursor: pointer;
+                transition: .2s ease;
+                font-family: inherit;
+              }}
+            
+              .btn:hover {{
+                transform: translateY(-1px);
+              }}
+            
+              .btn-primary {{
+                background: var(--primary);
+                color: white;
+              }}
+            
+              .btn-primary:hover {{
+                background: var(--primary-dark);
+              }}
+            
+              .btn-success {{
+                background: var(--success);
+                color: white;
+              }}
+            
+              .btn-success:hover {{
+                background: var(--success-dark);
+              }}
+            
+              .btn-danger {{
+                background: var(--danger);
+                color: white;
+              }}
+            
+              .btn-danger:hover {{
+                background: var(--danger-dark);
+              }}
+            
+              .btn-warning {{
+                background: var(--warning);
+                color: white;
+              }}
+            
+              .btn-warning:hover {{
+                background: var(--warning-dark);
+              }}
+            
+              .btn-light {{
+                background: #e5e7eb;
+                color: #111827;
+              }}
+            
+              .btn-light:hover {{
+                background: #d1d5db;
+              }}
+            
+              .actions-row {{
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+              }}
+            
+              .helper {{
+                color: rgba(255,255,255,.82);
+                font-size: .86rem;
+                line-height: 1.45;
+              }}
     
-    <body>
-      <div class="wrap">
+              a.btn {{
+                text-decoration: none !important;
+              }}
+            
+              a.btn:hover {{
+                text-decoration: none !important;
+              }}
     
-        <div class="hero">
-          <div class="hero-top">
-            <div>
-              <h1>Panel de Actas</h1>
-              <div class="hero-sub">{_esc(subtitle)}</div>
-            </div>
-          </div>
+              .group-mode-bar {{
+                display: flex;
+                gap: 10px;
+                flex-wrap: wrap;
+                padding: 16px;
+              }}
+            
+              .group-mode-link {{
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                padding: 10px 14px;
+                border-radius: 12px;
+                background: #f8fafc;
+                border: 1px solid #dbe3ee;
+                color: #1d4ed8;
+                font-weight: 700;
+                text-decoration: none !important;
+                transition: .2s ease;
+              }}
+            
+              .group-mode-link:hover {{
+                background: #eff6ff;
+                border-color: #bfdbfe;
+                text-decoration: none !important;
+              }}
+            
+              .group-mode-link-active {{
+                background: #dbeafe;
+                border-color: #93c5fd;
+                color: #1e3a8a;
+              }}
     
-          <div class="toolbar">
-            <a href="/panel?view=day&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'day' else ''}">Hoy</a>
-            <a href="/panel?view=week&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'week' else ''}">Semana actual</a>
-            <a href="/panel/promotions/report" class="tool-link" target="_blank">Promociones</a>
-          </div>
-    
-          <div class="grid-hero">
-            <div class="glass">
-              <h3 class="section-title">Proveedores</h3>
-    
-              <div class="provider-grid">
-                <div class="provider-card">
-                  <div class="provider-name">PROVEEDOR WA EMERGENCIA</div>
-                  <div class="provider-actions">
-                    <button class="btn btn-success" onclick="toggleProvider('PROVIDER1','on')">Activar</button>
-                    <button class="btn btn-danger" onclick="toggleProvider('PROVIDER1','off')">Desactivar</button>
-                  </div>
-                </div>
-    
-                <div class="provider-card">
-                  <div class="provider-name">AUSTRAM WEB</div>
-                  <div class="provider-actions">
-                    <button class="btn btn-success" onclick="toggleProvider('PROVIDER3','on')">Activar</button>
-                    <button class="btn btn-danger" onclick="toggleProvider('PROVIDER3','off')">Desactivar</button>
-                    <button class="btn btn-warning" onclick="refreshSID()">Actualizar SID</button>
-                  </div>
-                </div>
-    
-                <div class="provider-card">
-                  <div class="provider-name">LAZARO WEB</div>
-                  <div class="provider-actions">
-                    <button class="btn btn-success" onclick="toggleProvider('PROVIDER4','on')">Activar</button>
-                    <button class="btn btn-danger" onclick="toggleProvider('PROVIDER4','off')">Desactivar</button>
-                  </div>
-                </div>
-              </div>
-    
-              <div class="status-panel">
-                <strong>Estado actual</strong><br><br>
-                {provider_states}
-              </div>
-            </div>
-    
-            <div class="glass">
-              <h3 class="section-title">Mensajes masivos</h3>
-    
-              <div class="broadcast-grid">
+              .table-wrap td a {{
+                color: #1d4ed8;
+                text-decoration: none !important;
+                font-weight: 700;
+              }}
+            
+              .table-wrap td a:hover {{
+                color: #1e3a8a;
+              }}
+            
+              @media (max-width: 1200px) {{
+                .grid-hero {{
+                  grid-template-columns: 1fr;
+                }}
+            
+                .provider-grid {{
+                  grid-template-columns: 1fr;
+                }}
+            
+                .broadcast-buttons {{
+                  grid-template-columns: 1fr;
+                }}
+            
+                .cards {{
+                  grid-template-columns: repeat(3, minmax(0, 1fr));
+                }}
+              }}
+            
+              @media (max-width: 900px) {{
+                .wrap {{
+                  padding: 12px;
+                }}
+            
+                .hero {{
+                  padding: 18px;
+                  border-radius: 20px;
+                }}
+            
+                .hero h1 {{
+                  font-size: 1.45rem;
+                }}
+            
+                .cards {{
+                  grid-template-columns: repeat(2, minmax(0, 1fr));
+                }}
+            
+                .filters {{
+                  grid-template-columns: 1fr;
+                }}
+            
+                .head {{
+                  padding: 14px 16px;
+                }}
+            
+                .card {{
+                  padding: 14px;
+                }}
+            
+                .value {{
+                  font-size: 1.6rem;
+                }}
+              }}
+            
+              @media (max-width: 560px) {{
+                .cards {{
+                  grid-template-columns: 1fr;
+                }}
+            
+                .tool-link,
+                .btn {{
+                  width: 100%;
+                  justify-content: center;
+                }}
+            
+                .provider-actions,
+                .actions-row {{
+                  flex-direction: column;
+                }}
+              }}
+            </style>
+        </head>
+        
+        <body>
+          <div class="wrap">
+        
+            <div class="hero">
+              <div class="hero-top">
                 <div>
-                  <div class="helper" style="margin-bottom:10px;">Envía mensajes predefinidos a todos los grupos activos.</div>
-                  <div class="broadcast-buttons">
-                    <button class="btn btn-primary" onclick="sendBroadcast('activas')">Enviar promoción</button>
-                    <button class="btn btn-warning" onclick="sendBroadcast('mantenimiento')">Enviar mantenimiento</button>
-                    <button class="btn btn-danger" onclick="sendBroadcast('suspendido')">Enviar suspendido</button>
-                  </div>
+                  <h1>Panel de Actas</h1>
+                  <div class="hero-sub">{_esc(subtitle)}</div>
                 </div>
-    
-                <div class="broadcast-free">
-                  <div>
-                    <strong>Mensaje libre</strong>
-                    <div class="helper" style="margin-top:6px;">
-                      Escribe un mensaje personalizado para enviarlo masivamente.
+              </div>
+        
+              <div class="toolbar">
+                <a href="/panel?view=day&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'day' else ''}">Hoy</a>
+                <a href="/panel?view=week&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'week' else ''}">Semana actual</a>
+                <a href="/panel/promotions/report" class="tool-link" target="_blank">Promociones</a>
+              </div>
+        
+              <div class="grid-hero">
+                <div class="glass">
+                  <h3 class="section-title">Proveedores</h3>
+        
+                  <div class="provider-grid">
+                    <div class="provider-card">
+                      <div class="provider-name">PROVEEDOR WA EMERGENCIA</div>
+                      <div class="provider-actions">
+                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER1','on')">Activar</button>
+                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER1','off')">Desactivar</button>
+                      </div>
+                    </div>
+        
+                    <div class="provider-card">
+                      <div class="provider-name">AUSTRAM WEB</div>
+                      <div class="provider-actions">
+                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER3','on')">Activar</button>
+                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER3','off')">Desactivar</button>
+                        <button class="btn btn-warning" onclick="refreshSID()">Actualizar SID</button>
+                      </div>
+                    </div>
+        
+                    <div class="provider-card">
+                      <div class="provider-name">LAZARO WEB</div>
+                      <div class="provider-actions">
+                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER4','on')">Activar</button>
+                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER4','off')">Desactivar</button>
+                      </div>
                     </div>
                   </div>
-    
-                  <textarea
-                    id="broadcastMessage"
-                    placeholder="Escribe aquí el mensaje que deseas enviar a todos los grupos..."
-                  ></textarea>
-    
-                  <div class="actions-row">
-                    <button class="btn btn-success" onclick="sendFreeBroadcast()">Enviar mensaje libre</button>
-                    <button class="btn btn-light" onclick="clearBroadcast()">Limpiar</button>
+        
+                  <div class="status-panel">
+                    <strong>Estado actual</strong><br><br>
+                    {provider_states}
+                  </div>
+                </div>
+        
+                <div class="glass">
+                  <h3 class="section-title">Mensajes masivos</h3>
+        
+                  <div class="broadcast-grid">
+                    <div>
+                      <div class="helper" style="margin-bottom:10px;">Envía mensajes predefinidos a todos los grupos activos.</div>
+                      <div class="broadcast-buttons">
+                        <button class="btn btn-primary" onclick="sendBroadcast('activas')">Enviar promoción</button>
+                        <button class="btn btn-warning" onclick="sendBroadcast('mantenimiento')">Enviar mantenimiento</button>
+                        <button class="btn btn-danger" onclick="sendBroadcast('suspendido')">Enviar suspendido</button>
+                      </div>
+                    </div>
+        
+                    <div class="broadcast-free">
+                      <div>
+                        <strong>Mensaje libre</strong>
+                        <div class="helper" style="margin-top:6px;">
+                          Escribe un mensaje personalizado para enviarlo masivamente.
+                        </div>
+                      </div>
+        
+                      <textarea
+                        id="broadcastMessage"
+                        placeholder="Escribe aquí el mensaje que deseas enviar a todos los grupos..."
+                      ></textarea>
+        
+                      <div class="actions-row">
+                        <button class="btn btn-success" onclick="sendFreeBroadcast()">Enviar mensaje libre</button>
+                        <button class="btn btn-light" onclick="clearBroadcast()">Limpiar</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-    
-        <form class="box" method="get" action="/panel">
-          <div class="head">
-            <strong>Filtros</strong>
-          </div>
-          <div class="filters">
-            <input type="hidden" name="view" value="{_esc(view)}">
-            <input type="hidden" name="group_mode" value="{_esc(group_mode)}">
-            <input name="group_jid" placeholder="Grupo cliente" value="{_esc(group_jid)}">
-            <input name="provider_name" placeholder="Proveedor" value="{_esc(provider_name)}">
-            <input name="status" placeholder="Estado" value="{_esc(status)}">
-            <input name="act_type" placeholder="Tipo de acta" value="{_esc(act_type)}">
-            <button type="submit" class="btn btn-primary">Filtrar</button>
-          </div>
-        </form>
-    
-        html += """
-        <div class="box">
-          <div class="head">
-            <strong>Promoción compartida</strong>
-          </div>
         
-          <div class="filters" style="margin-bottom:12px;">
-            <input id="sharedPromoName" placeholder="Nombre de promoción">
-            <input id="sharedPromoClientKey" placeholder="Cliente unificado (ej. LAZARO)">
-            <input id="sharedPromoTotalActas" type="number" placeholder="Total de actas">
-            <input id="sharedPromoPricePerPiece" placeholder="Precio por pieza">
-          </div>
+            <form class="box" method="get" action="/panel">
+              <div class="head">
+                <strong>Filtros</strong>
+              </div>
+              <div class="filters">
+                <input type="hidden" name="view" value="{_esc(view)}">
+                <input type="hidden" name="group_mode" value="{_esc(group_mode)}">
+                <input name="group_jid" placeholder="Grupo cliente" value="{_esc(group_jid)}">
+                <input name="provider_name" placeholder="Proveedor" value="{_esc(provider_name)}">
+                <input name="status" placeholder="Estado" value="{_esc(status)}">
+                <input name="act_type" placeholder="Tipo de acta" value="{_esc(act_type)}">
+                <button type="submit" class="btn btn-primary">Filtrar</button>
+              </div>
+            </form>
         
-          <div class="helper" style="margin-bottom:10px;">
-            Selecciona los grupos que compartirán el mismo saldo.
-          </div>
+            html += """
+            <div class="box">
+              <div class="head">
+                <strong>Promoción compartida</strong>
+              </div>
+            
+              <div class="filters" style="margin-bottom:12px;">
+                <input id="sharedPromoName" placeholder="Nombre de promoción">
+                <input id="sharedPromoClientKey" placeholder="Cliente unificado (ej. LAZARO)">
+                <input id="sharedPromoTotalActas" type="number" placeholder="Total de actas">
+                <input id="sharedPromoPricePerPiece" placeholder="Precio por pieza">
+              </div>
+            
+              <div class="helper" style="margin-bottom:10px;">
+                Selecciona los grupos que compartirán el mismo saldo.
+              </div>
+            
+              <div id="sharedPromoGroups" style="max-height:260px;overflow:auto;border:1px solid #ddd;padding:10px;border-radius:12px;background:#fff;">
+            """
+            for gid, name in GROUP_NAME_MAP.items():
+                html += f'''
+                <label style="display:block;margin-bottom:6px;">
+                  <input type="checkbox" class="shared-promo-group" value="{gid}">
+                  {_esc(name)}
+                </label>
+                '''
+            html += """
+              </div>
+            
+              <div class="actions-row" style="margin-top:12px;">
+                <button class="btn btn-success" onclick="applySharedPromotion()">Aplicar promoción compartida</button>
+              </div>
+            </div>
+            """
+    
+            html += f"""
+            <div class="cards">
+              <div class="card"><div class="label">Total</div><div class="value">{summary["total"]}</div></div>
+              <div class="card"><div class="label">En cola</div><div class="value">{summary["queued"]}</div></div>
+              <div class="card"><div class="label">Procesando</div><div class="value">{summary["processing"]}</div></div>
+              <div class="card"><div class="label">Hecho</div><div class="value">{summary["done"]}</div></div>
+              <div class="card"><div class="label">Error</div><div class="value">{summary["error"]}</div></div>
+            </div>
         
-          <div id="sharedPromoGroups" style="max-height:260px;overflow:auto;border:1px solid #ddd;padding:10px;border-radius:12px;background:#fff;">
-        """
-        for gid, name in GROUP_NAME_MAP.items():
-            html += f'''
-            <label style="display:block;margin-bottom:6px;">
-              <input type="checkbox" class="shared-promo-group" value="{gid}">
-              {_esc(name)}
-            </label>
-            '''
-        html += """
-          </div>
+            <div class="box">
+              <div class="head"><strong>Resumen por proveedor</strong></div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Proveedor</th>
+                      <th class="right">Total</th>
+                      <th class="right">EN COLA</th>
+                      <th class="right">PROCESANDO</th>
+                      <th class="right">HECHO</th>
+                      <th class="right">ERROR</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+            """
         
-          <div class="actions-row" style="margin-top:12px;">
-            <button class="btn btn-success" onclick="applySharedPromotion()">Aplicar promoción compartida</button>
-          </div>
-        </div>
-        """
-
-        html += f"""
-        <div class="cards">
-          <div class="card"><div class="label">Total</div><div class="value">{summary["total"]}</div></div>
-          <div class="card"><div class="label">En cola</div><div class="value">{summary["queued"]}</div></div>
-          <div class="card"><div class="label">Procesando</div><div class="value">{summary["processing"]}</div></div>
-          <div class="card"><div class="label">Hecho</div><div class="value">{summary["done"]}</div></div>
-          <div class="card"><div class="label">Error</div><div class="value">{summary["error"]}</div></div>
-        </div>
-    
-        <div class="box">
-          <div class="head"><strong>Resumen por proveedor</strong></div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Proveedor</th>
-                  <th class="right">Total</th>
-                  <th class="right">EN COLA</th>
-                  <th class="right">PROCESANDO</th>
-                  <th class="right">HECHO</th>
-                  <th class="right">ERROR</th>
-                </tr>
-              </thead>
-              <tbody>
-        """
-    
-        if by_provider:
-            for r in by_provider:
-                html += f"""
-                <tr>
-                  <td>{_esc(r["provider_name"])}</td>
-                  <td class="right">{r["total"]}</td>
-                  <td class="right">{r["queued"]}</td>
-                  <td class="right">{r["processing"]}</td>
-                  <td class="right">{r["done"]}</td>
-                  <td class="right">{r["error"]}</td>
-                </tr>
-                """
-        else:
-            html += '<tr><td colspan="6">Sin datos.</td></tr>'
-    
-        html += """
-              </tbody>
-            </table>
-          </div>
-        </div>
-        """
-    
-        html += """
-        <div class="box">
-          <div class="head"><strong>Resumen por tipo de acta</strong></div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Tipo</th>
-                  <th class="right">Total</th>
-                  <th class="right">EN COLA</th>
-                  <th class="right">PROCESANDO</th>
-                  <th class="right">HECHO</th>
-                  <th class="right">ERROR</th>
-                </tr>
-              </thead>
-              <tbody>
-        """
-    
-        if by_type:
-            for r in by_type:
-                html += f"""
-                <tr>
-                  <td>{_esc(r["act_type"])}</td>
-                  <td class="right">{r["total"]}</td>
-                  <td class="right">{r["queued"]}</td>
-                  <td class="right">{r["processing"]}</td>
-                  <td class="right">{r["done"]}</td>
-                  <td class="right">{r["error"]}</td>
-                </tr>
-                """
-        else:
-            html += '<tr><td colspan="6">Sin datos.</td></tr>'
-    
-        html += """
-              </tbody>
-            </table>
-          </div>
-        </div>
-        """
-
-        html += f"""
-        <div class="box">
-          <div class="head"><strong>Vista de grupos</strong></div>
-          <div class="group-mode-bar">
-            <a class="group-mode-link {'group-mode-link-active' if group_mode == 'all' else ''}"
-               href="/panel?view={_esc(view)}&group_mode=all&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
-              Ver todos los grupos
-            </a>
-            <a class="group-mode-link {'group-mode-link-active' if group_mode == 'active' else ''}"
-               href="/panel?view={_esc(view)}&group_mode=active&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
-              Solo grupos con compras del día
-            </a>
-          </div>
-        </div>
-        """
-
-        all_blocked = are_all_client_groups_blocked()
-
-        toggle_all_btn = (
-            '<button class="btn btn-success" onclick="toggleAllGroups()">Desbloquear todos los grupos</button>'
-            if all_blocked
-            else '<button class="btn btn-danger" onclick="toggleAllGroups()">Bloquear todos los grupos</button>'
-        )
-        
-        html += f"""
-        <div class="box">
-          <div class="head">
-            <strong>Control masivo de grupos</strong>
-            <span class="small">Bloquea o desbloquea todos los grupos cliente con un solo clic</span>
-          </div>
-          <div class="group-mode-bar">
-            {toggle_all_btn}
-          </div>
-        </div>
-        """
-    
-        html += """
-        <div class="box">
-          <div class="head"><strong>Resumen por grupo cliente</strong></div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Grupo</th>
-                  <th class="right">Total</th>
-                  <th class="right">HECHO</th>
-                  <th class="right">ERROR</th>
-                  <th>Promoción</th>
-                  <th>Última actualización</th>
-                  <th>Bloqueo</th>
-                  <th>Acción</th>
-                </tr>
-              </thead>
-              <tbody>
-        """
-    
-        if by_group:
-            for r in by_group:
-                blocked = is_group_blocked(r["group_jid"])
-                blocked_text = "BLOQUEADO" if blocked else "ACTIVO"
-        
-                action_btn = (
-                    f'<button class="btn btn-success" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'unblock\')">Desbloquear</button>'
-                    if blocked
-                    else f'<button class="btn btn-danger" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'block\')">Bloquear</button>'
-                )
-        
-                group_key = (r["group_jid"] or "").replace("@g.us", "").strip()
-                promo_info = (
-                    promo_map.get(r["group_jid"])
-                    or promo_map.get(group_key)
-                )
-        
-                if promo_info:
-                    status = "Activa" if promo_info["available"] > 0 else "Agotada"
-
-                    promo_cell = f"""
-                    <span class="badge bg-success">{status}</span><br>
-                    <b>{promo_info["used_actas"]} / {promo_info["total_actas"]}</b>
+            if by_provider:
+                for r in by_provider:
+                    html += f"""
+                    <tr>
+                      <td>{_esc(r["provider_name"])}</td>
+                      <td class="right">{r["total"]}</td>
+                      <td class="right">{r["queued"]}</td>
+                      <td class="right">{r["processing"]}</td>
+                      <td class="right">{r["done"]}</td>
+                      <td class="right">{r["error"]}</td>
+                    </tr>
                     """
-                else:
-                    promo_cell = f"""
-                    <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}"
-                       class="btn btn-success"
-                       style="color:white;padding:6px 12px; font-size:13px; border-radius:16px; text-decoration:none;">
-                       +Promoción
-                    </a>
+            else:
+                html += '<tr><td colspan="6">Sin datos.</td></tr>'
+        
+            html += """
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            """
+        
+            html += """
+            <div class="box">
+              <div class="head"><strong>Resumen por tipo de acta</strong></div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Tipo</th>
+                      <th class="right">Total</th>
+                      <th class="right">EN COLA</th>
+                      <th class="right">PROCESANDO</th>
+                      <th class="right">HECHO</th>
+                      <th class="right">ERROR</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+            """
+        
+            if by_type:
+                for r in by_type:
+                    html += f"""
+                    <tr>
+                      <td>{_esc(r["act_type"])}</td>
+                      <td class="right">{r["total"]}</td>
+                      <td class="right">{r["queued"]}</td>
+                      <td class="right">{r["processing"]}</td>
+                      <td class="right">{r["done"]}</td>
+                      <td class="right">{r["error"]}</td>
+                    </tr>
                     """
+            else:
+                html += '<tr><td colspan="6">Sin datos.</td></tr>'
         
-                html += f"""
-                <tr>
-                  <td>
-                    <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}">
-                      {_esc(r["group_name"])}
-                    </a>
-                  </td>
-                  <td class="right">{r["total"]}</td>
-                  <td class="right">{r["done"]}</td>
-                  <td class="right">{r["error"]}</td>
-                  <td>{promo_cell}</td>
-                  <td>{_esc(_fmt_dt(r["last_update"]))}</td>
-                  <td>{blocked_text}</td>
-                  <td>{action_btn}</td>
-                </tr>
-                """
-        else:
-            html += '<tr><td colspan="8">Sin datos.</td></tr>'
+            html += """
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            """
     
-        html += """
-              </tbody>
-            </table>
+            html += f"""
+            <div class="box">
+              <div class="head"><strong>Vista de grupos</strong></div>
+              <div class="group-mode-bar">
+                <a class="group-mode-link {'group-mode-link-active' if group_mode == 'all' else ''}"
+                   href="/panel?view={_esc(view)}&group_mode=all&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
+                  Ver todos los grupos
+                </a>
+                <a class="group-mode-link {'group-mode-link-active' if group_mode == 'active' else ''}"
+                   href="/panel?view={_esc(view)}&group_mode=active&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
+                  Solo grupos con compras del día
+                </a>
+              </div>
+            </div>
+            """
+    
+            all_blocked = are_all_client_groups_blocked()
+    
+            toggle_all_btn = (
+                '<button class="btn btn-success" onclick="toggleAllGroups()">Desbloquear todos los grupos</button>'
+                if all_blocked
+                else '<button class="btn btn-danger" onclick="toggleAllGroups()">Bloquear todos los grupos</button>'
+            )
+            
+            html += f"""
+            <div class="box">
+              <div class="head">
+                <strong>Control masivo de grupos</strong>
+                <span class="small">Bloquea o desbloquea todos los grupos cliente con un solo clic</span>
+              </div>
+              <div class="group-mode-bar">
+                {toggle_all_btn}
+              </div>
+            </div>
+            """
+        
+            html += """
+            <div class="box">
+              <div class="head"><strong>Resumen por grupo cliente</strong></div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Grupo</th>
+                      <th class="right">Total</th>
+                      <th class="right">HECHO</th>
+                      <th class="right">ERROR</th>
+                      <th>Promoción</th>
+                      <th>Última actualización</th>
+                      <th>Bloqueo</th>
+                      <th>Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+            """
+        
+            if by_group:
+                for r in by_group:
+                    blocked = is_group_blocked(r["group_jid"])
+                    blocked_text = "BLOQUEADO" if blocked else "ACTIVO"
+            
+                    action_btn = (
+                        f'<button class="btn btn-success" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'unblock\')">Desbloquear</button>'
+                        if blocked
+                        else f'<button class="btn btn-danger" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'block\')">Bloquear</button>'
+                    )
+            
+                    group_key = (r["group_jid"] or "").replace("@g.us", "").strip()
+                    promo_info = (
+                        promo_map.get(r["group_jid"])
+                        or promo_map.get(group_key)
+                    )
+            
+                    if promo_info:
+                        status = "Activa" if promo_info["available"] > 0 else "Agotada"
+    
+                        promo_cell = f"""
+                        <span class="badge bg-success">{status}</span><br>
+                        <b>{promo_info["used_actas"]} / {promo_info["total_actas"]}</b>
+                        """
+                    else:
+                        promo_cell = f"""
+                        <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}"
+                           class="btn btn-success"
+                           style="color:white;padding:6px 12px; font-size:13px; border-radius:16px; text-decoration:none;">
+                           +Promoción
+                        </a>
+                        """
+            
+                    html += f"""
+                    <tr>
+                      <td>
+                        <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}">
+                          {_esc(r["group_name"])}
+                        </a>
+                      </td>
+                      <td class="right">{r["total"]}</td>
+                      <td class="right">{r["done"]}</td>
+                      <td class="right">{r["error"]}</td>
+                      <td>{promo_cell}</td>
+                      <td>{_esc(_fmt_dt(r["last_update"]))}</td>
+                      <td>{blocked_text}</td>
+                      <td>{action_btn}</td>
+                    </tr>
+                    """
+            else:
+                html += '<tr><td colspan="8">Sin datos.</td></tr>'
+        
+            html += """
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            """
+        
+            html += """
+            <div class="box">
+              <div class="head"><strong>Solicitudes recientes</strong></div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Dato</th>
+                      <th>Tipo</th>
+                      <th>Estado</th>
+                      <th>Grupo cliente</th>
+                      <th>Proveedor</th>
+                      <th>Grupo proveedor</th>
+                      <th>Mensaje proveedor</th>
+                      <th>Creado</th>
+                      <th>Actualizado</th>
+                      <th>Error</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+            """
+        
+            if latest:
+                for r in latest:
+                    status_class = {
+                        "QUEUED": "status-q",
+                        "PROCESSING": "status-p",
+                        "DONE": "status-d",
+                        "ERROR": "status-e",
+                    }.get(r.status, "")
+        
+                    html += f"""
+                    <tr>
+                      <td>{r.id}</td>
+                      <td class="mono">{_esc(r.curp)}</td>
+                      <td>{_esc(r.act_type)}</td>
+                      <td class="{status_class}">{_esc(r.status)}</td>
+                      <td>{_esc(_group_name(r.source_group_id))}</td>
+                      <td>{_esc(r.provider_name)}</td>
+                      <td>{_esc(_group_name(r.provider_group_id))}</td>
+                      <td class="small">{_esc(r.provider_message)}</td>
+                      <td>{_esc(_fmt_dt(r.created_at))}</td>
+                      <td>{_esc(_fmt_dt(r.updated_at))}</td>
+                      <td class="small">{_esc(r.error_message)}</td>
+                    </tr>
+                    """
+            else:
+                html += '<tr><td colspan="11">Sin solicitudes en este periodo.</td></tr>'
+        
+            html += """
+                  </tbody>
+                </table>
+              </div>
+            </div>
+        
           </div>
-        </div>
-        """
-    
-        html += """
-        <div class="box">
-          <div class="head"><strong>Solicitudes recientes</strong></div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Dato</th>
-                  <th>Tipo</th>
-                  <th>Estado</th>
-                  <th>Grupo cliente</th>
-                  <th>Proveedor</th>
-                  <th>Grupo proveedor</th>
-                  <th>Mensaje proveedor</th>
-                  <th>Creado</th>
-                  <th>Actualizado</th>
-                  <th>Error</th>
-                </tr>
-              </thead>
-              <tbody>
-        """
-    
-        if latest:
-            for r in latest:
-                status_class = {
-                    "QUEUED": "status-q",
-                    "PROCESSING": "status-p",
-                    "DONE": "status-d",
-                    "ERROR": "status-e",
-                }.get(r.status, "")
-    
-                html += f"""
-                <tr>
-                  <td>{r.id}</td>
-                  <td class="mono">{_esc(r.curp)}</td>
-                  <td>{_esc(r.act_type)}</td>
-                  <td class="{status_class}">{_esc(r.status)}</td>
-                  <td>{_esc(_group_name(r.source_group_id))}</td>
-                  <td>{_esc(r.provider_name)}</td>
-                  <td>{_esc(_group_name(r.provider_group_id))}</td>
-                  <td class="small">{_esc(r.provider_message)}</td>
-                  <td>{_esc(_fmt_dt(r.created_at))}</td>
-                  <td>{_esc(_fmt_dt(r.updated_at))}</td>
-                  <td class="small">{_esc(r.error_message)}</td>
-                </tr>
-                """
-        else:
-            html += '<tr><td colspan="11">Sin solicitudes en este periodo.</td></tr>'
-    
-        html += """
-              </tbody>
-            </table>
-          </div>
-        </div>
-    
-      </div>
-    
-      <script>
-        let broadcastRunning = false;
-    
-        async function toggleProvider(provider, action) {
-          const url = `/panel/provider/${provider}/${action}`;
-    
-          try {
-            const res = await fetch(url, { method: "POST" });
-            const data = await res.json();
-    
-            if (data.ok) {
-              location.reload();
-            } else {
-              alert("Error cambiando proveedor");
+        
+          <script>
+            let broadcastRunning = false;
+        
+            async function toggleProvider(provider, action) {
+              const url = `/panel/provider/${provider}/${action}`;
+        
+              try {
+                const res = await fetch(url, { method: "POST" });
+                const data = await res.json();
+        
+                if (data.ok) {
+                  location.reload();
+                } else {
+                  alert("Error cambiando proveedor");
+                }
+              } catch (e) {
+                alert("No se pudo conectar con el servidor");
+              }
             }
-          } catch (e) {
-            alert("No se pudo conectar con el servidor");
-          }
-        }
-    
-        async function refreshSID() {
-          const sid = prompt("Pega el nuevo PHPSESSID");
-          if (!sid) return;
-    
-          try {
-            const res = await fetch("/panel/provider3/session", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                phpsessid: sid
-              })
-            });
-    
-            const data = await res.json();
-    
-            if (data.ok) {
-              alert("SID actualizada");
-              location.reload();
-            } else {
-              alert(data.error || "Error actualizando SID");
+        
+            async function refreshSID() {
+              const sid = prompt("Pega el nuevo PHPSESSID");
+              if (!sid) return;
+        
+              try {
+                const res = await fetch("/panel/provider3/session", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json"
+                  },
+                  body: JSON.stringify({
+                    phpsessid: sid
+                  })
+                });
+        
+                const data = await res.json();
+        
+                if (data.ok) {
+                  alert("SID actualizada");
+                  location.reload();
+                } else {
+                  alert(data.error || "Error actualizando SID");
+                }
+              } catch (e) {
+                alert("No se pudo conectar con el servidor");
+              }
             }
-          } catch (e) {
-            alert("No se pudo conectar con el servidor");
-          }
-        }
+        
+            async function sendBroadcast(type) {
+              const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
+              if (!ok) return;
     
-        async function sendBroadcast(type) {
-          const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
-          if (!ok) return;
-
-          broadcastRunning = true;
+              broadcastRunning = true;
+        
+              try {
+                const res = await fetch(`/panel/broadcast/${type}`, {
+                  method: "POST"
+                });
+        
+                const data = await res.json();
+        
+                if (data.ok) {
+                  alert(data.message || "Envío iniciado");
+                } else {
+                  alert(data.error || "Error en envío masivo");
+                }
+              } catch (e) {
+                alert("No se pudo conectar con el servidor");
+              }
     
-          try {
-            const res = await fetch(`/panel/broadcast/${type}`, {
-              method: "POST"
-            });
-    
-            const data = await res.json();
-    
-            if (data.ok) {
-              alert(data.message || "Envío iniciado");
-            } else {
-              alert(data.error || "Error en envío masivo");
+              broadcastRunning = false;
             }
-          } catch (e) {
-            alert("No se pudo conectar con el servidor");
-          }
-
-          broadcastRunning = false;
-        }
+        
+            async function sendFreeBroadcast() {
+              const textarea = document.getElementById("broadcastMessage");
+              const message = textarea.value.trim();
+        
+              if (!message) {
+                alert("Escribe un mensaje");
+                return;
+              }
+        
+              const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
+              if (!ok) return;
     
-        async function sendFreeBroadcast() {
-          const textarea = document.getElementById("broadcastMessage");
-          const message = textarea.value.trim();
+              broadcastRunning = true;
+        
+              try {
+                const res = await fetch("/panel/broadcast/free", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json"
+                  },
+                  body: JSON.stringify({
+                    message: message
+                  })
+                });
+        
+                const data = await res.json();
+        
+                if (data.ok) {
+                  alert(data.message || "Envío iniciado");
+                  textarea.value = "";
+                } else {
+                  alert(data.error || "Error en envío masivo");
+                }
+              } catch (e) {
+                alert("No se pudo conectar con el servidor");
+              }
     
-          if (!message) {
-            alert("Escribe un mensaje");
-            return;
-          }
-    
-          const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
-          if (!ok) return;
-
-          broadcastRunning = true;
-    
-          try {
-            const res = await fetch("/panel/broadcast/free", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                message: message
-              })
-            });
-    
-            const data = await res.json();
-    
-            if (data.ok) {
-              alert(data.message || "Envío iniciado");
-              textarea.value = "";
-            } else {
-              alert(data.error || "Error en envío masivo");
+              broadcastRunning = false;
             }
-          } catch (e) {
-            alert("No se pudo conectar con el servidor");
-          }
-
-          broadcastRunning = false;
-        }
+        
+            function clearBroadcast() {
+              document.getElementById("broadcastMessage").value = "";
+            }
     
-        function clearBroadcast() {
-          document.getElementById("broadcastMessage").value = "";
-        }
-
-        async function toggleGroupBlock(groupJid, action) {
-          const msg = action === "block"
-            ? "¿Bloquear este grupo? El bot dejará de responder silenciosamente."
-            : "¿Desbloquear este grupo?";
-        
-          const ok = confirm(msg);
-          if (!ok) return;
-        
-          try {
-            const res = await fetch(`/panel/group/${encodeURIComponent(groupJid)}/${action}`, {
-              method: "POST"
-            });
-        
-            const data = await res.json();
-        
-            if (data.ok) {
-              location.reload();
-            } else {
-              alert(data.error || "Error cambiando estado del grupo");
+            async function toggleGroupBlock(groupJid, action) {
+              const msg = action === "block"
+                ? "¿Bloquear este grupo? El bot dejará de responder silenciosamente."
+                : "¿Desbloquear este grupo?";
+            
+              const ok = confirm(msg);
+              if (!ok) return;
+            
+              try {
+                const res = await fetch(`/panel/group/${encodeURIComponent(groupJid)}/${action}`, {
+                  method: "POST"
+                });
+            
+                const data = await res.json();
+            
+                if (data.ok) {
+                  location.reload();
+                } else {
+                  alert(data.error || "Error cambiando estado del grupo");
+                }
+              } catch (e) {
+                alert("No se pudo conectar con el servidor");
+              }
             }
-          } catch (e) {
-            alert("No se pudo conectar con el servidor");
-          }
-        }
-
-        async function toggleAllGroups() {
-          const ok = confirm("¿Seguro que deseas cambiar el estado de todos los grupos cliente?");
-          if (!ok) return;
-        
-          try {
-            const res = await fetch("/panel/groups/toggle-all", {
-              method: "POST"
-            });
-        
-            const data = await res.json();
-        
-            if (data.ok) {
-              alert(data.message || "Estado actualizado");
-              location.reload();
-            } else {
-              alert(data.error || "Error actualizando grupos");
-            }
-          } catch (e) {
-            alert("No se pudo conectar con el servidor");
-          }
-        }
-
-        async function applySharedPromotion() {
-          const selected = Array.from(document.querySelectorAll(".shared-promo-group:checked"))
-            .map(el => el.value);
-        
-          const promo_name = document.getElementById("sharedPromoName").value || "";
-          const client_key = document.getElementById("sharedPromoClientKey").value || "";
-          const total_actas = Number(document.getElementById("sharedPromoTotalActas").value || 0);
-          const price_per_piece = document.getElementById("sharedPromoPricePerPiece").value || "";
-        
-          if (!selected.length) {
-            alert("Selecciona al menos un grupo");
-            return;
-          }
-        
-          if (!total_actas || total_actas <= 0) {
-            alert("Ingresa un total de actas válido");
-            return;
-          }
-        
-          try {
-            const res = await fetch("/panel/promotions/apply", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                selected_group_jids: selected,
-                promo_name,
-                client_key,
-                total_actas,
-                price_per_piece
-              })
-            });
-        
-            const data = await res.json();
-        
-            if (data.ok) {
-              alert("Promoción compartida aplicada correctamente");
-              location.reload();
-            } else {
-              alert(data.error || "No se pudo aplicar la promoción");
-            }
-          } catch (e) {
-            alert("No se pudo conectar con el servidor");
-          }
-        }
     
-        setInterval(() => {
-          if (!broadcastRunning) {
-            location.reload();
-          }
-        }, 30000);
-
-      </script>
-    </body>
-    </html>
-        """
-        return HTMLResponse(content=html)
+            async function toggleAllGroups() {
+              const ok = confirm("¿Seguro que deseas cambiar el estado de todos los grupos cliente?");
+              if (!ok) return;
+            
+              try {
+                const res = await fetch("/panel/groups/toggle-all", {
+                  method: "POST"
+                });
+            
+                const data = await res.json();
+            
+                if (data.ok) {
+                  alert(data.message || "Estado actualizado");
+                  location.reload();
+                } else {
+                  alert(data.error || "Error actualizando grupos");
+                }
+              } catch (e) {
+                alert("No se pudo conectar con el servidor");
+              }
+            }
+    
+            async function applySharedPromotion() {
+              const selected = Array.from(document.querySelectorAll(".shared-promo-group:checked"))
+                .map(el => el.value);
+            
+              const promo_name = document.getElementById("sharedPromoName").value || "";
+              const client_key = document.getElementById("sharedPromoClientKey").value || "";
+              const total_actas = Number(document.getElementById("sharedPromoTotalActas").value || 0);
+              const price_per_piece = document.getElementById("sharedPromoPricePerPiece").value || "";
+            
+              if (!selected.length) {
+                alert("Selecciona al menos un grupo");
+                return;
+              }
+            
+              if (!total_actas || total_actas <= 0) {
+                alert("Ingresa un total de actas válido");
+                return;
+              }
+            
+              try {
+                const res = await fetch("/panel/promotions/apply", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json"
+                  },
+                  body: JSON.stringify({
+                    selected_group_jids: selected,
+                    promo_name,
+                    client_key,
+                    total_actas,
+                    price_per_piece
+                  })
+                });
+            
+                const data = await res.json();
+            
+                if (data.ok) {
+                  alert("Promoción compartida aplicada correctamente");
+                  location.reload();
+                } else {
+                  alert(data.error || "No se pudo aplicar la promoción");
+                }
+              } catch (e) {
+                alert("No se pudo conectar con el servidor");
+              }
+            }
+        
+            setInterval(() => {
+              if (!broadcastRunning) {
+                location.reload();
+              }
+            }, 30000);
+    
+          </script>
+        </body>
+        </html>
+            """
+            return HTMLResponse(content=html)
         
     except Exception as e:
         print("panel_actas error:", repr(e), flush=True)
