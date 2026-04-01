@@ -313,29 +313,15 @@ def _process_provider4(req, db):
     tipoa = _provider4_tipo_acta(req.act_type)
     inc_folio = "FOLIO" in (req.act_type or "").upper().strip()
 
-    if is_chain(req.curp):
-        result_html = client.consultar_por_cadena(
-            cadena=req.curp,
-            tipoa=tipoa,
-            inc_folio=inc_folio,
-        )
-    else:
-        result_html = client.consultar_por_curp(
-            curp=req.curp,
-            tipoa=tipoa,
-            inc_folio=inc_folio,
-        )
-
-    print("PROVIDER4_RESULT_HTML_PREVIEW =", result_html[:1000], flush=True)
-
-    pdf_bytes = client.download_pdf_bytes(
+    pdf_bytes = client.process_and_download(
         term=req.curp,
+        tipoa=tipoa,
         inc_folio=inc_folio,
+        is_chain=is_chain(req.curp),
     )
 
     return {
         "pdf_bytes": pdf_bytes,
-        "raw_result": result_html,
     }
     
 
