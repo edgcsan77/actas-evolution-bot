@@ -821,7 +821,7 @@ def process_request(request_id: int):
                 # WRONG_ACT_TYPE debe caer a Provider3 aunque haya tardado poco
                 should_fallback = (
                     p4_err.startswith("PROVIDER4_WRONG_ACT_TYPE")
-                    or (fallback_errors and p4_elapsed >= 180)
+                    or (fallback_errors and p4_elapsed >= 90)
                 )
         
                 if should_fallback:
