@@ -328,21 +328,40 @@ class Provider4Client:
         vget_html = self.submit_vget_form(html)
         print("PROVIDER4_VGET_HTML_PREVIEW =", vget_html[:1200], flush=True)
 
-        # Dar un pequeño margen para que el historial refleje el último resultado
-        time.sleep(2)
+        max_polls = 12
+        poll_sleep_seconds = 3
 
-        history_html = self.get_history_html()
-        print("PROVIDER4_HISTORY_HTML_PREVIEW =", history_html[:1500], flush=True)
+        for poll_attempt in range(max_polls):
+            history_html = self.get_history_html()
+            print(
+                f"PROVIDER4_HISTORY_HTML_PREVIEW_ATTEMPT_{poll_attempt+1} =",
+                history_html[:1500],
+                flush=True,
+            )
+
+            if inc_folio:
+                link = self._extract_folio_link(history_html, term)
+                if link:
+                    print("PROVIDER4_FINAL_DOWNLOAD_LINK =", link, flush=True)
+                    return self.download_pdf_bytes(link)
+            else:
+                link = self._extract_pdf_link(history_html, term)
+                if link:
+                    print("PROVIDER4_FINAL_DOWNLOAD_LINK =", link, flush=True)
+                    return self.download_pdf_bytes(link)
+
+            print(
+                f"PROVIDER4_HISTORY_LINK_NOT_READY_ATTEMPT_{poll_attempt+1} = {term}",
+                flush=True,
+            )
+            time.sleep(poll_sleep_seconds)
+
+        final_history_html = self.get_history_html()
+
+        if self._detect_no_result(final_history_html, term):
+            raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
 
         if inc_folio:
-            link = self._extract_folio_link(history_html, term)
-            if not link:
-                raise RuntimeError(f"PROVIDER4_NO_FOLIO_LINK_FOR:{term}")
+            raise RuntimeError(f"PROVIDER4_NO_FOLIO_LINK_FOR:{term}")
         else:
-            link = self._extract_pdf_link(history_html, term)
-            if not link:
-                raise RuntimeError(f"PROVIDER4_NO_PDF_LINK_FOR:{term}")
-
-        print("PROVIDER4_FINAL_DOWNLOAD_LINK =", link, flush=True)
-
-        return self.download_pdf_bytes(link)
+            raise RuntimeError(f"PROVIDER4_NO_PDF_LINK_FOR:{term}")
