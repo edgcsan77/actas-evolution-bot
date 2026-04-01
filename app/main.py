@@ -1907,14 +1907,6 @@ def panel_actas(
                 </div>
     
                 <div class="provider-card">
-                  <div class="provider-name">AUSTRAM BOT</div>
-                  <div class="provider-actions">
-                    <button class="btn btn-success" onclick="toggleProvider('PROVIDER2','on')">Activar</button>
-                    <button class="btn btn-danger" onclick="toggleProvider('PROVIDER2','off')">Desactivar</button>
-                  </div>
-                </div>
-    
-                <div class="provider-card">
                   <div class="provider-name">AUSTRAM WEB</div>
                   <div class="provider-actions">
                     <button class="btn btn-success" onclick="toggleProvider('PROVIDER3','on')">Activar</button>
@@ -2854,7 +2846,6 @@ def _providers_status_text(db: Session) -> str:
 
     return (
         f"PROVEEDOR WA EMERGENCIA: {s1}\n"
-        f"AUSTRAM BOT: {s2}\n"
         f"AUSTRAM WEB: {s3}{provider3_extra}\n"
         f"LAZARO WEB: {s4}"
     )
