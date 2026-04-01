@@ -236,15 +236,14 @@ class Provider4Client:
     
     def _detect_no_result(self, history_html: str, term: str) -> bool:
         row_html = self._history_row_for_term(history_html, term)
+    
         if not row_html:
             return False
     
         row_up = row_html.upper()
     
         if "NO_LOCALIZADO" in row_up:
-            return True
-    
-        if "DESCARGAR PDF" not in row_up and "DESCARGAR FOLIADO" not in row_up:
+            print("PROVIDER4_NO_RECORD_DETECTED =", term, flush=True)
             return True
     
         return False
@@ -443,8 +442,8 @@ class Provider4Client:
         vget_html = self.submit_vget_form(html)
         print("PROVIDER4_VGET_HTML_PREVIEW =", vget_html[:1200], flush=True)
 
-        max_polls = 12
-        poll_sleep_seconds = 3
+        max_polls = 30
+        poll_sleep_seconds = 4
 
         for poll_attempt in range(max_polls):
             history_html = self.get_history_html()
@@ -483,7 +482,7 @@ class Provider4Client:
 
         if self._detect_no_result(final_history_html, term):
             raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
-
+        
         if inc_folio:
             raise RuntimeError(f"PROVIDER4_NO_FOLIO_LINK_FOR:{term}")
         else:
