@@ -519,6 +519,84 @@ def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str) -
     }
 
 
+@app.get("/panel/recent-requests")
+def panel_recent_requests(
+    view: str = "day",
+    group_jid: str = "",
+    provider_name: str = "",
+    status: str = "",
+    act_type: str = "",
+    db: Session = Depends(get_db),
+):
+    time_min, time_max, view = _panel_period_bounds(view)
+
+    rows = _query_requests_for_panel(
+        db=db,
+        time_min=time_min,
+        time_max=time_max,
+        group_jid=group_jid or None,
+        provider_name=provider_name or None,
+        status=status or None,
+        act_type=act_type or None,
+    ).order_by(RequestLog.created_at.desc()).all()
+
+    latest = rows[:100]
+
+    html = """
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Dato</th>
+          <th>Tipo</th>
+          <th>Estado</th>
+          <th>Grupo cliente</th>
+          <th>Proveedor</th>
+          <th>Grupo proveedor</th>
+          <th>Mensaje proveedor</th>
+          <th>Creado</th>
+          <th>Actualizado</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody>
+    """
+
+    if latest:
+        for r in latest:
+            status_class = {
+                "QUEUED": "status-q",
+                "PROCESSING": "status-p",
+                "DONE": "status-d",
+                "ERROR": "status-e",
+            }.get(r.status, "")
+
+            html += f"""
+            <tr>
+              <td>{r.id}</td>
+              <td class="mono">{_esc(r.curp)}</td>
+              <td>{_esc(r.act_type)}</td>
+              <td class="{status_class}">{_esc(r.status)}</td>
+              <td>{_esc(_group_name(r.source_group_id))}</td>
+              <td>{_esc(r.provider_name)}</td>
+              <td>{_esc(_group_name(r.provider_group_id))}</td>
+              <td class="small">{_esc(r.provider_message)}</td>
+              <td>{_esc(_fmt_dt(r.created_at))}</td>
+              <td>{_esc(_fmt_dt(r.updated_at))}</td>
+              <td class="small">{_esc(r.error_message)}</td>
+            </tr>
+            """
+    else:
+        html += '<tr><td colspan="11">Sin solicitudes en este periodo.</td></tr>'
+
+    html += """
+      </tbody>
+    </table>
+    """
+
+    return HTMLResponse(content=html)
+
+
 @app.post("/panel/promotions/remove")
 def panel_remove_shared_promotion(
     payload: dict = Body(...),
@@ -2515,7 +2593,7 @@ def panel_actas(
         html += """
         <div class="box">
           <div class="head"><strong>Solicitudes recientes</strong></div>
-          <div class="table-wrap">
+          <div class="table-wrap" id="recentRequestsWrap">
             <table>
               <thead>
                 <tr>
@@ -2866,12 +2944,37 @@ def panel_actas(
             localStorage.setItem(bodyId, "closed");
           }
         }
+
+        async function refreshRecentRequests() {
+          const wrap = document.getElementById("recentRequestsWrap");
+          if (!wrap) return;
+        
+          const params = new URLSearchParams({
+            view: document.querySelector('input[name="view"]')?.value || "day",
+            group_jid: document.querySelector('input[name="group_jid"]')?.value || "",
+            provider_name: document.querySelector('input[name="provider_name"]')?.value || "",
+            status: document.querySelector('input[name="status"]')?.value || "",
+            act_type: document.querySelector('input[name="act_type"]')?.value || "",
+          });
+        
+          try {
+            const res = await fetch(`/panel/recent-requests?${params.toString()}`);
+            if (!res.ok) throw new Error("No se pudo actualizar solicitudes recientes");
+        
+            const html = await res.text();
+            wrap.innerHTML = html;
+          } catch (e) {
+            console.error("RECENT_REQUESTS_REFRESH_ERROR =", e);
+          }
+        }
     
         setInterval(() => {
-          if (!broadcastRunning) {
-            location.reload();
+          const processing = document.querySelectorAll(".status-p").length;
+          
+          if (processing > 0) {
+            refreshRecentRequests();
           }
-        }, 30000);
+        }, 15000);
 
       </script>
     </body>
