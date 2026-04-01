@@ -6,6 +6,7 @@ import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+from collections import Counter
 
 from fastapi import FastAPI, Depends, Body, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -1524,21 +1525,26 @@ async def panel_broadcast_free(request: Request, background_tasks: BackgroundTas
     except Exception as e:
         print("panel_broadcast_free error:", repr(e), flush=True)
         return {"ok": False, "error": str(e)}
-
+        
 
 def _promotion_summary_map(db: Session) -> dict[str, dict]:
     rows = db.query(GroupPromotion).filter(GroupPromotion.is_active == True).all()
+
+    client_counts = Counter((r.client_key or "").strip() for r in rows if r.client_key)
+
     out = {}
 
     for r in rows:
         available = max(0, (r.total_actas or 0) - (r.used_actas or 0))
+        client_key = (r.client_key or "").strip()
 
         payload = {
             "promo_name": r.promo_name or "",
             "total_actas": r.total_actas or 0,
             "used_actas": r.used_actas or 0,
             "available": available,
-            "client_key": (r.client_key or "").strip(),
+            "client_key": client_key,
+            "shared_count": client_counts.get(client_key, 0),
             "html": _promotion_badge_html(r),
         }
 
@@ -2602,7 +2608,7 @@ def panel_actas(
                     status = "Activa" if promo_info["available"] > 0 else "Agotada"
                     promo_badge_class = "badge-success" if promo_info["available"] > 0 else "badge-danger"
                 
-                    is_shared = bool((promo_info.get("client_key") or "").strip())
+                    is_shared = (promo_info.get("shared_count", 0) > 1)
                     shared_text = "Compartida" if is_shared else "Individual"
                     shared_badge_class = "badge-warning" if is_shared else "badge-light"
 
