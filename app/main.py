@@ -2,11 +2,13 @@ import os
 import base64
 import time
 import random
+import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Depends, Body, Request, BackgroundTasks
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -518,6 +520,59 @@ def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str) -
         "view": view,
     }
 
+
+@app.get("/panel/recent-requests/stream")
+async def panel_recent_requests_stream():
+    async def event_generator():
+        last_seen_id = 0
+        last_seen_updated = ""
+
+        while True:
+            db = SessionLocal()
+            try:
+                row = (
+                    db.query(RequestLog.id, RequestLog.updated_at)
+                    .order_by(RequestLog.updated_at.desc(), RequestLog.id.desc())
+                    .first()
+                )
+
+                current_id = row.id if row else 0
+                current_updated = (
+                    row.updated_at.isoformat() if row and row.updated_at else ""
+                )
+
+                changed = (
+                    current_id != last_seen_id
+                    or current_updated != last_seen_updated
+                )
+
+                if changed:
+                    payload = {
+                        "latest_id": current_id,
+                        "latest_updated_at": current_updated,
+                    }
+                    yield f"data: {json.dumps(payload)}\n\n"
+                    last_seen_id = current_id
+                    last_seen_updated = current_updated
+
+            except Exception as e:
+                payload = {"error": str(e)}
+                yield f"data: {json.dumps(payload)}\n\n"
+            finally:
+                db.close()
+
+            await asyncio.sleep(3)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+    
 
 @app.get("/panel/recent-requests")
 def panel_recent_requests(
@@ -2904,6 +2959,7 @@ def panel_actas(
         
         document.addEventListener("DOMContentLoaded", () => {
           filterSharedPromoGroups();
+          startRecentRequestsStream();
 
           const sections = [
             "grupoClienteBody",
@@ -2968,12 +3024,44 @@ def panel_actas(
             console.error("RECENT_REQUESTS_REFRESH_ERROR =", e);
           }
         }
-    
-        setInterval(() => {
-          if (!broadcastRunning) {
-            refreshRecentRequests();
+        
+        let recentRequestsEventSource = null;
+        
+        function startRecentRequestsStream() {
+          if (recentRequestsEventSource) {
+            recentRequestsEventSource.close();
           }
-        }, 15000);
+        
+          recentRequestsEventSource = new EventSource("/panel/recent-requests/stream");
+        
+          recentRequestsEventSource.onmessage = async function(event) {
+            try {
+              const data = JSON.parse(event.data || "{}");
+              if (data.error) {
+                console.error("RECENT_REQUESTS_STREAM_ERROR =", data.error);
+                return;
+              }
+        
+              if (!document.hidden) {
+                await refreshRecentRequests();
+              }
+            } catch (e) {
+              console.error("RECENT_REQUESTS_STREAM_PARSE_ERROR =", e);
+            }
+          };
+        
+          recentRequestsEventSource.onerror = function(err) {
+            console.error("RECENT_REQUESTS_STREAM_CONNECTION_ERROR =", err);
+        
+            try {
+              recentRequestsEventSource.close();
+            } catch (_) {}
+        
+            setTimeout(() => {
+              startRecentRequestsStream();
+            }, 5000);
+          };
+        }
 
       </script>
     </body>
