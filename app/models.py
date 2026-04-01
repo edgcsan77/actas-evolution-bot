@@ -86,6 +86,7 @@ class GroupPromotion(Base):
     total_actas = Column(Integer, nullable=False, default=0)
     used_actas = Column(Integer, nullable=False, default=0)
     price_per_piece = Column(String(30), nullable=True)
+    shared_key = Column(String(255), nullable=True, index=True)
 
     warning_sent_200 = Column(Boolean, default=False, nullable=False)
     warning_sent_100 = Column(Boolean, default=False, nullable=False)
