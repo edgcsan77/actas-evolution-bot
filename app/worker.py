@@ -113,23 +113,22 @@ def _pick_provider_name(db, request_id: int, source_group_id: str | None = None)
     if not enabled:
         raise RuntimeError("NO_PROVIDER_ENABLED")
 
-    # Provider4 solo para grupos de prueba
-    if source_group_id and source_group_id in PROVIDER4_TEST_GROUPS and "PROVIDER4" in enabled:
-        return "PROVIDER4"
+    # Si hay grupos de prueba definidos para Provider4, respetarlos.
+    # Si el set está vacío, Provider4 entra al reparto normal.
+    if PROVIDER4_TEST_GROUPS:
+        if source_group_id and source_group_id in PROVIDER4_TEST_GROUPS and "PROVIDER4" in enabled:
+            return "PROVIDER4"
 
-    # Para todos los demás, excluir PROVIDER4 del reparto normal
-    enabled_without_p4 = [p for p in enabled if p != "PROVIDER4"]
+        enabled = [p for p in enabled if p != "PROVIDER4"]
 
-    if not enabled_without_p4:
-        # Si solo está habilitado PROVIDER4 pero el grupo no es de prueba,
-        # evitamos que lo tome otro grupo.
-        raise RuntimeError("PROVIDER4_ONLY_ALLOWED_FOR_TEST_GROUPS")
+        if not enabled:
+            raise RuntimeError("NO_PROVIDER_ENABLED")
 
-    if len(enabled_without_p4) == 1:
-        return enabled_without_p4[0]
+    if len(enabled) == 1:
+        return enabled[0]
 
-    idx = (request_id - 1) % len(enabled_without_p4)
-    return enabled_without_p4[idx]
+    idx = (request_id - 1) % len(enabled)
+    return enabled[idx]
 
 
 def _pick_provider1_group(act_type: str, request_id: int) -> str:
