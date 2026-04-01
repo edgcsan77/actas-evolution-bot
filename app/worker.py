@@ -687,7 +687,7 @@ def process_request(request_id: int):
                     or "Read timed out" in p4_err
                 )
         
-                if fallback_errors and p4_elapsed >= 120:
+                if fallback_errors and p4_elapsed >= 150:
                     print(
                         "PROVIDER4_TIMEOUT_FALLBACK_TO_PROVIDER3 =",
                         {"req_id": req.id, "elapsed": p4_elapsed, "err": p4_err},
