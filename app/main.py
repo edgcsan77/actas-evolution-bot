@@ -2014,6 +2014,7 @@ def panel_actas(
           }}
         </style>
     </head>
+    
     html = f"""
     <body>
       <div class="wrap">
@@ -2156,7 +2157,7 @@ def panel_actas(
         </div>
         """
 
-        html += """
+        html += f"""
         <div class="cards">
           <div class="card"><div class="label">Total</div><div class="value">{summary["total"]}</div></div>
           <div class="card"><div class="label">En cola</div><div class="value">{summary["queued"]}</div></div>
