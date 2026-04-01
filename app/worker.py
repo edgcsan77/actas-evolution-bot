@@ -9,7 +9,8 @@ from app.services.evolution import send_group_text, send_document_base64, send_g
 from app.config import settings
 from app.utils.curp import provider_label_for_type, is_chain
 from app.utils.provider_format import provider2_command
-from app.services.provider3 import Provider3Client, decode_pdf_base64, Provider4Client
+from app.services.provider3 import Provider3Client, decode_pdf_base64
+from app.services.provider4 import Provider4Client
 from app.queue import redis_conn
 
 from zoneinfo import ZoneInfo
