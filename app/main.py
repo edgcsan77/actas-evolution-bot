@@ -15,7 +15,7 @@ from app.db import Base, engine, get_db
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion
 from app.queue import request_queue, redis_conn
 from app.worker import process_request, provider3_keepalive_job
-from app.services.provider3 import Provider3Client
+from app.services.provider3 import Provider3Client, Provider4Client
 
 from app.utils.curp import (
     extract_request_terms,
@@ -2486,6 +2486,7 @@ def startup():
         _get_or_create_provider(db, "PROVIDER1", True)
         _get_or_create_provider(db, "PROVIDER2", False)
         _get_or_create_provider(db, "PROVIDER3", False)
+        _get_or_create_provider(db, "PROVIDER4", False)
 
         current = _get_app_setting(db, "PROVIDER3_PHPSESSID", "")
         if not current and settings.PROVIDER3_PHPSESSID:
@@ -2818,7 +2819,7 @@ def _set_app_setting(db: Session, key: str, value: str):
 
 
 def _providers_status_text(db: Session) -> str:
-    from app.services.provider3 import Provider3Client
+    from app.services.provider3 import Provider3Client, Provider4Client
 
     p1 = _get_or_create_provider(db, "PROVIDER1", True)
     p2 = _get_or_create_provider(db, "PROVIDER2", False)
