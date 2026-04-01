@@ -659,7 +659,32 @@ def process_request(request_id: int):
 
         if provider_name == "PROVIDER4":
             if not _is_curp_term(req.curp):
-                print("PROVIDER4_SKIPPED_NON_CURP =", req.curp, flush=True)
+                enabled = _enabled_providers(db)
+            
+                if "PROVIDER3" not in enabled:
+                    print("NO_PROVIDER_FOR_CHAIN_OR_CODE =", req.curp, flush=True)
+            
+                    msg = (
+                        "⚠️ *Formato no disponible actualmente*\n\n"
+                        "Las consultas por *cadena o código de verificación* "
+                        "no están disponibles en este momento.\n\n"
+                        "Intenta nuevamente más tarde o realiza la búsqueda por *CURP*."
+                    )
+            
+                    if req.source_group_id:
+                        send_group_text(req.source_group_id, msg)
+                    else:
+                        send_group_text(req.requester_wa_id, msg)
+            
+                    req.status = "ERROR"
+                    req.error_message = "NO_PROVIDER_FOR_CHAIN_OR_CODE"
+                    req.updated_at = _utc_now_naive()
+                    db.commit()
+            
+                    return
+            
+                print("PROVIDER4_SKIPPED_NON_CURP_FALLBACK_PROVIDER3 =", req.curp, flush=True)
+            
                 _start_provider3_flow(req, db)
                 return
         
