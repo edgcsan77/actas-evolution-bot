@@ -2465,9 +2465,15 @@ def panel_actas(
         
                 if promo_info:
                     status = "Activa" if promo_info["available"] > 0 else "Agotada"
-
+                    promo_badge_class = "badge-success" if promo_info["available"] > 0 else "badge-danger"
+                
+                    is_shared = bool((promo_info.get("client_key") or "").strip())
+                    shared_text = "Compartida" if is_shared else "Individual"
+                    shared_badge_class = "badge-warning" if is_shared else "badge-light"
+                
                     promo_cell = f"""
-                    <span class="badge bg-success">{status}</span><br>
+                    <span class="badge {promo_badge_class}">{status}</span>
+                    <span class="badge {shared_badge_class}" style="margin-left:6px;">{shared_text}</span><br>
                     <b>{promo_info["used_actas"]} / {promo_info["total_actas"]}</b>
                     """
                 else:
