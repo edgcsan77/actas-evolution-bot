@@ -1,5 +1,6 @@
 import base64
 import time
+import re
 import random
 from datetime import datetime, timezone
 
@@ -26,6 +27,17 @@ def _utc_now_naive():
 
 def _mx_now():
     return datetime.now(ZoneInfo("America/Monterrey"))
+
+
+CURP_RE = re.compile(
+    r"^[A-Z][AEIOUX][A-Z]{2}\d{6}[HM][A-Z]{5}[A-Z0-9]\d$",
+    re.IGNORECASE
+)
+
+
+def _is_curp_term(value: str | None) -> bool:
+    v = (value or "").strip().upper()
+    return bool(CURP_RE.match(v))
 
 
 def _promo_client_key(group_jid: str | None, promo_name: str | None = None, client_key: str | None = None) -> str:
@@ -162,16 +174,30 @@ def _enabled_providers(db) -> list[str]:
     return enabled
 
 
-def _pick_provider_name(db, request_id: int, source_group_id: str | None = None) -> str:
+def _pick_provider_name(
+    db,
+    request_id: int,
+    source_group_id: str | None = None,
+    term: str | None = None,
+) -> str:
     enabled = _enabled_providers(db)
 
     if not enabled:
         raise RuntimeError("NO_PROVIDER_ENABLED")
 
-    # Si hay grupos de prueba definidos para Provider4, respetarlos.
-    # Si el set está vacío, Provider4 entra al reparto normal.
+    if not _is_curp_term(term):
+        enabled = [p for p in enabled if p != "PROVIDER4"]
+
+    if not enabled:
+        raise RuntimeError("NO_PROVIDER_ENABLED")
+
     if PROVIDER4_TEST_GROUPS:
-        if source_group_id and source_group_id in PROVIDER4_TEST_GROUPS and "PROVIDER4" in enabled:
+        if (
+            _is_curp_term(term)
+            and source_group_id
+            and source_group_id in PROVIDER4_TEST_GROUPS
+            and "PROVIDER4" in enabled
+        ):
             return "PROVIDER4"
 
         enabled = [p for p in enabled if p != "PROVIDER4"]
@@ -360,6 +386,9 @@ def _process_provider3(req, db):
 
 def _process_provider4(req, db):
 
+    if not _is_curp_term(req.curp):
+        raise RuntimeError("PROVIDER4_NOT_CURP")
+
     if PROVIDER4_TEST_GROUPS and req.source_group_id not in PROVIDER4_TEST_GROUPS:
         raise RuntimeError("PROVIDER4_NOT_ALLOWED_GROUP")
 
@@ -372,7 +401,7 @@ def _process_provider4(req, db):
         term=req.curp,
         tipoa=tipoa,
         inc_folio=inc_folio,
-        is_chain=is_chain(req.curp),
+        is_chain=False,
     )
 
     return {
@@ -486,6 +515,24 @@ def _handle_group_promotion_after_done(req, db):
             print("PROMOTION_NOTIFY_DUPLICATE_IGNORED =", notify_key, flush=True)
 
 
+def _start_provider3_flow(req, db):
+    provider_name = "PROVIDER3"
+    provider_group_id = _pick_provider_group(provider_name, req.act_type, req.id)
+    text_to_provider = _build_provider_message(provider_name, req.curp, req.act_type)
+
+    req.provider_name = provider_name
+    req.provider_group_id = provider_group_id
+    req.provider_message = text_to_provider
+    req.updated_at = _utc_now_naive()
+    db.commit()
+
+    print("FALLBACK_PROVIDER_NAME =", provider_name, flush=True)
+    print("FALLBACK_PROVIDER_GROUP_ID =", provider_group_id, flush=True)
+    print("FALLBACK_PROVIDER_TEXT =", text_to_provider, flush=True)
+
+    send_group_text(provider_group_id, text_to_provider)
+
+
 def process_request(request_id: int):
     db = SessionLocal()
     try:
@@ -499,7 +546,7 @@ def process_request(request_id: int):
         req.updated_at = _utc_now_naive()
         db.commit()
 
-        provider_name = _pick_provider_name(db, req.id, req.source_group_id)
+        provider_name = _pick_provider_name(db, req.id, req.source_group_id, req.curp)
         provider_group_id = _pick_provider_group(provider_name, req.act_type, req.id)
         text_to_provider = _build_provider_message(provider_name, req.curp, req.act_type)
 
@@ -611,7 +658,45 @@ def process_request(request_id: int):
             return
 
         if provider_name == "PROVIDER4":
-            provider4_result = _process_provider4(req, db)
+            if not _is_curp_term(req.curp):
+                print("PROVIDER4_SKIPPED_NON_CURP =", req.curp, flush=True)
+                _start_provider3_flow(req, db)
+                return
+        
+            provider4_started_ts = time.perf_counter()
+        
+            try:
+                provider4_result = _process_provider4(req, db)
+            except Exception as p4_exc:
+                p4_err = str(p4_exc)
+                p4_elapsed = time.perf_counter() - provider4_started_ts
+        
+                if p4_err.startswith("PROVIDER4_NOT_CURP"):
+                    print("PROVIDER4_NOT_CURP_FALLBACK_TO_PROVIDER3 =", req.curp, flush=True)
+                    _start_provider3_flow(req, db)
+                    return
+        
+                fallback_errors = (
+                    p4_err.startswith("PROVIDER4_BACKEND_FAILED:")
+                    or p4_err.startswith("PROVIDER4_VGET_FAILED:")
+                    or p4_err.startswith("PROVIDER4_HISTORY_FAILED:")
+                    or p4_err.startswith("PROVIDER4_NO_PDF_LINK_FOR:")
+                    or p4_err.startswith("PROVIDER4_NO_FOLIO_LINK_FOR:")
+                    or p4_err.startswith("PROVIDER4_DOWNLOAD_FAILED:")
+                    or p4_err.startswith("PROVIDER4_FOLIO_DOWNLOAD_FAILED:")
+                    or "Read timed out" in p4_err
+                )
+        
+                if fallback_errors and p4_elapsed >= 120:
+                    print(
+                        "PROVIDER4_TIMEOUT_FALLBACK_TO_PROVIDER3 =",
+                        {"req_id": req.id, "elapsed": p4_elapsed, "err": p4_err},
+                        flush=True,
+                    )
+                    _start_provider3_flow(req, db)
+                    return
+        
+                raise
         
             pdf_bytes = provider4_result["pdf_bytes"]
             safe_media_b64 = base64.b64encode(pdf_bytes).decode()
@@ -644,20 +729,26 @@ def process_request(request_id: int):
         
             send_ok = False
         
+            filename = (
+                f"{req.curp}_FOLIO.pdf"
+                if "FOLIO" in (req.act_type or "").upper()
+                else f"{req.curp}.pdf"
+            )
+        
             for attempt in range(3):
                 try:
                     if req.source_group_id:
                         send_group_document_base64(
                             req.source_group_id,
                             safe_media_b64,
-                            filename=f"{req.curp}.pdf",
+                            filename=filename,
                             caption=caption_text
                         )
                     else:
                         send_document_base64(
                             req.requester_wa_id,
                             safe_media_b64,
-                            filename=f"{req.curp}.pdf",
+                            filename=filename,
                             caption=caption_text
                         )
         
