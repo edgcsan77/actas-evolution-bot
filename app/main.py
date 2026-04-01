@@ -2394,7 +2394,11 @@ def panel_actas(
     
         html += """
         <div class="box">
-          <div class="head"><strong>Resumen por grupo cliente</strong></div>
+          <div class="head collapsible-head" onclick="toggleSection('grupoClienteBody', this)">
+            <strong>Resumen por grupo cliente</strong>
+            <span class="collapse-icon">▼</span>
+          </div>
+          <div id="grupoClienteBody" class="collapsible-body open">
           <div class="table-wrap">
             <table>
               <thead>
@@ -2440,7 +2444,7 @@ def panel_actas(
                     promo_cell = f"""
                     <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}"
                        class="btn btn-success"
-                       style="color:white;padding:6px 12px; font-size:13px; border-radius:16px; text-decoration:none;">
+                       style="color:white;align-items:center;padding:6px 12px; font-size:13px; border-radius:16px; text-decoration:none;">
                        +Promoción
                     </a>
                     """
@@ -2467,6 +2471,7 @@ def panel_actas(
         html += """
               </tbody>
             </table>
+          </div>
           </div>
         </div>
         """
