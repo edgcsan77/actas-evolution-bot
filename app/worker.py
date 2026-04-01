@@ -26,6 +26,59 @@ def _mx_now():
     return datetime.now(ZoneInfo("America/Monterrey"))
 
 
+def _promo_client_key(group_jid: str | None, promo_name: str | None = None, client_key: str | None = None) -> str:
+    return (client_key or promo_name or group_jid or "").strip().upper()
+
+
+def _get_client_promotions(db: Session, source_group_id: str) -> list:
+    base = (
+        db.query(GroupPromotion)
+        .filter(GroupPromotion.group_jid == source_group_id)
+        .with_for_update()
+        .first()
+    )
+    if not base:
+        return []
+
+    key = _promo_client_key(
+        base.group_jid,
+        getattr(base, "promo_name", None),
+        getattr(base, "client_key", None),
+    )
+
+    rows = (
+        db.query(GroupPromotion)
+        .filter(GroupPromotion.client_key == key)
+        .with_for_update()
+        .all()
+    )
+    return rows or [base]
+
+
+def _notify_client_groups(rows: list, message: str):
+    sent = set()
+    for row in rows:
+        gid = (row.group_jid or "").strip()
+        if gid and gid not in sent:
+            try:
+                send_group_text(gid, message)
+                sent.add(gid)
+            except Exception as e:
+                print("PROMO_NOTIFY_GROUP_ERROR =", gid, str(e), flush=True)
+
+
+def _block_client_groups(rows: list):
+    from app.main import block_group
+
+    for row in rows:
+        gid = (row.group_jid or "").strip()
+        if gid:
+            try:
+                block_group(gid)
+            except Exception as e:
+                print("PROMO_AUTO_BLOCK_ERROR =", gid, str(e), flush=True)
+
+
 def provider3_keepalive_job():
     db = SessionLocal()
 
@@ -329,102 +382,104 @@ def _handle_group_promotion_after_done(req, db):
     if not req.source_group_id:
         return
 
-    promo = (
-        db.query(GroupPromotion)
-        .filter(
-            GroupPromotion.group_jid == req.source_group_id,
-            GroupPromotion.is_active == True
-        )
-        .with_for_update()
-        .first()
-    )
-
-    if not promo:
+    rows = _get_client_promotions(db, req.source_group_id)
+    if not rows:
         return
 
-    total_before = int(promo.total_actas or 0)
-    used_before = int(promo.used_actas or 0)
+    active_rows = [r for r in rows if getattr(r, "is_active", False)]
+    if not active_rows:
+        return
+
+    leader = active_rows[0]
+
+    total_before = int(leader.total_actas or 0)
+    used_before = int(leader.used_actas or 0)
     available_before = max(0, total_before - used_before)
 
-    promo.used_actas = used_before + 1
-    promo.updated_at = _utc_now_naive()
+    used_after = used_before + 1
+    available_after = max(0, total_before - used_after)
 
-    available_after = max(0, total_before - int(promo.used_actas or 0))
+    for row in rows:
+        row.total_actas = total_before
+        row.used_actas = used_after
+        row.updated_at = _utc_now_naive()
 
     msg = None
     notify_level = None
 
-    crossed_0 = available_before > 0 and available_after <= 0 and not promo.warning_sent_0
-    crossed_10 = available_before > 10 and available_after <= 10 and not promo.warning_sent_10
-    crossed_50 = available_before > 50 and available_after <= 50 and not promo.warning_sent_50
-    crossed_100 = available_before > 100 and available_after <= 100 and not promo.warning_sent_100
-    crossed_200 = available_before > 200 and available_after <= 200 and not promo.warning_sent_200
+    crossed_0 = available_before > 0 and available_after <= 0 and not bool(getattr(leader, "warning_sent_0", False))
+    crossed_10 = available_before > 10 and available_after <= 10 and not bool(getattr(leader, "warning_sent_10", False))
+    crossed_50 = available_before > 50 and available_after <= 50 and not bool(getattr(leader, "warning_sent_50", False))
+    crossed_100 = available_before > 100 and available_after <= 100 and not bool(getattr(leader, "warning_sent_100", False))
+    crossed_200 = available_before > 200 and available_after <= 200 and not bool(getattr(leader, "warning_sent_200", False))
 
     if crossed_0:
         msg = (
             f"❌ *Paquete agotado*\n\n"
-            f"Tu paquete promocional de *{promo.total_actas} actas* ha sido consumido en su totalidad.\n\n"
-            f"El grupo quedará bloqueado automáticamente hasta nueva recarga o activación.\n\n"
+            f"Tu paquete promocional compartido ha sido consumido en su totalidad.\n"
+            f"Saldo disponible: *0 actas*.\n\n"
+            f"Todos los grupos asociados a este cliente quedarán bloqueados automáticamente hasta nueva recarga.\n\n"
             f"Quedamos atentos."
         )
-        promo.warning_sent_0 = True
-        promo.is_active = False
         notify_level = "0"
+        for row in rows:
+            row.warning_sent_0 = True
+            row.is_active = False
 
     elif crossed_10:
         msg = (
             f"🚨 *Saldo crítico*\n\n"
-            f"Tu paquete promocional cuenta actualmente con solo *{available_after} actas disponibles*.\n\n"
-            f"Es importante realizar tu recarga cuanto antes para no quedarte sin servicio.\n\n"
+            f"Tu paquete promocional compartido cuenta actualmente con solo *{available_after} actas disponibles*.\n\n"
+            f"Este aviso aplica para todos los grupos asociados a este cliente.\n\n"
             f"Quedamos atentos."
         )
-        promo.warning_sent_10 = True
         notify_level = "10"
+        for row in rows:
+            row.warning_sent_10 = True
 
     elif crossed_50:
         msg = (
             f"⚠️ *Aviso importante de saldo*\n\n"
-            f"Tu paquete promocional cuenta actualmente con *{available_after} actas disponibles*.\n\n"
-            f"Para evitar interrupciones en el servicio, te recomendamos realizar tu recarga a la brevedad.\n\n"
+            f"Tu paquete promocional compartido cuenta actualmente con *{available_after} actas disponibles*.\n\n"
+            f"Este aviso aplica para todos los grupos asociados a este cliente.\n\n"
             f"Quedamos atentos."
         )
-        promo.warning_sent_50 = True
         notify_level = "50"
+        for row in rows:
+            row.warning_sent_50 = True
 
     elif crossed_100:
         msg = (
             f"⚠️ *Aviso de saldo*\n\n"
-            f"Tu paquete promocional cuenta actualmente con *{available_after} actas disponibles*.\n\n"
-            f"Te recomendamos considerar tu próxima recarga con anticipación para evitar interrupciones.\n\n"
+            f"Tu paquete promocional compartido cuenta actualmente con *{available_after} actas disponibles*.\n\n"
+            f"Este aviso aplica para todos los grupos asociados a este cliente.\n\n"
             f"Quedamos atentos."
         )
-        promo.warning_sent_100 = True
         notify_level = "100"
+        for row in rows:
+            row.warning_sent_100 = True
 
     elif crossed_200:
         msg = (
             f"ℹ️ *Aviso de saldo*\n\n"
-            f"Actualmente cuentas con *{available_after} actas disponibles* de tu paquete promocional.\n\n"
-            f"Quedamos atentos."
+            f"Actualmente cuentas con *{available_after} actas disponibles* en tu paquete promocional compartido.\n\n"
+            f"Este aviso aplica para todos los grupos asociados a este cliente."
         )
-        promo.warning_sent_200 = True
         notify_level = "200"
+        for row in rows:
+            row.warning_sent_200 = True
 
     db.commit()
 
     if crossed_0:
-        try:
-            from app.main import block_group
-            block_group(req.source_group_id)
-        except Exception as block_exc:
-            print("PROMOTION_AUTO_BLOCK_ERROR =", str(block_exc), flush=True)
+        _block_client_groups(rows)
 
     if msg and notify_level:
-        notify_key = f"promo_notify:{req.source_group_id}:{notify_level}"
+        notify_key = f"promo_notify:{_promo_client_key(leader.group_jid, leader.promo_name, leader.client_key)}:{notify_level}"
         first_notify = redis_conn.set(notify_key, "1", ex=1800, nx=True)
 
         if first_notify:
-            send_group_text(req.source_group_id, msg)
+            _notify_client_groups(rows, msg)
         else:
             print("PROMOTION_NOTIFY_DUPLICATE_IGNORED =", notify_key, flush=True)
 
