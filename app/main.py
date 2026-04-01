@@ -2015,7 +2015,6 @@ def panel_actas(
         </style>
     </head>
     
-    html = f"""
     <body>
       <div class="wrap">
     
@@ -2120,7 +2119,6 @@ def panel_actas(
             <button type="submit" class="btn btn-primary">Filtrar</button>
           </div>
         </form>
-    """
     
         html += """
         <div class="box">
