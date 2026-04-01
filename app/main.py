@@ -2186,51 +2186,55 @@ def panel_actas(
         
         html += """
         <div class="box">
-          <div class="head">
-            <strong>Promoción compartida</strong>
-            <span class="small">Asigna un mismo saldo promocional a varios grupos del mismo cliente.</span>
+          <div class="head collapsible-head" onclick="toggleSection('promoCompartidaBody', this)">
+            <div>
+              <strong>Promoción compartida</strong>
+              <span class="small">Asigna un mismo saldo promocional a varios grupos del mismo cliente.</span>
+            </div>
+            <span class="collapse-icon">▼</span>
           </div>
         
-          <div class="filters" style="margin-bottom:12px;">
-            <input id="sharedPromoName" placeholder="Nombre de promoción">
-            <input id="sharedPromoClientKey" placeholder="Cliente unificado (ej. LAZARO)">
-            <input id="sharedPromoTotalActas" type="number" placeholder="Total de actas">
-            <input id="sharedPromoPricePerPiece" placeholder="Precio por pieza">
-          </div>
-        
-          <div class="box" style="padding:14px; margin-top:8px; background:#f8fafc; border:1px solid #e5e7eb;">
-            <div style="display:grid; grid-template-columns: 1.2fr auto auto auto; gap:10px; align-items:center;">
-              <input
-                id="sharedPromoSearch"
-                placeholder="Buscar grupo por nombre..."
-                oninput="filterSharedPromoGroups()"
-              >
-        
-              <label style="display:flex;align-items:center;gap:6px;font-size:14px;">
-                <input type="checkbox" id="filterNormalGroups" checked onchange="filterSharedPromoGroups()">
-                Normales
-              </label>
-        
-              <label style="display:flex;align-items:center;gap:6px;font-size:14px;">
-                <input type="checkbox" id="filterTestGroups" onchange="filterSharedPromoGroups()">
-                Pruebas
-              </label>
-        
-              <label style="display:flex;align-items:center;gap:6px;font-size:14px;">
-                <input type="checkbox" id="filterProviderGroups" onchange="filterSharedPromoGroups()">
-                Proveedores
-              </label>
+          <div id="promoCompartidaBody" class="collapsible-body open">
+            <div class="filters" style="margin-bottom:12px;">
+              <input id="sharedPromoName" placeholder="Nombre de promoción">
+              <input id="sharedPromoClientKey" placeholder="Cliente unificado (ej. LAZARO)">
+              <input id="sharedPromoTotalActas" type="number" placeholder="Total de actas">
+              <input id="sharedPromoPricePerPiece" placeholder="Precio por pieza">
             </div>
         
-            <div class="helper" style="margin-top:10px;">
-              Selecciona los grupos que compartirán el mismo saldo. Por defecto se muestran solo grupos normales.
-            </div>
-          </div>
+            <div class="box" style="padding:14px; margin-top:8px; background:#f8fafc; border:1px solid #e5e7eb;">
+              <div style="display:grid; grid-template-columns: 1.2fr auto auto auto; gap:10px; align-items:center;">
+                <input
+                  id="sharedPromoSearch"
+                  placeholder="Buscar grupo por nombre..."
+                  oninput="filterSharedPromoGroups()"
+                >
         
-          <div
-            id="sharedPromoGroups"
-            style="max-height:360px;overflow:auto;border:1px solid #e5e7eb;padding:12px;border-radius:14px;background:#fff;margin-top:12px;"
-          >
+                <label style="display:flex;align-items:center;gap:6px;font-size:14px;">
+                  <input type="checkbox" id="filterNormalGroups" checked onchange="filterSharedPromoGroups()">
+                  Normales
+                </label>
+        
+                <label style="display:flex;align-items:center;gap:6px;font-size:14px;">
+                  <input type="checkbox" id="filterTestGroups" onchange="filterSharedPromoGroups()">
+                  Pruebas
+                </label>
+        
+                <label style="display:flex;align-items:center;gap:6px;font-size:14px;">
+                  <input type="checkbox" id="filterProviderGroups" onchange="filterSharedPromoGroups()">
+                  Proveedores
+                </label>
+              </div>
+        
+              <div class="helper" style="margin-top:10px;">
+                Selecciona los grupos que compartirán el mismo saldo. Por defecto se muestran solo grupos normales.
+              </div>
+            </div>
+        
+            <div
+              id="sharedPromoGroups"
+              style="max-height:360px;overflow:auto;border:1px solid #e5e7eb;padding:12px;border-radius:14px;background:#fff;margin-top:12px;"
+            >
         """
         for gid, name in sorted(GROUP_NAME_MAP.items(), key=lambda x: x[1].lower()):
             group_name = (name or "").strip()
@@ -2279,18 +2283,18 @@ def panel_actas(
             </label>
             '''
         html += """
-        </div>
+            </div>
         
-          <div class="shared-promo-actions">
-            <button class="btn btn-success" onclick="applySharedPromotion()">
-              Aplicar promoción compartida
-            </button>
+            <div class="shared-promo-actions">
+              <button class="btn btn-success" onclick="applySharedPromotion()">
+                Aplicar promoción compartida
+              </button>
         
-            <button class="btn btn-light" type="button" onclick="clearSharedPromotionSelection()">
-              Limpiar selección
-            </button>
+              <button class="btn btn-light" type="button" onclick="clearSharedPromotionSelection()">
+                Limpiar selección
+              </button>
+            </div>
           </div>
-          
         </div>
         """
 
