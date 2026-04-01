@@ -2186,7 +2186,7 @@ def panel_actas(
         
         html += """
         <div class="box">
-          <div class="head collapsible-head" onclick="toggleSection('promoCompartidaBody', this)">
+          <div class="head collapsible-head closed" onclick="toggleSection('promoCompartidaBody', this)">
             <div>
               <strong>Promoción compartida</strong>
               <span class="small">Asigna un mismo saldo promocional a varios grupos del mismo cliente.</span>
@@ -2194,7 +2194,7 @@ def panel_actas(
             <span class="collapse-icon">▼</span>
           </div>
         
-          <div id="promoCompartidaBody" class="collapsible-body open">
+          <div id="promoCompartidaBody" class="collapsible-body closed">
             <div class="filters" style="margin-bottom:12px;">
               <input id="sharedPromoName" placeholder="Nombre de promoción">
               <input id="sharedPromoClientKey" placeholder="Cliente unificado (ej. LAZARO)">
@@ -2424,11 +2424,11 @@ def panel_actas(
     
         html += """
         <div class="box">
-          <div class="head collapsible-head" onclick="toggleSection('grupoClienteBody', this)">
+          <div class="head collapsible-head closed" onclick="toggleSection('grupoClienteBody', this)">
             <strong>Resumen por grupo cliente</strong>
             <span class="collapse-icon">▼</span>
           </div>
-          <div id="grupoClienteBody" class="collapsible-body open">
+          <div id="grupoClienteBody" class="collapsible-body closed">
           <div class="table-wrap">
             <table>
               <thead>
