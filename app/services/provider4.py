@@ -218,6 +218,27 @@ class Provider4Client:
 
         raise RuntimeError(f"PROVIDER4_HISTORY_FAILED: {last_error}")
 
+    def _history_row_for_term(self, history_html: str, term: str) -> str | None:
+        term = (term or "").strip().upper()
+        row_pattern = rf"<tr>.*?{re.escape(term)}.*?</tr>"
+        m = re.search(row_pattern, history_html, flags=re.IGNORECASE | re.DOTALL)
+        return m.group(0) if m else None
+    
+    def _detect_no_result(self, history_html: str, term: str) -> bool:
+        row_html = self._history_row_for_term(history_html, term)
+        if not row_html:
+            return False
+    
+        row_up = row_html.upper()
+    
+        if "NO_LOCALIZADO" in row_up:
+            return True
+    
+        if "DESCARGAR PDF" not in row_up and "DESCARGAR FOLIADO" not in row_up:
+            return True
+    
+        return False
+    
     def _extract_pdf_link(self, history_html: str, term: str) -> str | None:
         term = (term or "").strip().upper()
 
