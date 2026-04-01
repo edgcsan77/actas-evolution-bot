@@ -739,7 +739,7 @@ def panel_apply_shared_promotion(
             db.flush()
         else:
             row.promo_name = promo_name or row.promo_name
-            row.client_key = client_key
+            row.shared_key = shared_key
             row.total_actas = total_actas
             row.used_actas = 0
             row.price_per_piece = price_per_piece
@@ -1530,21 +1530,22 @@ async def panel_broadcast_free(request: Request, background_tasks: BackgroundTas
 def _promotion_summary_map(db: Session) -> dict[str, dict]:
     rows = db.query(GroupPromotion).filter(GroupPromotion.is_active == True).all()
 
-    client_counts = Counter((r.client_key or "").strip() for r in rows if r.client_key)
+    shared_counts = Counter((r.shared_key or "").strip() for r in rows if (r.shared_key or "").strip())
 
     out = {}
 
     for r in rows:
         available = max(0, (r.total_actas or 0) - (r.used_actas or 0))
-        client_key = (r.client_key or "").strip()
+        shared_key = (r.shared_key or "").strip()
 
         payload = {
             "promo_name": r.promo_name or "",
             "total_actas": r.total_actas or 0,
             "used_actas": r.used_actas or 0,
             "available": available,
-            "client_key": client_key,
-            "shared_count": client_counts.get(client_key, 0),
+            "client_key": (r.client_key or "").strip(),
+            "shared_key": shared_key,
+            "shared_count": shared_counts.get(shared_key, 0),
             "html": _promotion_badge_html(r),
         }
 
@@ -2608,7 +2609,7 @@ def panel_actas(
                     status = "Activa" if promo_info["available"] > 0 else "Agotada"
                     promo_badge_class = "badge-success" if promo_info["available"] > 0 else "badge-danger"
                 
-                    is_shared = (promo_info.get("shared_count", 0) > 1)
+                    is_shared = bool((promo_info.get("shared_key") or "").strip()) and (promo_info.get("shared_count", 0) > 1)
                     shared_text = "Compartida" if is_shared else "Individual"
                     shared_badge_class = "badge-warning" if is_shared else "badge-light"
 
