@@ -81,6 +81,8 @@ class GroupPromotion(Base):
     id = Column(Integer, primary_key=True)
     group_jid = Column(String(120), unique=True, nullable=False, index=True)
     promo_name = Column(String(150), nullable=True)
+    client_key = Column(String(255), nullable=True, index=True)
+
     total_actas = Column(Integer, nullable=False, default=0)
     used_actas = Column(Integer, nullable=False, default=0)
     price_per_piece = Column(String(30), nullable=True)
