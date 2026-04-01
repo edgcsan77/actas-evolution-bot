@@ -594,21 +594,36 @@ def _start_provider3_flow(req, db):
 
 
 def _validate_act_type_pdf(pdf_bytes: bytes, act_type: str | None) -> bool:
-    text = pdf_bytes.decode(errors="ignore").upper()
+    try:
+        text = pdf_bytes.decode(errors="ignore").upper()
+    except Exception:
+        return True
 
     act_type = (act_type or "").upper()
 
+    # Si no hay texto suficiente en el PDF, no bloquear
+    if not text or len(text.strip()) < 100:
+        return True
+
     if "NAC" in act_type:
-        return "NACIMIENTO" in text
+        if "MATRIMONIO" in text or "DIVORCIO" in text or "DEFUNCION" in text or "DEFUNCIÓN" in text:
+            return False
+        return True
 
     if "MAT" in act_type:
-        return "MATRIMONIO" in text
+        if "NACIMIENTO" in text or "DIVORCIO" in text or "DEFUNCION" in text or "DEFUNCIÓN" in text:
+            return False
+        return True
 
     if "DIV" in act_type:
-        return "DIVORCIO" in text
+        if "NACIMIENTO" in text or "MATRIMONIO" in text or "DEFUNCION" in text or "DEFUNCIÓN" in text:
+            return False
+        return True
 
     if "DEF" in act_type:
-        return "DEFUNCION" in text or "DEFUNCIÓN" in text
+        if "NACIMIENTO" in text or "MATRIMONIO" in text or "DIVORCIO" in text:
+            return False
+        return True
 
     return True
 
