@@ -40,6 +40,65 @@ def _is_curp_term(value: str | None) -> bool:
     return bool(CURP_RE.match(v))
 
 
+def _fallback_to_provider3_web(req, db):
+    req.provider_name = "PROVIDER3"
+    req.provider_group_id = None
+    req.provider_message = None
+    req.updated_at = _utc_now_naive()
+    db.commit()
+
+    print("FALLBACK_TO_PROVIDER3_WEB =", {"req_id": req.id, "curp": req.curp, "act_type": req.act_type}, flush=True)
+
+    provider3_result = _process_provider3(req, db)
+
+    pdf_bytes = provider3_result["pdf_bytes"]
+    safe_media_b64 = base64.b64encode(pdf_bytes).decode()
+
+    total_seconds = max(0.0, time.perf_counter() - process_started_ts)
+
+    if total_seconds >= 60:
+        minutes = int(total_seconds // 60)
+        seconds = total_seconds % 60
+        tiempo = f"{minutes} min {seconds:.2f} segundos"
+    else:
+        tiempo = f"{total_seconds:.2f} segundos"
+
+    caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
+
+    filename = (
+        f"{req.curp}_FOLIO.pdf"
+        if "FOLIO" in (req.act_type or "").upper()
+        else f"{req.curp}.pdf"
+    )
+
+    if req.source_group_id:
+        send_group_document_base64(
+            req.source_group_id,
+            safe_media_b64,
+            filename=filename,
+            caption=caption_text
+        )
+    else:
+        send_document_base64(
+            req.requester_wa_id,
+            safe_media_b64,
+            filename=filename,
+            caption=caption_text
+        )
+
+    req.provider_media_url = "BASE64_PROVIDER3"
+    req.pdf_url = None
+    req.status = "DONE"
+    req.error_message = None
+    req.updated_at = _utc_now_naive()
+    db.commit()
+
+    try:
+        _handle_group_promotion_after_done(req, db)
+    except Exception as promo_exc:
+        print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
+
+
 def _promo_client_key(group_jid: str | None, promo_name: str | None = None, client_key: str | None = None) -> str:
     return (client_key or promo_name or group_jid or "").strip().upper()
 
@@ -704,7 +763,7 @@ def process_request(request_id: int):
                     return
         
                 print("PROVIDER4_SKIPPED_NON_CURP_FALLBACK_PROVIDER3 =", req.curp, flush=True)
-                _start_provider3_flow(req, db)
+                _fallback_to_provider3_web(req, db)
                 return
         
             provider4_started_ts = time.perf_counter()
@@ -744,7 +803,7 @@ def process_request(request_id: int):
                         return
         
                     print("PROVIDER4_NOT_CURP_FALLBACK_TO_PROVIDER3 =", req.curp, flush=True)
-                    _start_provider3_flow(req, db)
+                    _fallback_to_provider3_web(req, db)
                     return
         
                 fallback_errors = (
@@ -762,7 +821,7 @@ def process_request(request_id: int):
                 # WRONG_ACT_TYPE debe caer a Provider3 aunque haya tardado poco
                 should_fallback = (
                     p4_err.startswith("PROVIDER4_WRONG_ACT_TYPE")
-                    or (fallback_errors and p4_elapsed >= 150)
+                    or (fallback_errors and p4_elapsed >= 180)
                 )
         
                 if should_fallback:
@@ -790,7 +849,7 @@ def process_request(request_id: int):
                         {"req_id": req.id, "elapsed": p4_elapsed, "err": p4_err},
                         flush=True,
                     )
-                    _start_provider3_flow(req, db)
+                    _fallback_to_provider3_web(req, db)
                     return
         
                 raise
