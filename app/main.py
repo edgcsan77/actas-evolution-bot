@@ -2014,6 +2014,7 @@ def panel_actas(
           }}
         </style>
     </head>
+    html = f"""
     <body>
       <div class="wrap">
     
@@ -2052,7 +2053,7 @@ def panel_actas(
                     <button class="btn btn-warning" onclick="refreshSID()">Actualizar SID</button>
                   </div>
                 </div>
-
+    
                 <div class="provider-card">
                   <div class="provider-name">LAZARO WEB</div>
                   <div class="provider-actions">
@@ -2118,7 +2119,8 @@ def panel_actas(
             <button type="submit" class="btn btn-primary">Filtrar</button>
           </div>
         </form>
-
+    """
+    
         html += """
         <div class="box">
           <div class="head">
@@ -2153,7 +2155,8 @@ def panel_actas(
           </div>
         </div>
         """
-    
+
+        html += """
         <div class="cards">
           <div class="card"><div class="label">Total</div><div class="value">{summary["total"]}</div></div>
           <div class="card"><div class="label">En cola</div><div class="value">{summary["queued"]}</div></div>
