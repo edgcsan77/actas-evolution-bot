@@ -458,8 +458,6 @@ class Provider4Client:
         max_polls = self.HISTORY_MAX_POLLS
         poll_sleep_seconds = self.HISTORY_POLL_SLEEP
     
-        # Para normales: si d.php responde antes que history, lo guardamos
-        # pero NO lo enviamos todavía; esperamos a history primero.
         early_direct_pdf_bytes = None
     
         if inc_folio:
@@ -467,7 +465,8 @@ class Provider4Client:
             print("PROVIDER4_DIRECT_FOLIO_URL =", direct_folio_url, flush=True)
     
             try:
-                return self.download_pdf_bytes(direct_folio_url)
+                early_direct_pdf_bytes = self.download_pdf_bytes(direct_folio_url)
+                print("PROVIDER4_DIRECT_FOLIO_EARLY_PDF_READY = TRUE", flush=True)
             except Exception as direct_exc:
                 print("PROVIDER4_DIRECT_FOLIO_FAILED =", str(direct_exc), flush=True)
         else:
@@ -495,34 +494,32 @@ class Provider4Client:
     
             if inc_folio:
                 if row_html:
-                    # Primero intentar la ruta directa otra vez
-                    try:
-                        return self.download_pdf_bytes(direct_folio_url)
-                    except Exception as direct_retry_exc:
-                        print("PROVIDER4_DIRECT_FOLIO_RETRY_FAILED =", str(direct_retry_exc), flush=True)
-    
-                    # Luego intentar el link de history
                     link = self._extract_folio_link(history_html, term)
                     if link:
                         print("PROVIDER4_FINAL_FOLIO_LINK =", link, flush=True)
                         return self._download_foliated_pdf(link)
     
+                    try:
+                        return self.download_pdf_bytes(direct_folio_url)
+                    except Exception as direct_retry_exc:
+                        print("PROVIDER4_DIRECT_FOLIO_RETRY_FAILED =", str(direct_retry_exc), flush=True)
+    
+                    if early_direct_pdf_bytes:
+                        print("PROVIDER4_USING_EARLY_DIRECT_FOLIO_PDF_AS_FALLBACK = TRUE", flush=True)
+                        return early_direct_pdf_bytes
+    
             else:
                 if row_html:
-                    # Para normales, PRIORIDAD al link que ya muestra history
                     link = self._extract_pdf_link(history_html, term)
                     if link:
                         print("PROVIDER4_FINAL_DOWNLOAD_LINK =", link, flush=True)
                         return self.download_pdf_bytes(link)
     
-                    # Si history ya mostró la fila pero no pudimos extraer link,
-                    # reintentar directa
                     try:
                         return self.download_pdf_bytes(direct_normal_url)
                     except Exception as direct_retry_exc:
                         print("PROVIDER4_DIRECT_NORMAL_RETRY_FAILED =", str(direct_retry_exc), flush=True)
     
-                    # Y como último respaldo, usar el PDF temprano que ya teníamos
                     if early_direct_pdf_bytes:
                         print("PROVIDER4_USING_EARLY_DIRECT_PDF_AS_FALLBACK = TRUE", flush=True)
                         return early_direct_pdf_bytes
@@ -538,7 +535,10 @@ class Provider4Client:
         if self._detect_no_result(final_history_html, term):
             raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
     
-        # Si se acabó el polling y en normales sí teníamos un PDF temprano, usarlo al final
+        if inc_folio and early_direct_pdf_bytes:
+            print("PROVIDER4_FINAL_USING_EARLY_DIRECT_FOLIO_PDF = TRUE", flush=True)
+            return early_direct_pdf_bytes
+    
         if not inc_folio and early_direct_pdf_bytes:
             print("PROVIDER4_FINAL_USING_EARLY_DIRECT_PDF = TRUE", flush=True)
             return early_direct_pdf_bytes
