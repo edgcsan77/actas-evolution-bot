@@ -2812,7 +2812,8 @@ def _set_app_setting(db: Session, key: str, value: str):
 
 
 def _providers_status_text(db: Session) -> str:
-    from app.services.provider3 import Provider3Client, Provider4Client
+    from app.services.provider3 import Provider3Client
+    from app.services.provider4 import Provider4Client
 
     p1 = _get_or_create_provider(db, "PROVIDER1", True)
     p2 = _get_or_create_provider(db, "PROVIDER2", False)
