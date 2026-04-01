@@ -1979,6 +1979,32 @@ def panel_actas(
               .shared-promo-actions .btn{{
                 min-width:220px;
               }}
+
+              .collapsible-head{{
+                display:flex;
+                align-items:center;
+                justify-content:space-between;
+                cursor:pointer;
+                user-select:none;
+              }}
+            
+              .collapse-icon{{
+                font-size:14px;
+                font-weight:700;
+                transition:transform .18s ease;
+              }}
+            
+              .collapsible-head.closed .collapse-icon{{
+                transform:rotate(-90deg);
+              }}
+            
+              .collapsible-body.open{{
+                display:block;
+              }}
+            
+              .collapsible-body.closed{{
+                display:none;
+              }}
             
               @media (max-width: 1200px) {{
                 .grid-hero {{
@@ -2444,7 +2470,7 @@ def panel_actas(
                     promo_cell = f"""
                     <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}"
                        class="btn btn-success"
-                       style="color:white;align-items:center;padding:6px 12px; font-size:13px; border-radius:16px; text-decoration:none;">
+                       style="color:white;display:inline-flex;align-items:center;justify-content:center;padding:6px 12px; font-size:13px; border-radius:16px; text-decoration:none;">
                        +Promoción
                     </a>
                     """
@@ -2790,6 +2816,23 @@ def panel_actas(
         document.addEventListener("DOMContentLoaded", () => {
           filterSharedPromoGroups();
         });
+
+        function toggleSection(bodyId, headEl) {
+          const body = document.getElementById(bodyId);
+          if (!body) return;
+        
+          const isClosed = body.classList.contains("closed");
+        
+          if (isClosed) {
+            body.classList.remove("closed");
+            body.classList.add("open");
+            headEl.classList.remove("closed");
+          } else {
+            body.classList.remove("open");
+            body.classList.add("closed");
+            headEl.classList.add("closed");
+          }
+        }
     
         setInterval(() => {
           if (!broadcastRunning) {
