@@ -658,14 +658,14 @@ def panel_remove_shared_promotion(
     payload: dict = Body(...),
     db: Session = Depends(get_db),
 ):
-    client_key = (payload.get("client_key") or "").strip().upper()
+    shared_key = (payload.get("shared_key") or "").strip().upper()
 
-    if not client_key:
-        return {"ok": False, "error": "CLIENT_KEY_REQUIRED"}
+    if not shared_key:
+        return {"ok": False, "error": "SHARED_KEY_REQUIRED"}
 
     rows = (
         db.query(GroupPromotion)
-        .filter(GroupPromotion.client_key == client_key)
+        .filter(GroupPromotion.shared_key == shared_key)
         .all()
     )
 
@@ -686,7 +686,7 @@ def panel_remove_shared_promotion(
     except Exception as e:
         print("PROMOTION_REMOVE_NOTIFY_ERROR =", str(e), flush=True)
 
-    return {"ok": True, "client_key": client_key}
+    return {"ok": True, "shared_key": shared_key}
 
 
 @app.post("/panel/promotions/apply")
@@ -709,6 +709,9 @@ def panel_apply_shared_promotion(
     if not client_key:
         client_key = _promo_client_key(None, promo_name, promo_name or "PROMOCION_COMPARTIDA")
 
+    # Este será el identificador real de la promoción compartida
+    shared_key = client_key
+
     rows = []
 
     for group_jid in selected_group_jids:
@@ -723,6 +726,7 @@ def panel_apply_shared_promotion(
                 group_jid=group_jid,
                 promo_name=promo_name,
                 client_key=client_key,
+                shared_key=shared_key,
                 total_actas=total_actas,
                 used_actas=0,
                 price_per_piece=price_per_piece,
@@ -739,6 +743,7 @@ def panel_apply_shared_promotion(
             db.flush()
         else:
             row.promo_name = promo_name or row.promo_name
+            row.client_key = client_key
             row.shared_key = shared_key
             row.total_actas = total_actas
             row.used_actas = 0
@@ -757,7 +762,7 @@ def panel_apply_shared_promotion(
 
     rows = (
         db.query(GroupPromotion)
-        .filter(GroupPromotion.client_key == client_key)
+        .filter(GroupPromotion.shared_key == shared_key)
         .all()
     )
 
@@ -774,8 +779,8 @@ def panel_apply_shared_promotion(
                 f"✅ *Promoción activada*\n\n"
                 f"Tu *{promo_label}* ya fue activado correctamente.\n"
                 f"Cuentas con *{total_actas} actas disponibles*.\n\n"
-                f"Este saldo aplica para todos los grupos asociados a este cliente.\n"
-                f"Cliente unificado: *{client_key}*.\n\n"
+                f"Este saldo aplica para todos los grupos asociados a esta promoción compartida.\n"
+                f"Clave compartida: *{shared_key}*.\n\n"
                 f"Gracias por tu preferencia."
             )
         )
@@ -786,6 +791,7 @@ def panel_apply_shared_promotion(
         "ok": True,
         "message": "Promoción compartida aplicada correctamente",
         "client_key": client_key,
+        "shared_key": shared_key,
         "total_actas": total_actas,
         "groups": selected_group_jids,
     }
