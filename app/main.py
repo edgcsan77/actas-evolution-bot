@@ -15,7 +15,8 @@ from app.db import Base, engine, get_db
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion
 from app.queue import request_queue, redis_conn
 from app.worker import process_request, provider3_keepalive_job
-from app.services.provider3 import Provider3Client, Provider4Client
+from app.services.provider3 import Provider3Client
+from app.services.provider4 import Provider4Client
 
 from app.utils.curp import (
     extract_request_terms,
