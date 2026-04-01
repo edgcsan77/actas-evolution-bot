@@ -1302,6 +1302,7 @@ GROUP_NAME_MAP = {
     "120363407565721999@g.us": "Docify Mx 3 - Eduardo",
     "120363421862592214@g.us": "Gpo. No. 58 Lazaro",
     "120363425433931286@g.us": "Gpo. No. 65 Gestoria Guerrero",
+    "120363425691947112@g.us": "Gpo. Lazaro",
 }
 
 
@@ -2969,9 +2970,7 @@ def panel_actas(
         }
     
         setInterval(() => {
-          const processing = document.querySelectorAll(".status-p").length;
-          
-          if (processing > 0) {
+          if (!broadcastRunning) {
             refreshRecentRequests();
           }
         }, 15000);
