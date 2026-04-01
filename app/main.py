@@ -2117,528 +2117,526 @@ def panel_actas(
                 <button type="submit" class="btn btn-primary">Filtrar</button>
               </div>
             </form>
-            """
+        """
         
-            html += """
-            <div class="box">
-              <div class="head">
-                <strong>Promoción compartida</strong>
-              </div>
-            
-              <div class="filters" style="margin-bottom:12px;">
-                <input id="sharedPromoName" placeholder="Nombre de promoción">
-                <input id="sharedPromoClientKey" placeholder="Cliente unificado (ej. LAZARO)">
-                <input id="sharedPromoTotalActas" type="number" placeholder="Total de actas">
-                <input id="sharedPromoPricePerPiece" placeholder="Precio por pieza">
-              </div>
-            
-              <div class="helper" style="margin-bottom:10px;">
-                Selecciona los grupos que compartirán el mismo saldo.
-              </div>
-            
-              <div id="sharedPromoGroups" style="max-height:260px;overflow:auto;border:1px solid #ddd;padding:10px;border-radius:12px;background:#fff;">
-            """
-            
-            for gid, name in GROUP_NAME_MAP.items():
-                html += f'''
-                <label style="display:block;margin-bottom:6px;">
-                  <input type="checkbox" class="shared-promo-group" value="{gid}">
-                  {_esc(name)}
-                </label>
-                '''
-
-            html += """
-              </div>
-            
-              <div class="actions-row" style="margin-top:12px;">
-                <button class="btn btn-success" onclick="applySharedPromotion()">Aplicar promoción compartida</button>
-              </div>
-            </div>
-            """
-    
-            html += f"""
-            <div class="cards">
-              <div class="card"><div class="label">Total</div><div class="value">{summary["total"]}</div></div>
-              <div class="card"><div class="label">En cola</div><div class="value">{summary["queued"]}</div></div>
-              <div class="card"><div class="label">Procesando</div><div class="value">{summary["processing"]}</div></div>
-              <div class="card"><div class="label">Hecho</div><div class="value">{summary["done"]}</div></div>
-              <div class="card"><div class="label">Error</div><div class="value">{summary["error"]}</div></div>
-            </div>
-        
-            <div class="box">
-              <div class="head"><strong>Resumen por proveedor</strong></div>
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Proveedor</th>
-                      <th class="right">Total</th>
-                      <th class="right">EN COLA</th>
-                      <th class="right">PROCESANDO</th>
-                      <th class="right">HECHO</th>
-                      <th class="right">ERROR</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-            """
-        
-            if by_provider:
-                for r in by_provider:
-                    html += f"""
-                    <tr>
-                      <td>{_esc(r["provider_name"])}</td>
-                      <td class="right">{r["total"]}</td>
-                      <td class="right">{r["queued"]}</td>
-                      <td class="right">{r["processing"]}</td>
-                      <td class="right">{r["done"]}</td>
-                      <td class="right">{r["error"]}</td>
-                    </tr>
-                    """
-            else:
-                html += '<tr><td colspan="6">Sin datos.</td></tr>'
-        
-            html += """
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            """
-        
-            html += """
-            <div class="box">
-              <div class="head"><strong>Resumen por tipo de acta</strong></div>
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Tipo</th>
-                      <th class="right">Total</th>
-                      <th class="right">EN COLA</th>
-                      <th class="right">PROCESANDO</th>
-                      <th class="right">HECHO</th>
-                      <th class="right">ERROR</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-            """
-        
-            if by_type:
-                for r in by_type:
-                    html += f"""
-                    <tr>
-                      <td>{_esc(r["act_type"])}</td>
-                      <td class="right">{r["total"]}</td>
-                      <td class="right">{r["queued"]}</td>
-                      <td class="right">{r["processing"]}</td>
-                      <td class="right">{r["done"]}</td>
-                      <td class="right">{r["error"]}</td>
-                    </tr>
-                    """
-            else:
-                html += '<tr><td colspan="6">Sin datos.</td></tr>'
-        
-            html += """
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            """
-    
-            html += f"""
-            <div class="box">
-              <div class="head"><strong>Vista de grupos</strong></div>
-              <div class="group-mode-bar">
-                <a class="group-mode-link {'group-mode-link-active' if group_mode == 'all' else ''}"
-                   href="/panel?view={_esc(view)}&group_mode=all&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
-                  Ver todos los grupos
-                </a>
-                <a class="group-mode-link {'group-mode-link-active' if group_mode == 'active' else ''}"
-                   href="/panel?view={_esc(view)}&group_mode=active&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
-                  Solo grupos con compras del día
-                </a>
-              </div>
-            </div>
-            """
-    
-            all_blocked = are_all_client_groups_blocked()
-    
-            toggle_all_btn = (
-                '<button class="btn btn-success" onclick="toggleAllGroups()">Desbloquear todos los grupos</button>'
-                if all_blocked
-                else '<button class="btn btn-danger" onclick="toggleAllGroups()">Bloquear todos los grupos</button>'
-            )
-            
-            html += f"""
-            <div class="box">
-              <div class="head">
-                <strong>Control masivo de grupos</strong>
-                <span class="small">Bloquea o desbloquea todos los grupos cliente con un solo clic</span>
-              </div>
-              <div class="group-mode-bar">
-                {toggle_all_btn}
-              </div>
-            </div>
-            """
-        
-            html += """
-            <div class="box">
-              <div class="head"><strong>Resumen por grupo cliente</strong></div>
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Grupo</th>
-                      <th class="right">Total</th>
-                      <th class="right">HECHO</th>
-                      <th class="right">ERROR</th>
-                      <th>Promoción</th>
-                      <th>Última actualización</th>
-                      <th>Bloqueo</th>
-                      <th>Acción</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-            """
-        
-            if by_group:
-                for r in by_group:
-                    blocked = is_group_blocked(r["group_jid"])
-                    blocked_text = "BLOQUEADO" if blocked else "ACTIVO"
-            
-                    action_btn = (
-                        f'<button class="btn btn-success" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'unblock\')">Desbloquear</button>'
-                        if blocked
-                        else f'<button class="btn btn-danger" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'block\')">Bloquear</button>'
-                    )
-            
-                    group_key = (r["group_jid"] or "").replace("@g.us", "").strip()
-                    promo_info = (
-                        promo_map.get(r["group_jid"])
-                        or promo_map.get(group_key)
-                    )
-            
-                    if promo_info:
-                        status = "Activa" if promo_info["available"] > 0 else "Agotada"
-    
-                        promo_cell = f"""
-                        <span class="badge bg-success">{status}</span><br>
-                        <b>{promo_info["used_actas"]} / {promo_info["total_actas"]}</b>
-                        """
-                    else:
-                        promo_cell = f"""
-                        <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}"
-                           class="btn btn-success"
-                           style="color:white;padding:6px 12px; font-size:13px; border-radius:16px; text-decoration:none;">
-                           +Promoción
-                        </a>
-                        """
-            
-                    html += f"""
-                    <tr>
-                      <td>
-                        <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}">
-                          {_esc(r["group_name"])}
-                        </a>
-                      </td>
-                      <td class="right">{r["total"]}</td>
-                      <td class="right">{r["done"]}</td>
-                      <td class="right">{r["error"]}</td>
-                      <td>{promo_cell}</td>
-                      <td>{_esc(_fmt_dt(r["last_update"]))}</td>
-                      <td>{blocked_text}</td>
-                      <td>{action_btn}</td>
-                    </tr>
-                    """
-            else:
-                html += '<tr><td colspan="8">Sin datos.</td></tr>'
-        
-            html += """
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            """
-        
-            html += """
-            <div class="box">
-              <div class="head"><strong>Solicitudes recientes</strong></div>
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Dato</th>
-                      <th>Tipo</th>
-                      <th>Estado</th>
-                      <th>Grupo cliente</th>
-                      <th>Proveedor</th>
-                      <th>Grupo proveedor</th>
-                      <th>Mensaje proveedor</th>
-                      <th>Creado</th>
-                      <th>Actualizado</th>
-                      <th>Error</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-            """
-        
-            if latest:
-                for r in latest:
-                    status_class = {
-                        "QUEUED": "status-q",
-                        "PROCESSING": "status-p",
-                        "DONE": "status-d",
-                        "ERROR": "status-e",
-                    }.get(r.status, "")
-        
-                    html += f"""
-                    <tr>
-                      <td>{r.id}</td>
-                      <td class="mono">{_esc(r.curp)}</td>
-                      <td>{_esc(r.act_type)}</td>
-                      <td class="{status_class}">{_esc(r.status)}</td>
-                      <td>{_esc(_group_name(r.source_group_id))}</td>
-                      <td>{_esc(r.provider_name)}</td>
-                      <td>{_esc(_group_name(r.provider_group_id))}</td>
-                      <td class="small">{_esc(r.provider_message)}</td>
-                      <td>{_esc(_fmt_dt(r.created_at))}</td>
-                      <td>{_esc(_fmt_dt(r.updated_at))}</td>
-                      <td class="small">{_esc(r.error_message)}</td>
-                    </tr>
-                    """
-            else:
-                html += '<tr><td colspan="11">Sin solicitudes en este periodo.</td></tr>'
-        
-            html += """
-                  </tbody>
-                </table>
-              </div>
-            </div>
-        
+        html += """
+        <div class="box">
+          <div class="head">
+            <strong>Promoción compartida</strong>
           </div>
         
-          <script>
-            let broadcastRunning = false;
+          <div class="filters" style="margin-bottom:12px;">
+            <input id="sharedPromoName" placeholder="Nombre de promoción">
+            <input id="sharedPromoClientKey" placeholder="Cliente unificado (ej. LAZARO)">
+            <input id="sharedPromoTotalActas" type="number" placeholder="Total de actas">
+            <input id="sharedPromoPricePerPiece" placeholder="Precio por pieza">
+          </div>
         
-            async function toggleProvider(provider, action) {
-              const url = `/panel/provider/${provider}/${action}`;
+          <div class="helper" style="margin-bottom:10px;">
+            Selecciona los grupos que compartirán el mismo saldo.
+          </div>
         
-              try {
-                const res = await fetch(url, { method: "POST" });
-                const data = await res.json();
+          <div id="sharedPromoGroups" style="max-height:260px;overflow:auto;border:1px solid #ddd;padding:10px;border-radius:12px;background:#fff;">
+        """
+        for gid, name in GROUP_NAME_MAP.items():
+            html += f'''
+            <label style="display:block;margin-bottom:6px;">
+              <input type="checkbox" class="shared-promo-group" value="{gid}">
+              {_esc(name)}
+            </label>
+            '''
+        html += """
+          </div>
         
-                if (data.ok) {
-                  location.reload();
-                } else {
-                  alert("Error cambiando proveedor");
-                }
-              } catch (e) {
-                alert("No se pudo conectar con el servidor");
-              }
-            }
-        
-            async function refreshSID() {
-              const sid = prompt("Pega el nuevo PHPSESSID");
-              if (!sid) return;
-        
-              try {
-                const res = await fetch("/panel/provider3/session", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json"
-                  },
-                  body: JSON.stringify({
-                    phpsessid: sid
-                  })
-                });
-        
-                const data = await res.json();
-        
-                if (data.ok) {
-                  alert("SID actualizada");
-                  location.reload();
-                } else {
-                  alert(data.error || "Error actualizando SID");
-                }
-              } catch (e) {
-                alert("No se pudo conectar con el servidor");
-              }
-            }
-        
-            async function sendBroadcast(type) {
-              const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
-              if (!ok) return;
+          <div class="actions-row" style="margin-top:12px;">
+            <button class="btn btn-success" onclick="applySharedPromotion()">Aplicar promoción compartida</button>
+          </div>
+        </div>
+        """
+
+        html += f"""
+        <div class="cards">
+          <div class="card"><div class="label">Total</div><div class="value">{summary["total"]}</div></div>
+          <div class="card"><div class="label">En cola</div><div class="value">{summary["queued"]}</div></div>
+          <div class="card"><div class="label">Procesando</div><div class="value">{summary["processing"]}</div></div>
+          <div class="card"><div class="label">Hecho</div><div class="value">{summary["done"]}</div></div>
+          <div class="card"><div class="label">Error</div><div class="value">{summary["error"]}</div></div>
+        </div>
     
-              broadcastRunning = true;
-        
-              try {
-                const res = await fetch(`/panel/broadcast/${type}`, {
-                  method: "POST"
-                });
-        
-                const data = await res.json();
-        
-                if (data.ok) {
-                  alert(data.message || "Envío iniciado");
-                } else {
-                  alert(data.error || "Error en envío masivo");
-                }
-              } catch (e) {
-                alert("No se pudo conectar con el servidor");
-              }
+        <div class="box">
+          <div class="head"><strong>Resumen por proveedor</strong></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Proveedor</th>
+                  <th class="right">Total</th>
+                  <th class="right">EN COLA</th>
+                  <th class="right">PROCESANDO</th>
+                  <th class="right">HECHO</th>
+                  <th class="right">ERROR</th>
+                </tr>
+              </thead>
+              <tbody>
+        """
     
-              broadcastRunning = false;
+        if by_provider:
+            for r in by_provider:
+                html += f"""
+                <tr>
+                  <td>{_esc(r["provider_name"])}</td>
+                  <td class="right">{r["total"]}</td>
+                  <td class="right">{r["queued"]}</td>
+                  <td class="right">{r["processing"]}</td>
+                  <td class="right">{r["done"]}</td>
+                  <td class="right">{r["error"]}</td>
+                </tr>
+                """
+        else:
+            html += '<tr><td colspan="6">Sin datos.</td></tr>'
+    
+        html += """
+              </tbody>
+            </table>
+          </div>
+        </div>
+        """
+    
+        html += """
+        <div class="box">
+          <div class="head"><strong>Resumen por tipo de acta</strong></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tipo</th>
+                  <th class="right">Total</th>
+                  <th class="right">EN COLA</th>
+                  <th class="right">PROCESANDO</th>
+                  <th class="right">HECHO</th>
+                  <th class="right">ERROR</th>
+                </tr>
+              </thead>
+              <tbody>
+        """
+    
+        if by_type:
+            for r in by_type:
+                html += f"""
+                <tr>
+                  <td>{_esc(r["act_type"])}</td>
+                  <td class="right">{r["total"]}</td>
+                  <td class="right">{r["queued"]}</td>
+                  <td class="right">{r["processing"]}</td>
+                  <td class="right">{r["done"]}</td>
+                  <td class="right">{r["error"]}</td>
+                </tr>
+                """
+        else:
+            html += '<tr><td colspan="6">Sin datos.</td></tr>'
+    
+        html += """
+              </tbody>
+            </table>
+          </div>
+        </div>
+        """
+
+        html += f"""
+        <div class="box">
+          <div class="head"><strong>Vista de grupos</strong></div>
+          <div class="group-mode-bar">
+            <a class="group-mode-link {'group-mode-link-active' if group_mode == 'all' else ''}"
+               href="/panel?view={_esc(view)}&group_mode=all&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
+              Ver todos los grupos
+            </a>
+            <a class="group-mode-link {'group-mode-link-active' if group_mode == 'active' else ''}"
+               href="/panel?view={_esc(view)}&group_mode=active&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
+              Solo grupos con compras del día
+            </a>
+          </div>
+        </div>
+        """
+
+        all_blocked = are_all_client_groups_blocked()
+
+        toggle_all_btn = (
+            '<button class="btn btn-success" onclick="toggleAllGroups()">Desbloquear todos los grupos</button>'
+            if all_blocked
+            else '<button class="btn btn-danger" onclick="toggleAllGroups()">Bloquear todos los grupos</button>'
+        )
+        
+        html += f"""
+        <div class="box">
+          <div class="head">
+            <strong>Control masivo de grupos</strong>
+            <span class="small">Bloquea o desbloquea todos los grupos cliente con un solo clic</span>
+          </div>
+          <div class="group-mode-bar">
+            {toggle_all_btn}
+          </div>
+        </div>
+        """
+    
+        html += """
+        <div class="box">
+          <div class="head"><strong>Resumen por grupo cliente</strong></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Grupo</th>
+                  <th class="right">Total</th>
+                  <th class="right">HECHO</th>
+                  <th class="right">ERROR</th>
+                  <th>Promoción</th>
+                  <th>Última actualización</th>
+                  <th>Bloqueo</th>
+                  <th>Acción</th>
+                </tr>
+              </thead>
+              <tbody>
+        """
+    
+        if by_group:
+            for r in by_group:
+                blocked = is_group_blocked(r["group_jid"])
+                blocked_text = "BLOQUEADO" if blocked else "ACTIVO"
+        
+                action_btn = (
+                    f'<button class="btn btn-success" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'unblock\')">Desbloquear</button>'
+                    if blocked
+                    else f'<button class="btn btn-danger" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'block\')">Bloquear</button>'
+                )
+        
+                group_key = (r["group_jid"] or "").replace("@g.us", "").strip()
+                promo_info = (
+                    promo_map.get(r["group_jid"])
+                    or promo_map.get(group_key)
+                )
+        
+                if promo_info:
+                    status = "Activa" if promo_info["available"] > 0 else "Agotada"
+
+                    promo_cell = f"""
+                    <span class="badge bg-success">{status}</span><br>
+                    <b>{promo_info["used_actas"]} / {promo_info["total_actas"]}</b>
+                    """
+                else:
+                    promo_cell = f"""
+                    <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}"
+                       class="btn btn-success"
+                       style="color:white;padding:6px 12px; font-size:13px; border-radius:16px; text-decoration:none;">
+                       +Promoción
+                    </a>
+                    """
+        
+                html += f"""
+                <tr>
+                  <td>
+                    <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}">
+                      {_esc(r["group_name"])}
+                    </a>
+                  </td>
+                  <td class="right">{r["total"]}</td>
+                  <td class="right">{r["done"]}</td>
+                  <td class="right">{r["error"]}</td>
+                  <td>{promo_cell}</td>
+                  <td>{_esc(_fmt_dt(r["last_update"]))}</td>
+                  <td>{blocked_text}</td>
+                  <td>{action_btn}</td>
+                </tr>
+                """
+        else:
+            html += '<tr><td colspan="8">Sin datos.</td></tr>'
+    
+        html += """
+              </tbody>
+            </table>
+          </div>
+        </div>
+        """
+    
+        html += """
+        <div class="box">
+          <div class="head"><strong>Solicitudes recientes</strong></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Dato</th>
+                  <th>Tipo</th>
+                  <th>Estado</th>
+                  <th>Grupo cliente</th>
+                  <th>Proveedor</th>
+                  <th>Grupo proveedor</th>
+                  <th>Mensaje proveedor</th>
+                  <th>Creado</th>
+                  <th>Actualizado</th>
+                  <th>Error</th>
+                </tr>
+              </thead>
+              <tbody>
+        """
+    
+        if latest:
+            for r in latest:
+                status_class = {
+                    "QUEUED": "status-q",
+                    "PROCESSING": "status-p",
+                    "DONE": "status-d",
+                    "ERROR": "status-e",
+                }.get(r.status, "")
+    
+                html += f"""
+                <tr>
+                  <td>{r.id}</td>
+                  <td class="mono">{_esc(r.curp)}</td>
+                  <td>{_esc(r.act_type)}</td>
+                  <td class="{status_class}">{_esc(r.status)}</td>
+                  <td>{_esc(_group_name(r.source_group_id))}</td>
+                  <td>{_esc(r.provider_name)}</td>
+                  <td>{_esc(_group_name(r.provider_group_id))}</td>
+                  <td class="small">{_esc(r.provider_message)}</td>
+                  <td>{_esc(_fmt_dt(r.created_at))}</td>
+                  <td>{_esc(_fmt_dt(r.updated_at))}</td>
+                  <td class="small">{_esc(r.error_message)}</td>
+                </tr>
+                """
+        else:
+            html += '<tr><td colspan="11">Sin solicitudes en este periodo.</td></tr>'
+    
+        html += """
+              </tbody>
+            </table>
+          </div>
+        </div>
+    
+      </div>
+    
+      <script>
+        let broadcastRunning = false;
+    
+        async function toggleProvider(provider, action) {
+          const url = `/panel/provider/${provider}/${action}`;
+    
+          try {
+            const res = await fetch(url, { method: "POST" });
+            const data = await res.json();
+    
+            if (data.ok) {
+              location.reload();
+            } else {
+              alert("Error cambiando proveedor");
             }
-        
-            async function sendFreeBroadcast() {
-              const textarea = document.getElementById("broadcastMessage");
-              const message = textarea.value.trim();
-        
-              if (!message) {
-                alert("Escribe un mensaje");
-                return;
-              }
-        
-              const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
-              if (!ok) return;
+          } catch (e) {
+            alert("No se pudo conectar con el servidor");
+          }
+        }
     
-              broadcastRunning = true;
-        
-              try {
-                const res = await fetch("/panel/broadcast/free", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json"
-                  },
-                  body: JSON.stringify({
-                    message: message
-                  })
-                });
-        
-                const data = await res.json();
-        
-                if (data.ok) {
-                  alert(data.message || "Envío iniciado");
-                  textarea.value = "";
-                } else {
-                  alert(data.error || "Error en envío masivo");
-                }
-              } catch (e) {
-                alert("No se pudo conectar con el servidor");
-              }
+        async function refreshSID() {
+          const sid = prompt("Pega el nuevo PHPSESSID");
+          if (!sid) return;
     
-              broadcastRunning = false;
+          try {
+            const res = await fetch("/panel/provider3/session", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                phpsessid: sid
+              })
+            });
+    
+            const data = await res.json();
+    
+            if (data.ok) {
+              alert("SID actualizada");
+              location.reload();
+            } else {
+              alert(data.error || "Error actualizando SID");
             }
+          } catch (e) {
+            alert("No se pudo conectar con el servidor");
+          }
+        }
+    
+        async function sendBroadcast(type) {
+          const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
+          if (!ok) return;
+
+          broadcastRunning = true;
+    
+          try {
+            const res = await fetch(`/panel/broadcast/${type}`, {
+              method: "POST"
+            });
+    
+            const data = await res.json();
+    
+            if (data.ok) {
+              alert(data.message || "Envío iniciado");
+            } else {
+              alert(data.error || "Error en envío masivo");
+            }
+          } catch (e) {
+            alert("No se pudo conectar con el servidor");
+          }
+
+          broadcastRunning = false;
+        }
+    
+        async function sendFreeBroadcast() {
+          const textarea = document.getElementById("broadcastMessage");
+          const message = textarea.value.trim();
+    
+          if (!message) {
+            alert("Escribe un mensaje");
+            return;
+          }
+    
+          const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
+          if (!ok) return;
+
+          broadcastRunning = true;
+    
+          try {
+            const res = await fetch("/panel/broadcast/free", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                message: message
+              })
+            });
+    
+            const data = await res.json();
+    
+            if (data.ok) {
+              alert(data.message || "Envío iniciado");
+              textarea.value = "";
+            } else {
+              alert(data.error || "Error en envío masivo");
+            }
+          } catch (e) {
+            alert("No se pudo conectar con el servidor");
+          }
+
+          broadcastRunning = false;
+        }
+    
+        function clearBroadcast() {
+          document.getElementById("broadcastMessage").value = "";
+        }
+
+        async function toggleGroupBlock(groupJid, action) {
+          const msg = action === "block"
+            ? "¿Bloquear este grupo? El bot dejará de responder silenciosamente."
+            : "¿Desbloquear este grupo?";
         
-            function clearBroadcast() {
-              document.getElementById("broadcastMessage").value = "";
-            }
-    
-            async function toggleGroupBlock(groupJid, action) {
-              const msg = action === "block"
-                ? "¿Bloquear este grupo? El bot dejará de responder silenciosamente."
-                : "¿Desbloquear este grupo?";
-            
-              const ok = confirm(msg);
-              if (!ok) return;
-            
-              try {
-                const res = await fetch(`/panel/group/${encodeURIComponent(groupJid)}/${action}`, {
-                  method: "POST"
-                });
-            
-                const data = await res.json();
-            
-                if (data.ok) {
-                  location.reload();
-                } else {
-                  alert(data.error || "Error cambiando estado del grupo");
-                }
-              } catch (e) {
-                alert("No se pudo conectar con el servidor");
-              }
-            }
-    
-            async function toggleAllGroups() {
-              const ok = confirm("¿Seguro que deseas cambiar el estado de todos los grupos cliente?");
-              if (!ok) return;
-            
-              try {
-                const res = await fetch("/panel/groups/toggle-all", {
-                  method: "POST"
-                });
-            
-                const data = await res.json();
-            
-                if (data.ok) {
-                  alert(data.message || "Estado actualizado");
-                  location.reload();
-                } else {
-                  alert(data.error || "Error actualizando grupos");
-                }
-              } catch (e) {
-                alert("No se pudo conectar con el servidor");
-              }
-            }
-    
-            async function applySharedPromotion() {
-              const selected = Array.from(document.querySelectorAll(".shared-promo-group:checked"))
-                .map(el => el.value);
-            
-              const promo_name = document.getElementById("sharedPromoName").value || "";
-              const client_key = document.getElementById("sharedPromoClientKey").value || "";
-              const total_actas = Number(document.getElementById("sharedPromoTotalActas").value || 0);
-              const price_per_piece = document.getElementById("sharedPromoPricePerPiece").value || "";
-            
-              if (!selected.length) {
-                alert("Selecciona al menos un grupo");
-                return;
-              }
-            
-              if (!total_actas || total_actas <= 0) {
-                alert("Ingresa un total de actas válido");
-                return;
-              }
-            
-              try {
-                const res = await fetch("/panel/promotions/apply", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json"
-                  },
-                  body: JSON.stringify({
-                    selected_group_jids: selected,
-                    promo_name,
-                    client_key,
-                    total_actas,
-                    price_per_piece
-                  })
-                });
-            
-                const data = await res.json();
-            
-                if (data.ok) {
-                  alert("Promoción compartida aplicada correctamente");
-                  location.reload();
-                } else {
-                  alert(data.error || "No se pudo aplicar la promoción");
-                }
-              } catch (e) {
-                alert("No se pudo conectar con el servidor");
-              }
-            }
+          const ok = confirm(msg);
+          if (!ok) return;
         
-            setInterval(() => {
-              if (!broadcastRunning) {
-                location.reload();
-              }
-            }, 30000);
+          try {
+            const res = await fetch(`/panel/group/${encodeURIComponent(groupJid)}/${action}`, {
+              method: "POST"
+            });
+        
+            const data = await res.json();
+        
+            if (data.ok) {
+              location.reload();
+            } else {
+              alert(data.error || "Error cambiando estado del grupo");
+            }
+          } catch (e) {
+            alert("No se pudo conectar con el servidor");
+          }
+        }
+
+        async function toggleAllGroups() {
+          const ok = confirm("¿Seguro que deseas cambiar el estado de todos los grupos cliente?");
+          if (!ok) return;
+        
+          try {
+            const res = await fetch("/panel/groups/toggle-all", {
+              method: "POST"
+            });
+        
+            const data = await res.json();
+        
+            if (data.ok) {
+              alert(data.message || "Estado actualizado");
+              location.reload();
+            } else {
+              alert(data.error || "Error actualizando grupos");
+            }
+          } catch (e) {
+            alert("No se pudo conectar con el servidor");
+          }
+        }
+
+        async function applySharedPromotion() {
+          const selected = Array.from(document.querySelectorAll(".shared-promo-group:checked"))
+            .map(el => el.value);
+        
+          const promo_name = document.getElementById("sharedPromoName").value || "";
+          const client_key = document.getElementById("sharedPromoClientKey").value || "";
+          const total_actas = Number(document.getElementById("sharedPromoTotalActas").value || 0);
+          const price_per_piece = document.getElementById("sharedPromoPricePerPiece").value || "";
+        
+          if (!selected.length) {
+            alert("Selecciona al menos un grupo");
+            return;
+          }
+        
+          if (!total_actas || total_actas <= 0) {
+            alert("Ingresa un total de actas válido");
+            return;
+          }
+        
+          try {
+            const res = await fetch("/panel/promotions/apply", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                selected_group_jids: selected,
+                promo_name,
+                client_key,
+                total_actas,
+                price_per_piece
+              })
+            });
+        
+            const data = await res.json();
+        
+            if (data.ok) {
+              alert("Promoción compartida aplicada correctamente");
+              location.reload();
+            } else {
+              alert(data.error || "No se pudo aplicar la promoción");
+            }
+          } catch (e) {
+            alert("No se pudo conectar con el servidor");
+          }
+        }
     
-          </script>
-        </body>
-        </html>
-            """
-            return HTMLResponse(content=html)
+        setInterval(() => {
+          if (!broadcastRunning) {
+            location.reload();
+          }
+        }, 30000);
+
+      </script>
+    </body>
+    </html>
+        """
+        return HTMLResponse(content=html)
         
     except Exception as e:
         print("panel_actas error:", repr(e), flush=True)
