@@ -1921,6 +1921,14 @@ def panel_actas(
                     <button class="btn btn-warning" onclick="refreshSID()">Actualizar SID</button>
                   </div>
                 </div>
+
+                <div class="provider-card">
+                  <div class="provider-name">LAZARO WEB</div>
+                  <div class="provider-actions">
+                    <button class="btn btn-success" onclick="toggleProvider('PROVIDER4','on')">Activar</button>
+                    <button class="btn btn-danger" onclick="toggleProvider('PROVIDER4','off')">Desactivar</button>
+                  </div>
+                </div>
               </div>
     
               <div class="status-panel">
@@ -2815,10 +2823,12 @@ def _providers_status_text(db: Session) -> str:
     p1 = _get_or_create_provider(db, "PROVIDER1", True)
     p2 = _get_or_create_provider(db, "PROVIDER2", False)
     p3 = _get_or_create_provider(db, "PROVIDER3", False)
+    p4 = _get_or_create_provider(db, "PROVIDER4", False)
 
     s1 = "ON" if p1.is_enabled else "OFF"
     s2 = "ON" if p2.is_enabled else "OFF"
     s3 = "ON" if p3.is_enabled else "OFF"
+    s4 = "ON" if p4.is_enabled else "OFF"
 
     provider3_extra = ""
 
@@ -2843,7 +2853,8 @@ def _providers_status_text(db: Session) -> str:
     return (
         f"PROVEEDOR WA EMERGENCIA: {s1}\n"
         f"AUSTRAM BOT: {s2}\n"
-        f"AUSTRAM WEB: {s3}{provider3_extra}"
+        f"AUSTRAM WEB: {s3}{provider3_extra}\n"
+        f"LAZARO WEB: {s4}"
     )
 
 
