@@ -1538,6 +1538,7 @@ def _promotion_summary_map(db: Session) -> dict[str, dict]:
             "total_actas": r.total_actas or 0,
             "used_actas": r.used_actas or 0,
             "available": available,
+            "client_key": (r.client_key or "").strip(),
             "html": _promotion_badge_html(r),
         }
 
@@ -2604,11 +2605,18 @@ def panel_actas(
                     is_shared = bool((promo_info.get("client_key") or "").strip())
                     shared_text = "Compartida" if is_shared else "Individual"
                     shared_badge_class = "badge-warning" if is_shared else "badge-light"
+
+                    client_key = (promo_info.get("client_key") or "").strip()
+                    client_line = (
+                        f'<div class="small" style="margin-top:4px;color:#6b7280;">{_esc(client_key)}</div>'
+                        if is_shared and client_key else ""
+                    )
                 
                     promo_cell = f"""
                     <span class="badge {promo_badge_class}">{status}</span>
                     <span class="badge {shared_badge_class}" style="margin-left:6px;">{shared_text}</span><br>
                     <b>{promo_info["used_actas"]} / {promo_info["total_actas"]}</b>
+                    {client_line}
                     """
                 else:
                     promo_cell = f"""
