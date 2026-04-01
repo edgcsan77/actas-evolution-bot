@@ -2117,6 +2117,7 @@ def panel_actas(
                 <button type="submit" class="btn btn-primary">Filtrar</button>
               </div>
             </form>
+            """
         
             html += """
             <div class="box">
@@ -2137,6 +2138,7 @@ def panel_actas(
             
               <div id="sharedPromoGroups" style="max-height:260px;overflow:auto;border:1px solid #ddd;padding:10px;border-radius:12px;background:#fff;">
             """
+            
             for gid, name in GROUP_NAME_MAP.items():
                 html += f'''
                 <label style="display:block;margin-bottom:6px;">
@@ -2144,6 +2146,7 @@ def panel_actas(
                   {_esc(name)}
                 </label>
                 '''
+
             html += """
               </div>
             
