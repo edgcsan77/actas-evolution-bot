@@ -15,10 +15,7 @@ from app.queue import redis_conn
 
 from zoneinfo import ZoneInfo
 
-
-PROVIDER4_TEST_GROUPS = {
-    "120363424360403186@g.us",  # grupo de prueba
-}
+PROVIDER4_TEST_GROUPS = set()
 
 
 def _utc_now_naive():
@@ -308,6 +305,10 @@ def _process_provider3(req, db):
 
 
 def _process_provider4(req, db):
+
+    if PROVIDER4_TEST_GROUPS and req.source_group_id not in PROVIDER4_TEST_GROUPS:
+        raise RuntimeError("PROVIDER4_NOT_ALLOWED_GROUP")
+
     client = Provider4Client()
 
     tipoa = _provider4_tipo_acta(req.act_type)
