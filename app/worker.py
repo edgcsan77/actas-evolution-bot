@@ -9,10 +9,15 @@ from app.services.evolution import send_group_text, send_document_base64, send_g
 from app.config import settings
 from app.utils.curp import provider_label_for_type, is_chain
 from app.utils.provider_format import provider2_command
-from app.services.provider3 import Provider3Client, decode_pdf_base64
+from app.services.provider3 import Provider3Client, decode_pdf_base64, Provider4Client
 from app.queue import redis_conn
 
 from zoneinfo import ZoneInfo
+
+
+PROVIDER4_TEST_GROUPS = {
+    "120363424360403186@g.us",  # grupo de prueba
+}
 
 
 def _utc_now_naive():
@@ -89,6 +94,7 @@ def _enabled_providers(db) -> list[str]:
     p1 = _get_or_create_provider(db, "PROVIDER1", True)
     p2 = _get_or_create_provider(db, "PROVIDER2", False)
     p3 = _get_or_create_provider(db, "PROVIDER3", False)
+    p4 = _get_or_create_provider(db, "PROVIDER4", False)
 
     enabled = []
     if p1.is_enabled:
@@ -97,21 +103,35 @@ def _enabled_providers(db) -> list[str]:
         enabled.append("PROVIDER2")
     if p3.is_enabled:
         enabled.append("PROVIDER3")
+    if p4.is_enabled:
+        enabled.append("PROVIDER4")
 
     return enabled
 
 
-def _pick_provider_name(db, request_id: int) -> str:
+def _pick_provider_name(db, request_id: int, source_group_id: str | None = None) -> str:
     enabled = _enabled_providers(db)
 
     if not enabled:
         raise RuntimeError("NO_PROVIDER_ENABLED")
 
-    if len(enabled) == 1:
-        return enabled[0]
+    # Provider4 solo para grupos de prueba
+    if source_group_id and source_group_id in PROVIDER4_TEST_GROUPS and "PROVIDER4" in enabled:
+        return "PROVIDER4"
 
-    idx = (request_id - 1) % len(enabled)
-    return enabled[idx]
+    # Para todos los demás, excluir PROVIDER4 del reparto normal
+    enabled_without_p4 = [p for p in enabled if p != "PROVIDER4"]
+
+    if not enabled_without_p4:
+        # Si solo está habilitado PROVIDER4 pero el grupo no es de prueba,
+        # evitamos que lo tome otro grupo.
+        raise RuntimeError("PROVIDER4_ONLY_ALLOWED_FOR_TEST_GROUPS")
+
+    if len(enabled_without_p4) == 1:
+        return enabled_without_p4[0]
+
+    idx = (request_id - 1) % len(enabled_without_p4)
+    return enabled_without_p4[idx]
 
 
 def _pick_provider1_group(act_type: str, request_id: int) -> str:
@@ -158,6 +178,9 @@ def _pick_provider_group(provider_name: str, act_type: str, request_id: int) -> 
     if provider_name == "PROVIDER3":
         return None
 
+    if provider_name == "PROVIDER4":
+        return None
+
     raise RuntimeError("UNKNOWN_PROVIDER")
 
 
@@ -170,6 +193,9 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
         return provider2_command(term, act_type)
 
     if provider_name == "PROVIDER3":
+        return None
+
+    if provider_name == "PROVIDER4":
         return None
 
     raise RuntimeError("UNKNOWN_PROVIDER")
@@ -189,6 +215,22 @@ def _provider3_flags(act_type: str) -> dict:
 
 
 def _provider3_tipo_acta(act_type: str) -> str:
+    act_type = (act_type or "").upper().strip()
+
+    mapping = {
+        "NACIMIENTO": "nacimiento",
+        "NACIMIENTO FOLIO": "nacimiento",
+        "MATRIMONIO": "matrimonio",
+        "MATRIMONIO FOLIO": "matrimonio",
+        "DEFUNCION": "defuncion",
+        "DEFUNCION FOLIO": "defuncion",
+        "DIVORCIO": "divorcio",
+        "DIVORCIO FOLIO": "divorcio",
+    }
+    return mapping.get(act_type, "nacimiento")
+
+
+def _provider4_tipo_acta(act_type: str) -> str:
     act_type = (act_type or "").upper().strip()
 
     mapping = {
@@ -261,6 +303,38 @@ def _process_provider3(req, db):
         "remaining": result.get("remaining"),
         "raw_result": result,
         "pdf_bytes": pdf_bytes,
+    }
+
+
+def _process_provider4(req, db):
+    client = Provider4Client()
+
+    tipoa = _provider4_tipo_acta(req.act_type)
+    inc_folio = "FOLIO" in (req.act_type or "").upper().strip()
+
+    if is_chain(req.curp):
+        result_html = client.consultar_por_cadena(
+            cadena=req.curp,
+            tipoa=tipoa,
+            inc_folio=inc_folio,
+        )
+    else:
+        result_html = client.consultar_por_curp(
+            curp=req.curp,
+            tipoa=tipoa,
+            inc_folio=inc_folio,
+        )
+
+    print("PROVIDER4_RESULT_HTML_PREVIEW =", result_html[:1000], flush=True)
+
+    pdf_bytes = client.download_pdf_bytes(
+        term=req.curp,
+        inc_folio=inc_folio,
+    )
+
+    return {
+        "pdf_bytes": pdf_bytes,
+        "raw_result": result_html,
     }
     
 
@@ -365,7 +439,7 @@ def process_request(request_id: int):
         req.updated_at = _utc_now_naive()
         db.commit()
 
-        provider_name = _pick_provider_name(db, req.id)
+        provider_name = _pick_provider_name(db, req.id, req.source_group_id)
         provider_group_id = _pick_provider_group(provider_name, req.act_type, req.id)
         text_to_provider = _build_provider_message(provider_name, req.curp, req.act_type)
 
@@ -463,6 +537,86 @@ def process_request(request_id: int):
             redis_conn.set(delivery_key, "1", ex=3600)
         
             req.provider_media_url = "BASE64_PROVIDER3"
+            req.pdf_url = None
+            req.status = "DONE"
+            req.error_message = None
+            req.updated_at = _utc_now_naive()
+            db.commit()
+        
+            try:
+                _handle_group_promotion_after_done(req, db)
+            except Exception as promo_exc:
+                print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
+        
+            return
+
+        if provider_name == "PROVIDER4":
+            provider4_result = _process_provider4(req, db)
+        
+            pdf_bytes = provider4_result["pdf_bytes"]
+            safe_media_b64 = base64.b64encode(pdf_bytes).decode()
+        
+            total_seconds = max(0.0, time.perf_counter() - process_started_ts)
+        
+            if total_seconds >= 60:
+                minutes = int(total_seconds // 60)
+                seconds = total_seconds % 60
+                tiempo = f"{minutes} min {seconds:.2f} segundos"
+            else:
+                tiempo = f"{total_seconds:.2f} segundos"
+        
+            NO_TIME_CAPTION_GROUPS = {
+                "120363408668441985@g.us",
+                "120363421166637606@g.us",
+            }
+        
+            caption_text = ""
+            if req.source_group_id not in NO_TIME_CAPTION_GROUPS:
+                caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
+        
+            print("PROVIDER4_CAPTION =", caption_text, flush=True)
+        
+            delivery_key = f"provider4_delivery:{req.id}:{req.curp}:{req.source_group_id or req.requester_wa_id}"
+        
+            if redis_conn.exists(delivery_key):
+                print("PROVIDER4_DUPLICATE_DELIVERY_IGNORED =", delivery_key, flush=True)
+                return
+        
+            send_ok = False
+        
+            for attempt in range(3):
+                try:
+                    if req.source_group_id:
+                        send_group_document_base64(
+                            req.source_group_id,
+                            safe_media_b64,
+                            filename=f"{req.curp}.pdf",
+                            caption=caption_text
+                        )
+                    else:
+                        send_document_base64(
+                            req.requester_wa_id,
+                            safe_media_b64,
+                            filename=f"{req.curp}.pdf",
+                            caption=caption_text
+                        )
+        
+                    send_ok = True
+                    print(f"PROVIDER4_SEND_OK_ATTEMPT_{attempt+1} =", req.id, flush=True)
+                    break
+        
+                except Exception as e:
+                    print(f"PROVIDER4_SEND_ATTEMPT_{attempt+1}_ERROR =", str(e), flush=True)
+                    if attempt == 2:
+                        raise
+                    time.sleep(2)
+        
+            if not send_ok:
+                raise RuntimeError("PROVIDER4_PDF_SEND_FAILED")
+        
+            redis_conn.set(delivery_key, "1", ex=3600)
+        
+            req.provider_media_url = "BASE64_PROVIDER4"
             req.pdf_url = None
             req.status = "DONE"
             req.error_message = None
