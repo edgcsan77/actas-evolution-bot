@@ -1966,6 +1966,19 @@ def panel_actas(
                 background: #fef2f2;
                 color: #b91c1c;
               }}
+
+              .shared-promo-actions{{
+                display:flex;
+                justify-content:center;
+                align-items:center;
+                gap:14px;
+                margin-top:18px;
+                padding:12px 0 4px 0;
+              }}
+            
+              .shared-promo-actions .btn{{
+                min-width:220px;
+              }}
             
               @media (max-width: 1200px) {{
                 .grid-hero {{
@@ -2240,12 +2253,18 @@ def panel_actas(
             </label>
             '''
         html += """
-          </div>
+        </div>
         
-          <div class="actions-row" style="margin-top:12px;">
-            <button class="btn btn-success" onclick="applySharedPromotion()">Aplicar promoción compartida</button>
-            <button class="btn btn-light" type="button" onclick="clearSharedPromotionSelection()">Limpiar selección</button>
+          <div class="shared-promo-actions">
+            <button class="btn btn-success" onclick="applySharedPromotion()">
+              Aplicar promoción compartida
+            </button>
+        
+            <button class="btn btn-light" type="button" onclick="clearSharedPromotionSelection()">
+              Limpiar selección
+            </button>
           </div>
+          
         </div>
         """
 
