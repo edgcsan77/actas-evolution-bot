@@ -319,6 +319,8 @@ class Provider4Client:
                 print("PROVIDER4_DOWNLOAD_CONTENT_TYPE =", content_type, flush=True)
 
                 if "pdf" not in content_type and not resp.content.startswith(b"%PDF"):
+                    html_preview = resp.text[:2000] if resp.text else ""
+                    print("PROVIDER4_NON_PDF_HTML_PREVIEW =", html_preview, flush=True)
                     raise RuntimeError(f"PROVIDER4_INVALID_PDF_RESPONSE:{content_type}")
 
                 return resp.content
@@ -334,6 +336,88 @@ class Provider4Client:
 
         raise RuntimeError(f"PROVIDER4_DOWNLOAD_FAILED: {last_error}")
 
+    def _extract_pdf_url_from_html(self, html: str, base_url: str) -> str | None:
+        patterns = [
+            r'window\.location\s*=\s*"([^"]+)"',
+            r"window\.location\s*=\s*'([^']+)'",
+            r'location\.href\s*=\s*"([^"]+)"',
+            r"location\.href\s*=\s*'([^']+)'",
+            r'<meta[^>]+http-equiv=["\']refresh["\'][^>]+content=["\'][^;]+;\s*url=([^"\']+)["\']',
+            r'<iframe[^>]+src=["\']([^"\']+)["\']',
+            r'<embed[^>]+src=["\']([^"\']+)["\']',
+            r'<a[^>]+href=["\']([^"\']+\.pdf[^"\']*)["\']',
+            r'<a[^>]+href=["\']([^"\']*d\.php\?[^"\']*)["\']',
+        ]
+    
+        for pattern in patterns:
+            m = re.search(pattern, html, flags=re.IGNORECASE)
+            if m:
+                return urljoin(base_url, unescape(m.group(1)))
+    
+        return None
+
+    def _download_foliated_pdf(self, url: str) -> bytes:
+        last_error = None
+    
+        for attempt in range(3):
+            try:
+                print(f"PROVIDER4_FOLIO_ATTEMPT_{attempt+1}_URL = {url}", flush=True)
+    
+                resp = self.session.get(
+                    url,
+                    timeout=(15, 240),
+                    headers={
+                        "User-Agent": self.session.headers["User-Agent"],
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        "Referer": self.HISTORY_URL,
+                    },
+                )
+                resp.raise_for_status()
+    
+                content_type = (resp.headers.get("content-type") or "").lower()
+                print("PROVIDER4_FOLIO_CONTENT_TYPE =", content_type, flush=True)
+    
+                if "pdf" in content_type or resp.content.startswith(b"%PDF"):
+                    return resp.content
+    
+                html = resp.text or ""
+                print("PROVIDER4_FOLIO_HTML_PREVIEW =", html[:2000], flush=True)
+    
+                next_url = self._extract_pdf_url_from_html(html, url)
+                if not next_url:
+                    raise RuntimeError("PROVIDER4_FOLIO_NO_NEXT_PDF_URL")
+    
+                print("PROVIDER4_FOLIO_NEXT_URL =", next_url, flush=True)
+    
+                pdf_resp = self.session.get(
+                    next_url,
+                    timeout=(15, 240),
+                    headers={
+                        "User-Agent": self.session.headers["User-Agent"],
+                        "Accept": "*/*",
+                        "Referer": url,
+                    },
+                )
+                pdf_resp.raise_for_status()
+    
+                pdf_content_type = (pdf_resp.headers.get("content-type") or "").lower()
+                print("PROVIDER4_FOLIO_NEXT_CONTENT_TYPE =", pdf_content_type, flush=True)
+    
+                if "pdf" not in pdf_content_type and not pdf_resp.content.startswith(b"%PDF"):
+                    html_preview = pdf_resp.text[:2000] if pdf_resp.text else ""
+                    print("PROVIDER4_FOLIO_NEXT_HTML_PREVIEW =", html_preview, flush=True)
+                    raise RuntimeError(f"PROVIDER4_FOLIO_INVALID_FINAL_RESPONSE:{pdf_content_type}")
+    
+                return pdf_resp.content
+    
+            except Exception as e:
+                last_error = e
+                print(f"PROVIDER4_FOLIO_ATTEMPT_{attempt+1}_ERROR = {str(e)}", flush=True)
+                if attempt < 2:
+                    time.sleep(4)
+    
+        raise RuntimeError(f"PROVIDER4_FOLIO_DOWNLOAD_FAILED: {last_error}")
+    
     def process_and_download(
         self,
         term: str,
