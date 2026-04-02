@@ -1531,11 +1531,16 @@ def panel_group_detail(
             const promoType = document.getElementById("promo_type")?.value || "paid";
             const isCredit = promoType === "credit";
             
-            let creditAbono = document.getElementById("promo_credit_abono")?.value?.trim() || "0";
-            let creditDebe = document.getElementById("promo_credit_debe")?.value?.trim() || "0";
+            let creditAbono = document.getElementById("promo_credit_abono")?.value?.trim() || "";
+            let creditDebe = document.getElementById("promo_credit_debe")?.value?.trim() || "";
             
-            if (creditAbono === "N/A") creditAbono = "0";
-            if (creditDebe === "N/A") creditDebe = "0";
+            if (!isCredit) {
+              creditAbono = "0";
+              creditDebe = "0";
+            } else {
+              if (creditAbono === "") creditAbono = "0";
+              if (creditDebe === "") creditDebe = "0";
+            }
 
             if (!totalActas) {{
               alert("Ingresa el total de actas");
