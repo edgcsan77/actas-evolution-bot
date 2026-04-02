@@ -935,7 +935,7 @@ def panel_promotions_report(db: Session = Depends(get_db)):
       if (!value) return;
 
       try {
-        const res = await fetch(`/panel/group/${groupJid}/credit/abono`, {
+        const res = await fetch(`/panel/group/${groupJid}/promotion/abono`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
