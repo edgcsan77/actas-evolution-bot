@@ -586,18 +586,20 @@ def panel_recent_requests(
 ):
     time_min, time_max, view = _panel_period_bounds(view)
 
-    rows = _query_requests_for_panel(
-        db=db,
-        time_min=time_min,
-        time_max=time_max,
-        group_jid=group_jid or None,
-        provider_name=provider_name or None,
-        status=status or None,
-        act_type=act_type or None,
+    rows = (
+        _query_requests_for_panel(
+            db=db,
+            time_min=time_min,
+            time_max=time_max,
+            group_jid=group_jid or None,
+            provider_name=provider_name or None,
+            status=status or None,
+            act_type=act_type or None,
+        )
+        .order_by(RequestLog.created_at.desc())
+        .limit(5)
+        .all()
     )
-    .order_by(RequestLog.created_at.desc())
-    .limit(5)
-    .all()
 
     html = """
     <table>
