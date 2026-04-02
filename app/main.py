@@ -1315,8 +1315,24 @@ def panel_group_detail(
           background: white;
           color: #1f2937;
           outline: none;
+          box-sizing: border-box;
         }}
         .filters input:focus {{
+          border-color: #334155;
+          box-shadow: 0 0 0 3px rgba(51, 65, 85, .10);
+        }}
+        .filters select {{
+          width: 100%;
+          padding: 11px 12px;
+          border: 1px solid #d1d5db;
+          border-radius: 12px;
+          font: inherit;
+          background: white;
+          color: #1f2937;
+          outline: none;
+          box-sizing: border-box;
+        }}
+        .filters select:focus {{
           border-color: #334155;
           box-shadow: 0 0 0 3px rgba(51, 65, 85, .10);
         }}
@@ -1335,6 +1351,10 @@ def panel_group_detail(
         }}
         .btn-success {{
           background: #166534;
+          color: white;
+        }}
+        .btn-danger {{
+          background: #b91c1c;
           color: white;
         }}
         .small {{
@@ -1363,24 +1383,6 @@ def panel_group_detail(
           font-weight: 800;
           background: #f8fafc;
         }}
-        .filters select {{
-          width: 100%;
-          padding: 11px 12px;
-          border: 1px solid #d1d5db;
-          border-radius: 12px;
-          font: inherit;
-          background: white;
-          color: #1f2937;
-          outline: none;
-        }}
-        .filters select:focus {{
-          border-color: #334155;
-          box-shadow: 0 0 0 3px rgba(51, 65, 85, .10);
-        }}
-        .btn-danger {{
-          background: #b91c1c;
-          color: white;
-        }}
         @media (max-width: 900px) {{
           .filters {{
             grid-template-columns: 1fr;
@@ -1395,11 +1397,12 @@ def panel_group_detail(
           <h1>{_esc(title)}</h1>
           <div class="hero-sub">{_esc(subtitle)}</div>
         </div>
+    """
 
-        html += f"""
+    html += f"""
         <div class="box">
           <div class="head"><strong>Promoción del grupo</strong></div>
-        
+
           <div class="filters" style="grid-template-columns: repeat(5, minmax(0, 1fr));">
             <div>
               <div class="small">Estado</div>
@@ -1422,33 +1425,34 @@ def panel_group_detail(
               <div style="margin-top:8px;font-weight:800;">{promo_price or 'N/D'}</div>
             </div>
           </div>
-        
+
           <div class="filters" style="grid-template-columns: repeat(6, minmax(0, 1fr));">
             <input id="promo_name" placeholder="Nombre de promoción" value="{promo_name}">
-        
+
             <select id="promo_type">
               <option value="paid" {"selected" if not promo_is_credit else ""}>Pagada</option>
               <option value="credit" {"selected" if promo_is_credit else ""}>Crédito</option>
             </select>
-        
+
             <input id="promo_total" placeholder="Total de actas" type="number" min="1" value="{promo_total if promo_total else ''}">
             <input id="promo_price" placeholder="Precio por pieza o bloque" value="{promo_price}">
             <input id="promo_credit_abono" placeholder="Abono" type="number" min="0" value="{promo_credit_abono}">
             <input id="promo_credit_debe" placeholder="Debe" type="number" min="0" value="{promo_credit_debe}">
           </div>
-        
+
           <div class="filters">
             <button type="button" class="btn btn-primary" onclick="savePromotion('{group_jid}')">Guardar promoción</button>
           </div>
-        
+
           <div class="filters" style="grid-template-columns: 1fr 220px 220px;">
             <input id="promo_recharge" placeholder="Recargar actas" type="number" min="1">
             <button type="button" class="btn btn-success" onclick="rechargePromotion('{group_jid}')">Recargar promoción</button>
             <button type="button" class="btn btn-danger" onclick="removePromotion('{group_jid}')">Quitar promoción</button>
           </div>
         </div>
-        """
+    """
 
+    html += f"""
         <div class="box">
           <table>
             <thead>
@@ -1498,17 +1502,17 @@ def panel_group_detail(
             const promoName = document.getElementById("promo_name")?.value?.trim() || "";
             const totalActas = document.getElementById("promo_total")?.value?.trim() || "";
             const pricePerPiece = document.getElementById("promo_price")?.value?.trim() || "";
-        
+
             const promoType = document.getElementById("promo_type")?.value || "paid";
             const isCredit = promoType === "credit";
             const creditAbono = document.getElementById("promo_credit_abono")?.value?.trim() || "0";
             const creditDebe = document.getElementById("promo_credit_debe")?.value?.trim() || "0";
-        
+
             if (!totalActas) {{
               alert("Ingresa el total de actas");
               return;
             }}
-        
+
             try {{
               const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/promotion`, {{
                 method: "POST",
@@ -1524,9 +1528,9 @@ def panel_group_detail(
                   credit_debe: creditDebe
                 }})
               }});
-        
+
               const data = await res.json();
-        
+
               if (data.ok) {{
                 alert(data.message || "Promoción guardada");
                 location.reload();
@@ -1537,25 +1541,25 @@ def panel_group_detail(
               alert("No se pudo conectar con el servidor");
             }}
           }}
-        
+
           function toggleGroupCreditFields() {{
             const promoType = document.getElementById("promo_type");
             const isCredit = promoType && promoType.value === "credit";
-        
+
             const abono = document.getElementById("promo_credit_abono");
             const debe = document.getElementById("promo_credit_debe");
-        
+
             if (abono) {{
               abono.disabled = !isCredit;
               if (!isCredit) abono.value = "0";
             }}
-        
+
             if (debe) {{
               debe.disabled = !isCredit;
               if (!isCredit) debe.value = "0";
             }}
           }}
-        
+
           document.addEventListener("DOMContentLoaded", () => {{
             const promoType = document.getElementById("promo_type");
             if (promoType) {{
@@ -1563,15 +1567,15 @@ def panel_group_detail(
               toggleGroupCreditFields();
             }}
           }});
-        
+
           async function rechargePromotion(groupJid) {{
             const extraActas = document.getElementById("promo_recharge")?.value?.trim() || "";
-        
+
             if (!extraActas) {{
               alert("Ingresa cuántas actas deseas recargar");
               return;
             }}
-        
+
             try {{
               const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/promotion/recharge`, {{
                 method: "POST",
@@ -1582,9 +1586,9 @@ def panel_group_detail(
                   extra_actas: extraActas
                 }})
               }});
-        
+
               const data = await res.json();
-        
+
               if (data.ok) {{
                 alert(data.message || "Recarga aplicada");
                 location.reload();
@@ -1595,18 +1599,18 @@ def panel_group_detail(
               alert("No se pudo conectar con el servidor");
             }}
           }}
-        
+
           async function removePromotion(groupJid) {{
             const ok = confirm("¿Seguro que deseas quitar la promoción de este grupo?");
             if (!ok) return;
-        
+
             try {{
               const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/promotion/remove`, {{
                 method: "POST"
               }});
-        
+
               const data = await res.json();
-        
+
               if (data.ok) {{
                 alert(data.message || "Promoción desactivada");
                 location.reload();
