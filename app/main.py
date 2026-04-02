@@ -1168,7 +1168,6 @@ def panel_promotions_report(db: Session = Depends(get_db)):
         </div>
       </div>
 
-      html += """
       <script>
       async function addCreditAbono(groupJid) {
         const value = prompt("Ingresa el abono:");
@@ -1198,7 +1197,7 @@ def panel_promotions_report(db: Session = Depends(get_db)):
         }
       }
       </script>
-      """
+
     </body>
     </html>
     """
