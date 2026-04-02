@@ -472,15 +472,36 @@ def _handle_group_promotion_after_done(req, db):
     if not req.source_group_id:
         return
 
-    rows = _get_client_promotions(db, req.source_group_id)
+    current = (
+        db.query(GroupPromotion)
+        .filter(
+            GroupPromotion.group_jid == req.source_group_id,
+            GroupPromotion.is_active == True
+        )
+        .first()
+    )
+
+    if not current:
+        return
+
+    shared_key = (current.shared_key or "").strip()
+
+    if shared_key:
+        rows = (
+            db.query(GroupPromotion)
+            .filter(
+                GroupPromotion.shared_key == shared_key,
+                GroupPromotion.is_active == True
+            )
+            .all()
+        )
+    else:
+        rows = [current]
+
     if not rows:
         return
 
-    active_rows = [r for r in rows if getattr(r, "is_active", False)]
-    if not active_rows:
-        return
-
-    leader = active_rows[0]
+    leader = rows[0]
 
     total_before = int(leader.total_actas or 0)
     used_before = int(leader.used_actas or 0)
@@ -506,9 +527,9 @@ def _handle_group_promotion_after_done(req, db):
     if crossed_0:
         msg = (
             f"❌ *Paquete agotado*\n\n"
-            f"Tu paquete promocional compartido ha sido consumido en su totalidad.\n"
+            f"Tu paquete promocional ha sido consumido en su totalidad.\n"
             f"Saldo disponible: *0 actas*.\n\n"
-            f"Todos los grupos asociados a este cliente quedarán bloqueados automáticamente hasta nueva recarga.\n\n"
+            f"{'Todos los grupos asociados a esta bolsa quedarán bloqueados automáticamente hasta nueva recarga.\n\n' if shared_key else ''}"
             f"Quedamos atentos."
         )
         notify_level = "0"
@@ -519,8 +540,8 @@ def _handle_group_promotion_after_done(req, db):
     elif crossed_10:
         msg = (
             f"🚨 *Saldo crítico*\n\n"
-            f"Tu paquete promocional compartido cuenta actualmente con solo *{available_after} actas disponibles*.\n\n"
-            f"Este aviso aplica para todos los grupos asociados a este cliente.\n\n"
+            f"Tu paquete promocional cuenta actualmente con solo *{available_after} actas disponibles*.\n\n"
+            f"{'Este aviso aplica para todos los grupos asociados a esta bolsa.\n\n' if shared_key else ''}"
             f"Quedamos atentos."
         )
         notify_level = "10"
@@ -530,8 +551,8 @@ def _handle_group_promotion_after_done(req, db):
     elif crossed_50:
         msg = (
             f"⚠️ *Aviso importante de saldo*\n\n"
-            f"Tu paquete promocional compartido cuenta actualmente con *{available_after} actas disponibles*.\n\n"
-            f"Este aviso aplica para todos los grupos asociados a este cliente.\n\n"
+            f"Tu paquete promocional cuenta actualmente con *{available_after} actas disponibles*.\n\n"
+            f"{'Este aviso aplica para todos los grupos asociados a esta bolsa.\n\n' if shared_key else ''}"
             f"Quedamos atentos."
         )
         notify_level = "50"
@@ -541,8 +562,8 @@ def _handle_group_promotion_after_done(req, db):
     elif crossed_100:
         msg = (
             f"⚠️ *Aviso de saldo*\n\n"
-            f"Tu paquete promocional compartido cuenta actualmente con *{available_after} actas disponibles*.\n\n"
-            f"Este aviso aplica para todos los grupos asociados a este cliente.\n\n"
+            f"Tu paquete promocional cuenta actualmente con *{available_after} actas disponibles*.\n\n"
+            f"{'Este aviso aplica para todos los grupos asociados a esta bolsa.\n\n' if shared_key else ''}"
             f"Quedamos atentos."
         )
         notify_level = "100"
@@ -552,8 +573,8 @@ def _handle_group_promotion_after_done(req, db):
     elif crossed_200:
         msg = (
             f"ℹ️ *Aviso de saldo*\n\n"
-            f"Actualmente cuentas con *{available_after} actas disponibles* en tu paquete promocional compartido.\n\n"
-            f"Este aviso aplica para todos los grupos asociados a este cliente."
+            f"Actualmente cuentas con *{available_after} actas disponibles* en tu paquete promocional.\n\n"
+            f"{'Este aviso aplica para todos los grupos asociados a esta bolsa.' if shared_key else ''}"
         )
         notify_level = "200"
         for row in rows:
@@ -562,14 +583,27 @@ def _handle_group_promotion_after_done(req, db):
     db.commit()
 
     if crossed_0:
-        _block_client_groups(rows)
+        if shared_key:
+            _block_client_groups(rows)
+        else:
+            try:
+                block_group(current.group_jid)
+            except Exception as e:
+                print("PROMOTION_SINGLE_GROUP_BLOCK_ERROR =", str(e), flush=True)
 
     if msg and notify_level:
-        notify_key = f"promo_notify:{_promo_client_key(leader.group_jid, leader.promo_name, leader.client_key)}:{notify_level}"
+        notify_scope = shared_key if shared_key else current.group_jid
+        notify_key = f"promo_notify:{notify_scope}:{notify_level}"
         first_notify = redis_conn.set(notify_key, "1", ex=1800, nx=True)
 
         if first_notify:
-            _notify_client_groups(rows, msg)
+            if shared_key:
+                _notify_client_groups(rows, msg)
+            else:
+                try:
+                    send_group_text(current.group_jid, msg)
+                except Exception as e:
+                    print("PROMOTION_SINGLE_GROUP_NOTIFY_ERROR =", str(e), flush=True)
         else:
             print("PROMOTION_NOTIFY_DUPLICATE_IGNORED =", notify_key, flush=True)
 
