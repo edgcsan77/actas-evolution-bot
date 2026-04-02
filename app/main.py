@@ -597,7 +597,7 @@ def panel_recent_requests(
             act_type=act_type or None,
         )
         .order_by(RequestLog.created_at.desc())
-        .limit(5)
+        .limit(10)
         .all()
     )
 
