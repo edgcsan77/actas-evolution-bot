@@ -920,7 +920,7 @@ def panel_promotions_report(db: Session = Depends(get_db)):
               <td class="right">{r["used_actas"]}</td>
               <td class="right">{r["disponibles"]}</td>
               <td class="right">
-                <button class="action-btn" onclick="registrarAbono('{_esc(r["group_jid"])}')">
+                <button class="action-btn" onclick="addCreditAbono('{_esc(r["group_jid"])}')">
                   Registrar abono
                 </button>
               </td>
@@ -1179,9 +1179,9 @@ def panel_promotions_report(db: Session = Depends(get_db)):
                 headers: {
                     "Content-Type": "application/json"
                 },
-                body: JSON.stringify({
+                body: JSON.stringify({{
                     amount: value
-                })
+                }})
             });
     
             const data = await res.json();
