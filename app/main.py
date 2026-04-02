@@ -1452,12 +1452,12 @@ def panel_group_detail(
         
             <div>
               <div class="small">Abono</div>
-              <input id="promo_credit_abono" placeholder="" type="number" min="0" value="{promo_credit_abono}">
+              <input id="promo_credit_abono" placeholder="" type="number" min="0" value="{promo_credit_abono if promo_is_credit else 'N/A'}">
             </div>
         
             <div>
               <div class="small">Debe</div>
-              <input id="promo_credit_debe" placeholder="" type="number" min="0" value="{promo_credit_debe}">
+              <input id="promo_credit_debe" placeholder="" type="number" min="0" value="{promo_credit_debe if promo_is_credit else 'N/A'}">
             </div>
           </div>
  
@@ -1526,8 +1526,12 @@ def panel_group_detail(
 
             const promoType = document.getElementById("promo_type")?.value || "paid";
             const isCredit = promoType === "credit";
-            const creditAbono = document.getElementById("promo_credit_abono")?.value?.trim() || "0";
-            const creditDebe = document.getElementById("promo_credit_debe")?.value?.trim() || "0";
+            
+            let creditAbono = document.getElementById("promo_credit_abono")?.value?.trim() || "0";
+            let creditDebe = document.getElementById("promo_credit_debe")?.value?.trim() || "0";
+            
+            if (creditAbono === "N/A") creditAbono = "0";
+            if (creditDebe === "N/A") creditDebe = "0";
 
             if (!totalActas) {{
               alert("Ingresa el total de actas");
@@ -1571,13 +1575,23 @@ def panel_group_detail(
             const debe = document.getElementById("promo_credit_debe");
 
             if (abono) {{
-              abono.disabled = !isCredit;
-              if (!isCredit) abono.value = "0";
+              if (isCredit) {{
+                abono.disabled = false;
+                if (abono.value === "N/A") abono.value = "0";
+              }} else {{
+                abono.disabled = true;
+                abono.value = "N/A";
+              }}
             }}
-
+        
             if (debe) {{
-              debe.disabled = !isCredit;
-              if (!isCredit) debe.value = "0";
+              if (isCredit) {{
+                debe.disabled = false;
+                if (debe.value === "N/A") debe.value = "0";
+              }} else {{
+                debe.disabled = true;
+                debe.value = "N/A";
+              }}
             }}
           }}
 
@@ -2798,27 +2812,27 @@ def panel_actas(
                     <option value="credit">Crédito</option>
                   </select>
                 </div>
-        
+            
                 <div>
                   <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:#374151;">
                     Abono
                   </label>
-                  <input id="sharedPromoCreditAbono" type="number" placeholder="0" value="0">
+                  <input id="sharedPromoCreditAbono" type="text" placeholder="N/A" value="N/A" disabled>
                 </div>
-        
+            
                 <div>
                   <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:#374151;">
                     Debe
                   </label>
-                  <input id="sharedPromoCreditDebe" type="number" placeholder="0" value="0">
+                  <input id="sharedPromoCreditDebe" type="text" placeholder="N/A" value="N/A" disabled>
                 </div>
-        
+            
               </div>
-        
+            
               <div class="helper" style="margin-top:12px;">
                 Selecciona los grupos que usarán la misma bolsa compartida. Si un grupo consume actas, se descuentan del mismo saldo para todos.
               </div>
-        
+            
               <div style="margin-top:10px;font-size:13px;color:#6b7280;">
                 Ejemplo: si 4 grupos comparten una bolsa de 1000 actas y uno consume 50,
                 el saldo disponible será 950 para todos los grupos asociados.
@@ -3376,8 +3390,15 @@ def panel_actas(
         
           const promo_type = document.getElementById("sharedPromoType").value || "paid";
           const is_credit = promo_type === "credit";
-          const credit_abono = Number(document.getElementById("sharedPromoCreditAbono").value || 0);
-          const credit_debe = Number(document.getElementById("sharedPromoCreditDebe").value || 0);
+
+          let credit_abono_raw = document.getElementById("sharedPromoCreditAbono").value || "0";
+          let credit_debe_raw = document.getElementById("sharedPromoCreditDebe").value || "0";
+         
+          if (credit_abono_raw === "N/A") credit_abono_raw = "0";
+          if (credit_debe_raw === "N/A") credit_debe_raw = "0";
+        
+          const credit_abono = Number(credit_abono_raw || 0);
+          const credit_debe = Number(credit_debe_raw || 0);
         
           if (!selected.length) {
             alert("Selecciona al menos un grupo");
@@ -3426,7 +3447,7 @@ def panel_actas(
           }
         }
 
-        function toggleCreditFields() {
+        function toggleSharedPromoCreditFields() {
           const promoType = document.getElementById("sharedPromoType");
           const isCredit = promoType && promoType.value === "credit";
         
@@ -3434,21 +3455,31 @@ def panel_actas(
           const debe = document.getElementById("sharedPromoCreditDebe");
         
           if (abono) {
-            abono.disabled = !isCredit;
-            if (!isCredit) abono.value = "0";
+            if (isCredit) {
+              abono.disabled = false;
+              if (abono.value === "N/A") abono.value = "0";
+            } else {
+              abono.disabled = true;
+              abono.value = "N/A";
+            }
           }
         
           if (debe) {
-            debe.disabled = !isCredit;
-            if (!isCredit) debe.value = "0";
+            if (isCredit) {
+              debe.disabled = false;
+              if (debe.value === "N/A") debe.value = "0";
+            } else {
+              debe.disabled = true;
+              debe.value = "N/A";
+            }
           }
         }
         
         document.addEventListener("DOMContentLoaded", () => {
           const promoType = document.getElementById("sharedPromoType");
           if (promoType) {
-            promoType.addEventListener("change", toggleCreditFields);
-            toggleCreditFields();
+            promoType.addEventListener("change", toggleSharedPromoCreditFields);
+            toggleSharedPromoCreditFields();
           }
         });
 
@@ -3500,8 +3531,7 @@ def panel_actas(
 
           const sections = [
             "grupoClienteBody",
-            "promoCompartidaBody",
-            "solicitudesRecientesBody"
+            "promoCompartidaBody"
           ];
         
           sections.forEach(id => {
