@@ -941,7 +941,7 @@ def panel_promotions_report(db: Session = Depends(get_db)):
             "Content-Type": "application/json"
           },
           body: JSON.stringify({
-            amount: value
+            abono: Number(value)
           })
         });
 
