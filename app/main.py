@@ -1168,41 +1168,37 @@ def panel_promotions_report(db: Session = Depends(get_db)):
         </div>
       </div>
 
+      html += """
       <script>
-          async function registrarAbono(groupJid) {
-            const value = prompt("Ingresa el abono:");
-            if (!value) return;
-        
-            const abono = Number(value);
-            if (!abono || abono <= 0) {
-              alert("Ingresa un abono válido");
-              return;
-            }
-        
-            try {
-              const res = await fetch(`/panel/group/${encodeURIComponent(groupJid)}/promotion/abono`, {
+      async function addCreditAbono(groupJid) {
+        const value = prompt("Ingresa el abono:");
+        if (!value) return;
+    
+        try {
+            const res = await fetch(`/panel/group/${groupJid}/credit/abono`, {
                 method: "POST",
                 headers: {
-                  "Content-Type": "application/json"
+                    "Content-Type": "application/json"
                 },
                 body: JSON.stringify({
-                  abono: abono
+                    amount: value
                 })
-              });
-        
-              const data = await res.json();
-        
-              if (data.ok) {
-                alert(data.message || "Abono registrado");
+            });
+    
+            const data = await res.json();
+    
+            if (data.ok) {
+                alert("Abono registrado");
                 location.reload();
-              } else {
-                alert(data.error || "No se pudo registrar el abono");
-              }
-            } catch (e) {
-              alert("No se pudo conectar con el servidor");
+            } else {
+                alert(data.error || "Error registrando abono");
             }
-          }
+        } catch (e) {
+            alert("Error de conexión");
+        }
+      }
       </script>
+      """
     </body>
     </html>
     """
