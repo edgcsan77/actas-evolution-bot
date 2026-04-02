@@ -2,6 +2,9 @@ import base64
 import time
 import re
 import random
+import uuid
+from urllib.parse import urljoin
+from html import unescape
 from datetime import datetime, timezone
 
 from app.db import SessionLocal
@@ -444,28 +447,46 @@ def _process_provider3(req, db):
 
 
 def _process_provider4(req, db):
-
     if not _is_curp_term(req.curp):
         raise RuntimeError("PROVIDER4_NOT_CURP")
 
     if PROVIDER4_TEST_GROUPS and req.source_group_id not in PROVIDER4_TEST_GROUPS:
         raise RuntimeError("PROVIDER4_NOT_ALLOWED_GROUP")
 
-    client = Provider4Client()
+    lock_key = "provider4:global_lock"
+    lock_token = str(uuid.uuid4())
+    lock_acquired = redis_conn.set(lock_key, lock_token, nx=True, ex=180)
 
-    tipoa = _provider4_tipo_acta(req.act_type)
-    inc_folio = "FOLIO" in (req.act_type or "").upper().strip()
+    if not lock_acquired:
+        raise RuntimeError("PROVIDER4_BUSY_LOCKED")
 
-    pdf_bytes = client.process_and_download(
-        term=req.curp,
-        tipoa=tipoa,
-        inc_folio=inc_folio,
-        is_chain=False,
-    )
+    try:
+        client = Provider4Client()
 
-    return {
-        "pdf_bytes": pdf_bytes,
-    }
+        tipoa = _provider4_tipo_acta(req.act_type)
+        inc_folio = "FOLIO" in (req.act_type or "").upper().strip()
+
+        pdf_bytes = client.process_and_download(
+            term=req.curp,
+            tipoa=tipoa,
+            inc_folio=inc_folio,
+            is_chain=False,
+        )
+
+        return {
+            "pdf_bytes": pdf_bytes,
+        }
+
+    finally:
+        try:
+            current_lock_val = redis_conn.get(lock_key)
+            if isinstance(current_lock_val, bytes):
+                current_lock_val = current_lock_val.decode(errors="ignore")
+
+            if current_lock_val == lock_token:
+                redis_conn.delete(lock_key)
+        except Exception as e:
+            print("PROVIDER4_LOCK_RELEASE_ERROR =", str(e), flush=True)
     
 
 def _handle_group_promotion_after_done(req, db):
@@ -626,6 +647,19 @@ def _start_provider3_flow(req, db):
     send_group_text(provider_group_id, text_to_provider)
 
 
+def _validate_pdf_matches_term(pdf_bytes: bytes, term: str) -> bool:
+    try:
+        text = pdf_bytes.decode(errors="ignore").upper()
+    except Exception:
+        return False
+
+    term_up = (term or "").strip().upper()
+    if not term_up:
+        return True
+
+    return term_up in text
+
+
 def _validate_act_type_pdf(pdf_bytes: bytes, act_type: str | None) -> bool:
     try:
         text = pdf_bytes.decode(errors="ignore").upper()
@@ -634,29 +668,39 @@ def _validate_act_type_pdf(pdf_bytes: bytes, act_type: str | None) -> bool:
 
     act_type = (act_type or "").upper()
 
-    # Si no hay texto suficiente en el PDF, no bloquear
     if not text or len(text.strip()) < 100:
         return True
 
     if "NAC" in act_type:
-        if "MATRIMONIO" in text or "DIVORCIO" in text or "DEFUNCION" in text or "DEFUNCIÓN" in text:
-            return False
-        return True
+        return not (
+            "MATRIMONIO" in text
+            or "DIVORCIO" in text
+            or "DEFUNCION" in text
+            or "DEFUNCIÓN" in text
+        )
 
     if "MAT" in act_type:
-        if "NACIMIENTO" in text or "DIVORCIO" in text or "DEFUNCION" in text or "DEFUNCIÓN" in text:
-            return False
-        return True
+        return not (
+            "NACIMIENTO" in text
+            or "DIVORCIO" in text
+            or "DEFUNCION" in text
+            or "DEFUNCIÓN" in text
+        )
 
     if "DIV" in act_type:
-        if "NACIMIENTO" in text or "MATRIMONIO" in text or "DEFUNCION" in text or "DEFUNCIÓN" in text:
-            return False
-        return True
+        return not (
+            "NACIMIENTO" in text
+            or "MATRIMONIO" in text
+            or "DEFUNCION" in text
+            or "DEFUNCIÓN" in text
+        )
 
     if "DEF" in act_type:
-        if "NACIMIENTO" in text or "MATRIMONIO" in text or "DIVORCIO" in text:
-            return False
-        return True
+        return not (
+            "NACIMIENTO" in text
+            or "MATRIMONIO" in text
+            or "DIVORCIO" in text
+        )
 
     return True
 
@@ -819,9 +863,12 @@ def process_request(request_id: int):
         
             try:
                 provider4_result = _process_provider4(req, db)
-        
+
                 pdf_bytes = provider4_result["pdf_bytes"]
-        
+                
+                if not _validate_pdf_matches_term(pdf_bytes, req.curp):
+                    raise RuntimeError("PROVIDER4_WRONG_CURP_IN_PDF")
+                
                 if not _validate_act_type_pdf(pdf_bytes, req.act_type):
                     raise RuntimeError("PROVIDER4_WRONG_ACT_TYPE")
         
@@ -864,12 +911,15 @@ def process_request(request_id: int):
                     or p4_err.startswith("PROVIDER4_DOWNLOAD_FAILED:")
                     or p4_err.startswith("PROVIDER4_FOLIO_DOWNLOAD_FAILED:")
                     or p4_err.startswith("PROVIDER4_WRONG_ACT_TYPE")
+                    or p4_err.startswith("PROVIDER4_WRONG_CURP_IN_PDF")
+                    or p4_err.startswith("PROVIDER4_BUSY_LOCKED")
                     or "Read timed out" in p4_err
                 )
         
-                # WRONG_ACT_TYPE debe caer a Provider3 aunque haya tardado poco
                 should_fallback = (
                     p4_err.startswith("PROVIDER4_WRONG_ACT_TYPE")
+                    or p4_err.startswith("PROVIDER4_WRONG_CURP_IN_PDF")
+                    or p4_err.startswith("PROVIDER4_BUSY_LOCKED")
                     or (fallback_errors and p4_elapsed >= 90)
                 )
         
