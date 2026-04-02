@@ -1534,13 +1534,13 @@ def panel_group_detail(
             let creditAbono = document.getElementById("promo_credit_abono")?.value?.trim() || "";
             let creditDebe = document.getElementById("promo_credit_debe")?.value?.trim() || "";
             
-            if (!isCredit) {
+            if (!isCredit) {{
               creditAbono = "0";
               creditDebe = "0";
-            } else {
+            }} else {{
               if (creditAbono === "") creditAbono = "0";
               if (creditDebe === "") creditDebe = "0";
-            }
+            }}
 
             if (!totalActas) {{
               alert("Ingresa el total de actas");
@@ -2826,14 +2826,14 @@ def panel_actas(
                   <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:#374151;">
                     Abono
                   </label>
-                  <input id="sharedPromoCreditAbono" type="text" placeholder="N/A" value="N/A" disabled>
+                  <input id="sharedPromoCreditAbono" type="number" min="0" placeholder="N/A" value="" disabled>
                 </div>
             
                 <div>
                   <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:#374151;">
                     Debe
                   </label>
-                  <input id="sharedPromoCreditDebe" type="text" placeholder="N/A" value="N/A" disabled>
+                  <input id="sharedPromoCreditDebe" type="number" min="0" placeholder="N/A" value="" disabled>
                 </div>
             
               </div>
@@ -3399,15 +3399,20 @@ def panel_actas(
         
           const promo_type = document.getElementById("sharedPromoType").value || "paid";
           const is_credit = promo_type === "credit";
-
-          let credit_abono_raw = document.getElementById("sharedPromoCreditAbono").value || "0";
-          let credit_debe_raw = document.getElementById("sharedPromoCreditDebe").value || "0";
-         
-          if (credit_abono_raw === "N/A") credit_abono_raw = "0";
-          if (credit_debe_raw === "N/A") credit_debe_raw = "0";
         
-          const credit_abono = Number(credit_abono_raw || 0);
-          const credit_debe = Number(credit_debe_raw || 0);
+          let credit_abono_raw = document.getElementById("sharedPromoCreditAbono").value || "";
+          let credit_debe_raw = document.getElementById("sharedPromoCreditDebe").value || "";
+        
+          if (!is_credit) {
+            credit_abono_raw = "0";
+            credit_debe_raw = "0";
+          } else {
+            if (credit_abono_raw === "") credit_abono_raw = "0";
+            if (credit_debe_raw === "") credit_debe_raw = "0";
+          }
+        
+          const credit_abono = Number(credit_abono_raw);
+          const credit_debe = Number(credit_debe_raw);
         
           if (!selected.length) {
             alert("Selecciona al menos un grupo");
@@ -3466,20 +3471,20 @@ def panel_actas(
           if (abono) {
             if (isCredit) {
               abono.disabled = false;
-              if (abono.value === "N/A") abono.value = "0";
+              if (!abono.value) abono.value = 0;
             } else {
               abono.disabled = true;
-              abono.value = "N/A";
+              abono.value = "";
             }
           }
         
           if (debe) {
             if (isCredit) {
               debe.disabled = false;
-              if (debe.value === "N/A") debe.value = "0";
+              if (!debe.value) debe.value = 0;
             } else {
               debe.disabled = true;
-              debe.value = "N/A";
+              debe.value = "";
             }
           }
         }
