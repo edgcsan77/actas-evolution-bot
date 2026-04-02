@@ -221,93 +221,72 @@ class Provider4Client:
 
         raise RuntimeError(f"PROVIDER4_HISTORY_FAILED: {last_error}")
 
-    def _folio_pdf_direct_url(self, term: str, tipoa: str) -> str:
-        tipo_map = {
-            "nacimiento": "NAC",
-            "matrimonio": "MAT",
-            "defuncion": "DEF",
-            "divorcio": "DIV",
-        }
-        code = tipo_map.get((tipoa or "").strip().lower(), "NAC")
-        return f"{self.BASE_URL}/servicio/ActasN/{term}_{code}_FOLIO.pdf"
+    def _extract_rows(self, history_html: str) -> list[str]:
+        return re.findall(
+            r"<tr[^>]*>.*?</tr>",
+            history_html,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
 
-    def _normal_pdf_direct_url(self, term: str, tipoa: str) -> str:
-        tipo_map = {
-            "nacimiento": "NAC",
-            "matrimonio": "MAT",
-            "defuncion": "DEF",
-            "divorcio": "DIV",
-        }
-        code = tipo_map.get((tipoa or "").strip().lower(), "NAC")
-        return f"{self.BASE_URL}/servicio/d.php?f={term}_{code}"
-    
     def _history_row_for_term(self, history_html: str, term: str) -> str | None:
-        term = (term or "").strip().upper()
-        row_pattern = rf"<tr>.*?{re.escape(term)}.*?</tr>"
-        m = re.search(row_pattern, history_html, flags=re.IGNORECASE | re.DOTALL)
-        return m.group(0) if m else None
-    
+        term_up = (term or "").strip().upper()
+        if not term_up:
+            return None
+
+        rows = self._extract_rows(history_html)
+
+        for row_html in rows:
+            row_up = row_html.upper()
+            if term_up in row_up:
+                return row_html
+
+        return None
+
     def _detect_no_result(self, history_html: str, term: str) -> bool:
         row_html = self._history_row_for_term(history_html, term)
-    
+
         if not row_html:
             return False
-    
+
         row_up = row_html.upper()
-    
+
         if "NO_LOCALIZADO" in row_up:
             print("PROVIDER4_NO_RECORD_DETECTED =", term, flush=True)
             return True
-    
+
         return False
-    
-    def _extract_pdf_link(self, history_html: str, term: str) -> str | None:
-        term = (term or "").strip().upper()
 
-        row_pattern = rf"<tr>.*?{re.escape(term)}.*?</tr>"
-        row_match = re.search(row_pattern, history_html, flags=re.IGNORECASE | re.DOTALL)
-
-        if row_match:
-            row_html = row_match.group(0)
-            m = re.search(r'href="(\./d\.php\?f=[^"]+)"', row_html, flags=re.IGNORECASE)
-            if m:
-                return urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
-
+    def _extract_pdf_link_from_row(self, row_html: str) -> str | None:
         m = re.search(
-            rf'href="(\./d\.php\?f=[^"]*{re.escape(term)}[^"]*)"',
-            history_html,
+            r'href="(\./d\.php\?f=[^"]+)"',
+            row_html,
             flags=re.IGNORECASE,
         )
         if m:
             return urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
-
         return None
 
-    def _extract_folio_link(self, history_html: str, term: str) -> str | None:
-        term = (term or "").strip().upper()
-
-        row_pattern = rf"<tr>.*?{re.escape(term)}.*?</tr>"
-        row_match = re.search(row_pattern, history_html, flags=re.IGNORECASE | re.DOTALL)
-
-        if row_match:
-            row_html = row_match.group(0)
-            m = re.search(
-                r'href="(\./ActasN/addFol\.php\?[^"]+)"',
-                row_html,
-                flags=re.IGNORECASE,
-            )
-            if m:
-                return urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
-
+    def _extract_folio_link_from_row(self, row_html: str) -> str | None:
         m = re.search(
             r'href="(\./ActasN/addFol\.php\?[^"]+)"',
-            history_html,
+            row_html,
             flags=re.IGNORECASE,
         )
         if m:
             return urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
-
         return None
+
+    def _pdf_matches_term(self, pdf_bytes: bytes, term: str) -> bool:
+        try:
+            text = pdf_bytes.decode(errors="ignore").upper()
+        except Exception:
+            return False
+
+        term_up = (term or "").strip().upper()
+        if not term_up:
+            return True
+
+        return term_up in text
 
     def download_pdf_bytes(self, url: str) -> bytes:
         last_error = None
@@ -360,21 +339,21 @@ class Provider4Client:
             r'<a[^>]+href=["\']([^"\']+\.pdf[^"\']*)["\']',
             r'<a[^>]+href=["\']([^"\']*d\.php\?[^"\']*)["\']',
         ]
-    
+
         for pattern in patterns:
             m = re.search(pattern, html, flags=re.IGNORECASE)
             if m:
                 return urljoin(base_url, unescape(m.group(1)))
-    
+
         return None
 
     def _download_foliated_pdf(self, url: str) -> bytes:
         last_error = None
-    
+
         for attempt in range(3):
             try:
                 print(f"PROVIDER4_FOLIO_ATTEMPT_{attempt+1}_URL = {url}", flush=True)
-    
+
                 resp = self.session.get(
                     url,
                     timeout=(15, 240),
@@ -385,22 +364,22 @@ class Provider4Client:
                     },
                 )
                 resp.raise_for_status()
-    
+
                 content_type = (resp.headers.get("content-type") or "").lower()
                 print("PROVIDER4_FOLIO_CONTENT_TYPE =", content_type, flush=True)
-    
+
                 if "pdf" in content_type or resp.content.startswith(b"%PDF"):
                     return resp.content
-    
+
                 html = resp.text or ""
                 print("PROVIDER4_FOLIO_HTML_PREVIEW =", html[:2000], flush=True)
-    
+
                 next_url = self._extract_pdf_url_from_html(html, url)
                 if not next_url:
                     raise RuntimeError("PROVIDER4_FOLIO_NO_NEXT_PDF_URL")
-    
+
                 print("PROVIDER4_FOLIO_NEXT_URL =", next_url, flush=True)
-    
+
                 pdf_resp = self.session.get(
                     next_url,
                     timeout=(15, 240),
@@ -411,25 +390,25 @@ class Provider4Client:
                     },
                 )
                 pdf_resp.raise_for_status()
-    
+
                 pdf_content_type = (pdf_resp.headers.get("content-type") or "").lower()
                 print("PROVIDER4_FOLIO_NEXT_CONTENT_TYPE =", pdf_content_type, flush=True)
-    
+
                 if "pdf" not in pdf_content_type and not pdf_resp.content.startswith(b"%PDF"):
                     html_preview = pdf_resp.text[:2000] if pdf_resp.text else ""
                     print("PROVIDER4_FOLIO_NEXT_HTML_PREVIEW =", html_preview, flush=True)
                     raise RuntimeError(f"PROVIDER4_FOLIO_INVALID_FINAL_RESPONSE:{pdf_content_type}")
-    
+
                 return pdf_resp.content
-    
+
             except Exception as e:
                 last_error = e
                 print(f"PROVIDER4_FOLIO_ATTEMPT_{attempt+1}_ERROR = {str(e)}", flush=True)
                 if attempt < 2:
                     time.sleep(4)
-    
+
         raise RuntimeError(f"PROVIDER4_FOLIO_DOWNLOAD_FAILED: {last_error}")
-    
+
     def process_and_download(
         self,
         term: str,
@@ -449,36 +428,15 @@ class Provider4Client:
                 tipoa=tipoa,
                 inc_folio=inc_folio,
             )
-    
+
         print("PROVIDER4_BACKEND_HTML_PREVIEW =", html[:1200], flush=True)
-    
+
         vget_html = self.submit_vget_form(html)
         print("PROVIDER4_VGET_HTML_PREVIEW =", vget_html[:1200], flush=True)
-    
+
         max_polls = self.HISTORY_MAX_POLLS
         poll_sleep_seconds = self.HISTORY_POLL_SLEEP
-    
-        early_direct_pdf_bytes = None
-    
-        if inc_folio:
-            direct_folio_url = self._folio_pdf_direct_url(term, tipoa)
-            print("PROVIDER4_DIRECT_FOLIO_URL =", direct_folio_url, flush=True)
-    
-            try:
-                early_direct_pdf_bytes = self.download_pdf_bytes(direct_folio_url)
-                print("PROVIDER4_DIRECT_FOLIO_EARLY_PDF_READY = TRUE", flush=True)
-            except Exception as direct_exc:
-                print("PROVIDER4_DIRECT_FOLIO_FAILED =", str(direct_exc), flush=True)
-        else:
-            direct_normal_url = self._normal_pdf_direct_url(term, tipoa)
-            print("PROVIDER4_DIRECT_NORMAL_URL =", direct_normal_url, flush=True)
-    
-            try:
-                early_direct_pdf_bytes = self.download_pdf_bytes(direct_normal_url)
-                print("PROVIDER4_DIRECT_NORMAL_EARLY_PDF_READY = TRUE", flush=True)
-            except Exception as direct_exc:
-                print("PROVIDER4_DIRECT_NORMAL_FAILED =", str(direct_exc), flush=True)
-    
+
         for poll_attempt in range(max_polls):
             history_html = self.get_history_html()
             print(
@@ -486,63 +444,45 @@ class Provider4Client:
                 history_html[:1500],
                 flush=True,
             )
-    
+
             if self._detect_no_result(history_html, term):
                 raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
-    
+
             row_html = self._history_row_for_term(history_html, term)
-    
-            if inc_folio:
-                if row_html:
-                    link = self._extract_folio_link(history_html, term)
+
+            if row_html:
+                if inc_folio:
+                    link = self._extract_folio_link_from_row(row_html)
                     if link:
                         print("PROVIDER4_FINAL_FOLIO_LINK =", link, flush=True)
-                        return self._download_foliated_pdf(link)
-    
-                    try:
-                        return self.download_pdf_bytes(direct_folio_url)
-                    except Exception as direct_retry_exc:
-                        print("PROVIDER4_DIRECT_FOLIO_RETRY_FAILED =", str(direct_retry_exc), flush=True)
-    
-                    if early_direct_pdf_bytes:
-                        print("PROVIDER4_USING_EARLY_DIRECT_FOLIO_PDF_AS_FALLBACK = TRUE", flush=True)
-                        return early_direct_pdf_bytes
-    
-            else:
-                if row_html:
-                    link = self._extract_pdf_link(history_html, term)
+                        pdf_bytes = self._download_foliated_pdf(link)
+
+                        if not self._pdf_matches_term(pdf_bytes, term):
+                            raise RuntimeError(f"PROVIDER4_WRONG_CURP_IN_PDF:{term}")
+
+                        return pdf_bytes
+                else:
+                    link = self._extract_pdf_link_from_row(row_html)
                     if link:
                         print("PROVIDER4_FINAL_DOWNLOAD_LINK =", link, flush=True)
-                        return self.download_pdf_bytes(link)
-    
-                    try:
-                        return self.download_pdf_bytes(direct_normal_url)
-                    except Exception as direct_retry_exc:
-                        print("PROVIDER4_DIRECT_NORMAL_RETRY_FAILED =", str(direct_retry_exc), flush=True)
-    
-                    if early_direct_pdf_bytes:
-                        print("PROVIDER4_USING_EARLY_DIRECT_PDF_AS_FALLBACK = TRUE", flush=True)
-                        return early_direct_pdf_bytes
-    
+                        pdf_bytes = self.download_pdf_bytes(link)
+
+                        if not self._pdf_matches_term(pdf_bytes, term):
+                            raise RuntimeError(f"PROVIDER4_WRONG_CURP_IN_PDF:{term}")
+
+                        return pdf_bytes
+
             print(
                 f"PROVIDER4_HISTORY_LINK_NOT_READY_ATTEMPT_{poll_attempt+1} = {term}",
                 flush=True,
             )
             time.sleep(poll_sleep_seconds)
-    
+
         final_history_html = self.get_history_html()
-    
+
         if self._detect_no_result(final_history_html, term):
             raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
-    
-        if inc_folio and early_direct_pdf_bytes:
-            print("PROVIDER4_FINAL_USING_EARLY_DIRECT_FOLIO_PDF = TRUE", flush=True)
-            return early_direct_pdf_bytes
-    
-        if not inc_folio and early_direct_pdf_bytes:
-            print("PROVIDER4_FINAL_USING_EARLY_DIRECT_PDF = TRUE", flush=True)
-            return early_direct_pdf_bytes
-    
+
         if inc_folio:
             raise RuntimeError(f"PROVIDER4_NO_FOLIO_LINK_FOR:{term}")
         else:
