@@ -88,6 +88,10 @@ class GroupPromotion(Base):
     price_per_piece = Column(String(30), nullable=True)
     shared_key = Column(String(255), nullable=True, index=True)
 
+    is_credit = Column(Boolean, default=False, nullable=False)
+    credit_abono = Column(Integer, nullable=False, default=0)
+    credit_debe = Column(Integer, nullable=False, default=0)
+
     warning_sent_200 = Column(Boolean, default=False, nullable=False)
     warning_sent_100 = Column(Boolean, default=False, nullable=False)
     warning_sent_50 = Column(Boolean, default=False, nullable=False)
