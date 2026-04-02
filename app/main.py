@@ -2346,7 +2346,7 @@ def panel_actas(
           <div id="promoCompartidaBody" class="collapsible-body closed">
             <div class="filters" style="margin-bottom:12px;">
               <input id="sharedPromoName" placeholder="Nombre de promoción">
-              <input id="sharedPromoClientKey" placeholder="Bolsa compartida">
+              <input id="sharedPromoClientKey" placeholder="Nombre de bolsa compartida">
               <input id="sharedPromoTotalActas" type="number" placeholder="Total de actas">
               <input id="sharedPromoPricePerPiece" placeholder="Precio por pieza">
             </div>
