@@ -907,7 +907,7 @@ def panel_promotions_report(db: Session = Depends(get_db)):
     def render_credito_rows(items: list[dict]) -> str:
         if not items:
             return '<tr><td colspan="8">Sin registros.</td></tr>'
-    
+
         html = ""
         for i, r in enumerate(items, start=1):
             html += f"""
@@ -927,6 +927,38 @@ def panel_promotions_report(db: Session = Depends(get_db)):
             </tr>
             """
         return html
+
+    script_js = """
+    <script>
+    async function addCreditAbono(groupJid) {
+      const value = prompt("Ingresa el abono:");
+      if (!value) return;
+
+      try {
+        const res = await fetch(`/panel/group/${groupJid}/credit/abono`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            amount: value
+          })
+        });
+
+        const data = await res.json();
+
+        if (data.ok) {
+          alert("Abono registrado");
+          location.reload();
+        } else {
+          alert(data.error || "Error registrando abono");
+        }
+      } catch (e) {
+        alert("Error de conexión");
+      }
+    }
+    </script>
+    """
 
     html = f"""
     <!doctype html>
@@ -1079,7 +1111,7 @@ def panel_promotions_report(db: Session = Depends(get_db)):
           font-weight: 700;
           cursor: pointer;
         }}
-        
+
         .action-btn:hover {{
           opacity: .92;
         }}
@@ -1131,7 +1163,6 @@ def panel_promotions_report(db: Session = Depends(get_db)):
                   <th class="right">Actas consumidas</th>
                   <th class="right">Restan</th>
                   <th class="right">Precio</th>
-                  <th class="right">Acción</th>
                 </tr>
               </thead>
               <tbody>
@@ -1158,6 +1189,7 @@ def panel_promotions_report(db: Session = Depends(get_db)):
                   <th class="right">Debe</th>
                   <th class="right">Actas consumidas</th>
                   <th class="right">Restan</th>
+                  <th class="right">Acción</th>
                 </tr>
               </thead>
               <tbody>
@@ -1168,36 +1200,7 @@ def panel_promotions_report(db: Session = Depends(get_db)):
         </div>
       </div>
 
-      <script>
-      async function addCreditAbono(groupJid) {
-        const value = prompt("Ingresa el abono:");
-        if (!value) return;
-    
-        try {
-            const res = await fetch(`/panel/group/${groupJid}/credit/abono`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({{
-                    amount: value
-                }})
-            });
-    
-            const data = await res.json();
-    
-            if (data.ok) {
-                alert("Abono registrado");
-                location.reload();
-            } else {
-                alert(data.error || "Error registrando abono");
-            }
-        } catch (e) {
-            alert("Error de conexión");
-        }
-      }
-      </script>
-
+      {script_js}
     </body>
     </html>
     """
