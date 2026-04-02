@@ -601,6 +601,8 @@ def panel_recent_requests(
         .all()
     )
 
+    latest = rows
+    
     html = """
     <table>
       <thead>
