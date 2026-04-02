@@ -1427,19 +1427,40 @@ def panel_group_detail(
           </div>
 
           <div class="filters" style="grid-template-columns: repeat(6, minmax(0, 1fr));">
-            <input id="promo_name" placeholder="Nombre de promoción" value="{promo_name}">
-
-            <select id="promo_type">
-              <option value="paid" {"selected" if not promo_is_credit else ""}>Pagada</option>
-              <option value="credit" {"selected" if promo_is_credit else ""}>Crédito</option>
-            </select>
-
-            <input id="promo_total" placeholder="Total de actas" type="number" min="1" value="{promo_total if promo_total else ''}">
-            <input id="promo_price" placeholder="Precio por pieza o bloque" value="{promo_price}">
-            <input id="promo_credit_abono" placeholder="Abono" type="number" min="0" value="{promo_credit_abono}">
-            <input id="promo_credit_debe" placeholder="Debe" type="number" min="0" value="{promo_credit_debe}">
+            <div>
+              <div class="small">Nombre de promoción</div>
+              <input id="promo_name" placeholder="Nombre de promoción" value="{promo_name}">
+            </div>
+        
+            <div>
+              <div class="small">Tipo</div>
+              <select id="promo_type">
+                <option value="paid" {"selected" if not promo_is_credit else ""}>Pagada</option>
+                <option value="credit" {"selected" if promo_is_credit else ""}>Crédito</option>
+              </select>
+            </div>
+        
+            <div>
+              <div class="small">Total de actas</div>
+              <input id="promo_total" placeholder="Total de actas" type="number" min="1" value="{promo_total if promo_total else ''}">
+            </div>
+          
+            <div>
+              <div class="small">Precio por pieza o bloque</div>
+              <input id="promo_price" placeholder="Precio por pieza o bloque" value="{promo_price}">
+            </div>
+        
+            <div>
+              <div class="small">Abono</div>
+              <input id="promo_credit_abono" placeholder="Abono" type="number" min="0" value="{promo_credit_abono}">
+            </div>
+        
+            <div>
+              <div class="small">Debe</div>
+              <input id="promo_credit_debe" placeholder="Debe" type="number" min="0" value="{promo_credit_debe}">
+            </div>
           </div>
-
+ 
           <div class="filters">
             <button type="button" class="btn btn-primary" onclick="savePromotion('{group_jid}')">Guardar promoción</button>
           </div>
