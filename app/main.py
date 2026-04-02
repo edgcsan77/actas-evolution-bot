@@ -127,7 +127,7 @@ def cron_provider3_keepalive(request: Request):
 def bot_is_open():
     now = datetime.now(ZoneInfo("America/Monterrey"))
     hour = now.hour
-    return 7 <= hour < 23
+    return 8 <= hour < 23
 
 
 def _panel_now():
@@ -1550,25 +1550,27 @@ def panel_group_detail(
     return HTMLResponse(content=html)
 
 
-BROADCAST_ACTIVAS_MSG = """*SERVICIO DE ACTAS SUPER RAPIDAS SALIENDO EN SEGUNDOS*
-⚡⚡⚡MANDEN, MANDEN💫💫
+BROADCAST_ACTIVAS_MSG = """🚀 *INICIAMOS CON EL SERVICIO*
 
-*SOLICITALAS POR:*
-*CURP*
-*CADENA (Identificador Electrónico)*
-*CODIGO DE VERIFICACION*
-*CON FOLIO O SIN FOLIO.*
+⚡ *ACTAS SUPER RÁPIDAS SALIENDO EN SEGUNDOS*
 
-HORARIOS DE LUNES A SABADO
-DE 08:00 AM A 10:00 PM
+💫 *MANDEN, MANDEN* 💫
+
+*SOLICÍTALAS POR:*
+• CURP
+• CADENA
+• CÓDIGO DE VERIFICACIÓN
+• CON FOLIO O SIN FOLIO
+
+🕘 *HORARIO*
+Lunes a Domingo
+08:00 AM a 11:00 PM
 """
 
-BROADCAST_MANTENIMIENTO_MSG = """🚧 *DOCU EXPRES EN MANTENIMIENTO*
+BROADCAST_RESTABLECIDO_MSG = """⚡⚡⚡ *SERVICIO SUPER RÁPIDO* ⚡⚡⚡
+🟢 *RESTABLECIDO*
 
-Por el momento el sistema se encuentra en mantenimiento temporalmente.
-
-Apenas quede restablecido les avisaremos por este medio.
-Gracias por su comprensión.
+💫 *MANDEN, MANDEN* 💫
 """
 
 BROADCAST_SUSPENDIDO_MSG = """⛔ *DOCU EXPRES SUSPENDIDO TEMPORALMENTE*
@@ -1576,6 +1578,11 @@ BROADCAST_SUSPENDIDO_MSG = """⛔ *DOCU EXPRES SUSPENDIDO TEMPORALMENTE*
 Por el momento el servicio está suspendido temporalmente.
 En cuanto vuelva a operar les avisaremos por este medio.
 Gracias por su paciencia.
+"""
+
+BROADCAST_CERRADO_MSG = """⚡⚡⚡ *SISTEMA DE ACTAS CERRADO* ⚡⚡⚡
+
+📌 *GRACIAS POR SU PREFERENCIA*
 """
 
 
@@ -1793,9 +1800,9 @@ def panel_broadcast_activas(background_tasks: BackgroundTasks):
     }
 
 
-@app.post("/panel/broadcast/mantenimiento")
+@app.post("/panel/broadcast/restablecido")
 def panel_broadcast_mantenimiento(background_tasks: BackgroundTasks):
-    background_tasks.add_task(_run_broadcast_job, BROADCAST_MANTENIMIENTO_MSG)
+    background_tasks.add_task(_run_broadcast_job, BROADCAST_RESTABLECIDO_MSG)
     return {
         "ok": True,
         "queued": True,
@@ -1806,6 +1813,16 @@ def panel_broadcast_mantenimiento(background_tasks: BackgroundTasks):
 @app.post("/panel/broadcast/suspendido")
 def panel_broadcast_suspendido(background_tasks: BackgroundTasks):
     background_tasks.add_task(_run_broadcast_job, BROADCAST_SUSPENDIDO_MSG)
+    return {
+        "ok": True,
+        "queued": True,
+        "message": "Envío masivo en segundo plano iniciado",
+    }
+
+
+@app.post("/panel/broadcast/cerrado")
+def panel_broadcast_cerrado(background_tasks: BackgroundTasks):
+    background_tasks.add_task(_run_broadcast_job, BROADCAST_CERRADO_MSG)
     return {
         "ok": True,
         "queued": True,
@@ -2331,6 +2348,15 @@ def panel_actas(
               .btn-light:hover {{
                 background: #d1d5db;
               }}
+
+              .btn-closed {{
+                background: #374151;
+                color: white;
+              }}
+            
+              .btn-closed:hover {{
+                background: #1f2937;
+              }}
             
               .actions-row {{
                 display: flex;
@@ -2593,9 +2619,10 @@ def panel_actas(
                     <div>
                       <div class="helper" style="margin-bottom:10px;">Envía mensajes predefinidos a todos los grupos activos.</div>
                       <div class="broadcast-buttons">
-                        <button class="btn btn-primary" onclick="sendBroadcast('activas')">Enviar promoción</button>
-                        <button class="btn btn-warning" onclick="sendBroadcast('mantenimiento')">Enviar mantenimiento</button>
-                        <button class="btn btn-danger" onclick="sendBroadcast('suspendido')">Enviar suspendido</button>
+                        <button class="btn btn-primary" onclick="sendBroadcast('activas')">Servicio activo</button>
+                        <button class="btn btn-warning" onclick="sendBroadcast('restablecido')">Servicio restablecido</button>
+                        <button class="btn btn-danger" onclick="sendBroadcast('suspendido')">Servicio suspendido</button>
+                        <button class="btn btn-closed" onclick="sendBroadcast('cerrado')">Servicio cerrado</button>
                       </div>
                     </div>
         
