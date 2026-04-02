@@ -754,7 +754,6 @@ def panel_apply_shared_promotion(
             row.client_key = client_key
             row.shared_key = shared_key
             row.total_actas = total_actas
-            row.used_actas = 0
             row.price_per_piece = price_per_piece
             row.is_credit = is_credit
             row.credit_abono = credit_abono
@@ -2539,8 +2538,8 @@ def panel_actas(
           <div id="promoCompartidaBody" class="collapsible-body closed">
         
             <div class="filters" style="margin-bottom:12px;">
-              <input id="sharedPromoName" placeholder="Nombre de la promoción (ej. Paquete Abril)">
-              <input id="sharedPromoClientKey" placeholder="Bolsa compartida (ej. MAX_1000)">
+              <input id="sharedPromoName" placeholder="Nombre de la promoción">
+              <input id="sharedPromoClientKey" placeholder="Nombre de la bolsa compartida">
               <input id="sharedPromoTotalActas" type="number" placeholder="Total de actas del paquete">
               <input id="sharedPromoPricePerPiece" placeholder="Precio por acta">
             </div>
