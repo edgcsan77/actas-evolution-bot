@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
-from app.db import Base, engine, get_db
+from app.db import Base, engine, get_db, SessionLocal
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion
 from app.queue import request_queue, redis_conn
 from app.worker import process_request, provider3_keepalive_job
