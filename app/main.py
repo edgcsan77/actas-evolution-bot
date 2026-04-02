@@ -701,6 +701,10 @@ def panel_apply_shared_promotion(
     shared_key = (payload.get("shared_key") or "").strip().upper()
     total_actas = int(payload.get("total_actas") or 0)
 
+    is_credit = bool(payload.get("is_credit") or False)
+    credit_abono = int(payload.get("credit_abono") or 0)
+    credit_debe = int(payload.get("credit_debe") or 0)
+
     if not selected_group_jids:
         return {"ok": False, "error": "NO_GROUPS_SELECTED"}
 
@@ -731,6 +735,9 @@ def panel_apply_shared_promotion(
                 total_actas=total_actas,
                 used_actas=0,
                 price_per_piece=price_per_piece,
+                is_credit=is_credit,
+                credit_abono=credit_abono,
+                credit_debe=credit_debe,
                 warning_sent_200=False,
                 warning_sent_100=False,
                 warning_sent_50=False,
@@ -749,6 +756,9 @@ def panel_apply_shared_promotion(
             row.total_actas = total_actas
             row.used_actas = 0
             row.price_per_piece = price_per_piece
+            row.is_credit = is_credit
+            row.credit_abono = credit_abono
+            row.credit_debe = credit_debe
             row.warning_sent_200 = False
             row.warning_sent_100 = False
             row.warning_sent_50 = False
@@ -774,14 +784,17 @@ def panel_apply_shared_promotion(
 
     try:
         promo_label = promo_name or "paquete promocional"
+        tipo_label = "crédito" if is_credit else "pagada"
+
         _notify_client_groups_main(
             rows,
             (
                 f"✅ *Promoción activada*\n\n"
-                f"Tu *{promo_label}* ya fue activado correctamente.\n"
+                f"Tu promoción *{promo_label}* ya fue activada correctamente.\n"
+                f"Tipo: *{tipo_label}*\n"
                 f"Cuentas con *{total_actas} actas disponibles*.\n\n"
                 f"Este saldo aplica para todos los grupos asociados a esta promoción compartida.\n"
-                f"Clave compartida: *{shared_key}*.\n\n"
+                f"Bolsa compartida: *{shared_key}*.\n\n"
                 f"Gracias por tu preferencia."
             )
         )
@@ -794,113 +807,291 @@ def panel_apply_shared_promotion(
         "client_key": client_key,
         "shared_key": shared_key,
         "total_actas": total_actas,
+        "is_credit": is_credit,
+        "credit_abono": credit_abono,
+        "credit_debe": credit_debe,
         "groups": selected_group_jids,
     }
+    
+
+def _is_credit_promotion(row: GroupPromotion) -> bool:
+    return bool(row.is_credit)
 
 
-@app.get("/panel/promotions/report")
+@app.get("/panel/promotions/report", response_class=HTMLResponse)
 def panel_promotions_report(db: Session = Depends(get_db)):
-
-    promos = (
+    rows = (
         db.query(GroupPromotion)
         .filter(GroupPromotion.is_active == True)
-        .order_by(GroupPromotion.promo_name)
+        .order_by(GroupPromotion.updated_at.desc(), GroupPromotion.id.desc())
         .all()
     )
 
-    html = """
-    <html>
+    pagadas = []
+    credito = []
+
+    for r in rows:
+        total_actas = r.total_actas or 0
+        used_actas = r.used_actas or 0
+        disponibles = max(0, total_actas - used_actas)
+
+        item = {
+            "group_jid": r.group_jid or "",
+            "group_name": _group_name(r.group_jid),
+            "promo_name": (r.promo_name or "").strip() or "-",
+            "total_actas": total_actas,
+            "used_actas": used_actas,
+            "disponibles": disponibles,
+            "price_per_piece": (r.price_per_piece or "").strip() or "-",
+            "credit_abono": r.credit_abono or 0,
+            "credit_debe": r.credit_debe or 0,
+        }
+
+        if _is_credit_promotion(r):
+            credito.append(item)
+        else:
+            pagadas.append(item)
+
+    def render_pagadas_rows(items: list[dict]) -> str:
+        if not items:
+            return '<tr><td colspan="7">Sin registros.</td></tr>'
+
+        html = ""
+        for i, r in enumerate(items, start=1):
+            html += f"""
+            <tr>
+              <td>{i}</td>
+              <td>{_esc(r["group_name"])}</td>
+              <td>{_esc(r["promo_name"])}</td>
+              <td class="right">{r["total_actas"]}</td>
+              <td class="right">{r["used_actas"]}</td>
+              <td class="right">{r["disponibles"]}</td>
+              <td class="right">{_esc(r["price_per_piece"])}</td>
+            </tr>
+            """
+        return html
+
+    def render_credito_rows(items: list[dict]) -> str:
+        if not items:
+            return '<tr><td colspan="7">Sin registros.</td></tr>'
+
+        html = ""
+        for i, r in enumerate(items, start=1):
+            html += f"""
+            <tr>
+              <td>{i}</td>
+              <td>{_esc(r["group_name"])}</td>
+              <td class="right">{r["total_actas"]}</td>
+              <td class="right">{r["credit_abono"]}</td>
+              <td class="right">{r["credit_debe"]}</td>
+              <td class="right">{r["used_actas"]}</td>
+              <td class="right">{r["disponibles"]}</td>
+            </tr>
+            """
+        return html
+
+    html = f"""
+    <!doctype html>
+    <html lang="es">
     <head>
-        <title>Reporte de Promociones</title>
+      <meta charset="utf-8">
+      <title>Reporte de Promociones</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        * {{
+          box-sizing: border-box;
+        }}
 
-        <style>
-        body {
-            font-family: Arial;
-            padding: 20px;
-        }
+        body {{
+          margin: 0;
+          padding: 24px;
+          font-family: Arial, Helvetica, sans-serif;
+          background: #f5f7fb;
+          color: #1f2937;
+        }}
 
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            margin-top:20px;
-        }
+        .wrap {{
+          max-width: 1320px;
+          margin: 0 auto;
+        }}
 
-        th, td {
-            border:1px solid #ccc;
-            padding:10px;
-            text-align:left;
-        }
+        .topbar {{
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 18px;
+          font-size: 13px;
+          color: #6b7280;
+        }}
 
-        th {
-            background:#f2f2f2;
-        }
+        h1 {{
+          margin: 0 0 18px 0;
+          font-size: 38px;
+          color: #111827;
+        }}
 
-        .print-btn {
-            font-size:22px;
-            padding:14px 28px;
-            background:#2ecc71;
-            color:white;
-            border:none;
-            border-radius:8px;
-            cursor:pointer;
-            margin-bottom:20px;
-            font-weight:600;
-        }
+        .section {{
+          background: #fff;
+          border: 1px solid #e5e7eb;
+          border-radius: 18px;
+          box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+          margin-bottom: 24px;
+          overflow: hidden;
+        }}
 
-        .print-btn:hover {
-            background:#27ae60;
-        }
+        .section-head {{
+          padding: 18px 20px;
+          border-bottom: 1px solid #e5e7eb;
+          background: #f8fafc;
+        }}
 
-        @media print {
-            .print-btn {
-                display:none;
-            }
-        }
+        .section-title {{
+          margin: 0;
+          font-size: 24px;
+          color: #111827;
+        }}
 
-        </style>
+        .section-sub {{
+          margin-top: 6px;
+          color: #6b7280;
+          font-size: 13px;
+        }}
+
+        .table-wrap {{
+          overflow-x: auto;
+        }}
+
+        table {{
+          width: 100%;
+          border-collapse: collapse;
+        }}
+
+        thead th {{
+          background: #f9fafb;
+          color: #111827;
+          text-align: left;
+          font-size: 14px;
+          padding: 14px;
+          border-bottom: 1px solid #e5e7eb;
+          white-space: nowrap;
+        }}
+
+        tbody td {{
+          padding: 14px;
+          border-bottom: 1px solid #eef2f7;
+          vertical-align: top;
+          font-size: 14px;
+        }}
+
+        tbody tr:hover {{
+          background: #fafcff;
+        }}
+
+        .right {{
+          text-align: right;
+        }}
+
+        .badge {{
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 4px 10px;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 700;
+        }}
+
+        .badge-paid {{
+          background: #dcfce7;
+          color: #166534;
+        }}
+
+        .badge-credit {{
+          background: #fff7ed;
+          color: #c2410c;
+        }}
+
+        @media print {{
+          body {{
+            background: #fff;
+            padding: 0;
+          }}
+
+          .section {{
+            box-shadow: none;
+            border-radius: 0;
+            break-inside: avoid;
+          }}
+        }}
+      </style>
     </head>
-
     <body>
-    <button class="print-btn" onclick="window.print()">
-    🖨 Imprimir reporte
-    </button>
+      <div class="wrap">
+        <div class="topbar">
+          <div>{datetime.now().strftime("%m/%d/%y, %H:%M")}</div>
+          <div>Reporte de Promociones</div>
+        </div>
 
-    <h2>Reporte de Grupos con Promoción</h2>
+        <h1>Reporte de Promociones</h1>
 
-    <table>
-    <tr>
-        <th>Grupo</th>
-        <th>Promoción</th>
-        <th>Total Actas</th>
-        <th>Usadas</th>
-        <th>Disponibles</th>
-        <th>Precio</th>
-    </tr>
-    """
+        <div class="section">
+          <div class="section-head">
+            <h2 class="section-title"><span class="badge badge-paid">Pagadas</span></h2>
+            <div class="section-sub">Actas por paquetes pagados.</div>
+          </div>
 
-    for p in promos:
-        group_name = GROUP_NAME_MAP.get(p.group_jid, p.group_jid)
-        disponibles = (p.total_actas or 0) - (p.used_actas or 0)
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>No.</th>
+                  <th>Cliente</th>
+                  <th>Promoción</th>
+                  <th class="right">Actas autorizadas</th>
+                  <th class="right">Actas consumidas</th>
+                  <th class="right">Restan</th>
+                  <th class="right">Precio</th>
+                </tr>
+              </thead>
+              <tbody>
+                {render_pagadas_rows(pagadas)}
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-        html += f"""
-        <tr>
-            <td>{group_name}</td>
-            <td>{p.promo_name or "-"}</td>
-            <td>{p.total_actas}</td>
-            <td>{p.used_actas}</td>
-            <td>{disponibles}</td>
-            <td>{p.price_per_piece or "-"}</td>
-        </tr>
-        """
+        <div class="section">
+          <div class="section-head">
+            <h2 class="section-title"><span class="badge badge-credit">Crédito</span></h2>
+            <div class="section-sub">Actas autorizadas a crédito.</div>
+          </div>
 
-    html += """
-    </table>
-
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>No.</th>
+                  <th>Cliente</th>
+                  <th class="right">Crédito</th>
+                  <th class="right">Abono</th>
+                  <th class="right">Debe</th>
+                  <th class="right">Actas consumidas</th>
+                  <th class="right">Restan</th>
+                </tr>
+              </thead>
+              <tbody>
+                {render_credito_rows(credito)}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </body>
     </html>
     """
 
-    return HTMLResponse(html)
+    return HTMLResponse(content=html)
 
 
 @app.get("/panel/group-detail", response_class=HTMLResponse)
@@ -2338,17 +2529,59 @@ def panel_actas(
           <div class="head collapsible-head closed" onclick="toggleSection('promoCompartidaBody', this)">
             <div>
               <strong>Promoción compartida</strong>
-              <span class="small">Asigna un mismo saldo promocional a varios grupos del mismo cliente.</span>
+              <span class="small">
+                Permite asignar un mismo paquete de actas a varios grupos para que utilicen el mismo saldo disponible.
+              </span>
             </div>
             <span class="collapse-icon">▼</span>
           </div>
         
           <div id="promoCompartidaBody" class="collapsible-body closed">
+        
             <div class="filters" style="margin-bottom:12px;">
-              <input id="sharedPromoName" placeholder="Nombre de promoción">
-              <input id="sharedPromoClientKey" placeholder="Nombre de bolsa compartida">
-              <input id="sharedPromoTotalActas" type="number" placeholder="Total de actas">
-              <input id="sharedPromoPricePerPiece" placeholder="Precio por pieza">
+              <input id="sharedPromoName" placeholder="Nombre de la promoción (ej. Paquete Abril)">
+              <input id="sharedPromoClientKey" placeholder="Bolsa compartida (ej. MAX_1000)">
+              <input id="sharedPromoTotalActas" type="number" placeholder="Total de actas del paquete">
+              <input id="sharedPromoPricePerPiece" placeholder="Precio por acta">
+            </div>
+        
+            <div class="box" style="padding:14px;margin-top:8px;background:#f8fafc;border:1px solid #e5e7eb;">
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;align-items:end;">
+                
+                <div>
+                  <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:#374151;">
+                    Tipo de promoción
+                  </label>
+                  <select id="sharedPromoType" style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;">
+                    <option value="paid">Pagada</option>
+                    <option value="credit">Crédito</option>
+                  </select>
+                </div>
+        
+                <div>
+                  <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:#374151;">
+                    Abono
+                  </label>
+                  <input id="sharedPromoCreditAbono" type="number" placeholder="0" value="0">
+                </div>
+        
+                <div>
+                  <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:#374151;">
+                    Debe
+                  </label>
+                  <input id="sharedPromoCreditDebe" type="number" placeholder="0" value="0">
+                </div>
+        
+              </div>
+        
+              <div class="helper" style="margin-top:12px;">
+                Selecciona los grupos que usarán la misma bolsa compartida. Si un grupo consume actas, se descuentan del mismo saldo para todos.
+              </div>
+        
+              <div style="margin-top:10px;font-size:13px;color:#6b7280;">
+                Ejemplo: si 4 grupos comparten una bolsa de 1000 actas y uno consume 50,
+                el saldo disponible será 950 para todos los grupos asociados.
+              </div>
             </div>
         
             <div class="box" style="padding:14px; margin-top:8px; background:#f8fafc; border:1px solid #e5e7eb;">
@@ -2900,6 +3133,11 @@ def panel_actas(
           const total_actas = Number(document.getElementById("sharedPromoTotalActas").value || 0);
           const price_per_piece = document.getElementById("sharedPromoPricePerPiece").value || "";
         
+          const promo_type = document.getElementById("sharedPromoType").value || "paid";
+          const is_credit = promo_type === "credit";
+          const credit_abono = Number(document.getElementById("sharedPromoCreditAbono").value || 0);
+          const credit_debe = Number(document.getElementById("sharedPromoCreditDebe").value || 0);
+        
           if (!selected.length) {
             alert("Selecciona al menos un grupo");
             return;
@@ -2911,7 +3149,7 @@ def panel_actas(
           }
         
           if (!shared_key) {
-            alert("Ingresa una clave compartida o cliente unificado");
+            alert("Ingresa una bolsa compartida");
             return;
           }
         
@@ -2927,7 +3165,10 @@ def panel_actas(
                 client_key,
                 shared_key,
                 total_actas,
-                price_per_piece
+                price_per_piece,
+                is_credit,
+                credit_abono,
+                credit_debe
               })
             });
         
@@ -2943,6 +3184,32 @@ def panel_actas(
             alert("No se pudo conectar con el servidor");
           }
         }
+
+        function toggleCreditFields() {
+          const promoType = document.getElementById("sharedPromoType");
+          const isCredit = promoType && promoType.value === "credit";
+        
+          const abono = document.getElementById("sharedPromoCreditAbono");
+          const debe = document.getElementById("sharedPromoCreditDebe");
+        
+          if (abono) {
+            abono.disabled = !isCredit;
+            if (!isCredit) abono.value = "0";
+          }
+        
+          if (debe) {
+            debe.disabled = !isCredit;
+            if (!isCredit) debe.value = "0";
+          }
+        }
+        
+        document.addEventListener("DOMContentLoaded", () => {
+          const promoType = document.getElementById("sharedPromoType");
+          if (promoType) {
+            promoType.addEventListener("change", toggleCreditFields);
+            toggleCreditFields();
+          }
+        });
 
         function filterSharedPromoGroups() {
           const search = (document.getElementById("sharedPromoSearch")?.value || "").trim().toLowerCase();
