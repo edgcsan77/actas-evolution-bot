@@ -1452,12 +1452,16 @@ def panel_group_detail(
         
             <div>
               <div class="small">Abono</div>
-              <input id="promo_credit_abono" placeholder="" type="number" min="0" value="{promo_credit_abono if promo_is_credit else 'N/A'}">
+              <input id="promo_credit_abono" type="number" min="0"
+              value="{promo_credit_abono if promo_is_credit else ''}"
+              placeholder="N/A">
             </div>
         
             <div>
               <div class="small">Debe</div>
-              <input id="promo_credit_debe" placeholder="" type="number" min="0" value="{promo_credit_debe if promo_is_credit else 'N/A'}">
+              <input id="promo_credit_debe" type="number" min="0"
+              value="{promo_credit_debe if promo_is_credit else ''}"
+              placeholder="N/A">
             </div>
           </div>
  
