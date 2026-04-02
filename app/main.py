@@ -817,6 +817,40 @@ def _is_credit_promotion(row: GroupPromotion) -> bool:
     return bool(row.is_credit)
 
 
+@app.post("/panel/group/{group_jid}/promotion/abono")
+def panel_register_group_promotion_abono(
+    group_jid: str,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    abono = int(payload.get("abono") or 0)
+
+    if abono <= 0:
+        return {"ok": False, "error": "ABONO_INVALIDO"}
+
+    row = db.query(GroupPromotion).filter(GroupPromotion.group_jid == group_jid).first()
+
+    if not row:
+        return {"ok": False, "error": "PROMOCION_NO_ENCONTRADA"}
+
+    if not row.is_credit:
+        return {"ok": False, "error": "LA_PROMOCION_NO_ES_A_CREDITO"}
+
+    row.credit_abono = (row.credit_abono or 0) + abono
+    row.credit_debe = max(0, (row.credit_debe or 0) - abono)
+    row.updated_at = _utc_now_naive()
+
+    db.commit()
+
+    return {
+        "ok": True,
+        "message": "Abono registrado correctamente",
+        "group_jid": group_jid,
+        "credit_abono": row.credit_abono,
+        "credit_debe": row.credit_debe,
+    }
+
+
 @app.get("/panel/promotions/report", response_class=HTMLResponse)
 def panel_promotions_report(db: Session = Depends(get_db)):
     rows = (
@@ -872,8 +906,8 @@ def panel_promotions_report(db: Session = Depends(get_db)):
 
     def render_credito_rows(items: list[dict]) -> str:
         if not items:
-            return '<tr><td colspan="7">Sin registros.</td></tr>'
-
+            return '<tr><td colspan="8">Sin registros.</td></tr>'
+    
         html = ""
         for i, r in enumerate(items, start=1):
             html += f"""
@@ -885,6 +919,11 @@ def panel_promotions_report(db: Session = Depends(get_db)):
               <td class="right">{r["credit_debe"]}</td>
               <td class="right">{r["used_actas"]}</td>
               <td class="right">{r["disponibles"]}</td>
+              <td class="right">
+                <button class="action-btn" onclick="registrarAbono('{_esc(r["group_jid"])}')">
+                  Registrar abono
+                </button>
+              </td>
             </tr>
             """
         return html
@@ -1031,6 +1070,20 @@ def panel_promotions_report(db: Session = Depends(get_db)):
           color: #c2410c;
         }}
 
+        .action-btn {{
+          padding: 8px 12px;
+          border: none;
+          border-radius: 10px;
+          background: #166534;
+          color: white;
+          font-weight: 700;
+          cursor: pointer;
+        }}
+        
+        .action-btn:hover {{
+          opacity: .92;
+        }}
+
         @media print {{
           body {{
             background: #fff;
@@ -1078,6 +1131,7 @@ def panel_promotions_report(db: Session = Depends(get_db)):
                   <th class="right">Actas consumidas</th>
                   <th class="right">Restan</th>
                   <th class="right">Precio</th>
+                  <th class="right">Acción</th>
                 </tr>
               </thead>
               <tbody>
@@ -1113,6 +1167,42 @@ def panel_promotions_report(db: Session = Depends(get_db)):
           </div>
         </div>
       </div>
+
+      <script>
+          async function registrarAbono(groupJid) {
+            const value = prompt("Ingresa el abono:");
+            if (!value) return;
+        
+            const abono = Number(value);
+            if (!abono || abono <= 0) {
+              alert("Ingresa un abono válido");
+              return;
+            }
+        
+            try {
+              const res = await fetch(`/panel/group/${encodeURIComponent(groupJid)}/promotion/abono`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  abono: abono
+                })
+              });
+        
+              const data = await res.json();
+        
+              if (data.ok) {
+                alert(data.message || "Abono registrado");
+                location.reload();
+              } else {
+                alert(data.error || "No se pudo registrar el abono");
+              }
+            } catch (e) {
+              alert("No se pudo conectar con el servidor");
+            }
+          }
+      </script>
     </body>
     </html>
     """
@@ -1136,10 +1226,6 @@ def panel_group_detail(
     promo_used = promo.used_actas if promo else 0
     promo_available = _promotion_available(promo) if promo else 0
     promo_price = _esc(promo.price_per_piece if promo else "")
-    promo_is_credit = bool(promo.is_credit) if promo else False
-    promo_credit_abono = promo.credit_abono if promo else 0
-    promo_credit_debe = promo.credit_debe if promo else 0
-    promo_type_label = "Crédito" if promo_is_credit else "Pagada"
 
     time_min, time_max, view = _panel_period_bounds(view)
 
@@ -1227,20 +1313,6 @@ def panel_group_detail(
           color: #1f2937;
           outline: none;
         }}
-        .filters select {{
-          width: 100%;
-          padding: 11px 12px;
-          border: 1px solid #d1d5db;
-          border-radius: 12px;
-          font: inherit;
-          background: white;
-          color: #1f2937;
-          outline: none;
-        }}
-        .filters select:focus {{
-          border-color: #334155;
-          box-shadow: 0 0 0 3px rgba(51, 65, 85, .10);
-        }}
         .filters input:focus {{
           border-color: #334155;
           box-shadow: 0 0 0 3px rgba(51, 65, 85, .10);
@@ -1253,10 +1325,6 @@ def panel_group_detail(
           font-size: .95rem;
           cursor: pointer;
           font-family: inherit;
-        }}
-        .btn-danger {{
-          background: #b91c1c;
-          color: white;
         }}
         .btn-primary {{
           background: #334155;
@@ -1309,15 +1377,10 @@ def panel_group_detail(
 
         <div class="box">
           <div class="head"><strong>Promoción del grupo</strong></div>
-        
-          <div class="filters" style="grid-template-columns: repeat(5, minmax(0, 1fr));">
+          <div class="filters">
             <div>
               <div class="small">Estado</div>
               <div style="margin-top:8px;">{promo_html}</div>
-            </div>
-            <div>
-              <div class="small">Tipo</div>
-              <div style="margin-top:8px;font-weight:800;">{promo_type_label}</div>
             </div>
             <div>
               <div class="small">Promoción</div>
@@ -1332,25 +1395,14 @@ def panel_group_detail(
               <div style="margin-top:8px;font-weight:800;">{promo_price or 'N/D'}</div>
             </div>
           </div>
-        
-          <div class="filters" style="grid-template-columns: repeat(6, minmax(0, 1fr));">
+
+          <div class="filters">
             <input id="promo_name" placeholder="Nombre de promoción" value="{promo_name}">
-        
-            <select id="promo_type" style="width:100%;padding:11px 12px;border:1px solid #d1d5db;border-radius:12px;font:inherit;background:white;color:#1f2937;outline:none;">
-              <option value="paid" {"selected" if not promo_is_credit else ""}>Pagada</option>
-              <option value="credit" {"selected" if promo_is_credit else ""}>Crédito</option>
-            </select>
-        
             <input id="promo_total" placeholder="Total de actas" type="number" min="1" value="{promo_total if promo_total else ''}">
             <input id="promo_price" placeholder="Precio por pieza o bloque" value="{promo_price}">
-            <input id="promo_credit_abono" placeholder="Abono" type="number" min="0" value="{promo_credit_abono}">
-            <input id="promo_credit_debe" placeholder="Debe" type="number" min="0" value="{promo_credit_debe}">
-          </div>
-        
-          <div class="filters" style="grid-template-columns: 1fr;">
             <button type="button" class="btn btn-primary" onclick="savePromotion('{group_jid}')">Guardar promoción</button>
           </div>
-        
+
           <div class="filters" style="grid-template-columns: 1fr 220px 220px;">
             <input id="promo_recharge" placeholder="Recargar actas" type="number" min="1">
             <button type="button" class="btn btn-success" onclick="rechargePromotion('{group_jid}')">Recargar promoción</button>
@@ -1403,129 +1455,95 @@ def panel_group_detail(
       </div>
 
       <script>
-          async function savePromotion(groupJid) {{
-            const promoName = document.getElementById("promo_name")?.value?.trim() || "";
-            const totalActas = document.getElementById("promo_total")?.value?.trim() || "";
-            const pricePerPiece = document.getElementById("promo_price")?.value?.trim() || "";
-        
-            const promoType = document.getElementById("promo_type")?.value || "paid";
-            const isCredit = promoType === "credit";
-            const creditAbono = document.getElementById("promo_credit_abono")?.value?.trim() || "0";
-            const creditDebe = document.getElementById("promo_credit_debe")?.value?.trim() || "0";
-        
-            if (!totalActas) {{
-              alert("Ingresa el total de actas");
-              return;
-            }}
-        
-            try {{
-              const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/promotion`, {{
-                method: "POST",
-                headers: {{
-                  "Content-Type": "application/json"
-                }},
-                body: JSON.stringify({{
-                  promo_name: promoName,
-                  total_actas: totalActas,
-                  price_per_piece: pricePerPiece,
-                  is_credit: isCredit,
-                  credit_abono: creditAbono,
-                  credit_debe: creditDebe
-                }})
-              }});
-        
-              const data = await res.json();
-        
-              if (data.ok) {{
-                alert(data.message || "Promoción guardada");
-                location.reload();
-              }} else {{
-                alert(data.error || "Error guardando promoción");
-              }}
-            }} catch (e) {{
-              alert("No se pudo conectar con el servidor");
-            }}
+        async function savePromotion(groupJid) {{
+          const promoName = document.getElementById("promo_name")?.value?.trim() || "";
+          const totalActas = document.getElementById("promo_total")?.value?.trim() || "";
+          const pricePerPiece = document.getElementById("promo_price")?.value?.trim() || "";
+
+          if (!totalActas) {{
+            alert("Ingresa el total de actas");
+            return;
           }}
-        
-          function toggleGroupCreditFields() {{
-            const promoType = document.getElementById("promo_type");
-            const isCredit = promoType && promoType.value === "credit";
-        
-            const abono = document.getElementById("promo_credit_abono");
-            const debe = document.getElementById("promo_credit_debe");
-        
-            if (abono) {{
-              abono.disabled = !isCredit;
-              if (!isCredit) abono.value = "0";
+
+          try {{
+            const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/promotion`, {{
+              method: "POST",
+              headers: {{
+                "Content-Type": "application/json"
+              }},
+              body: JSON.stringify({{
+                promo_name: promoName,
+                total_actas: totalActas,
+                price_per_piece: pricePerPiece
+              }})
+            }});
+
+            const data = await res.json();
+
+            if (data.ok) {{
+              alert(data.message || "Promoción guardada");
+              location.reload();
+            }} else {{
+              alert(data.error || "Error guardando promoción");
             }}
-        
-            if (debe) {{
-              debe.disabled = !isCredit;
-              if (!isCredit) debe.value = "0";
-            }}
+          }} catch (e) {{
+            alert("No se pudo conectar con el servidor");
           }}
-        
-          document.addEventListener("DOMContentLoaded", () => {{
-            const promoType = document.getElementById("promo_type");
-            if (promoType) {{
-              promoType.addEventListener("change", toggleGroupCreditFields);
-              toggleGroupCreditFields();
-            }}
-          }});
-        
-          async function rechargePromotion(groupJid) {{
-            const extraActas = document.getElementById("promo_recharge")?.value?.trim() || "";
-        
-            if (!extraActas) {{
-              alert("Ingresa cuántas actas deseas recargar");
-              return;
-            }}
-        
-            try {{
-              const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/promotion/recharge`, {{
-                method: "POST",
-                headers: {{
-                  "Content-Type": "application/json"
-                }},
-                body: JSON.stringify({{
-                  extra_actas: extraActas
-                }})
-              }});
-        
-              const data = await res.json();
-        
-              if (data.ok) {{
-                alert(data.message || "Recarga aplicada");
-                location.reload();
-              }} else {{
-                alert(data.error || "Error aplicando recarga");
-              }}
-            }} catch (e) {{
-              alert("No se pudo conectar con el servidor");
-            }}
+        }}
+
+        async function rechargePromotion(groupJid) {{
+          const extraActas = document.getElementById("promo_recharge")?.value?.trim() || "";
+
+          if (!extraActas) {{
+            alert("Ingresa cuántas actas deseas recargar");
+            return;
           }}
-        
-          async function removePromotion(groupJid) {{
-            const ok = confirm("¿Seguro que deseas quitar la promoción de este grupo?");
-            if (!ok) return;
-        
-            try {{
-              const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/promotion/remove`, {{
-                method: "POST"
-              }});
-        
-              const data = await res.json();
-        
-              if (data.ok) {{
-                alert(data.message || "Promoción desactivada");
-                location.reload();
-              }} else {{
-                alert(data.error || "Error quitando promoción");
-              }}
-            }} catch (e) {{
-              alert("No se pudo conectar con el servidor");
+
+          try {{
+            const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/promotion/recharge`, {{
+              method: "POST",
+              headers: {{
+                "Content-Type": "application/json"
+              }},
+              body: JSON.stringify({{
+                extra_actas: extraActas
+              }})
+            }});
+
+            const data = await res.json();
+
+            if (data.ok) {{
+              alert(data.message || "Recarga aplicada");
+              location.reload();
+            }} else {{
+              alert(data.error || "Error aplicando recarga");
             }}
+          }} catch (e) {{
+            alert("No se pudo conectar con el servidor");
           }}
+        }}
+
+        async function removePromotion(groupJid) {{
+          const ok = confirm("¿Seguro que deseas quitar la promoción de este grupo?");
+          if (!ok) return;
+        
+          try {{
+            const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/promotion/remove`, {{
+              method: "POST"
+            }});
+        
+            const data = await res.json();
+        
+            if (data.ok) {{
+              alert(data.message || "Promoción desactivada");
+              location.reload();
+            }} else {{
+              alert(data.error || "Error quitando promoción");
+            }}
+          }} catch (e) {{
+            alert("No se pudo conectar con el servidor");
+          }}
+        }}
       </script>
     </body>
     </html>
@@ -4021,10 +4039,6 @@ def panel_set_group_promotion(
     promo_name = (payload.get("promo_name") or "").strip()
     price_per_piece = (payload.get("price_per_piece") or "").strip()
 
-    is_credit = bool(payload.get("is_credit") or False)
-    credit_abono = int(payload.get("credit_abono") or 0)
-    credit_debe = int(payload.get("credit_debe") or 0)
-
     if total_actas <= 0:
         return {"ok": False, "error": "TOTAL_ACTAS_INVALID"}
 
@@ -4033,15 +4047,15 @@ def panel_set_group_promotion(
     if row:
         row.promo_name = promo_name or row.promo_name
         row.total_actas = total_actas
+        row.used_actas = 0
         row.price_per_piece = price_per_piece
-        row.is_credit = is_credit
-        row.credit_abono = credit_abono
-        row.credit_debe = credit_debe
+        row.warning_sent_200 = False
+        row.warning_sent_100 = False
+        row.warning_sent_50 = False
+        row.warning_sent_10 = False
+        row.warning_sent_0 = False
         row.is_active = True
         row.updated_at = _utc_now_naive()
-
-        # NO reiniciar consumidas al editar
-        row.used_actas = row.used_actas or 0
     else:
         row = GroupPromotion(
             group_jid=group_jid,
@@ -4049,9 +4063,6 @@ def panel_set_group_promotion(
             total_actas=total_actas,
             used_actas=0,
             price_per_piece=price_per_piece,
-            is_credit=is_credit,
-            credit_abono=credit_abono,
-            credit_debe=credit_debe,
             warning_sent_200=False,
             warning_sent_100=False,
             warning_sent_50=False,
@@ -4060,15 +4071,19 @@ def panel_set_group_promotion(
             is_active=True,
         )
         db.add(row)
-        db.flush()
 
     available = max(0, (row.total_actas or 0) - (row.used_actas or 0))
 
-    row.warning_sent_200 = available <= 200
-    row.warning_sent_100 = available <= 100
-    row.warning_sent_50 = available <= 50
-    row.warning_sent_10 = available <= 10
-    row.warning_sent_0 = available <= 0
+    if available <= 200:
+        row.warning_sent_200 = True
+    if available <= 100:
+        row.warning_sent_100 = True
+    if available <= 50:
+        row.warning_sent_50 = True
+    if available <= 10:
+        row.warning_sent_10 = True
+    if available <= 0:
+        row.warning_sent_0 = True
 
     db.commit()
 
@@ -4079,14 +4094,11 @@ def panel_set_group_promotion(
 
     try:
         promo_label = promo_name or "paquete promocional"
-        tipo_label = "crédito" if is_credit else "pagada"
-
         send_group_text(
             group_jid,
             (
                 f"✅ *Promoción activada*\n\n"
-                f"Tu *{promo_label}* ya fue guardada correctamente.\n"
-                f"Tipo: *{tipo_label}*\n"
+                f"Tu *{promo_label}* ya fue activado correctamente.\n"
                 f"Cuentas con *{available} actas disponibles*.\n\n"
                 f"Gracias por tu preferencia."
             )
@@ -4100,9 +4112,6 @@ def panel_set_group_promotion(
         "group_jid": group_jid,
         "total_actas": total_actas,
         "available": available,
-        "is_credit": is_credit,
-        "credit_abono": credit_abono,
-        "credit_debe": credit_debe,
     }
 
 
