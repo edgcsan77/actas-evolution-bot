@@ -594,9 +594,10 @@ def panel_recent_requests(
         provider_name=provider_name or None,
         status=status or None,
         act_type=act_type or None,
-    ).order_by(RequestLog.created_at.desc()).all()
-
-    latest = rows[:100]
+    )
+    .order_by(RequestLog.created_at.desc())
+    .limit(5)
+    .all()
 
     html = """
     <table>
