@@ -924,6 +924,26 @@ def panel_promotions_report(db: Session = Depends(get_db)):
           color: #6b7280;
         }}
 
+        .topbar-right {{
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }}
+
+        .print-btn {{
+          padding: 10px 14px;
+          border: none;
+          border-radius: 10px;
+          background: #111827;
+          color: white;
+          font-weight: 600;
+          cursor: pointer;
+        }}
+
+        .print-btn:hover {{
+          opacity: .92;
+        }}
+
         h1 {{
           margin: 0 0 18px 0;
           font-size: 38px;
@@ -1022,6 +1042,10 @@ def panel_promotions_report(db: Session = Depends(get_db)):
             border-radius: 0;
             break-inside: avoid;
           }}
+
+          .print-btn {{
+            display: none !important;
+          }}
         }}
       </style>
     </head>
@@ -1029,7 +1053,10 @@ def panel_promotions_report(db: Session = Depends(get_db)):
       <div class="wrap">
         <div class="topbar">
           <div>{datetime.now().strftime("%m/%d/%y, %H:%M")}</div>
-          <div>Reporte de Promociones</div>
+          <div class="topbar-right">
+            <span>Reporte de Promociones</span>
+            <button class="print-btn" onclick="window.print()">Imprimir</button>
+          </div>
         </div>
 
         <h1>Reporte de Promociones</h1>
