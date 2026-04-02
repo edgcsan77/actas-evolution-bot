@@ -1806,6 +1806,7 @@ GROUP_NAME_MAP = {
     "120363421862592214@g.us": "Gpo. No. 71 Lazaro 1",
     "120363425433931286@g.us": "Gpo. No. 65 Gestoria Guerrero",
     "120363425691947112@g.us": "Gpo. No. 70 Lazaro 2",
+    "120363427243510324@g.us": "Gpo. Grupos SN Gestoria Educativa",
 }
 
 
