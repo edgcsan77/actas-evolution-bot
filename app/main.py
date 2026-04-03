@@ -2891,6 +2891,7 @@ def panel_actas(
             <form class="box" method="get" action="/panel">
               <div class="head">
                 <strong>Filtros</strong>
+                <span class="small">Aplica filtros para localizar información específica rápidamente.</span>
               </div>
               <div class="filters">
                 <input type="hidden" name="view" value="{_esc(view)}">
@@ -2906,7 +2907,7 @@ def panel_actas(
         
         html += """
         <div class="box">
-          <div class="head collapsible-head closed" onclick="toggleSection('promoCompartidaBody', this)">
+          <div class="head collapsible-head open" onclick="toggleSection('promoCompartidaBody', this)">
             <div>
               <strong>Promoción compartida</strong>
               <span class="small">
@@ -2915,9 +2916,8 @@ def panel_actas(
             </div>
             <span class="collapse-icon">▼</span>
           </div>
-        
-          <div id="promoCompartidaBody" class="collapsible-body closed">
-        
+          <div id="promoCompartidaBody" class="collapsible-body open">
+
             <div class="filters" style="margin-bottom:12px;">
               <input id="sharedPromoName" placeholder="Nombre de la promoción">
               <input id="sharedPromoClientKey" placeholder="Nombre de la bolsa compartida">
@@ -3150,7 +3150,10 @@ def panel_actas(
 
         html += f"""
         <div class="box">
-          <div class="head"><strong>Vista de grupos</strong></div>
+          <div class="head">
+            <strong>Vista de grupos</strong>
+            <span class="small">Consulta los grupos cliente y cambia la vista según su actividad.</span>
+          </div>
           <div class="group-mode-bar">
             <a class="group-mode-link {'group-mode-link-active' if group_mode == 'all' else ''}"
                href="/panel?view={_esc(view)}&group_mode=all&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
@@ -3176,7 +3179,7 @@ def panel_actas(
         <div class="box">
           <div class="head">
             <strong>Control masivo de grupos</strong>
-            <span class="small">Bloquea o desbloquea todos los grupos cliente con un solo clic</span>
+            <span class="small">Bloquea o desbloquea todos los grupos cliente con un solo clic.</span>
           </div>
           <div class="group-mode-bar">
             {toggle_all_btn}
@@ -3187,7 +3190,12 @@ def panel_actas(
         html += """
         <div class="box">
           <div class="head collapsible-head open" onclick="toggleSection('grupoClienteBody', this)">
-            <strong>Resumen por grupo cliente</strong>
+            <div>
+              <strong>Resumen por grupo cliente</strong>
+              <span class="small">
+                Consulta el rendimiento y estado de las solicitudes por proveedor.
+              </span>
+            </div>
             <span class="collapse-icon">▼</span>
           </div>
           <div id="grupoClienteBody" class="collapsible-body open">
@@ -3290,7 +3298,12 @@ def panel_actas(
         html += """
         <div class="box">
           <div class="head collapsible-head closed" onclick="toggleSection('recentRequestsWrap', this)">
-            <strong>Solicitudes recientes</strong>
+            <div>
+              <strong>Solicitudes recientes</strong>
+              <span class="small">
+                Consulta las solicitudes recientes y su avance de procesamiento.
+              </span>
+            </div>
             <span class="collapse-icon">▼</span>
           </div>
           <div id="recentRequestsWrap" class="collapsible-body closed">
