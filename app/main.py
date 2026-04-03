@@ -4117,12 +4117,23 @@ def _get_group_promotion(db: Session, group_jid: str) -> GroupPromotion | None:
     if not group_jid:
         return None
 
-    return (
+    active = (
         db.query(GroupPromotion)
         .filter(
             GroupPromotion.group_jid == group_jid,
             GroupPromotion.is_active == True
         )
+        .order_by(GroupPromotion.updated_at.desc(), GroupPromotion.id.desc())
+        .first()
+    )
+
+    if active:
+        return active
+
+    return (
+        db.query(GroupPromotion)
+        .filter(GroupPromotion.group_jid == group_jid)
+        .order_by(GroupPromotion.updated_at.desc(), GroupPromotion.id.desc())
         .first()
     )
 
@@ -4415,8 +4426,6 @@ def panel_set_group_promotion(
         row.is_active = True
         row.updated_at = _utc_now_naive()
 
-        # NUEVA ACTIVACIÓN / REACTIVACIÓN:
-        # reiniciar todo el consumo anterior
         row.used_actas = 0
         row.warning_sent_200 = False
         row.warning_sent_100 = False
@@ -4424,7 +4433,6 @@ def panel_set_group_promotion(
         row.warning_sent_10 = False
         row.warning_sent_0 = False
 
-        # limpiar datos de compartida por si antes venía de una promo compartida
         row.client_key = None
         row.shared_key = None
 
@@ -4455,6 +4463,15 @@ def panel_set_group_promotion(
     available = max(0, (row.total_actas or 0) - (row.used_actas or 0))
 
     db.commit()
+
+    try:
+        redis_conn.delete(f"promo_notify:{group_jid}:0")
+        redis_conn.delete(f"promo_notify:{group_jid}:10")
+        redis_conn.delete(f"promo_notify:{group_jid}:50")
+        redis_conn.delete(f"promo_notify:{group_jid}:100")
+        redis_conn.delete(f"promo_notify:{group_jid}:200")
+    except Exception as e:
+        print("PROMO_NOTIFY_KEYS_CLEAR_ERROR =", str(e), flush=True)
 
     try:
         unblock_group(group_jid)
@@ -4567,6 +4584,15 @@ def panel_recharge_group_promotion(
     available = max(0, (row.total_actas or 0) - (row.used_actas or 0))
 
     db.commit()
+
+    try:
+        redis_conn.delete(f"promo_notify:{group_jid}:0")
+        redis_conn.delete(f"promo_notify:{group_jid}:10")
+        redis_conn.delete(f"promo_notify:{group_jid}:50")
+        redis_conn.delete(f"promo_notify:{group_jid}:100")
+        redis_conn.delete(f"promo_notify:{group_jid}:200")
+    except Exception as e:
+        print("PROMO_NOTIFY_KEYS_CLEAR_ERROR =", str(e), flush=True)
 
     try:
         unblock_group(group_jid)
