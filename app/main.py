@@ -4197,6 +4197,7 @@ def _providers_status_text(db: Session) -> str:
     s4 = "ON" if p4.is_enabled else "OFF"
 
     provider3_extra = ""
+    provider4_extra = ""
 
     try:
         phpsessid = _get_app_setting(db, "PROVIDER3_PHPSESSID", settings.PROVIDER3_PHPSESSID)
@@ -4216,10 +4217,25 @@ def _providers_status_text(db: Session) -> str:
     except Exception as e:
         provider3_extra = f" | ERROR LICENCIAS: {str(e)}"
 
+    try:
+        provider4_client = Provider4Client()
+    
+        local_start = _panel_week_start()
+        local_end = _panel_week_end()
+    
+        provider4_week = provider4_client.get_week_done_counts(local_start, local_end)
+    
+        provider4_total = provider4_week.get("total", 0)
+    
+        provider4_extra = f" | Actas semana: {provider4_total}"
+    
+    except Exception as e:
+        provider4_extra = f" | ERROR HISTORY: {str(e)}"
+
     return (
         f"PROVEEDOR WA EMERGENCIA: {s1}\n"
         f"AUSTRAM WEB: {s3}{provider3_extra}\n"
-        f"LAZARO WEB: {s4}"
+        f"LAZARO WEB: {s4}{provider4_extra}"
     )
 
 
