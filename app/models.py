@@ -75,6 +75,15 @@ class RequestLog(Base):
     expires_at = Column(DateTime, nullable=False)
 
 
+class GroupAlias(Base):
+    __tablename__ = "group_aliases"
+
+    id = Column(Integer, primary_key=True)
+    group_jid = Column(String(120), unique=True, nullable=False, index=True)
+    custom_name = Column(String(255), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class GroupPromotion(Base):
     __tablename__ = "group_promotions"
 
