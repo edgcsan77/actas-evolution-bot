@@ -1531,7 +1531,7 @@ def panel_group_detail(
           </div>
  
           <div class="filters">
-            <button type="button" class="btn btn-primary" onclick="savePromotion('{group_jid}')">Guardar promoción</button>
+            <button type="button" class="btn btn-primary" onclick="savePromotion('{group_jid}')">Activar promoción</button>
           </div>
 
           <div class="filters" style="grid-template-columns: 1fr 220px 220px;">
@@ -2674,6 +2674,11 @@ def panel_actas(
               .badge-light {{
                 background: #eef2ff;
                 color: #3730a3;
+              }}
+
+              .badge-success{{
+                background:#dcfce7;
+                color:#166534;
               }}
             
               .badge-warning {{
@@ -4483,7 +4488,7 @@ def panel_set_group_promotion(
         "is_credit": row.is_credit,
         "credit_abono": row.credit_abono,
         "credit_debe": row.credit_debe,
-}
+    }
 
 
 @app.post("/panel/group/{group_jid}/promotion/remove")
