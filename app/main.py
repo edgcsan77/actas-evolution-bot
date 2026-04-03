@@ -704,6 +704,19 @@ def panel_remove_shared_promotion(
 
     for row in rows:
         row.is_active = False
+        row.used_actas = 0
+        row.total_actas = 0
+        row.promo_name = ""
+        row.price_per_piece = ""
+        row.client_key = None
+        row.shared_key = None
+        row.credit_abono = 0
+        row.credit_debe = 0
+        row.warning_sent_200 = False
+        row.warning_sent_100 = False
+        row.warning_sent_50 = False
+        row.warning_sent_10 = False
+        row.warning_sent_0 = False
         row.updated_at = _utc_now_naive()
 
     db.commit()
@@ -784,6 +797,7 @@ def panel_apply_shared_promotion(
             row.client_key = client_key
             row.shared_key = shared_key
             row.total_actas = total_actas
+            row.used_actas = 0
             row.price_per_piece = price_per_piece
             row.is_credit = is_credit
             row.credit_abono = credit_abono
@@ -814,6 +828,7 @@ def panel_apply_shared_promotion(
     try:
         promo_label = promo_name or "paquete promocional"
         tipo_label = "crédito" if is_credit else "pagada"
+        available = max(0, total_actas)
 
         _notify_client_groups_main(
             rows,
@@ -821,7 +836,7 @@ def panel_apply_shared_promotion(
                 f"✅ *Promoción activada*\n\n"
                 f"Tu promoción *{promo_label}* ya fue activada correctamente.\n"
                 f"Tipo: *{tipo_label}*\n"
-                f"Cuentas con *{total_actas} actas disponibles*.\n\n"
+                f"Cuentas con *{available} actas disponibles*.\n\n"
                 f"Este saldo aplica para todos los grupos asociados a esta promoción compartida.\n"
                 f"Bolsa compartida: *{shared_key}*.\n\n"
                 f"Gracias por tu preferencia."
@@ -4382,8 +4397,19 @@ def panel_set_group_promotion(
         row.is_active = True
         row.updated_at = _utc_now_naive()
 
-        # NO reiniciar consumidas al editar
-        row.used_actas = row.used_actas or 0
+        # NUEVA ACTIVACIÓN / REACTIVACIÓN:
+        # reiniciar todo el consumo anterior
+        row.used_actas = 0
+        row.warning_sent_200 = False
+        row.warning_sent_100 = False
+        row.warning_sent_50 = False
+        row.warning_sent_10 = False
+        row.warning_sent_0 = False
+
+        # limpiar datos de compartida por si antes venía de una promo compartida
+        row.client_key = None
+        row.shared_key = None
+
     else:
         row = GroupPromotion(
             group_jid=group_jid,
@@ -4400,17 +4426,15 @@ def panel_set_group_promotion(
             warning_sent_10=False,
             warning_sent_0=False,
             is_active=True,
+            client_key=None,
+            shared_key=None,
+            created_at=_utc_now_naive(),
+            updated_at=_utc_now_naive(),
         )
         db.add(row)
         db.flush()
 
     available = max(0, (row.total_actas or 0) - (row.used_actas or 0))
-
-    row.warning_sent_200 = available <= 200
-    row.warning_sent_100 = available <= 100
-    row.warning_sent_50 = available <= 50
-    row.warning_sent_10 = available <= 10
-    row.warning_sent_0 = available <= 0
 
     db.commit()
 
@@ -4446,7 +4470,7 @@ def panel_set_group_promotion(
         "is_credit": row.is_credit,
         "credit_abono": row.credit_abono,
         "credit_debe": row.credit_debe,
-    }
+}
 
 
 @app.post("/panel/group/{group_jid}/promotion/remove")
@@ -4460,7 +4484,21 @@ def panel_remove_group_promotion(
         return {"ok": False, "error": "PROMOTION_NOT_FOUND"}
 
     row.is_active = False
+    row.used_actas = 0
+    row.total_actas = 0
+    row.promo_name = ""
+    row.price_per_piece = ""
+    row.client_key = None
+    row.shared_key = None
+    row.credit_abono = 0
+    row.credit_debe = 0
+    row.warning_sent_200 = False
+    row.warning_sent_100 = False
+    row.warning_sent_50 = False
+    row.warning_sent_10 = False
+    row.warning_sent_0 = False
     row.updated_at = _utc_now_naive()
+
     db.commit()
 
     try:
@@ -4479,7 +4517,7 @@ def panel_remove_group_promotion(
         "ok": True,
         "message": "Promoción desactivada correctamente",
         "group_jid": group_jid,
-    }
+}
 
 
 @app.post("/panel/group/{group_jid}/promotion/recharge")
