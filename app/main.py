@@ -1249,6 +1249,7 @@ def panel_group_detail(
 
     promo = _get_group_promotion(db, group_jid)
     promo_html = _promotion_badge_html(promo)
+    group_display_name = _esc(_group_name(group_jid, db))
     promo_name = _esc(promo.promo_name if promo else "")
     promo_total = promo.total_actas if promo else 0
     promo_used = promo.used_actas if promo else 0
@@ -1426,6 +1427,25 @@ def panel_group_detail(
           <a href="/panel?view={_esc(view)}">← Volver al historial</a>
           <h1>{_esc(title)}</h1>
           <div class="hero-sub">{_esc(subtitle)}</div>
+        </div>
+    """
+
+    html += f"""
+        <div class="box">
+          <div class="head"><strong>Nombre del grupo</strong></div>
+
+          <div class="filters" style="grid-template-columns: minmax(0, 1fr) 240px;">
+            <div>
+              <div class="small">Nombre personalizado</div>
+              <input id="group_custom_name" placeholder="Escribe el nombre del grupo" value="{group_display_name}">
+            </div>
+
+            <div style="display:flex;align-items:end;">
+              <button type="button" class="btn btn-primary" style="width:100%;" onclick="saveGroupName('{group_jid}')">
+                Guardar nombre
+              </button>
+            </div>
+          </div>
         </div>
     """
 
@@ -1695,6 +1715,38 @@ def panel_group_detail(
               alert("No se pudo conectar con el servidor");
             }}
           }}
+
+          async function saveGroupName(groupJid) {{
+            const customName = document.getElementById("group_custom_name")?.value?.trim() || "";
+        
+            if (!customName) {{
+              alert("Ingresa el nombre del grupo");
+              return;
+            }}
+        
+            try {{
+              const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/name`, {{
+                method: "POST",
+                headers: {{
+                  "Content-Type": "application/json"
+                }},
+                body: JSON.stringify({{
+                  custom_name: customName
+                }})
+              }});
+         
+              const data = await res.json();
+        
+              if (data.ok) {{
+                alert("Nombre guardado correctamente");
+                location.reload();
+              }} else {{
+                alert(data.error || "Error guardando nombre");
+              }}
+            }} catch (e) {{
+              alert("No se pudo conectar con el servidor");
+            }}
+          }}
       </script>
     </body>
     </html>
@@ -1880,7 +1932,7 @@ def panel_api_actas(
     ).order_by(RequestLog.created_at.desc()).all()
 
     summary = _panel_summary_from_rows(rows)
-    by_group = _panel_group_rows(rows)
+    by_group = _panel_group_rows(rows, db=db)
     by_provider = _panel_provider_rows(rows)
     by_type = _panel_type_rows(rows)
 
@@ -3149,7 +3201,8 @@ def panel_actas(
                 rename_btn = (
                     f'<a href="/panel/group-detail?group_jid={r["group_jid"]}&view={view}" '
                     f'class="btn btn-light" '
-                    f'style="padding:6px 10px;font-size:12px;border-radius:10px;text-decoration:none;">Renombrar</a>'
+                    f'style="display:flex;align-items:center;justify-content:center;'
+                    f'padding:6px 10px;font-size:12px;border-radius:10px;text-decoration:none;">Detalle</a>'
                 )
                 
                 block_btn = (
@@ -3159,7 +3212,7 @@ def panel_actas(
                 )
                 
                 action_btn = f'''
-                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <div style="display:flex;align-items:center;gap:8px;">
                   {rename_btn}
                   {block_btn}
                 </div>
