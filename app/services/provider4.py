@@ -1,5 +1,6 @@
 import re
 import time
+from datetime import datetime, timedelta
 from html import unescape
 from urllib.parse import urljoin
 
@@ -220,6 +221,128 @@ class Provider4Client:
                     time.sleep(4)
 
         raise RuntimeError(f"PROVIDER4_HISTORY_FAILED: {last_error}")
+
+    def get_history_html_for_date(self, fecha: str) -> str:
+        """
+        fecha debe venir como: 31/Mar/2026
+        """
+        last_error = None
+        url = f"{self.HISTORY_URL}&fecha={fecha}"
+    
+        for attempt in range(3):
+            try:
+                print(f"PROVIDER4_HISTORY_DATE_ATTEMPT_{attempt+1}_URL = {url}", flush=True)
+    
+                resp = self.session.get(
+                    url,
+                    timeout=(15, 120),
+                    headers={
+                        "User-Agent": self.session.headers["User-Agent"],
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        "Accept-Language": "es-ES,es;q=0.9",
+                        "Referer": self.MANUAL_PAGE_URL,
+                    },
+                )
+                resp.raise_for_status()
+    
+                print(
+                    f"PROVIDER4_HISTORY_DATE_ATTEMPT_{attempt+1}_STATUS = {resp.status_code}",
+                    flush=True,
+                )
+    
+                return resp.text
+    
+            except requests.exceptions.RequestException as e:
+                last_error = e
+                print(
+                    f"PROVIDER4_HISTORY_DATE_ATTEMPT_{attempt+1}_ERROR = {str(e)}",
+                    flush=True,
+                )
+                if attempt < 2:
+                    time.sleep(4)
+    
+        raise RuntimeError(f"PROVIDER4_HISTORY_DATE_FAILED: {last_error}")
+
+    def extract_daily_done_count(self, history_html: str) -> int:
+        """
+        Extrae el número mostrado en algo como:
+        <b><font size="4">*54*</font></b>
+        """
+        if not history_html:
+            return 0
+    
+        patterns = [
+            r"<b>\s*<font[^>]*>\s*\*(\d+)\*\s*</font>\s*</b>",
+            r"<font[^>]*>\s*\*(\d+)\*\s*</font>",
+            r"\*(\d+)\*",
+        ]
+    
+        for pattern in patterns:
+            m = re.search(pattern, history_html, flags=re.IGNORECASE | re.DOTALL)
+            if m:
+                value = int(m.group(1))
+                print("PROVIDER4_DAILY_DONE_COUNT =", value, flush=True)
+                return value
+    
+        print("PROVIDER4_DAILY_DONE_COUNT_NOT_FOUND = 0", flush=True)
+        return 0
+    
+    def get_done_count_for_date(self, fecha: str) -> int:
+        """
+        fecha en formato: 31/Mar/2026
+        """
+        self.warm()
+        html = self.get_history_html_for_date(fecha)
+        print(f"PROVIDER4_HISTORY_DATE_HTML_PREVIEW_{fecha} =", html[:1500], flush=True)
+        return self.extract_daily_done_count(html)
+    
+    def get_week_done_counts(self, start_date: datetime, end_date: datetime) -> dict:
+        """
+        Suma por día desde start_date hasta end_date sin incluir end_date.
+        Regresa detalle diario + total.
+        """
+        self.warm()
+    
+        month_map = {
+            1: "Jan",
+            2: "Feb",
+            3: "Mar",
+            4: "Apr",
+            5: "May",
+            6: "Jun",
+            7: "Jul",
+            8: "Aug",
+            9: "Sep",
+            10: "Oct",
+            11: "Nov",
+            12: "Dec",
+        }
+    
+        rows = []
+        total = 0
+    
+        cur = start_date
+        while cur < end_date:
+            fecha_param = f"{cur.day:02d}/{month_map[cur.month]}/{cur.year}"
+    
+            try:
+                daily_count = self.get_done_count_for_date(fecha_param)
+            except Exception as e:
+                print(f"PROVIDER4_WEEK_COUNT_ERROR_{fecha_param} = {str(e)}", flush=True)
+                daily_count = 0
+    
+            rows.append({
+                "date": cur.strftime("%Y-%m-%d"),
+                "fecha_param": fecha_param,
+                "count": daily_count,
+            })
+            total += daily_count
+            cur += timedelta(days=1)
+    
+        return {
+            "rows": rows,
+            "total": total,
+        }
 
     def _folio_pdf_direct_url(self, term: str, tipoa: str) -> str:
         tipo_map = {
