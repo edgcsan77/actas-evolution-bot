@@ -2107,28 +2107,50 @@ async def panel_broadcast_free(request: Request, background_tasks: BackgroundTas
         
 
 def _promotion_summary_map(db: Session) -> dict[str, dict]:
-    rows = db.query(GroupPromotion).all()
+    rows = (
+        db.query(GroupPromotion)
+        .order_by(GroupPromotion.updated_at.desc(), GroupPromotion.id.desc())
+        .all()
+    )
 
-    shared_counts = Counter((r.shared_key or "").strip() for r in rows if (r.shared_key or "").strip())
+    shared_counts = Counter(
+        (r.shared_key or "").strip()
+        for r in rows
+        if (r.shared_key or "").strip()
+    )
 
     out = {}
+    seen = set()
 
     for r in rows:
-        available = max(0, (r.total_actas or 0) - (r.used_actas or 0))
+        raw_key = (r.group_jid or "").strip()
+        if not raw_key or raw_key in seen:
+            continue
+
+        seen.add(raw_key)
+
+        total_actas = int(r.total_actas or 0)
+        used_actas = int(r.used_actas or 0)
+        available = max(0, total_actas - used_actas)
         shared_key = (r.shared_key or "").strip()
+        promo_name = (r.promo_name or "").strip()
+
+        # si la promo ya fue quitada completamente, no la metas al mapa
+        if not promo_name and total_actas == 0 and used_actas == 0:
+            continue
 
         payload = {
-            "promo_name": r.promo_name or "",
-            "total_actas": r.total_actas or 0,
-            "used_actas": r.used_actas or 0,
+            "promo_name": promo_name,
+            "total_actas": total_actas,
+            "used_actas": used_actas,
             "available": available,
+            "is_active": bool(r.is_active),
             "client_key": (r.client_key or "").strip(),
             "shared_key": shared_key,
             "shared_count": shared_counts.get(shared_key, 0),
             "html": _promotion_badge_html(r),
         }
 
-        raw_key = (r.group_jid or "").strip()
         clean_key = raw_key.replace("@g.us", "")
 
         out[raw_key] = payload
@@ -4547,6 +4569,20 @@ def panel_remove_group_promotion(
     db.commit()
 
     try:
+        unblock_group(group_jid)
+    except Exception as unblock_exc:
+        print("PROMOTION_REMOVE_UNBLOCK_ERROR =", str(unblock_exc), flush=True)
+
+    try:
+        redis_conn.delete(f"promo_notify:{group_jid}:0")
+        redis_conn.delete(f"promo_notify:{group_jid}:10")
+        redis_conn.delete(f"promo_notify:{group_jid}:50")
+        redis_conn.delete(f"promo_notify:{group_jid}:100")
+        redis_conn.delete(f"promo_notify:{group_jid}:200")
+    except Exception as redis_exc:
+        print("PROMOTION_REMOVE_REDIS_CLEAR_ERROR =", str(redis_exc), flush=True)
+
+    try:
         send_group_text(
             group_jid,
             (
@@ -4562,7 +4598,7 @@ def panel_remove_group_promotion(
         "ok": True,
         "message": "Promoción desactivada correctamente",
         "group_jid": group_jid,
-}
+    }
 
 
 @app.post("/panel/group/{group_jid}/promotion/recharge")
