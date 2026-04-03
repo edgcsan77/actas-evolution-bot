@@ -4149,25 +4149,24 @@ def _get_group_promotion(db: Session, group_jid: str) -> GroupPromotion | None:
     if not group_jid:
         return None
 
-    active = (
-        db.query(GroupPromotion)
-        .filter(
-            GroupPromotion.group_jid == group_jid,
-            GroupPromotion.is_active == True
-        )
-        .order_by(GroupPromotion.updated_at.desc(), GroupPromotion.id.desc())
-        .first()
-    )
-
-    if active:
-        return active
-
-    return (
+    rows = (
         db.query(GroupPromotion)
         .filter(GroupPromotion.group_jid == group_jid)
         .order_by(GroupPromotion.updated_at.desc(), GroupPromotion.id.desc())
-        .first()
+        .all()
     )
+
+    for row in rows:
+        promo_name = (row.promo_name or "").strip()
+        total_actas = int(row.total_actas or 0)
+        used_actas = int(row.used_actas or 0)
+
+        if not promo_name and total_actas == 0 and used_actas == 0:
+            continue
+
+        return row
+
+    return None
 
 
 def _promo_client_key(group_jid: str | None, promo_name: str | None = None, client_key: str | None = None) -> str:
@@ -4204,7 +4203,14 @@ def _promotion_badge_html(promo: GroupPromotion | None) -> str:
     if not promo:
         return '<span style="color:#6b7280;font-weight:700;">Sin promoción</span>'
 
-    available = _promotion_available(promo)
+    promo_name = (promo.promo_name or "").strip()
+    total_actas = int(promo.total_actas or 0)
+    used_actas = int(promo.used_actas or 0)
+
+    if not promo_name and total_actas == 0 and used_actas == 0:
+        return '<span style="color:#6b7280;font-weight:700;">Sin promoción</span>'
+
+    available = max(0, total_actas - used_actas)
 
     if available <= 0:
         color = "#991b1b"
