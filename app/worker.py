@@ -245,15 +245,13 @@ def _pick_provider_name(
         raise RuntimeError("NO_PROVIDER_ENABLED")
 
     if not _is_curp_term(term):
-        enabled = [p for p in enabled if p != "PROVIDER4"]
-
-    if not enabled:
-        raise RuntimeError("NO_PROVIDER_ENABLED")
+        if "PROVIDER3" in enabled:
+            return "PROVIDER3"
+        raise RuntimeError("NO_PROVIDER_FOR_CHAIN_OR_CODE")
 
     if PROVIDER4_TEST_GROUPS:
         if (
-            _is_curp_term(term)
-            and source_group_id
+            source_group_id
             and source_group_id in PROVIDER4_TEST_GROUPS
             and "PROVIDER4" in enabled
         ):
@@ -824,35 +822,6 @@ def process_request(request_id: int):
             return
 
         if provider_name == "PROVIDER4":
-            if not _is_curp_term(req.curp):
-                enabled = _enabled_providers(db)
-        
-                if "PROVIDER3" not in enabled:
-                    print("NO_PROVIDER_FOR_CHAIN_OR_CODE =", req.curp, flush=True)
-        
-                    msg = (
-                        "⚠️ *Formato no disponible actualmente*\n\n"
-                        "Las consultas por *cadena o código de verificación* "
-                        "no están disponibles en este momento.\n\n"
-                        "Intenta nuevamente más tarde o realiza la búsqueda por *CURP*."
-                    )
-        
-                    if req.source_group_id:
-                        send_group_text(req.source_group_id, msg)
-                    else:
-                        from app.services.evolution import send_text
-                        send_text(req.requester_wa_id, msg)
-        
-                    req.status = "ERROR"
-                    req.error_message = "NO_PROVIDER_FOR_CHAIN_OR_CODE"
-                    req.updated_at = _utc_now_naive()
-                    db.commit()
-                    return
-        
-                print("PROVIDER4_SKIPPED_NON_CURP_FALLBACK_PROVIDER3 =", req.curp, flush=True)
-                _fallback_to_provider3_web(req, db, process_started_ts)
-                return
-        
             provider4_started_ts = time.perf_counter()
         
             try:
@@ -1036,6 +1005,45 @@ def process_request(request_id: int):
     
         if req:
             req.updated_at = _utc_now_naive()
+
+            if err == "NO_PROVIDER_FOR_CHAIN_OR_CODE":
+                req.status = "ERROR"
+                req.error_message = err
+                db.commit()
+
+                msg = (
+                    "⚠️ *Formato no disponible actualmente*\n\n"
+                    "Las consultas por *cadena o código de verificación* "
+                    "no están disponibles en este momento.\n\n"
+                    "Intenta nuevamente más tarde o realiza la búsqueda por *CURP*."
+                )
+
+                if req.source_group_id:
+                    send_group_text(req.source_group_id, msg)
+                else:
+                    from app.services.evolution import send_text
+                    send_text(req.requester_wa_id, msg)
+
+                return
+
+            if err == "NO_PROVIDER_ENABLED":
+                req.status = "ERROR"
+                req.error_message = err
+                db.commit()
+
+                msg = (
+                    "⚠️ *Proveedores no disponibles*\n\n"
+                    "En este momento no hay proveedores activos para procesar la solicitud.\n\n"
+                    "Intenta nuevamente más tarde."
+                )
+
+                if req.source_group_id:
+                    send_group_text(req.source_group_id, msg)
+                else:
+                    from app.services.evolution import send_text
+                    send_text(req.requester_wa_id, msg)
+
+                return
     
             if (
                 err.startswith("PROVIDER3_NO_RECORD:")
