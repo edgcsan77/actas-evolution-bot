@@ -3197,13 +3197,6 @@ def panel_actas(
             for r in by_group:
                 blocked = is_group_blocked(r["group_jid"])
                 blocked_text = "BLOQUEADO" if blocked else "ACTIVO"
-        
-                rename_btn = (
-                    f'<a href="/panel/group-detail?group_jid={r["group_jid"]}&view={view}" '
-                    f'class="btn btn-light" '
-                    f'style="display:flex;align-items:center;justify-content:center;'
-                    f'padding:6px 10px;font-size:12px;border-radius:10px;text-decoration:none;">Detalle</a>'
-                )
                 
                 block_btn = (
                     f'<button class="btn btn-success" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'unblock\')">Desbloquear</button>'
@@ -3213,7 +3206,6 @@ def panel_actas(
                 
                 action_btn = f'''
                 <div style="display:flex;align-items:center;gap:8px;">
-                  {rename_btn}
                   {block_btn}
                 </div>
                 '''
