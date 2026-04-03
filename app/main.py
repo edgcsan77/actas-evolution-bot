@@ -391,7 +391,7 @@ def _panel_provider_rows(rows: list[RequestLog]) -> list[dict]:
     data = {}
 
     for r in rows:
-        name = r.provider_name or "SIN_PROVEEDOR"
+        name = r.provider_name or "NO IDENTIFICADO"
         if name not in data:
             data[name] = {
                 "provider_name": name,
@@ -653,7 +653,6 @@ def panel_recent_requests(
           <th>Grupo cliente</th>
           <th>Proveedor</th>
           <th>Grupo proveedor</th>
-          <th>Mensaje proveedor</th>
           <th>Creado</th>
           <th>Actualizado</th>
           <th>Error</th>
@@ -680,14 +679,13 @@ def panel_recent_requests(
               <td>{_esc(_group_name(r.source_group_id, db))}</td>
               <td>{_esc(_provider_label(r.provider_name))}</td>
               <td>{_esc(_group_name(r.provider_group_id, db))}</td>
-              <td class="small">{_esc(r.provider_message)}</td>
               <td>{_esc(_fmt_dt(r.created_at))}</td>
               <td>{_esc(_fmt_dt(r.updated_at))}</td>
               <td class="small">{_esc(r.error_message)}</td>
             </tr>
             """
     else:
-        html += '<tr><td colspan="11">Sin solicitudes en este periodo.</td></tr>'
+        html += '<tr><td colspan="10">Sin solicitudes en este periodo.</td></tr>'
 
     html += """
       </tbody>
