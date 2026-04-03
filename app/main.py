@@ -83,6 +83,20 @@ DAYS_ES = {
 }
 
 
+PROVIDER_LABELS = {
+    "PROVIDER1": "WA EMERGENCIA",
+    "PROVIDER2": "AUSTRAM BOT",
+    "PROVIDER3": "AUSTRAM WEB",
+    "PROVIDER4": "LAZARO WEB",
+}
+
+
+def _provider_label(name: str) -> str:
+    if not name:
+        return ""
+    return PROVIDER_LABELS.get(name, name)
+
+
 def _day_name_es_from_date(day_str: str) -> str:
     dt = datetime.strptime(day_str, "%Y-%m-%d")
     return DAYS_ES[dt.weekday()]
@@ -664,7 +678,7 @@ def panel_recent_requests(
               <td>{_esc(r.act_type)}</td>
               <td class="{status_class}">{_esc(r.status)}</td>
               <td>{_esc(_group_name(r.source_group_id, db))}</td>
-              <td>{_esc(r.provider_name)}</td>
+              <td>{_esc(_provider_label(r.provider_name))}</td>
               <td>{_esc(_group_name(r.provider_group_id, db))}</td>
               <td class="small">{_esc(r.provider_message)}</td>
               <td>{_esc(_fmt_dt(r.created_at))}</td>
@@ -2825,7 +2839,7 @@ def panel_actas(
         
                   <div class="provider-grid">
                     <div class="provider-card">
-                      <div class="provider-name">PROVEEDOR WA EMERGENCIA</div>
+                      <div class="provider-name">WA EMERGENCIA</div>
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER1','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER1','off')">Desactivar</button>
@@ -3095,7 +3109,7 @@ def panel_actas(
             for r in by_provider:
                 html += f"""
                 <tr>
-                  <td>{_esc(r["provider_name"])}</td>
+                  <td>{_esc(_provider_label(r["provider_name"]))}</td>
                   <td class="right">{r["total"]}</td>
                   <td class="right">{r["queued"]}</td>
                   <td class="right">{r["processing"]}</td>
@@ -3323,7 +3337,6 @@ def panel_actas(
                   <th>Grupo cliente</th>
                   <th>Proveedor</th>
                   <th>Grupo proveedor</th>
-                  <th>Mensaje proveedor</th>
                   <th>Creado</th>
                   <th>Actualizado</th>
                   <th>Error</th>
@@ -3348,16 +3361,15 @@ def panel_actas(
                   <td>{_esc(r.act_type)}</td>
                   <td class="{status_class}">{_esc(r.status)}</td>
                   <td>{_esc(_group_name(r.source_group_id))}</td>
-                  <td>{_esc(r.provider_name)}</td>
+                  <td>{_esc(_provider_label(r.provider_name))}</td>
                   <td>{_esc(_group_name(r.provider_group_id))}</td>
-                  <td class="small">{_esc(r.provider_message)}</td>
                   <td>{_esc(_fmt_dt(r.created_at))}</td>
                   <td>{_esc(_fmt_dt(r.updated_at))}</td>
                   <td class="small">{_esc(r.error_message)}</td>
                 </tr>
                 """
         else:
-            html += '<tr><td colspan="11">Sin solicitudes en este periodo.</td></tr>'
+            html += '<tr><td colspan="10">Sin solicitudes en este periodo.</td></tr>'
     
         html += """
               </tbody>
@@ -4277,7 +4289,7 @@ def _providers_status_text(db: Session) -> str:
         provider4_extra = f" | ERROR HISTORY: {str(e)}"
 
     return (
-        f"PROVEEDOR WA EMERGENCIA: {s1}\n"
+        f"WA EMERGENCIA: {s1}\n"
         f"AUSTRAM WEB: {s3}{provider3_extra}\n"
         f"LAZARO WEB: {s4}{provider4_extra}"
     )
