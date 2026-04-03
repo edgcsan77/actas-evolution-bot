@@ -1807,6 +1807,14 @@ GROUP_NAME_MAP = {
     "120363425433931286@g.us": "Gpo. No. 65 Gestoria Guerrero",
     "120363425691947112@g.us": "Gpo. No. 70 Lazaro 2",
     "120363427243510324@g.us": "Gpo. Grupos SN Gestoria Educativa",
+    "120363406217452557@g.us": "Gpo. No. 8 Cristina",
+    "120363407739117517@g.us": "Gpo. No. 9 Cristina",
+    "120363406363506819@g.us": "Gpo. No. 10 Cristina",
+    "120363424847083960@g.us": "Gpo. No. 11 Cristina",
+    "120363408346528746@g.us": "Gpo. No. 12 Cristina",
+    "120363406341954870@g.us": "Gpo. No. 13 Cristina",
+    "120363424448068009@g.us": "Gpo. No. 14 Cristina",
+    "120363405818188792@g.us": "Gpo. No. 15 Cristina", 
 }
 
 
@@ -3076,11 +3084,11 @@ def panel_actas(
     
         html += """
         <div class="box">
-          <div class="head collapsible-head closed" onclick="toggleSection('grupoClienteBody', this)">
+          <div class="head collapsible-head open" onclick="toggleSection('grupoClienteBody', this)">
             <strong>Resumen por grupo cliente</strong>
             <span class="collapse-icon">▼</span>
           </div>
-          <div id="grupoClienteBody" class="collapsible-body closed">
+          <div id="grupoClienteBody" class="collapsible-body open">
           <div class="table-wrap">
             <table>
               <thead>
