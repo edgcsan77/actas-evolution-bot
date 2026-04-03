@@ -581,13 +581,10 @@ def _handle_group_promotion_after_done(req, db):
     db.commit()
 
     if crossed_0:
-        if shared_key:
-            _block_client_groups(rows)
-        else:
-            try:
-                block_group(current.group_jid)
-            except Exception as e:
-                print("PROMOTION_SINGLE_GROUP_BLOCK_ERROR =", str(e), flush=True)
+        try:
+            _block_client_groups(rows if shared_key else [current])
+        except Exception as e:
+            print("PROMOTION_BLOCK_ERROR =", str(e), flush=True)
 
     if msg and notify_level:
         notify_scope = shared_key if shared_key else current.group_jid
