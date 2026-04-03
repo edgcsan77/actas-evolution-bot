@@ -4227,7 +4227,7 @@ def _providers_status_text(db: Session) -> str:
     
         provider4_total = provider4_week.get("total", 0)
     
-        provider4_extra = f" | Actas semana: {provider4_total}"
+        provider4_extra = f" | CURP hechas: {provider4_total}"
     
     except Exception as e:
         provider4_extra = f" | ERROR HISTORY: {str(e)}"
