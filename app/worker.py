@@ -588,6 +588,17 @@ def _handle_group_promotion_after_done(req, db):
 
     if msg and notify_level:
         notify_scope = shared_key if shared_key else current.group_jid
+
+        if notify_level == "0":
+            try:
+                if shared_key:
+                    _notify_client_groups(rows, msg)
+                else:
+                    send_group_text(current.group_jid, msg)
+            except Exception as e:
+                print("PROMOTION_NOTIFY_LEVEL_0_ERROR =", str(e), flush=True)
+            return
+
         notify_key = f"promo_notify:{notify_scope}:{notify_level}"
         first_notify = redis_conn.set(notify_key, "1", ex=1800, nx=True)
 
