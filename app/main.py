@@ -2095,7 +2095,7 @@ async def panel_broadcast_free(request: Request, background_tasks: BackgroundTas
         
 
 def _promotion_summary_map(db: Session) -> dict[str, dict]:
-    rows = db.query(GroupPromotion).filter(GroupPromotion.is_active == True).all()
+    rows = db.query(GroupPromotion).all()
 
     shared_counts = Counter((r.shared_key or "").strip() for r in rows if (r.shared_key or "").strip())
 
