@@ -627,20 +627,41 @@ def _start_provider3_flow(req, db):
 
 
 def _validate_pdf_matches_term(pdf_bytes: bytes, term: str) -> bool:
-    try:
-        text = pdf_bytes.decode(errors="ignore").upper()
-    except Exception:
-        return False
-
     term = (term or "").strip().upper()
-
     if not term:
+        return True
+
+    try:
+        text = pdf_bytes.decode("latin1", errors="ignore").upper()
+    except Exception:
         return True
 
     if not text or len(text.strip()) < 100:
         return True
 
-    return term in text
+    normalized_text = re.sub(r"[^A-Z0-9]", "", text)
+    normalized_term = re.sub(r"[^A-Z0-9]", "", term)
+
+    if normalized_term and normalized_term in normalized_text:
+        return True
+
+    found_curps = set(
+        re.findall(
+            r"[A-Z][AEIOUX][A-Z]{2}\d{6}[HM][A-Z]{5}[A-Z0-9]\d",
+            normalized_text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+    if normalized_term in found_curps:
+        return True
+
+    if found_curps and normalized_term not in found_curps:
+        print("PROVIDER4_VALIDATE_EXPECTED_CURP =", normalized_term, flush=True)
+        print("PROVIDER4_VALIDATE_FOUND_CURPS =", sorted(found_curps), flush=True)
+        return False
+
+    return True
 
 
 def _validate_act_type_pdf(pdf_bytes: bytes, act_type: str | None) -> bool:
@@ -843,6 +864,7 @@ def process_request(request_id: int):
                     raise RuntimeError("PROVIDER4_WRONG_ACT_TYPE")
                 
                 if not _validate_pdf_matches_term(pdf_bytes, req.curp):
+                    print("PROVIDER4_VALIDATE_FAIL_REQ_CURP =", req.curp, flush=True)
                     raise RuntimeError(f"PROVIDER4_WRONG_CURP_IN_PDF:{req.curp}")
         
             except Exception as p4_exc:
