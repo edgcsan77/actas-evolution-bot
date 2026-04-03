@@ -2895,7 +2895,7 @@ def panel_actas(
             <div>
               <strong>Promoción compartida</strong>
               <span class="small">
-                Permite asignar un paquete de actas a varios grupos para compartir el mismo saldo disponible.
+                Permite asignar un paquete de actas a varios grupos para compartir el mismo saldo.
               </span>
             </div>
             <span class="collapse-icon">▼</span>
