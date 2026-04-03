@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.db import Base, engine, get_db, SessionLocal
-from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion
+from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion, GroupAlias
 from app.queue import request_queue, redis_conn
 from app.worker import process_request, provider3_keepalive_job
 from app.services.provider3 import Provider3Client
@@ -209,11 +209,24 @@ def _query_requests_for_panel(
 
     if group_jid:
         val = group_jid.strip()
+        val_low = val.lower()
 
-        matching_group_ids = [
-            gid for gid, name in GROUP_NAME_MAP.items()
-            if val.lower() in gid.lower() or val.lower() in name.lower()
+        alias_rows = db.query(GroupAlias).all()
+        alias_matches = [
+            row.group_jid
+            for row in alias_rows
+            if row.group_jid and (
+                val_low in row.group_jid.lower()
+                or val_low in (row.custom_name or "").lower()
+            )
         ]
+
+        map_matches = [
+            gid for gid, name in GROUP_NAME_MAP.items()
+            if val_low in gid.lower() or val_low in (name or "").lower()
+        ]
+
+        matching_group_ids = list(dict.fromkeys(alias_matches + map_matches))
 
         if matching_group_ids:
             q = q.filter(RequestLog.source_group_id.in_(matching_group_ids))
@@ -260,6 +273,7 @@ def _panel_summary_from_rows(rows: list[RequestLog]) -> dict:
 
 def _panel_group_rows(
     rows: list[RequestLog],
+    db: Session,
     include_all_groups: bool = False,
     has_active_filters: bool = False,
 ) -> list[dict]:
@@ -277,7 +291,18 @@ def _panel_group_rows(
         return any(word in name_up for word in excluded_words)
 
     if include_all_groups and not has_active_filters:
-        for gid, name in GROUP_NAME_MAP.items():
+        alias_rows = db.query(GroupAlias).all()
+        alias_map = {
+            row.group_jid: (row.custom_name or "").strip()
+            for row in alias_rows
+            if row.group_jid
+        }
+
+        all_group_ids = set(GROUP_NAME_MAP.keys()) | set(alias_map.keys())
+
+        for gid in all_group_ids:
+            name = alias_map.get(gid) or GROUP_NAME_MAP.get(gid) or "Grupo sin nombre"
+
             if _is_hidden_group(name):
                 continue
 
@@ -305,7 +330,7 @@ def _panel_group_rows(
 
     for r in rows:
         gid = r.source_group_id or "PRIVADO"
-        group_name = _group_name(gid)
+        group_name = _group_name(gid, db)
 
         if gid != "PRIVADO" and _is_hidden_group(group_name):
             continue
@@ -344,7 +369,7 @@ def _panel_group_rows(
 
     out = [x for x in out if x["group_jid"] != "PRIVADO" or x["total"] > 0]
     out.sort(key=lambda x: ((x["total"] == 0), -x["total"], x["group_name"]))
-    
+
     return out
 
 
@@ -412,7 +437,7 @@ def _panel_type_rows(rows: list[RequestLog]) -> list[dict]:
     return out
 
 
-def _panel_daily_group_rows(rows: list[RequestLog]) -> list[dict]:
+def _panel_daily_group_rows(rows: list[RequestLog], db: Session) -> list[dict]:
     data = {}
 
     for r in rows:
@@ -425,7 +450,7 @@ def _panel_daily_group_rows(rows: list[RequestLog]) -> list[dict]:
             data[key] = {
                 "day": day,
                 "group_jid": gid,
-                "group_name": _group_name(gid),
+                "group_name": _group_name(gid, db),
                 "total": 0,
                 "queued": 0,
                 "processing": 0,
@@ -450,7 +475,7 @@ def _panel_daily_group_rows(rows: list[RequestLog]) -> list[dict]:
     return out
 
 
-def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str) -> dict:
+def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str, db: Session) -> dict:
     days = {}
 
     now_local = _panel_now()
@@ -513,7 +538,7 @@ def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str) -
 
     return {
         "group_jid": group_jid,
-        "group_name": _group_name(group_jid),
+        "group_name": _group_name(group_jid, db),
         "rows": rows_out,
         "totals": totals,
         "date_from": local_start.strftime("%Y-%m-%d"),
@@ -638,9 +663,9 @@ def panel_recent_requests(
               <td class="mono">{_esc(r.curp)}</td>
               <td>{_esc(r.act_type)}</td>
               <td class="{status_class}">{_esc(r.status)}</td>
-              <td>{_esc(_group_name(r.source_group_id))}</td>
+              <td>{_esc(_group_name(r.source_group_id, db))}</td>
               <td>{_esc(r.provider_name)}</td>
-              <td>{_esc(_group_name(r.provider_group_id))}</td>
+              <td>{_esc(_group_name(r.provider_group_id, db))}</td>
               <td class="small">{_esc(r.provider_message)}</td>
               <td>{_esc(_fmt_dt(r.created_at))}</td>
               <td>{_esc(_fmt_dt(r.updated_at))}</td>
@@ -875,7 +900,7 @@ def panel_promotions_report(db: Session = Depends(get_db)):
 
         item = {
             "group_jid": r.group_jid or "",
-            "group_name": _group_name(r.group_jid),
+            "group_name": _group_name(r.group_jid, db),
             "promo_name": (r.promo_name or "").strip() or "-",
             "total_actas": total_actas,
             "used_actas": used_actas,
@@ -1243,7 +1268,7 @@ def panel_group_detail(
         time_max=time_max,
     ).order_by(RequestLog.created_at.asc()).all()
 
-    detail = _panel_detail_for_group(rows, group_jid, view)
+    detail = _panel_detail_for_group(rows, group_jid, view, db)
 
     title = detail["group_name"]
     subtitle = (
@@ -1818,10 +1843,19 @@ GROUP_NAME_MAP = {
 }
 
 
-def _group_name(jid: str):
+def _group_name(jid: str, db: Session | None = None):
     if not jid:
         return ""
-    return GROUP_NAME_MAP.get(jid, jid)
+
+    if db:
+        row = db.query(GroupAlias).filter(GroupAlias.group_jid == jid).first()
+        if row and row.custom_name:
+            return row.custom_name
+
+    if jid in GROUP_NAME_MAP:
+        return GROUP_NAME_MAP[jid]
+
+    return "Grupo sin nombre"
     
 
 @app.get("/panel/api")
@@ -2059,6 +2093,7 @@ def panel_actas(
         
         by_group = _panel_group_rows(
             rows,
+            db=db,
             include_all_groups=include_all_groups,
             has_active_filters=has_active_filters,
         )
@@ -2808,7 +2843,7 @@ def panel_actas(
             <div>
               <strong>Promoción compartida</strong>
               <span class="small">
-                Permite asignar un mismo paquete de actas a varios grupos para que utilicen el mismo saldo disponible.
+                Permite asignar un paquete de actas a varios grupos para compartir el mismo saldo disponible.
               </span>
             </div>
             <span class="collapse-icon">▼</span>
@@ -3111,11 +3146,24 @@ def panel_actas(
                 blocked = is_group_blocked(r["group_jid"])
                 blocked_text = "BLOQUEADO" if blocked else "ACTIVO"
         
-                action_btn = (
+                rename_btn = (
+                    f'<a href="/panel/group-detail?group_jid={r["group_jid"]}&view={view}" '
+                    f'class="btn btn-light" '
+                    f'style="padding:6px 10px;font-size:12px;border-radius:10px;text-decoration:none;">Renombrar</a>'
+                )
+                
+                block_btn = (
                     f'<button class="btn btn-success" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'unblock\')">Desbloquear</button>'
                     if blocked
                     else f'<button class="btn btn-danger" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'block\')">Bloquear</button>'
                 )
+                
+                action_btn = f'''
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  {rename_btn}
+                  {block_btn}
+                </div>
+                '''
         
                 group_key = (r["group_jid"] or "").replace("@g.us", "").strip()
                 promo_info = (
@@ -3181,8 +3229,12 @@ def panel_actas(
     
         html += """
         <div class="box">
-          <div class="head"><strong>Solicitudes recientes</strong></div>
-          <div class="table-wrap" id="recentRequestsWrap">
+          <div class="head collapsible-head closed" onclick="toggleSection('recentRequestsWrap', this)">
+            <strong>Solicitudes recientes</strong>
+            <span class="collapse-icon">▼</span>
+          </div>
+          <div id="recentRequestsWrap" class="collapsible-body closed">
+          <div class="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -3234,7 +3286,6 @@ def panel_actas(
             </table>
           </div>
         </div>
-    
       </div>
     
       <script>
@@ -3289,6 +3340,7 @@ def panel_actas(
           const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
           if (!ok) return;
 
+          if (broadcastRunning) return;
           broadcastRunning = true;
     
           try {
@@ -3322,6 +3374,7 @@ def panel_actas(
           const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
           if (!ok) return;
 
+          if (broadcastRunning) return;
           broadcastRunning = true;
     
           try {
@@ -3509,6 +3562,30 @@ def panel_actas(
             promoType.addEventListener("change", toggleSharedPromoCreditFields);
             toggleSharedPromoCreditFields();
           }
+        
+          filterSharedPromoGroups();
+          startRecentRequestsStream();
+        
+          const sections = [
+            "grupoClienteBody",
+            "promoCompartidaBody",
+            "recentRequestsWrap"
+          ];
+        
+          sections.forEach(id => {
+            const body = document.getElementById(id);
+            const head = body?.previousElementSibling;
+        
+            if (!body || !head) return;
+        
+            const state = localStorage.getItem(id);
+        
+            if (state === "closed") {
+              body.classList.remove("open");
+              body.classList.add("closed");
+              head.classList.add("closed");
+            }
+          });
         });
 
         function filterSharedPromoGroups() {
@@ -3552,31 +3629,6 @@ def panel_actas(
         
           filterSharedPromoGroups();
         }
-        
-        document.addEventListener("DOMContentLoaded", () => {
-          filterSharedPromoGroups();
-          startRecentRequestsStream();
-
-          const sections = [
-            "grupoClienteBody",
-            "promoCompartidaBody"
-          ];
-        
-          sections.forEach(id => {
-            const body = document.getElementById(id);
-            const head = body?.previousElementSibling;
-        
-            if (!body || !head) return;
-        
-            const state = localStorage.getItem(id);
-        
-            if (state === "closed") {
-              body.classList.remove("open");
-              body.classList.add("closed");
-              head.classList.add("closed");
-            }
-          });
-        });
 
         function toggleSection(bodyId, headEl) {
           const body = document.getElementById(bodyId);
@@ -4211,6 +4263,34 @@ def list_blocked_groups() -> list[str]:
     out.sort()
     return out
     
+
+@app.post("/panel/group/{group_jid}/name")
+def panel_set_group_name(
+    group_jid: str,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    custom_name = (payload.get("custom_name") or "").strip()
+
+    if not custom_name:
+        return {"ok": False, "error": "NAME_REQUIRED"}
+
+    row = db.query(GroupAlias).filter(GroupAlias.group_jid == group_jid).first()
+
+    if row:
+        row.custom_name = custom_name
+        row.updated_at = _utc_now_naive()
+    else:
+        row = GroupAlias(
+            group_jid=group_jid,
+            custom_name=custom_name
+        )
+        db.add(row)
+
+    db.commit()
+
+    return {"ok": True}
+
 
 @app.post("/panel/group/{group_jid}/promotion")
 def panel_set_group_promotion(
