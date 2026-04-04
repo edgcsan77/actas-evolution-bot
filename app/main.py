@@ -868,6 +868,145 @@ def panel_apply_shared_promotion(
         "credit_debe": credit_debe,
         "groups": selected_group_jids,
     }
+
+
+@app.post("/panel/promotions/add-group")
+def panel_add_group_to_shared_promotion(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    group_jid = (payload.get("group_jid") or "").strip()
+    shared_key = (payload.get("shared_key") or "").strip().upper()
+
+    if not group_jid:
+        return {"ok": False, "error": "GROUP_JID_REQUIRED"}
+
+    if not shared_key:
+        return {"ok": False, "error": "SHARED_KEY_REQUIRED"}
+
+    # Buscar una promoción activa existente de esa bolsa compartida
+    leader = (
+        db.query(GroupPromotion)
+        .filter(
+            GroupPromotion.shared_key == shared_key,
+            GroupPromotion.is_active == True
+        )
+        .order_by(GroupPromotion.updated_at.desc(), GroupPromotion.id.desc())
+        .first()
+    )
+
+    if not leader:
+        return {"ok": False, "error": "SHARED_PROMOTION_NOT_FOUND"}
+
+    # Evitar duplicar si ya pertenece a esa misma bolsa activa
+    existing_same = (
+        db.query(GroupPromotion)
+        .filter(
+            GroupPromotion.group_jid == group_jid,
+            GroupPromotion.shared_key == shared_key,
+            GroupPromotion.is_active == True
+        )
+        .first()
+    )
+
+    if existing_same:
+        return {
+            "ok": True,
+            "message": "El grupo ya pertenece a esta bolsa compartida",
+            "group_jid": group_jid,
+            "shared_key": shared_key,
+        }
+
+    row = (
+        db.query(GroupPromotion)
+        .filter(GroupPromotion.group_jid == group_jid)
+        .first()
+    )
+
+    if row:
+        row.promo_name = leader.promo_name
+        row.client_key = leader.client_key
+        row.shared_key = leader.shared_key
+        row.total_actas = leader.total_actas
+        row.used_actas = leader.used_actas
+        row.price_per_piece = leader.price_per_piece
+        row.is_credit = leader.is_credit
+        row.credit_abono = leader.credit_abono or 0
+        row.credit_debe = leader.credit_debe or 0
+        row.warning_sent_200 = bool(leader.warning_sent_200)
+        row.warning_sent_100 = bool(leader.warning_sent_100)
+        row.warning_sent_50 = bool(leader.warning_sent_50)
+        row.warning_sent_10 = bool(leader.warning_sent_10)
+        row.warning_sent_0 = bool(leader.warning_sent_0)
+        row.is_active = True
+        row.updated_at = _utc_now_naive()
+    else:
+        row = GroupPromotion(
+            group_jid=group_jid,
+            promo_name=leader.promo_name,
+            client_key=leader.client_key,
+            shared_key=leader.shared_key,
+            total_actas=leader.total_actas,
+            used_actas=leader.used_actas,
+            price_per_piece=leader.price_per_piece,
+            is_credit=leader.is_credit,
+            credit_abono=leader.credit_abono or 0,
+            credit_debe=leader.credit_debe or 0,
+            warning_sent_200=bool(leader.warning_sent_200),
+            warning_sent_100=bool(leader.warning_sent_100),
+            warning_sent_50=bool(leader.warning_sent_50),
+            warning_sent_10=bool(leader.warning_sent_10),
+            warning_sent_0=bool(leader.warning_sent_0),
+            is_active=True,
+            created_at=_utc_now_naive(),
+            updated_at=_utc_now_naive(),
+        )
+        db.add(row)
+
+    db.commit()
+
+    rows = (
+        db.query(GroupPromotion)
+        .filter(
+            GroupPromotion.shared_key == shared_key,
+            GroupPromotion.is_active == True
+        )
+        .all()
+    )
+
+    try:
+        _unblock_client_groups_main(rows)
+    except Exception as unblock_exc:
+        print("PROMOTION_ADD_GROUP_UNBLOCK_ERROR =", str(unblock_exc), flush=True)
+
+    try:
+        available = max(0, int(leader.total_actas or 0) - int(leader.used_actas or 0))
+        promo_label = (leader.promo_name or "").strip() or "paquete promocional"
+        tipo_label = "crédito" if leader.is_credit else "pagada"
+
+        send_group_text(
+            group_jid,
+            (
+                f"✅ *Grupo agregado a bolsa compartida*\n\n"
+                f"Tu grupo fue agregado correctamente a la promoción *{promo_label}*.\n"
+                f"Tipo: *{tipo_label}*\n"
+                f"Bolsa compartida: *{shared_key}*\n"
+                f"Saldo disponible actual: *{available} actas*."
+            )
+        )
+    except Exception as notify_exc:
+        print("PROMOTION_ADD_GROUP_NOTIFY_ERROR =", str(notify_exc), flush=True)
+
+    return {
+        "ok": True,
+        "message": "Grupo agregado correctamente a la bolsa compartida",
+        "group_jid": group_jid,
+        "shared_key": shared_key,
+        "promo_name": leader.promo_name,
+        "total_actas": leader.total_actas,
+        "used_actas": leader.used_actas,
+        "available": max(0, int(leader.total_actas or 0) - int(leader.used_actas or 0)),
+    }
     
 
 def _is_credit_promotion(row: GroupPromotion) -> bool:
@@ -3095,6 +3234,10 @@ def panel_actas(
               <button class="btn btn-success" onclick="applySharedPromotion()">
                 Aplicar promoción compartida
               </button>
+
+              <button class="btn btn-primary" type="button" onclick="addGroupToSharedPromotion()">
+                Agregar grupo a bolsa existente
+              </button>
         
               <button class="btn btn-light" type="button" onclick="clearSharedPromotionSelection()">
                 Limpiar selección
@@ -3450,7 +3593,44 @@ def panel_actas(
             alert("No se pudo conectar con el servidor");
           }
         }
-    
+        
+        async function addGroupToSharedPromotion() {
+          const selected = Array.from(document.querySelectorAll(".shared-promo-group:checked"))
+            .map(el => el.value);
+        
+          if (selected.length !== 1) {
+            alert("Selecciona solo un grupo para agregarlo a una bolsa existente");
+            return;
+          }
+        
+          const shared_key = prompt("Ingresa la clave de la bolsa compartida existente:");
+          if (!shared_key) return;
+        
+          try {
+            const res = await fetch("/panel/promotions/add-group", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                group_jid: selected[0],
+                shared_key: shared_key
+              })
+            });
+        
+            const data = await res.json();
+        
+            if (data.ok) {
+              alert(data.message || "Grupo agregado correctamente");
+              location.reload();
+            } else {
+              alert(data.error || "No se pudo agregar el grupo");
+            }
+          } catch (e) {
+            alert("No se pudo conectar con el servidor");
+          }
+        }
+
         async function sendBroadcast(type) {
           const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
           if (!ok) return;
