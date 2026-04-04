@@ -52,6 +52,32 @@ def _is_provider4_eligible(term: str | None, act_type: str | None) -> bool:
     return True
 
 
+def _group_individual_limit_reached(row: GroupPromotion | None) -> bool:
+    if not row:
+        return False
+
+    limit_actas = int(row.shared_group_limit_actas or 0)
+    used_actas = int(row.shared_group_used_actas or 0)
+
+    if limit_actas <= 0:
+        return False
+
+    return used_actas >= limit_actas
+
+
+def _group_individual_remaining(row: GroupPromotion | None) -> int | None:
+    if not row:
+        return None
+
+    limit_actas = int(row.shared_group_limit_actas or 0)
+    used_actas = int(row.shared_group_used_actas or 0)
+
+    if limit_actas <= 0:
+        return None
+
+    return max(0, limit_actas - used_actas)
+
+
 def _fallback_to_provider3_web(req, db, process_started_ts):
     req.provider_name = "PROVIDER3"
     req.provider_group_id = None
@@ -524,6 +550,10 @@ def _handle_group_promotion_after_done(req, db):
     for row in rows:
         row.total_actas = total_before
         row.used_actas = used_after
+
+        if row.group_jid == req.source_group_id:
+            row.shared_group_used_actas = int(row.shared_group_used_actas or 0) + 1
+        
         row.updated_at = _utc_now_naive()
 
     msg = None
@@ -591,7 +621,42 @@ def _handle_group_promotion_after_done(req, db):
         for row in rows:
             row.warning_sent_200 = True
 
+    current_group_row = next(
+        (x for x in rows if (x.group_jid or "").strip() == (req.source_group_id or "").strip()),
+        None
+    )
+
+    individual_limit_msg = None
+    reached_individual_limit = False
+
+    if current_group_row:
+        limit_actas = int(current_group_row.shared_group_limit_actas or 0)
+        used_group = int(current_group_row.shared_group_used_actas or 0)
+
+        if limit_actas > 0 and used_group >= limit_actas:
+            reached_individual_limit = True
+            individual_limit_msg = (
+                f"⚠️ *Límite individual alcanzado*\n\n"
+                f"Este grupo alcanzó su límite individual dentro de la bolsa compartida.\n"
+                f"Límite del grupo: *{limit_actas} actas*.\n"
+                f"Consumidas por este grupo: *{used_group}*.\n\n"
+                f"El grupo quedará bloqueado automáticamente, "
+                f"pero la bolsa compartida general puede seguir disponible para los demás grupos."
+            )
+
     db.commit()
+
+    if reached_individual_limit and current_group_row and current_group_row.group_jid:
+        try:
+            from app.main import block_group
+            block_group(current_group_row.group_jid)
+        except Exception as e:
+            print("SHARED_GROUP_LIMIT_BLOCK_AFTER_DONE_ERROR =", str(e), flush=True)
+
+        try:
+            send_group_text(current_group_row.group_jid, individual_limit_msg)
+        except Exception as e:
+            print("SHARED_GROUP_LIMIT_NOTIFY_AFTER_DONE_ERROR =", str(e), flush=True)
 
     if crossed_0:
         try:
@@ -730,6 +795,48 @@ def process_request(request_id: int):
         req.status = "PROCESSING"
         req.updated_at = _utc_now_naive()
         db.commit()
+
+        if req.source_group_id:
+            promo_row = (
+                db.query(GroupPromotion)
+                .filter(
+                    GroupPromotion.group_jid == req.source_group_id,
+                    GroupPromotion.is_active == True
+                )
+                .first()
+            )
+
+            if promo_row and (promo_row.shared_key or "").strip():
+                if _group_individual_limit_reached(promo_row):
+                    remaining_shared = max(
+                        0,
+                        int(promo_row.total_actas or 0) - int(promo_row.used_actas or 0)
+                    )
+
+                    msg = (
+                        f"⚠️ *Límite individual alcanzado*\n\n"
+                        f"Este grupo ya consumió su límite individual dentro de la bolsa compartida.\n"
+                        f"Límite del grupo: *{int(promo_row.shared_group_limit_actas or 0)} actas*.\n"
+                        f"Consumidas por este grupo: *{int(promo_row.shared_group_used_actas or 0)}*.\n"
+                        f"Saldo disponible en la bolsa general: *{remaining_shared} actas*."
+                    )
+
+                    try:
+                        send_group_text(req.source_group_id, msg)
+                    except Exception as notify_exc:
+                        print("SHARED_GROUP_LIMIT_NOTIFY_ERROR =", str(notify_exc), flush=True)
+
+                    try:
+                        from app.main import block_group
+                        block_group(req.source_group_id)
+                    except Exception as block_exc:
+                        print("SHARED_GROUP_LIMIT_BLOCK_ERROR =", str(block_exc), flush=True)
+
+                    req.status = "ERROR"
+                    req.error_message = "SHARED_GROUP_LIMIT_REACHED"
+                    req.updated_at = _utc_now_naive()
+                    db.commit()
+                    return
 
         provider_name = _pick_provider_name(
             db,
