@@ -40,6 +40,18 @@ def _is_curp_term(value: str | None) -> bool:
     return bool(CURP_RE.match(v))
 
 
+def _is_provider4_eligible(term: str | None, act_type: str | None) -> bool:
+    if not _is_curp_term(term):
+        return False
+
+    act_type_up = (act_type or "").strip().upper()
+
+    if "FOLIO" in act_type_up:
+        return False
+
+    return True
+
+
 def _fallback_to_provider3_web(req, db, process_started_ts):
     req.provider_name = "PROVIDER3"
     req.provider_group_id = None
@@ -238,16 +250,17 @@ def _pick_provider_name(
     request_id: int,
     source_group_id: str | None = None,
     term: str | None = None,
+    act_type: str | None = None,
 ) -> str:
     enabled = _enabled_providers(db)
 
     if not enabled:
         raise RuntimeError("NO_PROVIDER_ENABLED")
 
-    if not _is_curp_term(term):
+    if not _is_provider4_eligible(term, act_type):
         if "PROVIDER3" in enabled:
             return "PROVIDER3"
-        raise RuntimeError("NO_PROVIDER_FOR_CHAIN_OR_CODE")
+        raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
 
     if PROVIDER4_TEST_GROUPS:
         if (
@@ -718,7 +731,13 @@ def process_request(request_id: int):
         req.updated_at = _utc_now_naive()
         db.commit()
 
-        provider_name = _pick_provider_name(db, req.id, req.source_group_id, req.curp)
+        provider_name = _pick_provider_name(
+            db,
+            req.id,
+            req.source_group_id,
+            req.curp,
+            req.act_type,
+        )
         provider_group_id = _pick_provider_group(provider_name, req.act_type, req.id)
         text_to_provider = _build_provider_message(provider_name, req.curp, req.act_type)
 
@@ -848,31 +867,6 @@ def process_request(request_id: int):
                 p4_err = str(p4_exc)
                 p4_elapsed = time.perf_counter() - provider4_started_ts
                 enabled = _enabled_providers(db)
-        
-                if p4_err.startswith("PROVIDER4_NOT_CURP"):
-                    if "PROVIDER3" not in enabled:
-                        msg = (
-                            "⚠️ *Formato no disponible actualmente*\n\n"
-                            "Las consultas por *cadena o código de verificación* "
-                            "no están disponibles en este momento.\n\n"
-                            "Intenta nuevamente más tarde o realiza la búsqueda por *CURP*."
-                        )
-        
-                        if req.source_group_id:
-                            send_group_text(req.source_group_id, msg)
-                        else:
-                            from app.services.evolution import send_text
-                            send_text(req.requester_wa_id, msg)
-        
-                        req.status = "ERROR"
-                        req.error_message = "NO_PROVIDER_FOR_CHAIN_OR_CODE"
-                        req.updated_at = _utc_now_naive()
-                        db.commit()
-                        return
-        
-                    print("PROVIDER4_NOT_CURP_FALLBACK_TO_PROVIDER3 =", req.curp, flush=True)
-                    _fallback_to_provider3_web(req, db, process_started_ts)
-                    return
         
                 fallback_errors = (
                     p4_err.startswith("PROVIDER4_BACKEND_FAILED:")
@@ -1015,6 +1009,26 @@ def process_request(request_id: int):
     
         if req:
             req.updated_at = _utc_now_naive()
+
+            if err == "NO_PROVIDER_FOR_SPECIAL_FORMAT":
+                req.status = "ERROR"
+                req.error_message = err
+                db.commit()
+
+                msg = (
+                    "⚠️ *Formato no disponible actualmente*\n\n"
+                    "Las consultas por *cadena, código de verificación o actas foliadas* "
+                    "no están disponibles en este momento.\n\n"
+                    "Intenta nuevamente más tarde o realiza la búsqueda por *CURP normal*."
+                )
+
+                if req.source_group_id:
+                    send_group_text(req.source_group_id, msg)
+                else:
+                    from app.services.evolution import send_text
+                    send_text(req.requester_wa_id, msg)
+
+                return
 
             if err == "NO_PROVIDER_FOR_CHAIN_OR_CODE":
                 req.status = "ERROR"
