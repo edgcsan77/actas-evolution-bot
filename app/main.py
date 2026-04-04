@@ -744,6 +744,42 @@ def panel_remove_shared_promotion(
     return {"ok": True, "shared_key": shared_key}
 
 
+@app.post("/panel/promotions/set-group-limit")
+def panel_set_shared_group_limit(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    group_jid = (payload.get("group_jid") or "").strip()
+    limit_actas = int(payload.get("limit_actas") or 0)
+
+    if not group_jid:
+        return {"ok": False, "error": "GROUP_JID_REQUIRED"}
+
+    row = (
+        db.query(GroupPromotion)
+        .filter(GroupPromotion.group_jid == group_jid)
+        .first()
+    )
+
+    if not row:
+        return {"ok": False, "error": "PROMOTION_NOT_FOUND"}
+
+    if not (row.shared_key or "").strip():
+        return {"ok": False, "error": "GROUP_NOT_IN_SHARED_PROMOTION"}
+
+    row.shared_group_limit_actas = limit_actas if limit_actas > 0 else None
+    row.updated_at = _utc_now_naive()
+    db.commit()
+
+    return {
+        "ok": True,
+        "message": "Límite individual actualizado correctamente",
+        "group_jid": group_jid,
+        "shared_group_limit_actas": row.shared_group_limit_actas,
+        "shared_group_used_actas": row.shared_group_used_actas or 0,
+    }
+
+
 @app.post("/panel/promotions/apply")
 def panel_apply_shared_promotion(
     payload: dict = Body(...),
@@ -759,6 +795,7 @@ def panel_apply_shared_promotion(
     is_credit = bool(payload.get("is_credit") or False)
     credit_abono = int(payload.get("credit_abono") or 0)
     credit_debe = int(payload.get("credit_debe") or 0)
+    shared_group_limit_actas = int(payload.get("shared_group_limit_actas") or 0)
 
     if not selected_group_jids:
         return {"ok": False, "error": "NO_GROUPS_SELECTED"}
@@ -793,6 +830,8 @@ def panel_apply_shared_promotion(
                 is_credit=is_credit,
                 credit_abono=credit_abono,
                 credit_debe=credit_debe,
+                shared_group_limit_actas=shared_group_limit_actas or None,
+                shared_group_used_actas=0,
                 warning_sent_200=False,
                 warning_sent_100=False,
                 warning_sent_50=False,
@@ -814,6 +853,8 @@ def panel_apply_shared_promotion(
             row.is_credit = is_credit
             row.credit_abono = credit_abono
             row.credit_debe = credit_debe
+            row.shared_group_limit_actas = shared_group_limit_actas or None
+            row.shared_group_used_actas = 0
             row.warning_sent_200 = False
             row.warning_sent_100 = False
             row.warning_sent_50 = False
@@ -877,6 +918,7 @@ def panel_add_group_to_shared_promotion(
 ):
     group_jid = (payload.get("group_jid") or "").strip()
     shared_key = (payload.get("shared_key") or "").strip().upper()
+    shared_group_limit_actas = int(payload.get("shared_group_limit_actas") or 0)
 
     if not group_jid:
         return {"ok": False, "error": "GROUP_JID_REQUIRED"}
@@ -933,6 +975,8 @@ def panel_add_group_to_shared_promotion(
         row.is_credit = leader.is_credit
         row.credit_abono = leader.credit_abono or 0
         row.credit_debe = leader.credit_debe or 0
+        row.shared_group_limit_actas = shared_group_limit_actas or None
+        row.shared_group_used_actas = 0
         row.warning_sent_200 = bool(leader.warning_sent_200)
         row.warning_sent_100 = bool(leader.warning_sent_100)
         row.warning_sent_50 = bool(leader.warning_sent_50)
@@ -952,6 +996,8 @@ def panel_add_group_to_shared_promotion(
             is_credit=leader.is_credit,
             credit_abono=leader.credit_abono or 0,
             credit_debe=leader.credit_debe or 0,
+            shared_group_limit_actas=shared_group_limit_actas or None,
+            shared_group_used_actas=0,
             warning_sent_200=bool(leader.warning_sent_200),
             warning_sent_100=bool(leader.warning_sent_100),
             warning_sent_50=bool(leader.warning_sent_50),
@@ -3625,6 +3671,35 @@ def panel_actas(
               location.reload();
             } else {
               alert(data.error || "No se pudo agregar el grupo");
+            }
+          } catch (e) {
+            alert("No se pudo conectar con el servidor");
+          }
+        }
+
+        async function setSharedGroupLimit(groupJid) {
+          const value = prompt("Ingresa el límite individual de actas para este grupo dentro de la bolsa compartida:");
+          if (value === null) return;
+        
+          try {
+            const res = await fetch("/panel/promotions/set-group-limit", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                group_jid: groupJid,
+                limit_actas: Number(value || 0)
+              })
+            });
+        
+            const data = await res.json();
+        
+            if (data.ok) {
+              alert(data.message || "Límite actualizado");
+              location.reload();
+            } else {
+              alert(data.error || "No se pudo actualizar el límite");
             }
           } catch (e) {
             alert("No se pudo conectar con el servidor");
