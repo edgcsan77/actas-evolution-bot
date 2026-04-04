@@ -386,50 +386,40 @@ class Provider4Client:
     
     def _extract_pdf_link(self, history_html: str, term: str) -> str | None:
         term = (term or "").strip().upper()
-
+    
         row_pattern = rf"<tr>.*?{re.escape(term)}.*?</tr>"
         row_match = re.search(row_pattern, history_html, flags=re.IGNORECASE | re.DOTALL)
-
-        if row_match:
-            row_html = row_match.group(0)
-            m = re.search(r'href="(\./d\.php\?f=[^"]+)"', row_html, flags=re.IGNORECASE)
-            if m:
-                return urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
-
-        m = re.search(
-            rf'href="(\./d\.php\?f=[^"]*{re.escape(term)}[^"]*)"',
-            history_html,
-            flags=re.IGNORECASE,
-        )
+    
+        if not row_match:
+            return None
+    
+        row_html = row_match.group(0)
+    
+        m = re.search(r'href="(\./d\.php\?f=[^"]+)"', row_html, flags=re.IGNORECASE)
         if m:
             return urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
-
+    
         return None
 
     def _extract_folio_link(self, history_html: str, term: str) -> str | None:
         term = (term or "").strip().upper()
-
+    
         row_pattern = rf"<tr>.*?{re.escape(term)}.*?</tr>"
         row_match = re.search(row_pattern, history_html, flags=re.IGNORECASE | re.DOTALL)
-
-        if row_match:
-            row_html = row_match.group(0)
-            m = re.search(
-                r'href="(\./ActasN/addFol\.php\?[^"]+)"',
-                row_html,
-                flags=re.IGNORECASE,
-            )
-            if m:
-                return urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
-
+    
+        if not row_match:
+            return None
+    
+        row_html = row_match.group(0)
+    
         m = re.search(
             r'href="(\./ActasN/addFol\.php\?[^"]+)"',
-            history_html,
+            row_html,
             flags=re.IGNORECASE,
         )
         if m:
             return urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
-
+    
         return None
 
     def download_pdf_bytes(self, url: str) -> bytes:
@@ -581,6 +571,7 @@ class Provider4Client:
         max_polls = self.HISTORY_MAX_POLLS
         poll_sleep_seconds = self.HISTORY_POLL_SLEEP
     
+        # Solo intento rápido, NO entrega final sin confirmación de history
         early_direct_pdf_bytes = None
     
         if inc_folio:
@@ -602,6 +593,8 @@ class Provider4Client:
             except Exception as direct_exc:
                 print("PROVIDER4_DIRECT_NORMAL_FAILED =", str(direct_exc), flush=True)
     
+        history_confirmed = False
+    
         for poll_attempt in range(max_polls):
             history_html = self.get_history_html()
             print(
@@ -615,36 +608,45 @@ class Provider4Client:
     
             row_html = self._history_row_for_term(history_html, term)
     
-            if inc_folio:
-                if row_html:
+            if row_html:
+                history_confirmed = True
+                print(
+                    f"PROVIDER4_HISTORY_CONFIRMED_ATTEMPT_{poll_attempt+1} = {term}",
+                    flush=True,
+                )
+    
+                if inc_folio:
                     link = self._extract_folio_link(history_html, term)
                     if link:
                         print("PROVIDER4_FINAL_FOLIO_LINK =", link, flush=True)
                         return self._download_foliated_pdf(link)
     
+                    # Si history ya mostró la fila correcta, ahora sí se permite directo
                     try:
                         return self.download_pdf_bytes(direct_folio_url)
                     except Exception as direct_retry_exc:
                         print("PROVIDER4_DIRECT_FOLIO_RETRY_FAILED =", str(direct_retry_exc), flush=True)
     
+                    # Usar early direct SOLO después de confirmación en history
                     if early_direct_pdf_bytes:
-                        print("PROVIDER4_USING_EARLY_DIRECT_FOLIO_PDF_AS_FALLBACK = TRUE", flush=True)
+                        print("PROVIDER4_USING_CONFIRMED_EARLY_DIRECT_FOLIO_PDF = TRUE", flush=True)
                         return early_direct_pdf_bytes
     
-            else:
-                if row_html:
+                else:
                     link = self._extract_pdf_link(history_html, term)
                     if link:
                         print("PROVIDER4_FINAL_DOWNLOAD_LINK =", link, flush=True)
                         return self.download_pdf_bytes(link)
     
+                    # Si history ya mostró la fila correcta, ahora sí se permite directo
                     try:
                         return self.download_pdf_bytes(direct_normal_url)
                     except Exception as direct_retry_exc:
                         print("PROVIDER4_DIRECT_NORMAL_RETRY_FAILED =", str(direct_retry_exc), flush=True)
     
+                    # Usar early direct SOLO después de confirmación en history
                     if early_direct_pdf_bytes:
-                        print("PROVIDER4_USING_EARLY_DIRECT_PDF_AS_FALLBACK = TRUE", flush=True)
+                        print("PROVIDER4_USING_CONFIRMED_EARLY_DIRECT_PDF = TRUE", flush=True)
                         return early_direct_pdf_bytes
     
             print(
@@ -658,13 +660,12 @@ class Provider4Client:
         if self._detect_no_result(final_history_html, term):
             raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
     
-        if inc_folio and early_direct_pdf_bytes:
-            print("PROVIDER4_FINAL_USING_EARLY_DIRECT_FOLIO_PDF = TRUE", flush=True)
-            return early_direct_pdf_bytes
-    
-        if not inc_folio and early_direct_pdf_bytes:
-            print("PROVIDER4_FINAL_USING_EARLY_DIRECT_PDF = TRUE", flush=True)
-            return early_direct_pdf_bytes
+        # Ya NO usar early direct sin confirmación de history
+        if not history_confirmed:
+            if inc_folio:
+                raise RuntimeError(f"PROVIDER4_HISTORY_NOT_CONFIRMED_FOLIO:{term}")
+            else:
+                raise RuntimeError(f"PROVIDER4_HISTORY_NOT_CONFIRMED_PDF:{term}")
     
         if inc_folio:
             raise RuntimeError(f"PROVIDER4_NO_FOLIO_LINK_FOR:{term}")
