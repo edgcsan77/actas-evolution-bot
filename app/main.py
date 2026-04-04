@@ -1472,6 +1472,7 @@ def panel_group_detail(
     promo_credit_abono = promo.credit_abono if promo else 0
     promo_credit_debe = promo.credit_debe if promo else 0
     promo_type_label = "Crédito" if promo_is_credit else "Pagada"
+    promo_shared_group_limit = promo.shared_group_limit_actas if promo else 0
 
     time_min, time_max, view = _panel_period_bounds(view)
 
@@ -1726,6 +1727,21 @@ def panel_group_detail(
               placeholder="N/A">
             </div>
           </div>
+
+          <div class="filters" style="grid-template-columns: minmax(0, 1fr) 220px;">
+            <div>
+              <div class="small">Límite individual dentro de bolsa compartida</div>
+              <input id="shared_group_limit" type="number" min="0"
+                     placeholder="Sin límite"
+                     value="{promo_shared_group_limit if promo_shared_group_limit else ''}">
+            </div>
+
+            <div style="display:flex;align-items:end;">
+              <button type="button" class="btn btn-primary" style="width:100%;" onclick="setSharedGroupLimit('{group_jid}')">
+                Guardar límite
+              </button>
+            </div>
+          </div>
  
           <div class="filters">
             <button type="button" class="btn btn-primary" onclick="savePromotion('{group_jid}')">Activar promoción</button>
@@ -1832,6 +1848,34 @@ def panel_group_detail(
                 location.reload();
               }} else {{
                 alert(data.error || "Error guardando promoción");
+              }}
+            }} catch (e) {{
+              alert("No se pudo conectar con el servidor");
+            }}
+          }}
+
+          async function setSharedGroupLimit(groupJid) {{
+            const limit = document.getElementById("shared_group_limit")?.value?.trim() || "0";
+
+            try {{
+              const res = await fetch("/panel/promotions/set-group-limit", {{
+                method: "POST",
+                headers: {{
+                  "Content-Type": "application/json"
+                }},
+                body: JSON.stringify({{
+                  group_jid: groupJid,
+                  limit_actas: Number(limit || 0)
+                }})
+              }});
+
+              const data = await res.json();
+
+              if (data.ok) {{
+                alert(data.message || "Límite actualizado");
+                location.reload();
+              }} else {{
+                alert(data.error || "Error actualizando límite");
               }}
             }} catch (e) {{
               alert("No se pudo conectar con el servidor");
