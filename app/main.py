@@ -3037,7 +3037,12 @@ def panel_actas(
               style="max-height:360px;overflow:auto;border:1px solid #e5e7eb;padding:12px;border-radius:14px;background:#fff;margin-top:12px;"
             >
         """
-        for gid, name in sorted(GROUP_NAME_MAP.items(), key=lambda x: _group_name(x[0], db).lower()):
+        group_ids = set(GROUP_NAME_MAP.keys())
+        group_ids.update(
+            gid for (gid,) in db.query(GroupAlias.group_jid).all()
+        )
+
+        for gid in sorted(group_ids, key=lambda x: _group_name(x, db).lower()):
             group_name = _group_name(gid, db)
             upper_name = group_name.upper()
         
