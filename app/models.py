@@ -90,16 +90,21 @@ class GroupPromotion(Base):
     id = Column(Integer, primary_key=True)
     group_jid = Column(String(120), unique=True, nullable=False, index=True)
     promo_name = Column(String(150), nullable=True)
-    client_key = Column(String(255), nullable=True, index=True)
 
     total_actas = Column(Integer, nullable=False, default=0)
     used_actas = Column(Integer, nullable=False, default=0)
+    
     price_per_piece = Column(String(30), nullable=True)
-    shared_key = Column(String(255), nullable=True, index=True)
 
     is_credit = Column(Boolean, default=False, nullable=False)
     credit_abono = Column(Integer, nullable=False, default=0)
     credit_debe = Column(Integer, nullable=False, default=0)
+
+    client_key = Column(String(255), nullable=True, index=True)
+    shared_key = Column(String(255), nullable=True, index=True)
+
+    shared_group_limit_actas = Column(Integer, nullable=True)
+    shared_group_used_actas = Column(Integer, nullable=False, default=0, server_default="0")
 
     warning_sent_200 = Column(Boolean, default=False, nullable=False)
     warning_sent_100 = Column(Boolean, default=False, nullable=False)
@@ -108,5 +113,6 @@ class GroupPromotion(Base):
     warning_sent_0 = Column(Boolean, default=False, nullable=False)
 
     is_active = Column(Boolean, default=True, nullable=False)
+    
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
