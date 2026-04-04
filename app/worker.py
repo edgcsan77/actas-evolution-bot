@@ -878,6 +878,8 @@ def process_request(request_id: int):
                     p4_err.startswith("PROVIDER4_BACKEND_FAILED:")
                     or p4_err.startswith("PROVIDER4_VGET_FAILED:")
                     or p4_err.startswith("PROVIDER4_HISTORY_FAILED:")
+                    or p4_err.startswith("PROVIDER4_HISTORY_NOT_CONFIRMED_PDF:")
+                    or p4_err.startswith("PROVIDER4_HISTORY_NOT_CONFIRMED_FOLIO:")
                     or p4_err.startswith("PROVIDER4_NO_PDF_LINK_FOR:")
                     or p4_err.startswith("PROVIDER4_NO_FOLIO_LINK_FOR:")
                     or p4_err.startswith("PROVIDER4_DOWNLOAD_FAILED:")
