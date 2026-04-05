@@ -84,7 +84,7 @@ DAYS_ES = {
 
 
 PROVIDER_LABELS = {
-    "PROVIDER1": "WA EMERGENCIA",
+    "PROVIDER1": "ADMIN DIGITAL",
     "PROVIDER2": "AUSTRAM BOT",
     "PROVIDER3": "AUSTRAM WEB",
     "PROVIDER4": "LAZARO WEB",
@@ -3088,7 +3088,7 @@ def panel_actas(
         
                   <div class="provider-grid">
                     <div class="provider-card">
-                      <div class="provider-name">WA EMERGENCIA</div>
+                      <div class="provider-name">ADMIN DIGITAL</div>
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER1','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER1','off')">Desactivar</button>
@@ -4619,7 +4619,7 @@ def _providers_status_text(db: Session) -> str:
         provider4_extra = f" | ERROR HISTORY: {str(e)}"
 
     return (
-        f"WA EMERGENCIA: {s1}\n"
+        f"ADMIN DIGITAL: {s1}\n"
         f"AUSTRAM WEB: {s3}{provider3_extra}\n"
         f"LAZARO WEB: {s4}{provider4_extra}"
     )
