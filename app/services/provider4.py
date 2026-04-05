@@ -16,7 +16,7 @@ class Provider4Client:
     VGET_URL = f"{BASE_URL}/servicio/vGetOfi.php"
     HISTORY_URL = f"{BASE_URL}/servicio/vHistory.php?HID={HID}"
 
-    HISTORY_MAX_POLLS = 15
+    HISTORY_MAX_POLLS = 60
     HISTORY_POLL_SLEEP = 3
 
     def __init__(self) -> None:
@@ -403,15 +403,25 @@ class Provider4Client:
 
     def _extract_folio_link(self, history_html: str, term: str) -> str | None:
         term = (term or "").strip().upper()
-    
+
         row_pattern = rf"<tr>.*?{re.escape(term)}.*?</tr>"
         row_match = re.search(row_pattern, history_html, flags=re.IGNORECASE | re.DOTALL)
-    
+
         if not row_match:
             return None
-    
+
         row_html = row_match.group(0)
-    
+
+        # Prioridad: d.php final
+        m = re.search(
+            r'href="(\./d\.php\?f=[^"]+)"',
+            row_html,
+            flags=re.IGNORECASE,
+        )
+        if m:
+            return urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
+
+        # Respaldo: addFol.php
         m = re.search(
             r'href="(\./ActasN/addFol\.php\?[^"]+)"',
             row_html,
@@ -419,7 +429,7 @@ class Provider4Client:
         )
         if m:
             return urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
-    
+
         return None
 
     def download_pdf_bytes(self, url: str) -> bytes:
@@ -573,25 +583,14 @@ class Provider4Client:
     
         # Solo intento rápido, NO entrega final sin confirmación de history
         early_direct_pdf_bytes = None
-    
-        if inc_folio:
-            direct_folio_url = self._folio_pdf_direct_url(term, tipoa)
-            print("PROVIDER4_DIRECT_FOLIO_URL =", direct_folio_url, flush=True)
-    
-            try:
-                early_direct_pdf_bytes = self.download_pdf_bytes(direct_folio_url)
-                print("PROVIDER4_DIRECT_FOLIO_EARLY_PDF_READY = TRUE", flush=True)
-            except Exception as direct_exc:
-                print("PROVIDER4_DIRECT_FOLIO_FAILED =", str(direct_exc), flush=True)
-        else:
-            direct_normal_url = self._normal_pdf_direct_url(term, tipoa)
-            print("PROVIDER4_DIRECT_NORMAL_URL =", direct_normal_url, flush=True)
-    
-            try:
-                early_direct_pdf_bytes = self.download_pdf_bytes(direct_normal_url)
-                print("PROVIDER4_DIRECT_NORMAL_EARLY_PDF_READY = TRUE", flush=True)
-            except Exception as direct_exc:
-                print("PROVIDER4_DIRECT_NORMAL_FAILED =", str(direct_exc), flush=True)
+        direct_normal_url = self._normal_pdf_direct_url(term, tipoa)
+        print("PROVIDER4_DIRECT_URL =", direct_normal_url, flush=True)
+
+        try:
+            early_direct_pdf_bytes = self.download_pdf_bytes(direct_normal_url)
+            print("PROVIDER4_DIRECT_EARLY_PDF_READY = TRUE", flush=True)
+        except Exception as direct_exc:
+            print("PROVIDER4_DIRECT_FAILED =", str(direct_exc), flush=True)
     
         history_confirmed = False
     
@@ -610,6 +609,11 @@ class Provider4Client:
     
             if row_html:
                 history_confirmed = True
+
+                if early_direct_pdf_bytes:
+                    print("PROVIDER4_FAST_DIRECT_AFTER_HISTORY = TRUE", flush=True)
+                    return early_direct_pdf_bytes
+                
                 print(
                     f"PROVIDER4_HISTORY_CONFIRMED_ATTEMPT_{poll_attempt+1} = {term}",
                     flush=True,
@@ -619,17 +623,21 @@ class Provider4Client:
                     link = self._extract_folio_link(history_html, term)
                     if link:
                         print("PROVIDER4_FINAL_FOLIO_LINK =", link, flush=True)
-                        return self._download_foliated_pdf(link)
-    
+
+                        if "addFol.php" in link:
+                            return self._download_foliated_pdf(link)
+
+                        return self.download_pdf_bytes(link)
+
                     # Si history ya mostró la fila correcta, ahora sí se permite directo
                     try:
-                        return self.download_pdf_bytes(direct_folio_url)
+                        return self.download_pdf_bytes(direct_normal_url)
                     except Exception as direct_retry_exc:
-                        print("PROVIDER4_DIRECT_FOLIO_RETRY_FAILED =", str(direct_retry_exc), flush=True)
-    
+                        print("PROVIDER4_DIRECT_RETRY_FAILED =", str(direct_retry_exc), flush=True)
+
                     # Usar early direct SOLO después de confirmación en history
                     if early_direct_pdf_bytes:
-                        print("PROVIDER4_USING_CONFIRMED_EARLY_DIRECT_FOLIO_PDF = TRUE", flush=True)
+                        print("PROVIDER4_USING_CONFIRMED_EARLY_DIRECT_PDF = TRUE", flush=True)
                         return early_direct_pdf_bytes
     
                 else:
@@ -642,8 +650,8 @@ class Provider4Client:
                     try:
                         return self.download_pdf_bytes(direct_normal_url)
                     except Exception as direct_retry_exc:
-                        print("PROVIDER4_DIRECT_NORMAL_RETRY_FAILED =", str(direct_retry_exc), flush=True)
-    
+                        print("PROVIDER4_DIRECT_RETRY_FAILED =", str(direct_retry_exc), flush=True)
+                    
                     # Usar early direct SOLO después de confirmación en history
                     if early_direct_pdf_bytes:
                         print("PROVIDER4_USING_CONFIRMED_EARLY_DIRECT_PDF = TRUE", flush=True)
