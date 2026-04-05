@@ -647,15 +647,15 @@ class Provider4Client:
                         return self.download_pdf_bytes(link)
     
                     # Si history ya mostró la fila correcta, ahora sí se permite directo
-                    try:
-                        return self.download_pdf_bytes(direct_normal_url)
-                    except Exception as direct_retry_exc:
-                        print("PROVIDER4_DIRECT_RETRY_FAILED =", str(direct_retry_exc), flush=True)
+                    #try:
+                    #    return self.download_pdf_bytes(direct_normal_url)
+                    #except Exception as direct_retry_exc:
+                    #    print("PROVIDER4_DIRECT_RETRY_FAILED =", str(direct_retry_exc), flush=True)
                     
                     # Usar early direct SOLO después de confirmación en history
-                    if early_direct_pdf_bytes:
-                        print("PROVIDER4_USING_CONFIRMED_EARLY_DIRECT_PDF = TRUE", flush=True)
-                        return early_direct_pdf_bytes
+                    #if early_direct_pdf_bytes:
+                    #    print("PROVIDER4_USING_CONFIRMED_EARLY_DIRECT_PDF = TRUE", flush=True)
+                    #    return early_direct_pdf_bytes
     
             print(
                 f"PROVIDER4_HISTORY_LINK_NOT_READY_ATTEMPT_{poll_attempt+1} = {term}",
