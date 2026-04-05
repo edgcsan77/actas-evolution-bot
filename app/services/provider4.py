@@ -610,7 +610,7 @@ class Provider4Client:
             if row_html:
                 history_confirmed = True
 
-                if early_direct_pdf_bytes:
+                if early_direct_pdf_bytes and not inc_folio:
                     print("PROVIDER4_FAST_DIRECT_AFTER_HISTORY = TRUE", flush=True)
                     return early_direct_pdf_bytes
                 
