@@ -321,7 +321,7 @@ def _pick_provider1_group(act_type: str, request_id: int) -> str:
 
     especiales_group = settings.PROVIDER_GROUP_ESPECIALES
 
-    if act_type.startswith("NACIMIENTO")
+    if act_type.startswith("NACIMIENTO"):
         if not nacimiento_groups:
             raise RuntimeError("NO_BIRTH_PROVIDER_GROUPS_CONFIGURED")
         idx = (request_id - 1) % len(nacimiento_groups)
