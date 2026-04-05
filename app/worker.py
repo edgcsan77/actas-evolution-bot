@@ -284,10 +284,11 @@ def _pick_provider_name(
         raise RuntimeError("NO_PROVIDER_ENABLED")
 
     if not _is_provider4_eligible(term, act_type):
-        if "PROVIDER3" in enabled:
-            return "PROVIDER3"
-        raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
+        enabled = [p for p in enabled if p != "PROVIDER4"]
 
+        if not enabled:
+            raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
+    
     if PROVIDER4_TEST_GROUPS:
         if (
             source_group_id
@@ -320,7 +321,7 @@ def _pick_provider1_group(act_type: str, request_id: int) -> str:
 
     especiales_group = settings.PROVIDER_GROUP_ESPECIALES
 
-    if act_type == "NACIMIENTO":
+    if act_type.startswith("NACIMIENTO")
         if not nacimiento_groups:
             raise RuntimeError("NO_BIRTH_PROVIDER_GROUPS_CONFIGURED")
         idx = (request_id - 1) % len(nacimiento_groups)
