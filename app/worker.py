@@ -44,10 +44,10 @@ def _is_provider4_eligible(term: str | None, act_type: str | None) -> bool:
     if not _is_curp_term(term):
         return False
 
-    #act_type_up = (act_type or "").strip().upper()
+    act_type_up = (act_type or "").strip().upper()
 
-    #if "FOLIO" in act_type_up:
-    #    return False
+    if "FOLIO" in act_type_up:
+        return False
 
     return True
 
