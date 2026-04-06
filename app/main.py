@@ -563,7 +563,7 @@ def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str, d
 
 @app.post("/panel/ping-group")
 def panel_ping_group(payload: dict):
-    group_jid = payload.get("group_jid")
+    group_jid = (payload.get("group_jid") or "").strip()
 
     if not group_jid:
         return {"ok": False, "error": "NO_GROUP"}
@@ -577,7 +577,6 @@ Group JID:
 """
 
     send_group_text(group_jid, msg)
-
     return {"ok": True}
 
 
@@ -1677,7 +1676,7 @@ def panel_group_detail(
               <button type="button" class="btn btn-primary" style="width:100%;" onclick="saveGroupName('{group_jid}')">
                 Guardar nombre
               </button>
-              <button onclick="pingGroup()" class="btn btn-warning">
+              <button type="button" class="btn btn-warning" onclick="pingGroup('{group_jid}')">
                 Ping grupo
               </button>
             </div>
@@ -1995,8 +1994,8 @@ def panel_group_detail(
             }}
           }}
 
-          async function pingGroup() {{
-            if (!confirm("Enviar ping a este grupo?")) return;
+          async function pingGroup(groupJid) {{
+            if (!confirm("¿Enviar ping a este grupo?")) return;
         
             const res = await fetch("/panel/ping-group", {{
               method: "POST",
@@ -2004,7 +2003,7 @@ def panel_group_detail(
                 "Content-Type": "application/json"
               }},
               body: JSON.stringify({{
-                group_jid: "{{group_jid}}"
+                group_jid: groupJid
               }})
             }});
         
@@ -2013,7 +2012,7 @@ def panel_group_detail(
             if (data.ok) {{
               alert("Ping enviado");
             }} else {{
-              alert("Error enviando ping");
+              alert(data.error || "Error enviando ping");
             }}
           }}
 
