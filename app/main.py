@@ -1669,7 +1669,7 @@ def panel_group_detail(
         <div class="box">
           <div class="head"><strong>Nombre del grupo</strong></div>
 
-          <div class="filters" style="grid-template-columns: minmax(0, 1fr) 240px;">
+          <div class="filters" style="grid-template-columns: minmax(0, 1fr) 360px;">
             <div>
               <div class="small">Nombre personalizado</div>
               <input id="group_custom_name" placeholder="Escribe el nombre del grupo" value="{group_display_name}">
