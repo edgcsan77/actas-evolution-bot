@@ -84,6 +84,16 @@ class GroupAlias(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class GroupCategory(Base):
+    __tablename__ = "group_categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    group_jid = Column(String, unique=True, index=True, nullable=False)
+    category = Column(String, nullable=False, default="otro")
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+
+
 class GroupPromotion(Base):
     __tablename__ = "group_promotions"
 
