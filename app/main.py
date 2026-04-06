@@ -1676,10 +1676,19 @@ def panel_group_detail(
             </div>
 
             <div style="display:flex;align-items:end;gap:10px;">
-              <button type="button" class="btn btn-primary" style="width:100%;" onclick="saveGroupName('{group_jid}')">
+              <button 
+                type="button" 
+                class="btn btn-primary"
+                style="flex:1;white-space:nowrap;"
+                onclick="saveGroupName('{group_jid}')">
                 Guardar nombre
               </button>
-              <button type="button" class="btn btn-warning" onclick="pingGroup('{group_jid}')">
+            
+              <button 
+                type="button" 
+                class="btn btn-warning"
+                style="flex:1;white-space:nowrap;"
+                onclick="pingGroup('{group_jid}')">
                 Ping grupo
               </button>
             </div>
