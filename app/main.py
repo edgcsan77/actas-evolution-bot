@@ -3570,7 +3570,6 @@ def panel_actas(
                   <div class="broadcast-header">
                     <div>
                       <h3 class="section-title" style="margin-bottom:6px;">Mensajes masivos</h3>
-                      <div class="helper">Envía avisos por categoría o a todos los grupos.</div>
                     </div>
                 
                     <div class="broadcast-target">
@@ -5113,9 +5112,9 @@ def _providers_status_text(db: Session) -> str:
         provider1_extra = f" | ERROR DB: {str(e)}"
 
     return (
-        f"ADMIN DIGITAL: {s1}{provider1_extra}\n"
-        f"AUSTRAM WEB: {s3}{provider3_extra}\n"
-        f"LAZARO WEB: {s4}{provider4_extra}"
+        f"ADMIN DIGITAL:\n{s1}{provider1_extra}\n\n"
+        f"AUSTRAM WEB:\n{s3}{provider3_extra}\n\n"
+        f"LAZARO WEB:\n{s4}{provider4_extra}"
     )
 
 
