@@ -4638,6 +4638,7 @@ def _providers_status_text(db: Session) -> str:
     s3 = "ON" if p3.is_enabled else "OFF"
     s4 = "ON" if p4.is_enabled else "OFF"
 
+    provider1_extra = ""
     provider3_extra = ""
     provider4_extra = ""
 
@@ -4674,8 +4675,28 @@ def _providers_status_text(db: Session) -> str:
     except Exception as e:
         provider4_extra = f" | ERROR HISTORY: {str(e)}"
 
+    try:
+        local_start = _panel_week_start()
+        local_end = _panel_week_end()
+
+        provider1_total = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.provider_name == "PROVIDER1",
+                RequestLog.status == "DONE",
+                RequestLog.created_at >= local_start,
+                RequestLog.created_at < local_end,
+            )
+            .count()
+        )
+
+        provider1_extra = f" | CURP y CADENA hechas: {provider1_total}"
+
+    except Exception as e:
+        provider1_extra = f" | ERROR BD: {str(e)}"
+
     return (
-        f"ADMIN DIGITAL: {s1}\n"
+        f"ADMIN DIGITAL: {s1}{provider1_extra}\n"
         f"AUSTRAM WEB: {s3}{provider3_extra}\n"
         f"LAZARO WEB: {s4}{provider4_extra}"
     )
