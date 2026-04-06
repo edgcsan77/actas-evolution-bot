@@ -1277,7 +1277,7 @@ def process_request(request_id: int):
             req.status = "ERROR"
             req.error_message = err
             db.commit()
-             _notify_support_error(req, err, "ERROR NO CONTROLADO EN WORKER")
+            _notify_support_error(req, err, "ERROR NO CONTROLADO EN WORKER")
         raise
         
     finally:
