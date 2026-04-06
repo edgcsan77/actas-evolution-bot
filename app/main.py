@@ -154,7 +154,13 @@ def _panel_day_str():
 
 def _panel_week_start(dt=None):
     dt = dt or _panel_now()
+
     start = dt - timedelta(days=dt.weekday())
+    week_number = start.isocalendar().week
+
+    if week_number % 2 == 1:
+        start = start - timedelta(days=7)
+
     return start.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
