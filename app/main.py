@@ -304,6 +304,7 @@ def _panel_group_rows(
         "PRUEBA",
         "PRUEBAS",
         "TEST",
+        "AD",
     )
 
     def _is_hidden_group(name: str) -> bool:
@@ -1478,6 +1479,101 @@ def panel_promotions_report(db: Session = Depends(get_db)):
     return HTMLResponse(content=html)
 
 
+def _get_group_category(db: Session, group_jid: str) -> str:
+    row = (
+        db.query(GroupCategory)
+        .filter(GroupCategory.group_jid == group_jid)
+        .first()
+    )
+    return (row.category or "otro") if row else "otro"
+
+
+def _set_group_category(db: Session, group_jid: str, category: str):
+    row = (
+        db.query(GroupCategory)
+        .filter(GroupCategory.group_jid == group_jid)
+        .first()
+    )
+
+    if row:
+        row.category = category
+        row.updated_at = _utc_now_naive()
+    else:
+        row = GroupCategory(
+            group_jid=group_jid,
+            category=category,
+            created_at=_utc_now_naive(),
+            updated_at=_utc_now_naive(),
+        )
+        db.add(row)
+
+    db.commit()
+    return row
+
+
+def _remove_group_category(db: Session, group_jid: str):
+    row = (
+        db.query(GroupCategory)
+        .filter(GroupCategory.group_jid == group_jid)
+        .first()
+    )
+    if row:
+        db.delete(row)
+        db.commit()
+
+
+GROUP_CATEGORY_OPTIONS = [
+    ("papeleria_ciber", "Papelería / Ciber"),
+    ("gestor", "Gestor"),
+    ("otro", "Otro"),
+]
+
+
+def _get_broadcast_target_groups(db: Session, target_category: str, selected_groups: list[str] | None = None) -> list[str]:
+    selected_groups = selected_groups or []
+
+    all_groups = set(GROUP_NAME_MAP.keys())
+    all_groups.update(gid for (gid,) in db.query(GroupAlias.group_jid).all())
+
+    if target_category == "all":
+        return sorted(all_groups)
+
+    if target_category == "manual":
+        return [g for g in selected_groups if g in all_groups]
+
+    rows = (
+        db.query(GroupCategory)
+        .filter(GroupCategory.category == target_category)
+        .all()
+    )
+
+    category_groups = [r.group_jid for r in rows if r.group_jid in all_groups]
+    return sorted(category_groups)
+
+
+@app.post("/panel/group/{group_jid}/category")
+async def panel_group_set_category(group_jid: str, request: Request, db: Session = Depends(get_db)):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    category = (payload.get("category") or "").strip().lower()
+
+    allowed = {"papeleria_ciber", "gestor", "otro"}
+    if category not in allowed:
+        return {"ok": False, "error": "CATEGORIA_INVALIDA"}
+
+    _set_group_category(db, group_jid, category)
+    return {"ok": True}
+
+
+@app.post("/panel/group/{group_jid}/category/remove")
+def panel_group_remove_category(group_jid: str, db: Session = Depends(get_db)):
+    _remove_group_category(db, group_jid)
+    return {"ok": True}
+
+
 @app.get("/panel/group-detail", response_class=HTMLResponse)
 def panel_group_detail(
     group_jid: str = "",
@@ -1501,6 +1597,7 @@ def panel_group_detail(
     promo_credit_debe = promo.credit_debe if promo else 0
     promo_type_label = "Crédito" if promo_is_credit else "Pagada"
     promo_shared_group_limit = promo.shared_group_limit_actas if promo else 0
+    group_category = _get_group_category(db, group_jid)
 
     time_min, time_max, view = _panel_period_bounds(view)
 
@@ -1704,6 +1801,35 @@ def panel_group_detail(
 
     html += f"""
         <div class="box">
+          <div class="head"><strong>Categoría del grupo</strong></div>
+        
+          <div class="filters" style="grid-template-columns: minmax(0, 1fr) 220px 220px;">
+            <div>
+              <div class="small">Categoría actual</div>
+              <select id="group_category">
+                <option value="papeleria_ciber" {"selected" if group_category == "papeleria_ciber" else ""}>Papelería / Ciber</option>
+                <option value="gestor" {"selected" if group_category == "gestor" else ""}>Gestor</option>
+                <option value="otro" {"selected" if group_category == "otro" else ""}>Otro</option>
+              </select>
+            </div>
+        
+            <div style="display:flex;align-items:end;">
+              <button type="button" class="btn btn-primary" style="width:100%;" onclick="saveGroupCategory('{group_jid}')">
+                Guardar categoría
+              </button>
+            </div>
+        
+            <div style="display:flex;align-items:end;">
+              <button type="button" class="btn btn-danger" style="width:100%;" onclick="removeGroupCategory('{group_jid}')">
+                Quitar categoría
+              </button>
+            </div>
+          </div>
+        </div>
+    """
+
+    html += f"""
+        <div class="box">
           <div class="head"><strong>Promoción del grupo</strong></div>
 
           <div class="filters" style="grid-template-columns: repeat(5, minmax(0, 1fr));">
@@ -1888,6 +2014,52 @@ def panel_group_detail(
                 location.reload();
               }} else {{
                 alert(data.error || "Error guardando promoción");
+              }}
+            }} catch (e) {{
+              alert("No se pudo conectar con el servidor");
+            }}
+          }}
+
+          async function saveGroupCategory(groupJid) {{
+            const category = document.getElementById("group_category")?.value || "otro";
+        
+            try {{
+              const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/category`, {{
+                method: "POST",
+                headers: {{
+                  "Content-Type": "application/json"
+                }},
+                body: JSON.stringify({{ category }})
+              }});
+        
+              const data = await res.json();
+        
+              if (data.ok) {{
+                alert("Categoría guardada correctamente");
+                location.reload();
+              }} else {{
+                alert(data.error || "Error guardando categoría");
+              }}
+            }} catch (e) {{
+              alert("No se pudo conectar con el servidor");
+            }}
+          }}
+        
+          async function removeGroupCategory(groupJid) {{
+            if (!confirm("¿Quitar categoría de este grupo?")) return;
+        
+            try {{
+              const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/category/remove`, {{
+                method: "POST"
+              }});
+        
+              const data = await res.json();
+        
+              if (data.ok) {{
+                alert("Categoría eliminada");
+                location.reload();
+              }} else {{
+                alert(data.error || "Error quitando categoría");
               }}
             }} catch (e) {{
               alert("No se pudo conectar con el servidor");
@@ -2303,11 +2475,11 @@ def _broadcast_target_groups() -> list[str]:
     return out
 
 
-def _run_broadcast_job(message_text: str):
+def _run_broadcast_job(message_text: str, target_groups: list[str]):
     sent = []
     failed = []
 
-    for gid in _broadcast_target_groups():
+    for gid in target_groups:
         try:
             send_group_text(gid, message_text)
             sent.append({
@@ -2332,47 +2504,143 @@ def _run_broadcast_job(message_text: str):
 
 
 @app.post("/panel/broadcast/activas")
-def panel_broadcast_activas(background_tasks: BackgroundTasks):
-    background_tasks.add_task(_run_broadcast_job, BROADCAST_ACTIVAS_MSG)
-    return {
-        "ok": True,
-        "queued": True,
-        "message": "Envío masivo en segundo plano iniciado",
-    }
+async def panel_broadcast_activas(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    try:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        target_category = (payload.get("category") or "all").strip().lower()
+        selected_groups = payload.get("selected_groups") or []
+
+        target_groups = _get_broadcast_target_groups(db, target_category, selected_groups)
+
+        if not target_groups:
+            return {"ok": False, "error": "No hay grupos para esa categoría"}
+
+        background_tasks.add_task(_run_broadcast_job, BROADCAST_ACTIVAS_MSG, target_groups)
+
+        return {
+            "ok": True,
+            "queued": True,
+            "message": f"Envío masivo iniciado para {len(target_groups)} grupos",
+        }
+
+    except Exception as e:
+        print("panel_broadcast_activas error:", repr(e), flush=True)
+        return {"ok": False, "error": str(e)}
 
 
 @app.post("/panel/broadcast/restablecido")
-def panel_broadcast_mantenimiento(background_tasks: BackgroundTasks):
-    background_tasks.add_task(_run_broadcast_job, BROADCAST_RESTABLECIDO_MSG)
-    return {
-        "ok": True,
-        "queued": True,
-        "message": "Envío masivo en segundo plano iniciado",
-    }
+async def panel_broadcast_mantenimiento(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    try:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        target_category = (payload.get("category") or "all").strip().lower()
+        selected_groups = payload.get("selected_groups") or []
+
+        target_groups = _get_broadcast_target_groups(db, target_category, selected_groups)
+
+        if not target_groups:
+            return {"ok": False, "error": "No hay grupos para esa categoría"}
+
+        background_tasks.add_task(_run_broadcast_job, BROADCAST_RESTABLECIDO_MSG, target_groups)
+
+        return {
+            "ok": True,
+            "queued": True,
+            "message": f"Envío masivo iniciado para {len(target_groups)} grupos",
+        }
+
+    except Exception as e:
+        print("panel_broadcast_mantenimiento error:", repr(e), flush=True)
+        return {"ok": False, "error": str(e)}
 
 
 @app.post("/panel/broadcast/suspendido")
-def panel_broadcast_suspendido(background_tasks: BackgroundTasks):
-    background_tasks.add_task(_run_broadcast_job, BROADCAST_SUSPENDIDO_MSG)
-    return {
-        "ok": True,
-        "queued": True,
-        "message": "Envío masivo en segundo plano iniciado",
-    }
+async def panel_broadcast_suspendido(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    try:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        target_category = (payload.get("category") or "all").strip().lower()
+        selected_groups = payload.get("selected_groups") or []
+
+        target_groups = _get_broadcast_target_groups(db, target_category, selected_groups)
+
+        if not target_groups:
+            return {"ok": False, "error": "No hay grupos para esa categoría"}
+
+        background_tasks.add_task(_run_broadcast_job, BROADCAST_SUSPENDIDO_MSG, target_groups)
+
+        return {
+            "ok": True,
+            "queued": True,
+            "message": f"Envío masivo iniciado para {len(target_groups)} grupos",
+        }
+
+    except Exception as e:
+        print("panel_broadcast_suspendido error:", repr(e), flush=True)
+        return {"ok": False, "error": str(e)}
 
 
 @app.post("/panel/broadcast/cerrado")
-def panel_broadcast_cerrado(background_tasks: BackgroundTasks):
-    background_tasks.add_task(_run_broadcast_job, BROADCAST_CERRADO_MSG)
-    return {
-        "ok": True,
-        "queued": True,
-        "message": "Envío masivo en segundo plano iniciado",
-    }
+async def panel_broadcast_cerrado(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    try:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        target_category = (payload.get("category") or "all").strip().lower()
+        selected_groups = payload.get("selected_groups") or []
+
+        target_groups = _get_broadcast_target_groups(db, target_category, selected_groups)
+
+        if not target_groups:
+            return {"ok": False, "error": "No hay grupos para esa categoría"}
+
+        background_tasks.add_task(_run_broadcast_job, BROADCAST_CERRADO_MSG, target_groups)
+
+        return {
+            "ok": True,
+            "queued": True,
+            "message": f"Envío masivo iniciado para {len(target_groups)} grupos",
+        }
+
+    except Exception as e:
+        print("panel_broadcast_cerrado error:", repr(e), flush=True)
+        return {"ok": False, "error": str(e)}
 
 
 @app.post("/panel/broadcast/free")
-async def panel_broadcast_free(request: Request, background_tasks: BackgroundTasks):
+async def panel_broadcast_free(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     try:
         try:
             payload = await request.json()
@@ -2380,16 +2648,23 @@ async def panel_broadcast_free(request: Request, background_tasks: BackgroundTas
             payload = {}
 
         message_text = (payload.get("message") or "").strip()
+        target_category = (payload.get("category") or "all").strip().lower()
+        selected_groups = payload.get("selected_groups") or []
 
         if not message_text:
             return {"ok": False, "error": "Mensaje vacío"}
 
-        background_tasks.add_task(_run_broadcast_job, message_text)
+        target_groups = _get_broadcast_target_groups(db, target_category, selected_groups)
+
+        if not target_groups:
+            return {"ok": False, "error": "No hay grupos para esa categoría"}
+
+        background_tasks.add_task(_run_broadcast_job, message_text, target_groups)
 
         return {
             "ok": True,
             "queued": True,
-            "message": "Envío masivo en segundo plano iniciado",
+            "message": f"Envío masivo iniciado para {len(target_groups)} grupos",
         }
 
     except Exception as e:
@@ -3183,6 +3458,17 @@ def panel_actas(
         
                 <div class="glass">
                   <h3 class="section-title">Mensajes masivos</h3>
+
+                  <div style="margin-bottom:12px;">
+                    <div class="helper" style="margin-bottom:6px;">Enviar a</div>
+                    <select id="broadcastCategory">
+                      <option value="all">Todos</option>
+                      <option value="papeleria_ciber">Papelería / Ciber</option>
+                      <option value="gestor">Gestores</option>
+                      <option value="otro">Otros</option>
+                      <option value="manual">Selección manual</option>
+                    </select>
+                  </div>
         
                   <div class="broadcast-grid">
                     <div>
@@ -3815,17 +4101,25 @@ def panel_actas(
         async function sendBroadcast(type) {
           const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
           if (!ok) return;
-
+        
           if (broadcastRunning) return;
           broadcastRunning = true;
-    
+        
+          const category = document.getElementById("broadcastCategory")?.value || "all";
+        
           try {
             const res = await fetch(`/panel/broadcast/${type}`, {
-              method: "POST"
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                category: category
+              })
             });
-    
+        
             const data = await res.json();
-    
+        
             if (data.ok) {
               alert(data.message || "Envío iniciado");
             } else {
@@ -3834,25 +4128,26 @@ def panel_actas(
           } catch (e) {
             alert("No se pudo conectar con el servidor");
           }
-
+        
           broadcastRunning = false;
         }
     
         async function sendFreeBroadcast() {
           const textarea = document.getElementById("broadcastMessage");
           const message = textarea.value.trim();
-    
+          const category = document.getElementById("broadcastCategory")?.value || "all";
+        
           if (!message) {
             alert("Escribe un mensaje");
             return;
           }
-    
+        
           const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
           if (!ok) return;
-
+        
           if (broadcastRunning) return;
           broadcastRunning = true;
-    
+        
           try {
             const res = await fetch("/panel/broadcast/free", {
               method: "POST",
@@ -3860,12 +4155,13 @@ def panel_actas(
                 "Content-Type": "application/json"
               },
               body: JSON.stringify({
-                message: message
+                message: message,
+                category: category
               })
             });
-    
+        
             const data = await res.json();
-    
+        
             if (data.ok) {
               alert(data.message || "Envío iniciado");
               textarea.value = "";
@@ -3875,7 +4171,7 @@ def panel_actas(
           } catch (e) {
             alert("No se pudo conectar con el servidor");
           }
-
+        
           broadcastRunning = false;
         }
     
