@@ -576,8 +576,11 @@ Group JID:
 {group_jid}
 """
 
-    send_group_text(group_jid, msg)
-    return {"ok": True}
+    try:
+        send_group_text(group_jid, msg)
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/panel/recent-requests/stream")
@@ -1672,7 +1675,7 @@ def panel_group_detail(
               <input id="group_custom_name" placeholder="Escribe el nombre del grupo" value="{group_display_name}">
             </div>
 
-            <div style="display:flex;align-items:end;">
+            <div style="display:flex;align-items:end;gap:10px;">
               <button type="button" class="btn btn-primary" style="width:100%;" onclick="saveGroupName('{group_jid}')">
                 Guardar nombre
               </button>
