@@ -2115,8 +2115,8 @@ GROUP_NAME_MAP = {
     "120363424509175054@g.us": "Prov Normal 3",
     "120363426176817361@g.us": "Prov Normal 4",
     "120363409870423163@g.us": "Prov Especial 1",
-    "120363408639542108@g.us": "ADMIN DIGITAL 1",
-    "120363427054214985@g.us": "ADMIN DIGITAL 2",
+    "120363408639542108@g.us": "AD 1",
+    "120363427054214985@g.us": "AD 2",
     "120363422785755828@g.us": "Gpo. No. 4 Karen",
     "120363426949877636@g.us": "Gpo. No. 11 Morelos",
     "120363425014097597@g.us": "Gpo. No. 7 Karen Marvin",
@@ -4667,9 +4667,7 @@ def _providers_status_text(db: Session) -> str:
         local_end = _panel_week_end()
     
         provider4_week = provider4_client.get_week_done_counts(local_start, local_end)
-    
         provider4_total = provider4_week.get("total", 0)
-    
         provider4_extra = f" | CURP hechas: {provider4_total}"
     
     except Exception as e:
@@ -4689,11 +4687,10 @@ def _providers_status_text(db: Session) -> str:
             )
             .count()
         )
-
         provider1_extra = f" | CURP y CADENA hechas: {provider1_total}"
 
     except Exception as e:
-        provider1_extra = f" | ERROR BD: {str(e)}"
+        provider1_extra = f" | ERROR DB: {str(e)}"
 
     return (
         f"ADMIN DIGITAL: {s1}{provider1_extra}\n"
