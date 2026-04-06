@@ -3586,9 +3586,6 @@ def panel_actas(
                   <div class="broadcast-section">
                     <div class="broadcast-block">
                       <div class="broadcast-block-title">Mensajes predefinidos</div>
-                      <div class="helper" style="margin-bottom:12px;">
-                        Envía avisos rápidos según el estado del servicio.
-                      </div>
                 
                       <div class="broadcast-buttons-grid">
                         <button class="btn btn-success" onclick="sendBroadcast('activas')">Servicio activo</button>
@@ -3600,9 +3597,6 @@ def panel_actas(
                 
                     <div class="broadcast-block">
                       <div class="broadcast-block-title">Mensaje libre</div>
-                      <div class="helper" style="margin-bottom:12px;">
-                        Escribe un mensaje personalizado para enviarlo masivamente.
-                      </div>
                 
                       <textarea
                         id="broadcastMessage"
