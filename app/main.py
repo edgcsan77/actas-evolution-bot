@@ -561,6 +561,26 @@ def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str, d
     }
 
 
+@app.post("/panel/ping-group")
+def panel_ping_group(payload: dict):
+    group_jid = payload.get("group_jid")
+
+    if not group_jid:
+        return {"ok": False, "error": "NO_GROUP"}
+
+    msg = f"""🔎 *PING PANEL*
+
+Este mensaje es para identificar el grupo.
+
+Group JID:
+{group_jid}
+"""
+
+    send_group_text(group_jid, msg)
+
+    return {"ok": True}
+
+
 @app.get("/panel/recent-requests/stream")
 async def panel_recent_requests_stream():
     async def event_generator():
@@ -1657,6 +1677,9 @@ def panel_group_detail(
               <button type="button" class="btn btn-primary" style="width:100%;" onclick="saveGroupName('{group_jid}')">
                 Guardar nombre
               </button>
+              <button onclick="pingGroup()" class="btn btn-warning">
+                Ping grupo
+              </button>
             </div>
           </div>
         </div>
@@ -1969,6 +1992,28 @@ def panel_group_detail(
               }}
             }} catch (e) {{
               alert("No se pudo conectar con el servidor");
+            }}
+          }}
+
+          async function pingGroup() {{
+            if (!confirm("Enviar ping a este grupo?")) return;
+        
+            const res = await fetch("/panel/ping-group", {{
+              method: "POST",
+              headers: {{
+                "Content-Type": "application/json"
+              }},
+              body: JSON.stringify({{
+                group_jid: "{{group_jid}}"
+              }})
+            }});
+        
+            const data = await res.json();
+          
+            if (data.ok) {{
+              alert("Ping enviado");
+            }} else {{
+              alert("Error enviando ping");
             }}
           }}
 
