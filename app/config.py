@@ -16,6 +16,8 @@ class Settings(BaseSettings):
 
     ADMIN_PHONE: str = ""
 
+    SOPORTE_ACTAS_GROUP: str = ""
+
     # PROVIDER 1
     PROVIDER_GROUP_NACIMIENTO_1: str = ""
     PROVIDER_GROUP_NACIMIENTO_2: str = ""
