@@ -1226,7 +1226,7 @@ def process_request(request_id: int):
                     from app.services.evolution import send_text
                     send_text(req.requester_wa_id, msg)
 
-                _notify_support_error(req, err, msg)
+                #_notify_support_error(req, err, msg)
                 return
 
             if err.startswith("PROVIDER3_RATE_LIMIT"):
