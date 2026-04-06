@@ -41,7 +41,8 @@ class Settings(BaseSettings):
         "NO SE ENCONTRÓ EL ACTA EN SISTEMA|"
         "ACTA NO ENCONTRADA|"
         "DOCUMENTO NO ENCONTRADO|"
-        "SIN REGISTRO"
+        "SIN REGISTRO|"
+        "ERROR! CURP INVALIDA"
     )
 
     HISTORY_DAYS: int = 7
