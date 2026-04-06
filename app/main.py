@@ -1910,7 +1910,7 @@ def panel_group_detail(
           </div>
  
           <div class="filters">
-            <button type="button" class="btn btn-primary" onclick="savePromotion('{group_jid}')">Activar promoción</button>
+            <button type="button" class="btn btn-success" onclick="savePromotion('{group_jid}')">Activar promoción</button>
           </div>
 
           <div class="filters" style="grid-template-columns: 1fr 220px 220px;">
@@ -3329,6 +3329,104 @@ def panel_actas(
               .collapsible-body.closed{{
                 display:none;
               }}
+
+              .broadcast-header {{
+                display: flex;
+                justify-content: space-between;
+                align-items: end;
+                gap: 16px;
+                margin-bottom: 18px;
+                flex-wrap: wrap;
+              }}
+            
+              .broadcast-target {{
+                min-width: 240px;
+                max-width: 320px;
+                width: 100%;
+              }}
+            
+              .broadcast-label {{
+                display: block;
+                font-size: .9rem;
+                font-weight: 700;
+                margin-bottom: 6px;
+                color: #e5e7eb;
+              }}
+            
+              .broadcast-select {{
+                width: 100%;
+                border: 1px solid rgba(255,255,255,.14);
+                background: rgba(255,255,255,.08);
+                color: white;
+                border-radius: 12px;
+                padding: 11px 12px;
+                font: inherit;
+                outline: none;
+              }}
+            
+              .broadcast-select option {{
+                color: #111827;
+                background: white;
+              }}
+            
+              .broadcast-section {{
+                display: grid;
+                gap: 18px;
+              }}
+            
+              .broadcast-block {{
+                background: rgba(255,255,255,.06);
+                border: 1px solid rgba(255,255,255,.08);
+                border-radius: 18px;
+                padding: 16px;
+              }}
+            
+              .broadcast-block-title {{
+                font-size: 1rem;
+                font-weight: 800;
+                margin-bottom: 6px;
+                color: white;
+              }}
+            
+              .broadcast-buttons-grid {{
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 12px;
+              }}
+            
+              .broadcast-buttons-grid .btn {{
+                width: 100%;
+                min-height: 52px;
+                white-space: normal;
+                line-height: 1.2;
+                text-align: center;
+              }}
+            
+              .broadcast-textarea {{
+                width: 100%;
+                min-height: 120px;
+                resize: vertical;
+                border: 1px solid rgba(255,255,255,.12);
+                background: white;
+                color: #111827;
+                border-radius: 16px;
+                padding: 14px 16px;
+                font: inherit;
+                box-sizing: border-box;
+                outline: none;
+              }}
+            
+              .broadcast-textarea:focus {{
+                border-color: rgba(255,255,255,.35);
+                box-shadow: 0 0 0 3px rgba(255,255,255,.10);
+              }}
+            
+              .broadcast-actions {{
+                display: flex;
+                gap: 10px;
+                margin-top: 14px;
+                flex-wrap: wrap;
+              }}
             
               @media (max-width: 1200px) {{
                 .grid-hero {{
@@ -3380,6 +3478,18 @@ def panel_actas(
             
                 .value {{
                   font-size: 1.6rem;
+                }}
+
+                .broadcast-buttons-grid {{
+                  grid-template-columns: 1fr;
+                }}
+            
+                .broadcast-actions {{
+                  flex-direction: column;
+                }}
+            
+                .broadcast-actions .btn {{
+                  width: 100%;
                 }}
               }}
             
@@ -3457,50 +3567,58 @@ def panel_actas(
                 </div>
         
                 <div class="glass">
-                  <h3 class="section-title">Mensajes masivos</h3>
-
-                  <div style="margin-bottom:12px;">
-                    <div class="helper" style="margin-bottom:6px;">Enviar a</div>
-                    <select id="broadcastCategory">
-                      <option value="all">Todos</option>
-                      <option value="papeleria_ciber">Papelería / Ciber</option>
-                      <option value="gestor">Gestores</option>
-                      <option value="otro">Otros</option>
-                      <option value="manual">Selección manual</option>
-                    </select>
-                  </div>
-        
-                  <div class="broadcast-grid">
+                  <div class="broadcast-header">
                     <div>
-                      <div class="helper" style="margin-bottom:10px;">Envía mensajes predefinidos a todos los grupos activos.</div>
-                      <div class="broadcast-buttons">
+                      <h3 class="section-title" style="margin-bottom:6px;">Mensajes masivos</h3>
+                      <div class="helper">Envía avisos por categoría o a todos los grupos.</div>
+                    </div>
+                
+                    <div class="broadcast-target">
+                      <label for="broadcastCategory" class="broadcast-label">Enviar a</label>
+                      <select id="broadcastCategory" class="broadcast-select">
+                        <option value="all">Todos</option>
+                        <option value="papeleria_ciber">Papelería / Ciber</option>
+                        <option value="gestor">Gestores</option>
+                        <option value="otro">Otros</option>
+                      </select>
+                    </div>
+                  </div>
+                
+                  <div class="broadcast-section">
+                    <div class="broadcast-block">
+                      <div class="broadcast-block-title">Mensajes predefinidos</div>
+                      <div class="helper" style="margin-bottom:12px;">
+                        Envía avisos rápidos según el estado del servicio.
+                      </div>
+                
+                      <div class="broadcast-buttons-grid">
                         <button class="btn btn-success" onclick="sendBroadcast('activas')">Servicio activo</button>
                         <button class="btn btn-warning" onclick="sendBroadcast('restablecido')">Servicio restablecido</button>
                         <button class="btn btn-danger" onclick="sendBroadcast('suspendido')">Servicio suspendido</button>
                         <button class="btn btn-closed" onclick="sendBroadcast('cerrado')">Servicio cerrado</button>
                       </div>
                     </div>
-        
-                    <div class="broadcast-free">
-                      <div>
-                        <strong>Mensaje libre</strong>
-                        <div class="helper" style="margin-top:6px;">
-                          Escribe un mensaje personalizado para enviarlo masivamente.
-                        </div>
+                
+                    <div class="broadcast-block">
+                      <div class="broadcast-block-title">Mensaje libre</div>
+                      <div class="helper" style="margin-bottom:12px;">
+                        Escribe un mensaje personalizado para enviarlo masivamente.
                       </div>
-        
+                
                       <textarea
                         id="broadcastMessage"
-                        placeholder="Escribe aquí el mensaje que deseas enviar a todos los grupos..."
+                        class="broadcast-textarea"
+                        placeholder="Escribe aquí el mensaje que deseas enviar..."
                       ></textarea>
-        
-                      <div class="actions-row">
+                
+                      <div class="broadcast-actions">
                         <button class="btn btn-success" onclick="sendFreeBroadcast()">Enviar mensaje libre</button>
                         <button class="btn btn-light" onclick="clearBroadcast()">Limpiar</button>
                       </div>
                     </div>
                   </div>
                 </div>
+                
               </div>
             </div>
         
