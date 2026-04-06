@@ -35,6 +35,31 @@ CURP_RE = re.compile(
 )
 
 
+def _notify_support_error(req, err: str, extra_msg: str = ""):
+    support_group = (getattr(settings, "SOPORTE_ACTAS_GROUP", "") or "").strip()
+    if not support_group:
+        return
+
+    try:
+        msg = (
+            "🚨 *ERROR SOPORTE ACTAS*\n\n"
+            f"Solicitud ID: {getattr(req, 'id', 'N/D')}\n"
+            f"Dato: {getattr(req, 'curp', 'N/D')}\n"
+            f"Tipo: {getattr(req, 'act_type', 'N/D')}\n"
+            f"Proveedor: {getattr(req, 'provider_name', 'N/D')}\n"
+            f"Grupo origen: {getattr(req, 'source_group_id', 'N/D')}\n"
+            f"Solicitante: {getattr(req, 'requester_wa_id', 'N/D')}\n"
+            f"Error: {err}\n"
+        )
+
+        if extra_msg:
+            msg += f"\nDetalle: {extra_msg}\n"
+
+        send_group_text(support_group, msg)
+    except Exception as support_exc:
+        print("SUPPORT_ERROR_NOTIFY_FAILED =", str(support_exc), flush=True)
+
+
 def _is_curp_term(value: str | None) -> bool:
     v = (value or "").strip().upper()
     return bool(CURP_RE.match(v))
@@ -1136,6 +1161,7 @@ def process_request(request_id: int):
                     from app.services.evolution import send_text
                     send_text(req.requester_wa_id, msg)
 
+                _notify_support_error(req, err, msg)
                 return
 
             if err == "NO_PROVIDER_FOR_CHAIN_OR_CODE":
@@ -1156,6 +1182,7 @@ def process_request(request_id: int):
                     from app.services.evolution import send_text
                     send_text(req.requester_wa_id, msg)
 
+                _notify_support_error(req, err, msg)
                 return
 
             if err == "NO_PROVIDER_ENABLED":
@@ -1175,6 +1202,7 @@ def process_request(request_id: int):
                     from app.services.evolution import send_text
                     send_text(req.requester_wa_id, msg)
 
+                _notify_support_error(req, err, msg)
                 return
     
             if (
@@ -1197,7 +1225,8 @@ def process_request(request_id: int):
                 else:
                     from app.services.evolution import send_text
                     send_text(req.requester_wa_id, msg)
-                    
+
+                _notify_support_error(req, err, msg)
                 return
 
             if err.startswith("PROVIDER3_RATE_LIMIT"):
@@ -1217,7 +1246,8 @@ def process_request(request_id: int):
                 else:
                     from app.services.evolution import send_text
                     send_text(req.requester_wa_id, msg)
-    
+
+                _notify_support_error(req, err, msg)
                 return
 
             if (
@@ -1240,12 +1270,14 @@ def process_request(request_id: int):
                 else:
                     from app.services.evolution import send_text
                     send_text(req.requester_wa_id, msg)
-    
+
+                _notify_support_error(req, err, msg)
                 return
 
             req.status = "ERROR"
             req.error_message = err
             db.commit()
+             _notify_support_error(req, err, "ERROR NO CONTROLADO EN WORKER")
         raise
         
     finally:
