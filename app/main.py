@@ -5497,7 +5497,7 @@ def _providers_status_text(db: Session) -> str:
 
     try:
         phpsessid = _get_app_setting(db, "PROVIDER3_PHPSESSID", settings.PROVIDER3_PHPSESSID)
-        if phpsessid and p3.is_enabled:
+        if phpsessid:
             client = Provider3Client(phpsessid=phpsessid)
             lic = client.get_licenses()
             curp_left = lic.get("acta_curp")
@@ -5506,17 +5506,16 @@ def _providers_status_text(db: Session) -> str:
                 f" | CURP restantes: {curp_left if curp_left is not None else 'N/D'}"
                 f" | CADENA restantes: {cadena_left if cadena_left is not None else 'N/D'}"
             )
-        elif p3.is_enabled:
+        else:
             provider3_extra = " | SIN PHPSESSID"
     except Exception as e:
         provider3_extra = f" | ERROR LICENCIAS: {str(e)}"
 
     try:
-        if p4.is_enabled:
-            provider4_client = Provider4Client()
-            provider4_month = provider4_client.get_week_done_counts(local_start, local_end)
-            provider4_total = provider4_month.get("total", 0)
-            provider4_extra = f" | CURP hechas: {provider4_total}"
+        provider4_client = Provider4Client()
+        provider4_month = provider4_client.get_week_done_counts(local_start, local_end)
+        provider4_total = provider4_month.get("total", 0)
+        provider4_extra = f" | CURP hechas: {provider4_total}"
     except Exception as e:
         provider4_extra = f" | ERROR HISTORY: {str(e)}"
 
