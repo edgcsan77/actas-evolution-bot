@@ -3008,7 +3008,7 @@ def panel_actas(
     db: Session = Depends(get_db),
 ):
     try:
-        cache_key = f"panel:{view}:{group_mode}"
+        cache_key = f"panel:{view}:{group_mode}:{group_jid}:{provider_name}:{status}:{act_type}"
 
         cached_panel = redis_conn.get(cache_key)
         if cached_panel:
