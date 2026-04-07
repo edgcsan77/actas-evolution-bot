@@ -3127,39 +3127,85 @@ def panel_actas(
         by_group.sort(key=lambda x: ((x["total"] == 0), -x["total"], x["group_name"]))
         
         by_provider_raw = (
-            base_q.with_entities(RequestLog.provider_name, func.count(RequestLog.id))
-            .group_by(RequestLog.provider_name)
+            base_q.with_entities(
+                RequestLog.provider_name,
+                RequestLog.status,
+                func.count(RequestLog.id),
+            )
+            .group_by(RequestLog.provider_name, RequestLog.status)
             .all()
         )
-        by_provider = [
-            {
-                "provider_name": name or "NO IDENTIFICADO",
-                "total": int(cnt or 0),
-                "queued": 0,
-                "processing": 0,
-                "done": 0,
-                "error": 0,
-            }
-            for name, cnt in by_provider_raw
-        ]
+        
+        provider_map = {}
+        
+        for name, st, cnt in by_provider_raw:
+            name = name or "NO IDENTIFICADO"
+            item = provider_map.setdefault(
+                name,
+                {
+                    "provider_name": name,
+                    "total": 0,
+                    "queued": 0,
+                    "processing": 0,
+                    "done": 0,
+                    "error": 0,
+                }
+            )
+        
+            cnt = int(cnt or 0)
+            item["total"] += cnt
+        
+            if st == "QUEUED":
+                item["queued"] += cnt
+            elif st == "PROCESSING":
+                item["processing"] += cnt
+            elif st == "DONE":
+                item["done"] += cnt
+            elif st == "ERROR":
+                item["error"] += cnt
+        
+        by_provider = list(provider_map.values())
         by_provider.sort(key=lambda x: (-x["total"], x["provider_name"]))
         
         by_type_raw = (
-            base_q.with_entities(RequestLog.act_type, func.count(RequestLog.id))
-            .group_by(RequestLog.act_type)
+            base_q.with_entities(
+                RequestLog.act_type,
+                RequestLog.status,
+                func.count(RequestLog.id),
+            )
+            .group_by(RequestLog.act_type, RequestLog.status)
             .all()
         )
-        by_type = [
-            {
-                "act_type": name or "SIN_TIPO",
-                "total": int(cnt or 0),
-                "queued": 0,
-                "processing": 0,
-                "done": 0,
-                "error": 0,
-            }
-            for name, cnt in by_type_raw
-        ]
+        
+        type_map = {}
+        
+        for name, st, cnt in by_type_raw:
+            name = name or "SIN_TIPO"
+            item = type_map.setdefault(
+                name,
+                {
+                    "act_type": name,
+                    "total": 0,
+                    "queued": 0,
+                    "processing": 0,
+                    "done": 0,
+                    "error": 0,
+                }
+            )
+        
+            cnt = int(cnt or 0)
+            item["total"] += cnt
+        
+            if st == "QUEUED":
+                item["queued"] += cnt
+            elif st == "PROCESSING":
+                item["processing"] += cnt
+            elif st == "DONE":
+                item["done"] += cnt
+            elif st == "ERROR":
+                item["error"] += cnt
+        
+        by_type = list(type_map.values())
         by_type.sort(key=lambda x: (-x["total"], x["act_type"]))
         
         promo_map = _promotion_summary_map(db)
