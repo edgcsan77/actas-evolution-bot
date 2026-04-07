@@ -152,20 +152,18 @@ def _panel_day_str():
     return _panel_now().strftime("%Y-%m-%d")
 
 
-def _panel_week_start(dt=None):
+def _panel_month_start(dt=None):
     dt = dt or _panel_now()
-
-    start = dt - timedelta(days=dt.weekday())
-    week_number = start.isocalendar().week
-
-    if week_number % 2 == 1:
-        start = start - timedelta(days=7)
-
-    return start.replace(hour=0, minute=0, second=0, microsecond=0)
+    return dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
-def _panel_week_end(dt=None):
-    return _panel_week_start(dt) + timedelta(days=7)
+def _panel_month_end(dt=None):
+    dt = dt or _panel_now()
+    start = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    if start.month == 12:
+        return start.replace(year=start.year + 1, month=1)
+    return start.replace(month=start.month + 1)
 
 
 def _daterange_days(start_dt, end_dt):
@@ -196,12 +194,12 @@ def _fmt_dt(dt):
 def _panel_period_bounds(view: str):
     view = (view or "day").strip().lower()
 
-    if view == "week":
-        local_start = _panel_week_start()
-        local_end = _panel_week_end()
+    if view == "month":
+        local_start = _panel_month_start()
+        local_end = _panel_month_end()
         utc_start = _panel_to_utc_naive(local_start)
         utc_end = _panel_to_utc_naive(local_end)
-        return utc_start, utc_end, "week"
+        return utc_start, utc_end, "month"
 
     now = _panel_now()
     local_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -500,10 +498,11 @@ def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str, d
     days = {}
 
     now_local = _panel_now()
+    view = (view or "day").strip().lower()
 
-    if (view or "day").strip().lower() == "week":
-        local_start = _panel_week_start(now_local)
-        local_end = _panel_week_end(now_local)
+    if view == "month":
+        local_start = _panel_month_start(now_local)
+        local_end = _panel_month_end(now_local)
     else:
         local_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
         local_end = local_start + timedelta(days=1)
@@ -1577,7 +1576,7 @@ def panel_group_remove_category(group_jid: str, db: Session = Depends(get_db)):
 @app.get("/panel/group-detail", response_class=HTMLResponse)
 def panel_group_detail(
     group_jid: str = "",
-    view: str = "week",
+    view: str = "month",
     db: Session = Depends(get_db),
 ):
     if not group_jid:
@@ -1611,8 +1610,8 @@ def panel_group_detail(
 
     title = detail["group_name"]
     subtitle = (
-        f"Historial semanal: {detail['date_from']} a {detail['date_to']} ({PANEL_TZ})"
-        if view == "week"
+        f"Historial mensual: {detail['date_from']} a {detail['date_to']} ({PANEL_TZ})"
+        if view == "month"
         else f"Historial diario: {detail['date_from']} ({PANEL_TZ})"
     )
 
@@ -2772,7 +2771,7 @@ def panel_actas(
         latest = rows[:100]
     
         subtitle = (
-            f"Vista semanal ({PANEL_TZ})" if view == "week"
+            f"Vista mensual ({PANEL_TZ})" if view == "month"
             else f"Vista diaria ({_panel_day_str()}, {PANEL_TZ})"
         )
     
@@ -3525,7 +3524,7 @@ def panel_actas(
         
               <div class="toolbar">
                 <a href="/panel?view=day&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'day' else ''}">Hoy</a>
-                <a href="/panel?view=week&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'week' else ''}">Semana actual</a>
+                <a href="/panel?view=month&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'month' else ''}">Mes actual</a>
                 <a href="/panel/promotions/report" class="tool-link" target="_blank">Promociones</a>
               </div>
         
@@ -5038,9 +5037,6 @@ def _set_app_setting(db: Session, key: str, value: str):
 
 
 def _providers_status_text(db: Session) -> str:
-    from app.services.provider3 import Provider3Client
-    from app.services.provider4 import Provider4Client
-
     p1 = _get_or_create_provider(db, "PROVIDER1", True)
     p2 = _get_or_create_provider(db, "PROVIDER2", False)
     p3 = _get_or_create_provider(db, "PROVIDER3", False)
@@ -5054,6 +5050,11 @@ def _providers_status_text(db: Session) -> str:
     provider1_extra = ""
     provider3_extra = ""
     provider4_extra = ""
+
+    local_start = _panel_month_start()
+    local_end = _panel_month_end()
+    utc_start = _panel_to_utc_naive(local_start)
+    utc_end = _panel_to_utc_naive(local_end)
 
     try:
         phpsessid = _get_app_setting(db, "PROVIDER3_PHPSESSID", settings.PROVIDER3_PHPSESSID)
@@ -5075,33 +5076,24 @@ def _providers_status_text(db: Session) -> str:
 
     try:
         provider4_client = Provider4Client()
-    
-        local_start = _panel_week_start()
-        local_end = _panel_week_end()
-    
-        provider4_week = provider4_client.get_week_done_counts(local_start, local_end)
-        provider4_total = provider4_week.get("total", 0)
+        provider4_month = provider4_client.get_week_done_counts(local_start, local_end)
+        provider4_total = provider4_month.get("total", 0)
         provider4_extra = f" | CURP hechas: {provider4_total}"
-    
     except Exception as e:
         provider4_extra = f" | ERROR HISTORY: {str(e)}"
 
     try:
-        local_start = _panel_week_start()
-        local_end = _panel_week_end()
-
         provider1_total = (
             db.query(RequestLog)
             .filter(
                 RequestLog.provider_name == "PROVIDER1",
                 RequestLog.status == "DONE",
-                RequestLog.created_at >= local_start,
-                RequestLog.created_at < local_end,
+                RequestLog.created_at >= utc_start,
+                RequestLog.created_at < utc_end,
             )
             .count()
         )
         provider1_extra = f" | CURP y CADENA hechas: {provider1_total}"
-
     except Exception as e:
         provider1_extra = f" | ERROR DB: {str(e)}"
 
