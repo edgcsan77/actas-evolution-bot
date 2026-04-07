@@ -5521,7 +5521,6 @@ def _providers_status_text(db: Session) -> str:
 
     text = (
         f"ADMIN DIGITAL:\n{s1}{provider1_extra}\n\n"
-        f"AUSTRAM BOT:\n{s2}{provider2_extra}\n\n"
         f"AUSTRAM WEB:\n{s3}{provider3_extra}\n\n"
         f"LAZARO WEB:\n{s4}{provider4_extra}"
     )
