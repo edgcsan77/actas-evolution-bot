@@ -241,7 +241,7 @@ def seems_like_identifier_attempt(text: str) -> bool:
         return True
 
     # Si trae mezcla de letras y números tipo CURP rara
-    if re.search(r"\b[A-Z]{4}\d{4,}[A-Z0-9]{4,}\b", t):
+    if re.search(r"\b[A-Z]{2,5}\d{4,}[HM][A-Z0-9]{4,}\b", t):
         return True
 
     return False
