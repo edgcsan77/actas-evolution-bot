@@ -799,6 +799,26 @@ def panel_set_shared_group_limit(
     row.updated_at = _utc_now_naive()
     db.commit()
 
+    try:
+        if limit_actas > 0:
+            msg = f"""📦 *Actualización de promoción*
+Se ha establecido un *límite individual* dentro de la promoción compartida.
+
+🔢 Límite asignado: *{limit_actas} actas*
+
+Este grupo podrá utilizar hasta esa cantidad dentro de la bolsa compartida.
+"""
+        else:
+            msg = """📦 *Actualización de promoción*
+
+Se eliminó el límite individual para este grupo.
+Ahora puede usar libremente la bolsa compartida disponible.
+"""
+        send_group_text(group_jid, msg)
+
+    except Exception as e:
+        print("PROMO_LIMIT_NOTIFY_ERROR:", e)
+
     return {
         "ok": True,
         "message": "Límite individual actualizado correctamente",
