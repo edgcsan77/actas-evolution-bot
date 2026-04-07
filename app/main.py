@@ -298,6 +298,7 @@ def _panel_group_rows(
     has_active_filters: bool = False,
 ) -> list[dict]:
     data = {}
+    group_cache = _build_group_name_cache(db)
 
     excluded_words = (
         "PROV",
@@ -312,17 +313,13 @@ def _panel_group_rows(
         return any(word in name_up for word in excluded_words)
 
     if include_all_groups and not has_active_filters:
-        alias_rows = db.query(GroupAlias).all()
-        alias_map = {
-            row.group_jid: (row.custom_name or "").strip()
-            for row in alias_rows
-            if row.group_jid
-        }
-
-        all_group_ids = set(GROUP_NAME_MAP.keys()) | set(alias_map.keys())
+        all_group_ids = set(GROUP_NAME_MAP.keys()) | set(group_cache.keys())
 
         for gid in all_group_ids:
-            name = alias_map.get(gid) or GROUP_NAME_MAP.get(gid) or "Grupo sin nombre"
+            if gid == "PRIVADO":
+                continue
+
+            name = _group_name_cached(gid, group_cache) or "Grupo sin nombre"
 
             if _is_hidden_group(name):
                 continue
@@ -351,7 +348,7 @@ def _panel_group_rows(
 
     for r in rows:
         gid = r.source_group_id or "PRIVADO"
-        group_name = _group_name(gid, db)
+        group_name = _group_name_cached(gid, group_cache)
 
         if gid != "PRIVADO" and _is_hidden_group(group_name):
             continue
@@ -380,7 +377,7 @@ def _panel_group_rows(
         elif r.status == "ERROR":
             item["error"] += 1
 
-        if not item["last_update"] or (r.updated_at and r.updated_at > item["last_update"]):
+        if r.updated_at and (not item["last_update"] or r.updated_at > item["last_update"]):
             item["last_update"] = r.updated_at
 
     out = list(data.values())
@@ -706,6 +703,18 @@ def panel_recent_requests(
             provider_name=provider_name or None,
             status=status or None,
             act_type=act_type or None,
+        )
+        .with_entities(
+            RequestLog.id,
+            RequestLog.curp,
+            RequestLog.act_type,
+            RequestLog.status,
+            RequestLog.source_group_id,
+            RequestLog.provider_name,
+            RequestLog.provider_group_id,
+            RequestLog.created_at,
+            RequestLog.updated_at,
+            RequestLog.error_message,
         )
         .order_by(RequestLog.created_at.desc())
         .limit(15)
@@ -1187,6 +1196,8 @@ def panel_register_group_promotion_abono(
 
 @app.get("/panel/promotions/report", response_class=HTMLResponse)
 def panel_promotions_report(db: Session = Depends(get_db)):
+    group_cache = _build_group_name_cache(db)
+
     rows = (
         db.query(GroupPromotion)
         .filter(GroupPromotion.is_active == True)
@@ -1204,7 +1215,7 @@ def panel_promotions_report(db: Session = Depends(get_db)):
 
         item = {
             "group_jid": r.group_jid or "",
-            "group_name": _group_name(r.group_jid, db),
+            "group_name": _group_name_cached(r.group_jid, group_cache),
             "promo_name": (r.promo_name or "").strip() or "-",
             "total_actas": total_actas,
             "used_actas": used_actas,
@@ -1700,9 +1711,11 @@ def panel_group_detail(
     if not group_jid:
         return HTMLResponse("<pre>Falta group_jid</pre>", status_code=400)
 
+    group_cache = _build_group_name_cache(db)
+
     promo = _get_group_promotion(db, group_jid)
     promo_html = _promotion_badge_html(promo)
-    group_display_name = _esc(_group_name(group_jid, db))
+    group_display_name = _esc(_group_name_cached(group_jid, group_cache))
     promo_name = _esc(promo.promo_name if promo else "")
     promo_total = promo.total_actas if promo else 0
     promo_used = promo.used_actas if promo else 0
@@ -1722,7 +1735,6 @@ def panel_group_detail(
         db.query(
             RequestLog.created_at,
             RequestLog.status,
-            RequestLog.source_group_id,
         )
         .filter(
             RequestLog.created_at >= time_min,
@@ -1732,17 +1744,17 @@ def panel_group_detail(
         .order_by(RequestLog.created_at.asc())
         .all()
     )
-    
+
     days = {}
     now_local = _panel_now()
-    
+
     if view == "month":
         local_start = _panel_month_start(now_local)
         local_end = _panel_month_end(now_local)
     else:
         local_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
         local_end = local_start + timedelta(days=1)
-    
+
     cur = local_start
     while cur < local_end:
         day_str = cur.strftime("%Y-%m-%d")
@@ -1756,18 +1768,18 @@ def panel_group_detail(
             "processing": 0,
         }
         cur += timedelta(days=1)
-    
-    for created_at, status_value, _ in rows:
+
+    for created_at, status_value in rows:
         if not created_at:
             continue
         local_dt = _to_panel_tz(created_at)
         day_str = local_dt.strftime("%Y-%m-%d")
         if day_str not in days:
             continue
-    
+
         item = days[day_str]
         item["total"] += 1
-    
+
         if status_value == "DONE":
             item["done"] += 1
         elif status_value == "ERROR":
@@ -1776,13 +1788,13 @@ def panel_group_detail(
             item["queued"] += 1
         elif status_value == "PROCESSING":
             item["processing"] += 1
-    
+
     rows_out = list(days.values())
     rows_out.sort(key=lambda x: x["date"])
-    
+
     detail = {
         "group_jid": group_jid,
-        "group_name": _group_name_cached(group_jid, _build_group_name_cache(db)),
+        "group_name": _group_name_cached(group_jid, group_cache),
         "rows": rows_out,
         "totals": {
             "total": sum(x["total"] for x in rows_out),
@@ -2965,6 +2977,24 @@ def _promotion_summary_map(db: Session) -> dict[str, dict]:
 
     _cache_set_json(cache_key, out, ttl=60)
     return out
+
+                                                                                                        
+def _panel_cache_key(
+    view: str,
+    group_jid: str,
+    provider_name: str,
+    status: str,
+    act_type: str,
+    group_mode: str,
+) -> str:
+    return "panel:html:" + "|".join([
+        (view or "").strip(),
+        (group_jid or "").strip(),
+        (provider_name or "").strip(),
+        (status or "").strip(),
+        (act_type or "").strip(),
+        (group_mode or "").strip(),
+    ])
                                                                                                         
                     
 @app.get("/panel", response_class=HTMLResponse)
@@ -2978,6 +3008,14 @@ def panel_actas(
     db: Session = Depends(get_db),
 ):
     try:
+        cache_key = f"panel:{view}:{group_mode}"
+
+        cached_panel = redis_conn.get(cache_key)
+        if cached_panel:
+            if isinstance(cached_panel, bytes):
+                cached_panel = cached_panel.decode("utf-8", errors="ignore")
+            return HTMLResponse(content=cached_panel)
+    
         time_min, time_max, view = _panel_period_bounds(view)
 
         base_q = _query_requests_for_panel(
@@ -3042,9 +3080,7 @@ def panel_actas(
         group_map = {}
         
         if include_all_groups and not has_active_filters:
-            for gid in set(GROUP_NAME_MAP.keys()) | {
-                g for (g,) in db.query(GroupAlias.group_jid).all() if g
-            }:
+            for gid in set(GROUP_NAME_MAP.keys()) | set(group_cache.keys()):
                 group_map[gid] = {
                     "group_jid": gid,
                     "group_name": _group_name_cached(gid, group_cache),
@@ -3151,7 +3187,7 @@ def panel_actas(
             else f"Vista diaria ({_panel_day_str()}, {PANEL_TZ})"
         )
         
-        provider_states = _esc(_providers_status_text(db)).replace("\n", "<br>")
+        provider_states = _esc(_providers_status_text(db)).replace("\n", "<br>") if view == "month" else ""
     
         html = f"""
         <!doctype html>
@@ -4101,12 +4137,10 @@ def panel_actas(
             >
         """
         group_ids = set(GROUP_NAME_MAP.keys())
-        group_ids.update(
-            gid for (gid,) in db.query(GroupAlias.group_jid).all()
-        )
+        group_ids.update(group_cache.keys())
 
-        for gid in sorted(group_ids, key=lambda x: _group_name(x, db).lower()):
-            group_name = _group_name(gid, db)
+        for gid in sorted(group_ids, key=lambda x: _group_name_cached(x, group_cache).lower()):
+            group_name = _group_name_cached(gid, group_cache)
             upper_name = group_name.upper()
         
             is_test = (
@@ -4822,7 +4856,9 @@ def panel_actas(
           }
         
           filterSharedPromoGroups();
-          startRecentRequestsStream();
+          if (!document.hidden) {
+            startRecentRequestsStream();
+          }
         
           const sections = [
             "grupoClienteBody",
@@ -4972,6 +5008,11 @@ def panel_actas(
     </body>
     </html>
         """
+        try:
+            redis_conn.setex(cache_key, 15, html)
+        except Exception:
+            pass
+            
         return HTMLResponse(content=html)
         
     except Exception as e:
@@ -5415,8 +5456,8 @@ def _set_app_setting(db: Session, key: str, value: str):
 def _providers_status_text(db: Session) -> str:
     cache_key = "panel:providers_status_text:v1"
     cached = _cache_get_json(cache_key)
-    if cached:
-        return cached.get("text", "")
+    if cached and isinstance(cached, dict) and cached.get("text"):
+        return cached["text"]
 
     p1 = _get_or_create_provider(db, "PROVIDER1", True)
     p2 = _get_or_create_provider(db, "PROVIDER2", False)
@@ -5429,6 +5470,7 @@ def _providers_status_text(db: Session) -> str:
     s4 = "ON" if p4.is_enabled else "OFF"
 
     provider1_extra = ""
+    provider2_extra = ""
     provider3_extra = ""
     provider4_extra = ""
 
@@ -5439,7 +5481,7 @@ def _providers_status_text(db: Session) -> str:
 
     try:
         phpsessid = _get_app_setting(db, "PROVIDER3_PHPSESSID", settings.PROVIDER3_PHPSESSID)
-        if phpsessid:
+        if phpsessid and p3.is_enabled:
             client = Provider3Client(phpsessid=phpsessid)
             lic = client.get_licenses()
             curp_left = lic.get("acta_curp")
@@ -5448,16 +5490,17 @@ def _providers_status_text(db: Session) -> str:
                 f" | CURP restantes: {curp_left if curp_left is not None else 'N/D'}"
                 f" | CADENA restantes: {cadena_left if cadena_left is not None else 'N/D'}"
             )
-        else:
+        elif p3.is_enabled:
             provider3_extra = " | SIN PHPSESSID"
     except Exception as e:
         provider3_extra = f" | ERROR LICENCIAS: {str(e)}"
 
     try:
-        provider4_client = Provider4Client()
-        provider4_month = provider4_client.get_week_done_counts(local_start, local_end)
-        provider4_total = provider4_month.get("total", 0)
-        provider4_extra = f" | CURP hechas: {provider4_total}"
+        if p4.is_enabled:
+            provider4_client = Provider4Client()
+            provider4_month = provider4_client.get_week_done_counts(local_start, local_end)
+            provider4_total = provider4_month.get("total", 0)
+            provider4_extra = f" | CURP hechas: {provider4_total}"
     except Exception as e:
         provider4_extra = f" | ERROR HISTORY: {str(e)}"
 
@@ -5478,7 +5521,7 @@ def _providers_status_text(db: Session) -> str:
 
     text = (
         f"ADMIN DIGITAL:\n{s1}{provider1_extra}\n\n"
-        f"AUSTRAM BOT:\n{s2}\n\n"
+        f"AUSTRAM BOT:\n{s2}{provider2_extra}\n\n"
         f"AUSTRAM WEB:\n{s3}{provider3_extra}\n\n"
         f"LAZARO WEB:\n{s4}{provider4_extra}"
     )
