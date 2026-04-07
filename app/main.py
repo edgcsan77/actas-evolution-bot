@@ -1901,10 +1901,18 @@ def panel_group_detail(
         </div>
     """
 
+    is_in_shared_promo = bool((promo.shared_key or "").strip()) if promo else False
+
+    shared_remove_btn = (
+        f'<button type="button" class="btn btn-danger" onclick="removeFromSharedPromotion(\'{group_jid}\')">Quitar de bolsa</button>'
+        if is_in_shared_promo
+        else ""
+    )
+    
     html += f"""
         <div class="box">
           <div class="head"><strong>Promoción del grupo</strong></div>
-
+    
           <div class="filters" style="grid-template-columns: repeat(5, minmax(0, 1fr));">
             <div>
               <div class="small">Estado</div>
@@ -1927,7 +1935,7 @@ def panel_group_detail(
               <div style="margin-top:8px;font-weight:800;">{promo_price or 'N/D'}</div>
             </div>
           </div>
-
+    
           <div class="filters" style="grid-template-columns: repeat(6, minmax(0, 1fr));">
             <div>
               <div class="small">Nombre de promoción</div>
@@ -1966,32 +1974,27 @@ def panel_group_detail(
               placeholder="N/A">
             </div>
           </div>
-
+    
           <div class="filters">
             <button type="button" class="btn btn-success" onclick="savePromotion('{group_jid}')">Activar promoción</button>
+            {shared_remove_btn}
           </div>
-
-          <div class="filters" style="grid-template-columns: minmax(0, 1fr) 220px 220px;">
+    
+          <div class="filters" style="grid-template-columns: minmax(0, 1fr) 220px;">
             <div>
               <div class="small">Límite individual dentro de bolsa compartida</div>
               <input id="shared_group_limit" type="number" min="0"
                      placeholder="Sin límite"
                      value="{promo_shared_group_limit if promo_shared_group_limit else ''}">
             </div>
-
+    
             <div style="display:flex;align-items:end;">
               <button type="button" class="btn btn-primary" style="width:100%;" onclick="setSharedGroupLimit('{group_jid}')">
                 Guardar límite
               </button>
             </div>
-
-            <div style="display:flex;align-items:end;">
-              <button type="button" class="btn btn-danger" style="width:100%;" onclick="removeFromSharedPromotion('{group_jid}')">
-                Sacar de bolsa
-              </button>
-            </div>
           </div>
-
+    
           <div class="filters" style="grid-template-columns: 1fr 220px 220px;">
             <input id="promo_recharge" placeholder="Recargar actas" type="number" min="1">
             <button type="button" class="btn btn-success" onclick="rechargePromotion('{group_jid}')">Recargar promoción</button>
