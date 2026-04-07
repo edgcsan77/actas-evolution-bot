@@ -1593,6 +1593,60 @@ def panel_group_remove_category(group_jid: str, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+@app.post("/panel/group/{group_jid}/shared-promotion/remove")
+def remove_group_from_shared_promotion(
+    group_jid: str,
+    db: Session = Depends(get_db),
+):
+    group_jid = (group_jid or "").strip()
+
+    if not group_jid:
+        return {"ok": False, "error": "GROUP_JID_REQUIRED"}
+
+    row = (
+        db.query(GroupPromotion)
+        .filter(GroupPromotion.group_jid == group_jid)
+        .first()
+    )
+
+    if not row:
+        return {"ok": False, "error": "PROMOTION_NOT_FOUND"}
+
+    if not (row.shared_key or "").strip():
+        return {"ok": False, "error": "GROUP_NOT_IN_SHARED_PROMOTION"}
+
+    # guardar datos antes de quitarlo
+    promo_name = row.promo_name or "Promoción compartida"
+
+    # quitar de bolsa
+    row.shared_key = None
+    row.shared_group_limit_actas = None
+    row.shared_group_used_actas = 0
+    row.updated_at = _utc_now_naive()
+
+    db.commit()
+
+    try:
+        msg = f"""
+📦 *Actualización de promoción*
+Este grupo fue retirado de la *bolsa compartida*:
+
+🏷 Promoción: *{promo_name}*
+
+A partir de ahora este grupo ya no utilizará el saldo compartido.
+"""
+        send_group_text(group_jid, msg)
+
+    except Exception as e:
+        print("SHARED_PROMO_REMOVE_NOTIFY_ERROR:", e)
+
+    return {
+        "ok": True,
+        "message": "El grupo fue eliminado de la bolsa compartida",
+        "group_jid": group_jid,
+    }
+
+
 @app.get("/panel/group-detail", response_class=HTMLResponse)
 def panel_group_detail(
     group_jid: str = "",
@@ -1913,7 +1967,7 @@ def panel_group_detail(
             </div>
           </div>
 
-          <div class="filters" style="grid-template-columns: minmax(0, 1fr) 220px;">
+          <div class="filters" style="grid-template-columns: minmax(0, 1fr) 220px 220px;">
             <div>
               <div class="small">Límite individual dentro de bolsa compartida</div>
               <input id="shared_group_limit" type="number" min="0"
@@ -1924,6 +1978,12 @@ def panel_group_detail(
             <div style="display:flex;align-items:end;">
               <button type="button" class="btn btn-primary" style="width:100%;" onclick="setSharedGroupLimit('{group_jid}')">
                 Guardar límite
+              </button>
+            </div>
+
+            <div style="display:flex;align-items:end;">
+              <button type="button" class="btn btn-danger" style="width:100%;" onclick="removeFromSharedPromotion('{group_jid}')">
+                Sacar de bolsa
               </button>
             </div>
           </div>
@@ -2033,6 +2093,28 @@ def panel_group_detail(
                 location.reload();
               }} else {{
                 alert(data.error || "Error guardando promoción");
+              }}
+            }} catch (e) {{
+              alert("No se pudo conectar con el servidor");
+            }}
+          }}
+
+          async function removeFromSharedPromotion(groupJid) {{
+            const ok = confirm("¿Seguro que deseas sacar este grupo de la bolsa compartida?");
+            if (!ok) return;
+        
+            try {{
+              const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/shared-promotion/remove`, {{
+                method: "POST"
+              }});
+        
+              const data = await res.json();
+        
+              if (data.ok) {{
+                alert(data.message || "Grupo eliminado de la bolsa compartida");
+                location.reload();
+              }} else {{
+                alert(data.error || "Error quitando el grupo de la bolsa compartida");
               }}
             }} catch (e) {{
               alert("No se pudo conectar con el servidor");
