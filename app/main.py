@@ -1948,7 +1948,7 @@ def panel_group_detail(
             </div>
           
             <div>
-              <div class="small">Precio por pieza o bloque</div>
+              <div class="small">Precio por pieza</div>
               <input id="promo_price" placeholder="" value="{promo_price}">
             </div>
         
@@ -1965,6 +1965,10 @@ def panel_group_detail(
               value="{promo_credit_debe if promo_is_credit else ''}"
               placeholder="N/A">
             </div>
+          </div>
+
+          <div class="filters">
+            <button type="button" class="btn btn-success" onclick="savePromotion('{group_jid}')">Activar promoción</button>
           </div>
 
           <div class="filters" style="grid-template-columns: minmax(0, 1fr) 220px 220px;">
@@ -1986,10 +1990,6 @@ def panel_group_detail(
                 Sacar de bolsa
               </button>
             </div>
-          </div>
- 
-          <div class="filters">
-            <button type="button" class="btn btn-success" onclick="savePromotion('{group_jid}')">Activar promoción</button>
           </div>
 
           <div class="filters" style="grid-template-columns: 1fr 220px 220px;">
