@@ -39,6 +39,8 @@ from app.services.evolution import (
     get_media_base64,
 )
 
+from sqlalchemy import func, case, or_
+
 app = FastAPI(title=settings.APP_NAME)
 PANEL_TZ = "America/Monterrey"
 BLOCKED_GROUPS_KEY = "blocked_groups_no_response"
@@ -227,21 +229,24 @@ def _query_requests_for_panel(
 
     if group_jid:
         val = group_jid.strip()
-        val_low = val.lower()
+        val_like = f"%{val}%"
 
-        alias_rows = db.query(GroupAlias).all()
         alias_matches = [
-            row.group_jid
-            for row in alias_rows
-            if row.group_jid and (
-                val_low in row.group_jid.lower()
-                or val_low in (row.custom_name or "").lower()
+            gid for (gid,) in (
+                db.query(GroupAlias.group_jid)
+                .filter(
+                    or_(
+                        GroupAlias.group_jid.ilike(val_like),
+                        GroupAlias.custom_name.ilike(val_like),
+                    )
+                )
+                .all()
             )
         ]
 
         map_matches = [
             gid for gid, name in GROUP_NAME_MAP.items()
-            if val_low in gid.lower() or val_low in (name or "").lower()
+            if val.lower() in gid.lower() or val.lower() in (name or "").lower()
         ]
 
         matching_group_ids = list(dict.fromkeys(alias_matches + map_matches))
@@ -249,19 +254,16 @@ def _query_requests_for_panel(
         if matching_group_ids:
             q = q.filter(RequestLog.source_group_id.in_(matching_group_ids))
         else:
-            q = q.filter(RequestLog.source_group_id.ilike(f"%{val}%"))
+            q = q.filter(RequestLog.source_group_id.ilike(val_like))
 
     if provider_name:
-        val = provider_name.strip()
-        q = q.filter(RequestLog.provider_name.ilike(f"%{val}%"))
+        q = q.filter(RequestLog.provider_name.ilike(f"%{provider_name.strip()}%"))
 
     if status:
-        val = status.strip()
-        q = q.filter(RequestLog.status.ilike(f"%{val}%"))
+        q = q.filter(RequestLog.status.ilike(f"%{status.strip()}%"))
 
     if act_type:
-        val = act_type.strip()
-        q = q.filter(RequestLog.act_type.ilike(f"%{val}%"))
+        q = q.filter(RequestLog.act_type.ilike(f"%{act_type.strip()}%"))
 
     return q
     
@@ -567,6 +569,47 @@ def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str, d
     }
 
 
+def _cache_get_json(key: str):
+    try:
+        raw = redis_conn.get(key)
+        if not raw:
+            return None
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="ignore")
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+def _cache_set_json(key: str, value, ttl: int = 30):
+    try:
+        redis_conn.setex(key, ttl, json.dumps(value, ensure_ascii=False))
+    except Exception:
+        pass
+
+
+def _build_group_name_cache(db: Session) -> dict[str, str]:
+    cache = {"PRIVADO": "PRIVADO"}
+
+    for gid, name in GROUP_NAME_MAP.items():
+        if gid:
+            cache[gid] = (name or "").strip() or gid
+
+    alias_rows = db.query(GroupAlias.group_jid, GroupAlias.custom_name).all()
+    for gid, custom_name in alias_rows:
+        if gid:
+            cache[gid] = (custom_name or "").strip() or cache.get(gid, gid)
+
+    return cache
+
+
+def _group_name_cached(group_jid: str | None, group_cache: dict[str, str]) -> str:
+    gid = (group_jid or "").strip()
+    if not gid:
+        return "PRIVADO"
+    return group_cache.get(gid, gid)
+
+
 @app.post("/panel/ping-group")
 def panel_ping_group(payload: dict):
     group_jid = (payload.get("group_jid") or "").strip()
@@ -652,6 +695,7 @@ def panel_recent_requests(
     db: Session = Depends(get_db),
 ):
     time_min, time_max, view = _panel_period_bounds(view)
+    group_cache = _build_group_name_cache(db)
 
     rows = (
         _query_requests_for_panel(
@@ -704,9 +748,9 @@ def panel_recent_requests(
               <td class="mono">{_esc(r.curp)}</td>
               <td>{_esc(r.act_type)}</td>
               <td class="{status_class}">{_esc(r.status)}</td>
-              <td>{_esc(_group_name(r.source_group_id, db))}</td>
+              <td>{_esc(_group_name_cached(r.source_group_id, group_cache))}</td>
               <td>{_esc(_provider_label(r.provider_name))}</td>
-              <td>{_esc(_group_name(r.provider_group_id, db))}</td>
+              <td>{_esc(_group_name_cached(r.provider_group_id, group_cache))}</td>
               <td>{_esc(_fmt_dt(r.created_at))}</td>
               <td>{_esc(_fmt_dt(r.updated_at))}</td>
               <td class="small">{_esc(r.error_message)}</td>
@@ -1674,13 +1718,83 @@ def panel_group_detail(
 
     time_min, time_max, view = _panel_period_bounds(view)
 
-    rows = _query_requests_for_panel(
-        db=db,
-        time_min=time_min,
-        time_max=time_max,
-    ).order_by(RequestLog.created_at.asc()).all()
-
-    detail = _panel_detail_for_group(rows, group_jid, view, db)
+    rows = (
+        db.query(
+            RequestLog.created_at,
+            RequestLog.status,
+            RequestLog.source_group_id,
+        )
+        .filter(
+            RequestLog.created_at >= time_min,
+            RequestLog.created_at < time_max,
+            RequestLog.source_group_id == group_jid,
+        )
+        .order_by(RequestLog.created_at.asc())
+        .all()
+    )
+    
+    days = {}
+    now_local = _panel_now()
+    
+    if view == "month":
+        local_start = _panel_month_start(now_local)
+        local_end = _panel_month_end(now_local)
+    else:
+        local_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        local_end = local_start + timedelta(days=1)
+    
+    cur = local_start
+    while cur < local_end:
+        day_str = cur.strftime("%Y-%m-%d")
+        days[day_str] = {
+            "day_name": _day_name_es_from_date(day_str),
+            "date": day_str,
+            "total": 0,
+            "done": 0,
+            "error": 0,
+            "queued": 0,
+            "processing": 0,
+        }
+        cur += timedelta(days=1)
+    
+    for created_at, status_value, _ in rows:
+        if not created_at:
+            continue
+        local_dt = _to_panel_tz(created_at)
+        day_str = local_dt.strftime("%Y-%m-%d")
+        if day_str not in days:
+            continue
+    
+        item = days[day_str]
+        item["total"] += 1
+    
+        if status_value == "DONE":
+            item["done"] += 1
+        elif status_value == "ERROR":
+            item["error"] += 1
+        elif status_value == "QUEUED":
+            item["queued"] += 1
+        elif status_value == "PROCESSING":
+            item["processing"] += 1
+    
+    rows_out = list(days.values())
+    rows_out.sort(key=lambda x: x["date"])
+    
+    detail = {
+        "group_jid": group_jid,
+        "group_name": _group_name_cached(group_jid, _build_group_name_cache(db)),
+        "rows": rows_out,
+        "totals": {
+            "total": sum(x["total"] for x in rows_out),
+            "done": sum(x["done"] for x in rows_out),
+            "error": sum(x["error"] for x in rows_out),
+            "queued": sum(x["queued"] for x in rows_out),
+            "processing": sum(x["processing"] for x in rows_out),
+        },
+        "date_from": local_start.strftime("%Y-%m-%d"),
+        "date_to": (local_end - timedelta(days=1)).strftime("%Y-%m-%d"),
+        "view": view,
+    }
 
     title = detail["group_name"]
     subtitle = (
@@ -2777,8 +2891,23 @@ async def panel_broadcast_free(
         
 
 def _promotion_summary_map(db: Session) -> dict[str, dict]:
+    cache_key = "panel:promotion_summary_map:v1"
+    cached = _cache_get_json(cache_key)
+    if cached:
+        return cached
+
     rows = (
-        db.query(GroupPromotion)
+        db.query(
+            GroupPromotion.group_jid,
+            GroupPromotion.promo_name,
+            GroupPromotion.total_actas,
+            GroupPromotion.used_actas,
+            GroupPromotion.is_active,
+            GroupPromotion.client_key,
+            GroupPromotion.shared_key,
+            GroupPromotion.updated_at,
+            GroupPromotion.id,
+        )
         .order_by(GroupPromotion.updated_at.desc(), GroupPromotion.id.desc())
         .all()
     )
@@ -2805,9 +2934,19 @@ def _promotion_summary_map(db: Session) -> dict[str, dict]:
         shared_key = (r.shared_key or "").strip()
         promo_name = (r.promo_name or "").strip()
 
-        # si la promo ya fue quitada completamente, no la metas al mapa
         if not promo_name and total_actas == 0 and used_actas == 0:
             continue
+
+        if available <= 0:
+            badge_html = '<span style="display:inline-block;padding:6px 10px;border-radius:999px;font-weight:800;font-size:.82rem;color:#991b1b;background:#fee2e2;">Agotada · 0 disponibles</span>'
+        elif available <= 10:
+            badge_html = f'<span style="display:inline-block;padding:6px 10px;border-radius:999px;font-weight:800;font-size:.82rem;color:#991b1b;background:#fee2e2;">Crítico · {available} disponibles</span>'
+        elif available <= 50:
+            badge_html = f'<span style="display:inline-block;padding:6px 10px;border-radius:999px;font-weight:800;font-size:.82rem;color:#92400e;background:#fef3c7;">Precaución · {available} disponibles</span>'
+        elif available <= 100:
+            badge_html = f'<span style="display:inline-block;padding:6px 10px;border-radius:999px;font-weight:800;font-size:.82rem;color:#92400e;background:#fef3c7;">Bajo · {available} disponibles</span>'
+        else:
+            badge_html = f'<span style="display:inline-block;padding:6px 10px;border-radius:999px;font-weight:800;font-size:.82rem;color:#166534;background:#dcfce7;">Activa · {available} disponibles</span>'
 
         payload = {
             "promo_name": promo_name,
@@ -2818,14 +2957,13 @@ def _promotion_summary_map(db: Session) -> dict[str, dict]:
             "client_key": (r.client_key or "").strip(),
             "shared_key": shared_key,
             "shared_count": shared_counts.get(shared_key, 0),
-            "html": _promotion_badge_html(r),
+            "html": badge_html,
         }
 
-        clean_key = raw_key.replace("@g.us", "")
-
         out[raw_key] = payload
-        out[clean_key] = payload
+        out[raw_key.replace("@g.us", "")] = payload
 
+    _cache_set_json(cache_key, out, ttl=60)
     return out
                                                                                                         
                     
@@ -2841,8 +2979,8 @@ def panel_actas(
 ):
     try:
         time_min, time_max, view = _panel_period_bounds(view)
-    
-        rows = _query_requests_for_panel(
+
+        base_q = _query_requests_for_panel(
             db=db,
             time_min=time_min,
             time_max=time_max,
@@ -2850,9 +2988,37 @@ def panel_actas(
             provider_name=provider_name or None,
             status=status or None,
             act_type=act_type or None,
-        ).order_by(RequestLog.created_at.desc()).all()
-    
-        summary = _panel_summary_from_rows(rows)
+        )
+        
+        group_cache = _build_group_name_cache(db)
+        
+        status_rows = (
+            base_q.with_entities(
+                RequestLog.status,
+                func.count(RequestLog.id)
+            )
+            .group_by(RequestLog.status)
+            .all()
+        )
+        
+        summary = {
+            "total": 0,
+            "queued": 0,
+            "processing": 0,
+            "done": 0,
+            "error": 0,
+        }
+        for st, cnt in status_rows:
+            cnt = int(cnt or 0)
+            summary["total"] += cnt
+            if st == "QUEUED":
+                summary["queued"] = cnt
+            elif st == "PROCESSING":
+                summary["processing"] = cnt
+            elif st == "DONE":
+                summary["done"] = cnt
+            elif st == "ERROR":
+                summary["error"] = cnt
         
         include_all_groups = (group_mode == "all")
         has_active_filters = any([
@@ -2862,24 +3028,129 @@ def panel_actas(
             (act_type or "").strip(),
         ])
         
-        by_group = _panel_group_rows(
-            rows,
-            db=db,
-            include_all_groups=include_all_groups,
-            has_active_filters=has_active_filters,
+        group_rows_raw = (
+            base_q.with_entities(
+                RequestLog.source_group_id,
+                RequestLog.status,
+                func.count(RequestLog.id),
+                func.max(RequestLog.updated_at),
+            )
+            .group_by(RequestLog.source_group_id, RequestLog.status)
+            .all()
         )
         
-        by_provider = _panel_provider_rows(rows)
-        by_type = _panel_type_rows(rows)
+        group_map = {}
+        
+        if include_all_groups and not has_active_filters:
+            for gid in set(GROUP_NAME_MAP.keys()) | {
+                g for (g,) in db.query(GroupAlias.group_jid).all() if g
+            }:
+                group_map[gid] = {
+                    "group_jid": gid,
+                    "group_name": _group_name_cached(gid, group_cache),
+                    "total": 0,
+                    "queued": 0,
+                    "processing": 0,
+                    "done": 0,
+                    "error": 0,
+                    "last_update": None,
+                }
+        
+        for gid, st, cnt, last_upd in group_rows_raw:
+            gid = gid or "PRIVADO"
+            item = group_map.setdefault(gid, {
+                "group_jid": gid,
+                "group_name": _group_name_cached(gid, group_cache),
+                "total": 0,
+                "queued": 0,
+                "processing": 0,
+                "done": 0,
+                "error": 0,
+                "last_update": None,
+            })
+        
+            cnt = int(cnt or 0)
+            item["total"] += cnt
+        
+            if st == "QUEUED":
+                item["queued"] += cnt
+            elif st == "PROCESSING":
+                item["processing"] += cnt
+            elif st == "DONE":
+                item["done"] += cnt
+            elif st == "ERROR":
+                item["error"] += cnt
+        
+            if last_upd and (not item["last_update"] or last_upd > item["last_update"]):
+                item["last_update"] = last_upd
+        
+        by_group = list(group_map.values())
+        if has_active_filters or not include_all_groups:
+            by_group = [x for x in by_group if x["total"] > 0]
+        by_group = [x for x in by_group if x["group_jid"] != "PRIVADO" or x["total"] > 0]
+        by_group.sort(key=lambda x: ((x["total"] == 0), -x["total"], x["group_name"]))
+        
+        by_provider_raw = (
+            base_q.with_entities(RequestLog.provider_name, func.count(RequestLog.id))
+            .group_by(RequestLog.provider_name)
+            .all()
+        )
+        by_provider = [
+            {
+                "provider_name": name or "NO IDENTIFICADO",
+                "total": int(cnt or 0),
+                "queued": 0,
+                "processing": 0,
+                "done": 0,
+                "error": 0,
+            }
+            for name, cnt in by_provider_raw
+        ]
+        by_provider.sort(key=lambda x: (-x["total"], x["provider_name"]))
+        
+        by_type_raw = (
+            base_q.with_entities(RequestLog.act_type, func.count(RequestLog.id))
+            .group_by(RequestLog.act_type)
+            .all()
+        )
+        by_type = [
+            {
+                "act_type": name or "SIN_TIPO",
+                "total": int(cnt or 0),
+                "queued": 0,
+                "processing": 0,
+                "done": 0,
+                "error": 0,
+            }
+            for name, cnt in by_type_raw
+        ]
+        by_type.sort(key=lambda x: (-x["total"], x["act_type"]))
+        
         promo_map = _promotion_summary_map(db)
-    
-        latest = rows[:100]
-    
+        
+        latest = (
+            base_q.with_entities(
+                RequestLog.id,
+                RequestLog.curp,
+                RequestLog.act_type,
+                RequestLog.status,
+                RequestLog.source_group_id,
+                RequestLog.provider_name,
+                RequestLog.provider_group_id,
+                RequestLog.created_at,
+                RequestLog.updated_at,
+                RequestLog.error_message,
+            )
+            .order_by(RequestLog.created_at.desc())
+            .limit(100)
+            .all()
+        )
+        
         subtitle = (
             f"Vista mensual ({PANEL_TZ})" if view == "month"
             else f"Vista diaria ({_panel_day_str()}, {PANEL_TZ})"
         )
-    
+        
         provider_states = _esc(_providers_status_text(db)).replace("\n", "<br>")
     
         html = f"""
@@ -4181,9 +4452,9 @@ def panel_actas(
                   <td class="mono">{_esc(r.curp)}</td>
                   <td>{_esc(r.act_type)}</td>
                   <td class="{status_class}">{_esc(r.status)}</td>
-                  <td>{_esc(_group_name(r.source_group_id))}</td>
+                  <td>{_esc(_group_name_cached(r.source_group_id, group_cache))}</td>
                   <td>{_esc(_provider_label(r.provider_name))}</td>
-                  <td>{_esc(_group_name(r.provider_group_id))}</td>
+                  <td>{_esc(_group_name_cached(r.provider_group_id, group_cache)}</td>
                   <td>{_esc(_fmt_dt(r.created_at))}</td>
                   <td>{_esc(_fmt_dt(r.updated_at))}</td>
                   <td class="small">{_esc(r.error_message)}</td>
@@ -5142,6 +5413,11 @@ def _set_app_setting(db: Session, key: str, value: str):
 
 
 def _providers_status_text(db: Session) -> str:
+    cache_key = "panel:providers_status_text:v1"
+    cached = _cache_get_json(cache_key)
+    if cached:
+        return cached.get("text", "")
+
     p1 = _get_or_create_provider(db, "PROVIDER1", True)
     p2 = _get_or_create_provider(db, "PROVIDER2", False)
     p3 = _get_or_create_provider(db, "PROVIDER3", False)
@@ -5166,10 +5442,8 @@ def _providers_status_text(db: Session) -> str:
         if phpsessid:
             client = Provider3Client(phpsessid=phpsessid)
             lic = client.get_licenses()
-
             curp_left = lic.get("acta_curp")
             cadena_left = lic.get("acta_cadena")
-
             provider3_extra = (
                 f" | CURP restantes: {curp_left if curp_left is not None else 'N/D'}"
                 f" | CADENA restantes: {cadena_left if cadena_left is not None else 'N/D'}"
@@ -5189,24 +5463,28 @@ def _providers_status_text(db: Session) -> str:
 
     try:
         provider1_total = (
-            db.query(RequestLog)
+            db.query(func.count(RequestLog.id))
             .filter(
                 RequestLog.provider_name == "PROVIDER1",
                 RequestLog.status == "DONE",
                 RequestLog.created_at >= utc_start,
                 RequestLog.created_at < utc_end,
             )
-            .count()
-        )
+            .scalar()
+        ) or 0
         provider1_extra = f" | CURP y CADENA hechas: {provider1_total}"
     except Exception as e:
         provider1_extra = f" | ERROR DB: {str(e)}"
 
-    return (
+    text = (
         f"ADMIN DIGITAL:\n{s1}{provider1_extra}\n\n"
+        f"AUSTRAM BOT:\n{s2}\n\n"
         f"AUSTRAM WEB:\n{s3}{provider3_extra}\n\n"
         f"LAZARO WEB:\n{s4}{provider4_extra}"
     )
+
+    _cache_set_json(cache_key, {"text": text}, ttl=60)
+    return text
 
 
 def _resolve_requester_wa_id(data: dict, key: dict, is_group: bool) -> str:
