@@ -4454,7 +4454,7 @@ def panel_actas(
                   <td class="{status_class}">{_esc(r.status)}</td>
                   <td>{_esc(_group_name_cached(r.source_group_id, group_cache))}</td>
                   <td>{_esc(_provider_label(r.provider_name))}</td>
-                  <td>{_esc(_group_name_cached(r.provider_group_id, group_cache)}</td>
+                  <td>{_esc(_group_name_cached(r.provider_group_id, group_cache))}</td>
                   <td>{_esc(_fmt_dt(r.created_at))}</td>
                   <td>{_esc(_fmt_dt(r.updated_at))}</td>
                   <td class="small">{_esc(r.error_message)}</td>
