@@ -2975,7 +2975,7 @@ def _promotion_summary_map(db: Session) -> dict[str, dict]:
         out[raw_key] = payload
         out[raw_key.replace("@g.us", "")] = payload
 
-    _cache_set_json(cache_key, out, ttl=60)
+    _cache_set_json(cache_key, out, ttl=5)
     return out
 
                                                                                                         
@@ -5009,7 +5009,7 @@ def panel_actas(
     </html>
         """
         try:
-            redis_conn.setex(cache_key, 15, html)
+            redis_conn.setex(cache_key, 5, html)
         except Exception:
             pass
             
@@ -5047,6 +5047,14 @@ def panel_provider_on(provider_name: str, db: Session = Depends(get_db)):
     row.is_enabled = True
     row.updated_at = _utc_now_naive()
     db.commit()
+
+    try:
+        for key in redis_conn.scan_iter("panel:*"):
+            redis_conn.delete(key)
+        redis_conn.delete("panel:providers_status_text:v1")
+    except Exception:
+        pass
+
     return {"ok": True, "provider": provider_name.upper(), "enabled": True}
 
 
@@ -5056,6 +5064,14 @@ def panel_provider_off(provider_name: str, db: Session = Depends(get_db)):
     row.is_enabled = False
     row.updated_at = _utc_now_naive()
     db.commit()
+
+    try:
+        for key in redis_conn.scan_iter("panel:*"):
+            redis_conn.delete(key)
+        redis_conn.delete("panel:providers_status_text:v1")
+    except Exception:
+        pass
+
     return {"ok": True, "provider": provider_name.upper(), "enabled": False}
 
 
@@ -5525,7 +5541,7 @@ def _providers_status_text(db: Session) -> str:
         f"LAZARO WEB:\n{s4}{provider4_extra}"
     )
 
-    _cache_set_json(cache_key, {"text": text}, ttl=60)
+    _cache_set_json(cache_key, {"text": text}, ttl=5)
     return text
 
 
