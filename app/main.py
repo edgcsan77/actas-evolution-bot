@@ -3187,7 +3187,7 @@ def panel_actas(
             else f"Vista diaria ({_panel_day_str()}, {PANEL_TZ})"
         )
         
-        provider_states = _esc(_providers_status_text(db)).replace("\n", "<br>") if view == "month" else ""
+        provider_states = _esc(_providers_status_text(db)).replace("\n", "<br>")
     
         html = f"""
         <!doctype html>
