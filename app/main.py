@@ -5732,6 +5732,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         terms = extract_request_terms(text_body)
         problem = detect_identifier_problem(text_body)
 
+        print("DEBUG_TEXT_BODY =", repr(text_body), flush=True)
+        print("DEBUG_TERMS =", terms, flush=True)
+        print("DEBUG_PROBLEM =", repr(problem), flush=True)
+        print("DEBUG_MESSAGE_KEYS =", list(message.keys()), flush=True)
+
         if not bot_is_open() and terms and not is_provider_message and not is_admin_command:
             msg = (
                 "🚀 *DOCU EXPRES*\n"
