@@ -4645,7 +4645,7 @@ def panel_actas(
         else:
             html += '<tr><td colspan="10">Sin solicitudes en este periodo.</td></tr>'
     
-        html += """
+        html += f"""
               </tbody>
             </table>
           </div>
@@ -4653,7 +4653,7 @@ def panel_actas(
       </div>
     
       <script>
-        const PANEL_STREAM_ENABLED = {"true" if PANEL_STREAM_ENABLED else "false"};
+        const PANEL_STREAM_ENABLED = {str(PANEL_STREAM_ENABLED).lower()};
         let broadcastRunning = false;
     
         async function toggleProvider(provider, action) {
