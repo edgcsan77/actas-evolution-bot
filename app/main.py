@@ -5893,6 +5893,91 @@ def panel_recharge_group_promotion(
     if not row:
         return {"ok": False, "error": "PROMOTION_NOT_FOUND"}
 
+    shared_key = (row.shared_key or "").strip()
+
+    # =========================
+    # RECARGA COMPARTIDA
+    # =========================
+    if shared_key:
+        rows = (
+            db.query(GroupPromotion)
+            .filter(GroupPromotion.shared_key == shared_key)
+            .all()
+        )
+
+        if not rows:
+            return {"ok": False, "error": "SHARED_PROMOTION_NOT_FOUND"}
+
+        leader = rows[0]
+        current_total = int(leader.total_actas or 0)
+        current_used = int(leader.used_actas or 0)
+
+        new_total = current_total + extra_actas
+        available = max(0, new_total - current_used)
+
+        for r in rows:
+            r.total_actas = new_total
+            r.used_actas = current_used
+            r.warning_sent_200 = False
+            r.warning_sent_100 = False
+            r.warning_sent_50 = False
+            r.warning_sent_10 = False
+            r.warning_sent_0 = False
+            r.is_active = True
+            r.updated_at = _utc_now_naive()
+
+        db.commit()
+
+        try:
+            redis_conn.delete(f"promo_notify:{shared_key}:0")
+            redis_conn.delete(f"promo_notify:{shared_key}:10")
+            redis_conn.delete(f"promo_notify:{shared_key}:50")
+            redis_conn.delete(f"promo_notify:{shared_key}:100")
+            redis_conn.delete(f"promo_notify:{shared_key}:200")
+        except Exception as e:
+            print("PROMO_NOTIFY_KEYS_CLEAR_SHARED_ERROR =", str(e), flush=True)
+
+        try:
+            notified = set()
+            for r in rows:
+                gid = (r.group_jid or "").strip()
+                if gid:
+                    try:
+                        unblock_group(gid)
+                    except Exception as unblock_exc:
+                        print("PROMOTION_RECHARGE_UNBLOCK_SHARED_ERROR =", gid, str(unblock_exc), flush=True)
+
+                    if gid not in notified:
+                        try:
+                            send_group_text(
+                                gid,
+                                (
+                                    f"🔄 *Recarga aplicada a bolsa compartida*\n\n"
+                                    f"Bolsa: *{shared_key}*\n"
+                                    f"Se agregaron *{extra_actas} actas*.\n"
+                                    f"Ahora cuentan con *{available} actas disponibles*.\n\n"
+                                    f"Gracias por tu preferencia."
+                                )
+                            )
+                            notified.add(gid)
+                        except Exception as notify_exc:
+                            print("PROMOTION_RECHARGE_SHARED_NOTIFY_ERROR =", gid, str(notify_exc), flush=True)
+        except Exception as e:
+            print("PROMOTION_RECHARGE_SHARED_GENERAL_ERROR =", str(e), flush=True)
+
+        return {
+            "ok": True,
+            "message": f"Recarga aplicada a la bolsa compartida. Nuevo saldo disponible: {available}",
+            "group_jid": group_jid,
+            "shared_key": shared_key,
+            "total_actas": new_total,
+            "used_actas": current_used,
+            "available": available,
+        }
+
+    # =========================
+    # RECARGA INDIVIDUAL
+    # =========================
     row.total_actas = (row.total_actas or 0) + extra_actas
     row.used_actas = row.used_actas or 0
     row.warning_sent_200 = False
