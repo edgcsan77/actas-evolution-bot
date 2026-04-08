@@ -5128,7 +5128,7 @@ def panel_actas(
         
           recentRequestsEventSource.onmessage = async function(event) {{
             try {{
-              const data = JSON.parse(event.data || "{}");
+              const data = JSON.parse(event.data || "{{}}");
               if (data.error) {{
                 console.error("RECENT_REQUESTS_STREAM_ERROR =", data.error);
                 return;
