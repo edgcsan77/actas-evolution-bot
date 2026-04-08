@@ -1,0 +1,79 @@
+import json
+from datetime import datetime, timezone, timedelta
+from app.config import settings
+from app.services.provider3 import Provider3Client
+from app.services.provider4 import Provider4Client
+from app.db import SessionLocal
+from app.queue import redis_conn
+
+CACHE_KEY = "panel:providers_status_cached"
+CACHE_TTL = 600  # 10 minutos
+
+
+def _cache_set_json(key: str, value, ttl: int = 30):
+    try:
+        redis_conn.setex(key, ttl, json.dumps(value, ensure_ascii=False))
+    except Exception:
+        pass
+
+
+def refresh_providers_status():
+    db = SessionLocal()
+
+    result = {
+        "provider3": {
+            "curp": None,
+            "cadena": None,
+            "error": None,
+            "updated_at": None
+        },
+        "provider4": {
+            "total": None,
+            "error": None,
+            "updated_at": None
+        }
+    }
+
+    try:
+        phpsessid = settings.PROVIDER3_PHPSESSID
+
+        if phpsessid:
+            client = Provider3Client(phpsessid=phpsessid)
+            lic = client.get_licenses()
+
+            result["provider3"]["curp"] = lic.get("acta_curp")
+            result["provider3"]["cadena"] = lic.get("acta_cadena")
+        else:
+            result["provider3"]["error"] = "SIN PHPSESSID"
+
+    except Exception as e:
+        result["provider3"]["error"] = str(e)
+        print("PROVIDER3_STATUS_ERROR =", str(e), flush=True)
+
+    result["provider3"]["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    try:
+        now = datetime.now()
+        local_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        if local_start.month == 12:
+            local_end = local_start.replace(year=local_start.year + 1, month=1)
+        else:
+            local_end = local_start.replace(month=local_start.month + 1)
+
+        client4 = Provider4Client()
+        month_data = client4.get_week_done_counts(local_start, local_end)
+
+        result["provider4"]["total"] = month_data.get("total", 0)
+
+    except Exception as e:
+        result["provider4"]["error"] = str(e)
+        print("PROVIDER4_STATUS_ERROR =", str(e), flush=True)
+
+    result["provider4"]["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    _cache_set_json(CACHE_KEY, result, ttl=CACHE_TTL)
+
+    print("PROVIDERS_STATUS_REFRESH_OK =", result, flush=True)
+
+    db.close()
