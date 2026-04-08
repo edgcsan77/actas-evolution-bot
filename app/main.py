@@ -5621,13 +5621,6 @@ def _set_app_setting(db: Session, key: str, value: str):
 
 
 def _providers_status_text(db: Session) -> str:
-    cache_key = "panel:providers_status_text:v2"
-    PROVIDERS_STATUS_TTL = 180
-
-    cached = _cache_get_json(cache_key)
-    if cached and isinstance(cached, dict) and cached.get("text"):
-        return cached["text"]
-
     p1 = _get_or_create_provider(db, "PROVIDER1", True)
     p3 = _get_or_create_provider(db, "PROVIDER3", False)
     p4 = _get_or_create_provider(db, "PROVIDER4", False)
@@ -5660,11 +5653,34 @@ def _providers_status_text(db: Session) -> str:
     except Exception as e:
         provider1_extra = f" | ERROR DB: {str(e)}"
 
+    cached = _cache_get_json("panel:providers_status_cached") or {}
+
+    p3_cached = cached.get("provider3", {})
+    p4_cached = cached.get("provider4", {})
+
     if p3.is_enabled:
-        provider3_extra = " | Licencias: ver manualmente"
+        if p3_cached.get("error"):
+            provider3_extra = f" | ERROR: {p3_cached.get('error')}"
+        else:
+            curp_left = p3_cached.get("curp")
+            cadena_left = p3_cached.get("cadena")
+            updated_at = p3_cached.get("updated_at") or ""
+            provider3_extra = (
+                f" | CURP: {curp_left if curp_left is not None else 'N/D'}"
+                f" | CADENA: {cadena_left if cadena_left is not None else 'N/D'}"
+                f"{f' | Act: {updated_at}' if updated_at else ''}"
+            )
 
     if p4.is_enabled:
-        provider4_extra = " | Historial: carga diferida"
+        if p4_cached.get("error"):
+            provider4_extra = f" | ERROR: {p4_cached.get('error')}"
+        else:
+            total_done = p4_cached.get("total")
+            updated_at = p4_cached.get("updated_at") or ""
+            provider4_extra = (
+                f" | CURP hechas: {total_done if total_done is not None else 'N/D'}"
+                f"{f' | Act: {updated_at}' if updated_at else ''}"
+            )
 
     text = (
         f"ADMIN DIGITAL:\n{s1}{provider1_extra}\n\n"
@@ -5672,7 +5688,6 @@ def _providers_status_text(db: Session) -> str:
         f"LAZARO WEB:\n{s4}{provider4_extra}"
     )
 
-    _cache_set_json(cache_key, {"text": text}, ttl=PROVIDERS_STATUS_TTL)
     return text
 
 
