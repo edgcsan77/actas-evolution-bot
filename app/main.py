@@ -45,12 +45,12 @@ app = FastAPI(title=settings.APP_NAME)
 PANEL_TZ = "America/Monterrey"
 BLOCKED_GROUPS_KEY = "blocked_groups_no_response"
 
-PANEL_HTML_TTL = 45
-PANEL_RECENT_TTL = 15
-PANEL_GROUP_DETAIL_TTL = 60
+PANEL_HTML_TTL = 180
+PANEL_RECENT_TTL = 60
+PANEL_GROUP_DETAIL_TTL = 180
 GROUP_NAME_CACHE_TTL = 300
 PANEL_STREAM_SLEEP = 8
-PANEL_STREAM_ENABLED = True
+PANEL_STREAM_ENABLED = False
 
 
 def _utc_now_naive():
@@ -5618,23 +5618,22 @@ def _set_app_setting(db: Session, key: str, value: str):
 
 
 def _providers_status_text(db: Session) -> str:
-    cache_key = "panel:providers_status_text:v1"
+    cache_key = "panel:providers_status_text:v2"
+    PROVIDERS_STATUS_TTL = 180
+
     cached = _cache_get_json(cache_key)
     if cached and isinstance(cached, dict) and cached.get("text"):
         return cached["text"]
 
     p1 = _get_or_create_provider(db, "PROVIDER1", True)
-    p2 = _get_or_create_provider(db, "PROVIDER2", False)
     p3 = _get_or_create_provider(db, "PROVIDER3", False)
     p4 = _get_or_create_provider(db, "PROVIDER4", False)
 
     s1 = "ON" if p1.is_enabled else "OFF"
-    s2 = "ON" if p2.is_enabled else "OFF"
     s3 = "ON" if p3.is_enabled else "OFF"
     s4 = "ON" if p4.is_enabled else "OFF"
 
     provider1_extra = ""
-    provider2_extra = ""
     provider3_extra = ""
     provider4_extra = ""
 
@@ -5642,31 +5641,6 @@ def _providers_status_text(db: Session) -> str:
     local_end = _panel_month_end()
     utc_start = _panel_to_utc_naive(local_start)
     utc_end = _panel_to_utc_naive(local_end)
-
-    try:
-        phpsessid = _get_app_setting(db, "PROVIDER3_PHPSESSID", settings.PROVIDER3_PHPSESSID)
-        if phpsessid and p3.is_enabled:
-            client = Provider3Client(phpsessid=phpsessid)
-            lic = client.get_licenses()
-            curp_left = lic.get("acta_curp")
-            cadena_left = lic.get("acta_cadena")
-            provider3_extra = (
-                f" | CURP restantes: {curp_left if curp_left is not None else 'N/D'}"
-                f" | CADENA restantes: {cadena_left if cadena_left is not None else 'N/D'}"
-            )
-        elif p3.is_enabled:
-            provider3_extra = " | SIN PHPSESSID"
-    except Exception as e:
-        provider3_extra = f" | ERROR LICENCIAS: {str(e)}"
-
-    try:
-        if p4.is_enabled:
-            provider4_client = Provider4Client()
-            provider4_month = provider4_client.get_week_done_counts(local_start, local_end)
-            provider4_total = provider4_month.get("total", 0)
-            provider4_extra = f" | CURP hechas: {provider4_total}"
-    except Exception as e:
-        provider4_extra = f" | ERROR HISTORY: {str(e)}"
 
     try:
         provider1_total = (
@@ -5683,13 +5657,19 @@ def _providers_status_text(db: Session) -> str:
     except Exception as e:
         provider1_extra = f" | ERROR DB: {str(e)}"
 
+    if p3.is_enabled:
+        provider3_extra = " | Licencias: ver manualmente"
+
+    if p4.is_enabled:
+        provider4_extra = " | Historial: carga diferida"
+
     text = (
         f"ADMIN DIGITAL:\n{s1}{provider1_extra}\n\n"
         f"AUSTRAM WEB:\n{s3}{provider3_extra}\n\n"
         f"LAZARO WEB:\n{s4}{provider4_extra}"
     )
 
-    _cache_set_json(cache_key, {"text": text}, ttl=15)
+    _cache_set_json(cache_key, {"text": text}, ttl=PROVIDERS_STATUS_TTL)
     return text
 
 
