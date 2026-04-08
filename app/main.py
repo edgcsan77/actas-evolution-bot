@@ -4653,7 +4653,7 @@ def panel_actas(
       </div>
     
       <script>
-        const PANEL_STREAM_ENABLED = {str(PANEL_STREAM_ENABLED).lower()};
+        const PANEL_STREAM_ENABLED = {json.dumps(PANEL_STREAM_ENABLED)};
         let broadcastRunning = false;
     
         async function toggleProvider(provider, action) {
