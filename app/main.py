@@ -4777,7 +4777,7 @@ def panel_actas(
           const category = document.getElementById("broadcastCategory")?.value || "all";
         
           try {{
-            const res = await fetch(`/panel/broadcast/${type}`, {{
+            const res = await fetch(`/panel/broadcast/${{type}}`, {{
               method: "POST",
               headers: {{
                 "Content-Type": "application/json"
