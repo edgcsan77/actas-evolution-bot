@@ -4856,7 +4856,7 @@ def panel_actas(
           const ok = confirm(msg);
           if (!ok) return;
         
-          try {
+          try {{
             const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/${{action}}`, {{
               method: "POST"
             }});
