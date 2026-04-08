@@ -5,6 +5,7 @@ from app.services.provider3 import Provider3Client
 from app.services.provider4 import Provider4Client
 from app.db import SessionLocal
 from app.queue import redis_conn
+from app.main import _get_app_setting
 
 CACHE_KEY = "panel:providers_status_cached"
 CACHE_TTL = 600  # 10 minutos
