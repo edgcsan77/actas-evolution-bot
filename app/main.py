@@ -1961,7 +1961,7 @@ def panel_group_detail(
     <body>
       <div class="wrap">
         <div class="hero">
-          <a href="/panel?view={_esc(view)}">← Volver al historial</a>
+          <a href="javascript:history.back()">← Volver al historial</a>
           <h1>{_esc(title)}</h1>
           <div class="hero-sub">{_esc(subtitle)}</div>
         </div>
