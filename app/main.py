@@ -5142,7 +5142,7 @@ def panel_actas(
             }}
           }};
         
-          recentRequestsEventSource.onerror = function(err) {
+          recentRequestsEventSource.onerror = function(err) {{
             console.error("RECENT_REQUESTS_STREAM_CONNECTION_ERROR =", err);
         
             try {{
