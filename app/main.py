@@ -5664,22 +5664,18 @@ def _providers_status_text(db: Session) -> str:
         else:
             curp_left = p3_cached.get("curp")
             cadena_left = p3_cached.get("cadena")
-            updated_at = p3_cached.get("updated_at") or ""
             provider3_extra = (
                 f" | CURP: {curp_left if curp_left is not None else 'N/D'}"
                 f" | CADENA: {cadena_left if cadena_left is not None else 'N/D'}"
-                f"{f' | Act: {updated_at}' if updated_at else ''}"
             )
-
+    
     if p4.is_enabled:
         if p4_cached.get("error"):
             provider4_extra = f" | ERROR: {p4_cached.get('error')}"
         else:
             total_done = p4_cached.get("total")
-            updated_at = p4_cached.get("updated_at") or ""
             provider4_extra = (
                 f" | CURP hechas: {total_done if total_done is not None else 'N/D'}"
-                f"{f' | Act: {updated_at}' if updated_at else ''}"
             )
 
     text = (
