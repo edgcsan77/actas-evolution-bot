@@ -4590,7 +4590,7 @@ def panel_actas(
     
         html += """
         <div class="box">
-          <div class="head collapsible-head closed" onclick="toggleSection('recentRequestsWrap', this)">
+          <div class="head collapsible-head open" onclick="toggleSection('recentRequestsWrap', this)">
             <div>
               <strong>Solicitudes recientes</strong>
               <span class="small">
@@ -4599,7 +4599,7 @@ def panel_actas(
             </div>
             <span class="collapse-icon">▼</span>
           </div>
-          <div id="recentRequestsWrap" class="collapsible-body closed">
+          <div id="recentRequestsWrap" class="collapsible-body open">
           <div class="table-wrap">
             <table>
               <thead>
