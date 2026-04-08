@@ -35,7 +35,7 @@ def refresh_providers_status():
     }
 
     try:
-        phpsessid = settings.PROVIDER3_PHPSESSID
+        phpsessid = _get_app_setting(db, "PROVIDER3_PHPSESSID", settings.PROVIDER3_PHPSESSID)
 
         if phpsessid:
             client = Provider3Client(phpsessid=phpsessid)
