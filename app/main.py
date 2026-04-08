@@ -4653,121 +4653,121 @@ def panel_actas(
       </div>
     
       <script>
-        const PANEL_STREAM_ENABLED = {json.dumps(PANEL_STREAM_ENABLED)};
+        const PANEL_STREAM_ENABLED = {{json.dumps(PANEL_STREAM_ENABLED)}};
         let broadcastRunning = false;
     
-        async function toggleProvider(provider, action) {
-          const url = `/panel/provider/${provider}/${action}`;
+        async function toggleProvider(provider, action) {{
+          const url = `/panel/provider/${{provider}}/${{action}}`;
     
-          try {
-            const res = await fetch(url, { method: "POST" });
+          try {{
+            const res = await fetch(url, {{ method: "POST" }});
             const data = await res.json();
     
-            if (data.ok) {
+            if (data.ok) {{
               location.reload();
-            } else {
+            }} else {{
               alert("Error cambiando proveedor");
-            }
-          } catch (e) {
+            }}
+          }} catch (e) {{
             alert("No se pudo conectar con el servidor");
-          }
-        }
+          }}
+        }}
     
-        async function refreshSID() {
+        async function refreshSID() {{
           const sid = prompt("Pega el nuevo PHPSESSID");
           if (!sid) return;
     
-          try {
-            const res = await fetch("/panel/provider3/session", {
+          try {{
+            const res = await fetch("/panel/provider3/session", {{
               method: "POST",
-              headers: {
+              headers: {{
                 "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
+              }},
+              body: JSON.stringify({{
                 phpsessid: sid
-              })
-            });
+              }})
+            }});
     
             const data = await res.json();
     
-            if (data.ok) {
+            if (data.ok) {{
               alert("SID actualizada");
               location.reload();
-            } else {
+            }} else {{
               alert(data.error || "Error actualizando SID");
-            }
-          } catch (e) {
+            }}
+          }} catch (e) {{
             alert("No se pudo conectar con el servidor");
-          }
-        }
+          }}
+        }}
         
-        async function addGroupToSharedPromotion() {
+        async function addGroupToSharedPromotion() {{
           const selected = Array.from(document.querySelectorAll(".shared-promo-group:checked"))
             .map(el => el.value);
         
-          if (selected.length !== 1) {
+          if (selected.length !== 1) {{
             alert("Selecciona solo un grupo para agregarlo a una bolsa existente");
             return;
-          }
+          }}
         
           const shared_key = prompt("Ingresa la clave de la bolsa compartida existente:");
           if (!shared_key) return;
         
-          try {
-            const res = await fetch("/panel/promotions/add-group", {
+          try {{
+            const res = await fetch("/panel/promotions/add-group", {{
               method: "POST",
-              headers: {
+              headers: {{
                 "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
+              }},
+              body: JSON.stringify({{
                 group_jid: selected[0],
                 shared_key: shared_key
-              })
-            });
+              }})
+            }});
         
             const data = await res.json();
         
-            if (data.ok) {
+            if (data.ok) {{
               alert(data.message || "Grupo agregado correctamente");
               location.reload();
-            } else {
+            }} else {{
               alert(data.error || "No se pudo agregar el grupo");
-            }
-          } catch (e) {
+            }}
+          }} catch (e) {{
             alert("No se pudo conectar con el servidor");
-          }
-        }
+          }}
+        }}
 
-        async function setSharedGroupLimit(groupJid) {
+        async function setSharedGroupLimit(groupJid) {{
           const value = prompt("Ingresa el límite individual de actas para este grupo dentro de la bolsa compartida:");
           if (value === null) return;
         
-          try {
-            const res = await fetch("/panel/promotions/set-group-limit", {
+          try {{
+            const res = await fetch("/panel/promotions/set-group-limit", {{
               method: "POST",
-              headers: {
+              headers: {{
                 "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
+              }},
+              body: JSON.stringify({{
                 group_jid: groupJid,
                 limit_actas: Number(value || 0)
-              })
-            });
+              }})
+            }});
         
             const data = await res.json();
         
-            if (data.ok) {
+            if (data.ok) {{
               alert(data.message || "Límite actualizado");
               location.reload();
-            } else {
+            }} else {{
               alert(data.error || "No se pudo actualizar el límite");
-            }
-          } catch (e) {
+            }}
+          }} catch (e) {{
             alert("No se pudo conectar con el servidor");
-          }
-        }
+          }}
+        }}
 
-        async function sendBroadcast(type) {
+        async function sendBroadcast(type) {{
           const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
           if (!ok) return;
         
@@ -4776,40 +4776,40 @@ def panel_actas(
         
           const category = document.getElementById("broadcastCategory")?.value || "all";
         
-          try {
-            const res = await fetch(`/panel/broadcast/${type}`, {
+          try {{
+            const res = await fetch(`/panel/broadcast/${type}`, {{
               method: "POST",
-              headers: {
+              headers: {{
                 "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
+              }},
+              body: JSON.stringify({{
                 category: category
-              })
-            });
+              }})
+            }});
         
             const data = await res.json();
         
-            if (data.ok) {
+            if (data.ok) {{
               alert(data.message || "Envío iniciado");
-            } else {
+            }} else {{
               alert(data.error || "Error en envío masivo");
-            }
-          } catch (e) {
+            }}
+          }} catch (e) {{
             alert("No se pudo conectar con el servidor");
-          }
+          }}
         
           broadcastRunning = false;
-        }
+        }}
     
-        async function sendFreeBroadcast() {
+        async function sendFreeBroadcast() {{
           const textarea = document.getElementById("broadcastMessage");
           const message = textarea.value.trim();
           const category = document.getElementById("broadcastCategory")?.value || "all";
         
-          if (!message) {
+          if (!message) {{
             alert("Escribe un mensaje");
             return;
-          }
+          }}
         
           const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
           if (!ok) return;
@@ -4817,38 +4817,38 @@ def panel_actas(
           if (broadcastRunning) return;
           broadcastRunning = true;
         
-          try {
-            const res = await fetch("/panel/broadcast/free", {
+          try {{
+            const res = await fetch("/panel/broadcast/free", {{
               method: "POST",
-              headers: {
+              headers: {{
                 "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
+              }},
+              body: JSON.stringify({{
                 message: message,
                 category: category
-              })
-            });
+              }})
+            }});
         
             const data = await res.json();
         
-            if (data.ok) {
+            if (data.ok) {{
               alert(data.message || "Envío iniciado");
               textarea.value = "";
-            } else {
+            }} else {{
               alert(data.error || "Error en envío masivo");
-            }
-          } catch (e) {
+            }}
+          }} catch (e) {{
             alert("No se pudo conectar con el servidor");
-          }
+          }}
         
           broadcastRunning = false;
-        }
+        }}
     
-        function clearBroadcast() {
+        function clearBroadcast() {{
           document.getElementById("broadcastMessage").value = "";
-        }
+        }}
 
-        async function toggleGroupBlock(groupJid, action) {
+        async function toggleGroupBlock(groupJid, action) {{
           const msg = action === "block"
             ? "¿Bloquear este grupo? El bot dejará de responder silenciosamente."
             : "¿Desbloquear este grupo?";
@@ -4857,45 +4857,45 @@ def panel_actas(
           if (!ok) return;
         
           try {
-            const res = await fetch(`/panel/group/${encodeURIComponent(groupJid)}/${action}`, {
+            const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/${action}`, {{
               method: "POST"
-            });
+            }});
         
             const data = await res.json();
         
-            if (data.ok) {
+            if (data.ok) {{
               location.reload();
-            } else {
+            }} else {{
               alert(data.error || "Error cambiando estado del grupo");
-            }
-          } catch (e) {
+            }}
+          }} catch (e) {{
             alert("No se pudo conectar con el servidor");
-          }
-        }
+          }}
+        }}
 
-        async function toggleAllGroups() {
+        async function toggleAllGroups() {{
           const ok = confirm("¿Seguro que deseas cambiar el estado de todos los grupos cliente?");
           if (!ok) return;
         
-          try {
-            const res = await fetch("/panel/groups/toggle-all", {
+          try {{
+            const res = await fetch("/panel/groups/toggle-all", {{
               method: "POST"
-            });
+            }});
         
             const data = await res.json();
         
-            if (data.ok) {
+            if (data.ok) {{
               alert(data.message || "Estado actualizado");
               location.reload();
-            } else {
+            }} else {{
               alert(data.error || "Error actualizando grupos");
-            }
-          } catch (e) {
+            }}
+          }} catch (e) {{
             alert("No se pudo conectar con el servidor");
-          }
-        }
+          }}
+        }}
 
-        async function applySharedPromotion() {
+        async function applySharedPromotion() {{
           const selected = Array.from(document.querySelectorAll(".shared-promo-group:checked"))
             .map(el => el.value);
         
@@ -4911,39 +4911,39 @@ def panel_actas(
           let credit_abono_raw = document.getElementById("sharedPromoCreditAbono").value || "";
           let credit_debe_raw = document.getElementById("sharedPromoCreditDebe").value || "";
         
-          if (!is_credit) {
+          if (!is_credit) {{
             credit_abono_raw = "0";
             credit_debe_raw = "0";
-          } else {
+          }} else {{
             if (credit_abono_raw === "") credit_abono_raw = "0";
             if (credit_debe_raw === "") credit_debe_raw = "0";
-          }
+          }}
         
           const credit_abono = Number(credit_abono_raw);
           const credit_debe = Number(credit_debe_raw);
         
-          if (!selected.length) {
+          if (!selected.length) {{
             alert("Selecciona al menos un grupo");
             return;
-          }
+          }}
         
-          if (!total_actas || total_actas <= 0) {
+          if (!total_actas || total_actas <= 0) {{
             alert("Ingresa un total de actas válido");
             return;
-          }
+          }}
         
-          if (!shared_key) {
+          if (!shared_key) {{
             alert("Ingresa una bolsa compartida");
             return;
-          }
+          }}
         
-          try {
-            const res = await fetch("/panel/promotions/apply", {
+          try {{
+            const res = await fetch("/panel/promotions/apply", {{
               method: "POST",
-              headers: {
+              headers: {{
                 "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
+              }},
+              body: JSON.stringify({{
                 selected_group_jids: selected,
                 promo_name,
                 client_key,
@@ -4953,61 +4953,61 @@ def panel_actas(
                 is_credit,
                 credit_abono,
                 credit_debe
-              })
-            });
+              }})
+            }});
         
             const data = await res.json();
         
-            if (data.ok) {
+            if (data.ok) {{
               alert("Promoción compartida aplicada correctamente");
               location.reload();
-            } else {
+            }} else {{
               alert(data.error || "No se pudo aplicar la promoción");
-            }
-          } catch (e) {
+            }}
+          }} catch (e) {{
             alert("No se pudo conectar con el servidor");
-          }
-        }
+          }}
+        }}
 
-        function toggleSharedPromoCreditFields() {
+        function toggleSharedPromoCreditFields() {{
           const promoType = document.getElementById("sharedPromoType");
           const isCredit = promoType && promoType.value === "credit";
         
           const abono = document.getElementById("sharedPromoCreditAbono");
           const debe = document.getElementById("sharedPromoCreditDebe");
         
-          if (abono) {
-            if (isCredit) {
+          if (abono) {{
+            if (isCredit) {{
               abono.disabled = false;
               if (!abono.value) abono.value = 0;
-            } else {
+            }} else {{
               abono.disabled = true;
               abono.value = "";
-            }
-          }
+            }}
+          }}
         
-          if (debe) {
-            if (isCredit) {
+          if (debe) {{
+            if (isCredit) {{
               debe.disabled = false;
               if (!debe.value) debe.value = 0;
-            } else {
+            }} else {{
               debe.disabled = true;
               debe.value = "";
-            }
-          }
-        }
+            }}
+          }}
+        }}
         
-        document.addEventListener("DOMContentLoaded", () => {
+        document.addEventListener("DOMContentLoaded", () => {{
           const promoType = document.getElementById("sharedPromoType");
-          if (promoType) {
+          if (promoType) {{
             promoType.addEventListener("change", toggleSharedPromoCreditFields);
             toggleSharedPromoCreditFields();
-          }
+          }}
         
           filterSharedPromoGroups();
-          if (PANEL_STREAM_ENABLED && !document.hidden) {
+          if (PANEL_STREAM_ENABLED && !document.hidden) {{
             startRecentRequestsStream();
-          }
+          }}
         
           const sections = [
             "grupoClienteBody",
@@ -5015,7 +5015,7 @@ def panel_actas(
             "recentRequestsWrap"
           ];
         
-          sections.forEach(id => {
+          sections.forEach(id => {{
             const body = document.getElementById(id);
             const head = body?.previousElementSibling;
         
@@ -5023,15 +5023,15 @@ def panel_actas(
         
             const state = localStorage.getItem(id);
         
-            if (state === "closed") {
+            if (state === "closed") {{
               body.classList.remove("open");
               body.classList.add("closed");
               head.classList.add("closed");
-            }
-          });
-        });
+            }}
+          }});
+        }});
 
-        function filterSharedPromoGroups() {
+        function filterSharedPromoGroups() {{
           const search = (document.getElementById("sharedPromoSearch")?.value || "").trim().toLowerCase();
           const showNormal = document.getElementById("filterNormalGroups")?.checked;
           const showTest = document.getElementById("filterTestGroups")?.checked;
@@ -5039,7 +5039,7 @@ def panel_actas(
         
           const items = document.querySelectorAll(".shared-promo-item");
         
-          items.forEach(item => {
+          items.forEach(item => {{
             const name = item.dataset.name || "";
             const kind = item.dataset.kind || "normal";
         
@@ -5051,13 +5051,13 @@ def panel_actas(
             if (kind === "provider" && showProvider) matchesKind = true;
         
             item.style.display = (matchesSearch && matchesKind) ? "flex" : "none";
-          });
-        }
+          }});
+        }}
         
-        function clearSharedPromotionSelection() {
-          document.querySelectorAll(".shared-promo-group").forEach(el => {
+        function clearSharedPromotionSelection() {{
+          document.querySelectorAll(".shared-promo-group").forEach(el => {{
             el.checked = false;
-          });
+          }});
         
           const searchInput = document.getElementById("sharedPromoSearch");
           if (searchInput) searchInput.value = "";
@@ -5071,94 +5071,94 @@ def panel_actas(
           if (provider) provider.checked = false;
         
           filterSharedPromoGroups();
-        }
+        }}
 
-        function toggleSection(bodyId, headEl) {
+        function toggleSection(bodyId, headEl) {{
           const body = document.getElementById(bodyId);
           if (!body) return;
         
           const isClosed = body.classList.contains("closed");
         
-          if (isClosed) {
+          if (isClosed) {{
             body.classList.remove("closed");
             body.classList.add("open");
             headEl.classList.remove("closed");    
             localStorage.setItem(bodyId, "open");
-          } else {
+          }} else {{
             body.classList.remove("open");
             body.classList.add("closed");
             headEl.classList.add("closed");
             localStorage.setItem(bodyId, "closed");
-          }
-        }
+          }}
+        }}
 
-        async function refreshRecentRequests() {
+        async function refreshRecentRequests() {{
           const wrap = document.getElementById("recentRequestsWrap");
           if (!wrap) return;
         
-          const params = new URLSearchParams({
+          const params = new URLSearchParams({{
             view: document.querySelector('input[name="view"]')?.value || "day",
             group_jid: document.querySelector('input[name="group_jid"]')?.value || "",
             provider_name: document.querySelector('input[name="provider_name"]')?.value || "",
             status: document.querySelector('input[name="status"]')?.value || "",
             act_type: document.querySelector('input[name="act_type"]')?.value || "",
-          });
+          }});
         
-          try {
-            const res = await fetch(`/panel/recent-requests?${params.toString()}`);
+          try {{
+            const res = await fetch(`/panel/recent-requests?${{params.toString()}}`);
             if (!res.ok) throw new Error("No se pudo actualizar solicitudes recientes");
         
             const html = await res.text();
             wrap.innerHTML = html;
-          } catch (e) {
+          }} catch (e) {{
             console.error("RECENT_REQUESTS_REFRESH_ERROR =", e);
-          }
-        }
+          }}
+        }}
         
         let recentRequestsEventSource = null;
         
-        function startRecentRequestsStream() {
+        function startRecentRequestsStream() {{
           if (!PANEL_STREAM_ENABLED) return;
 
-          if (recentRequestsEventSource) {
+          if (recentRequestsEventSource) {{
             recentRequestsEventSource.close();
-          }
+          }}
         
           recentRequestsEventSource = new EventSource("/panel/recent-requests/stream");
         
-          recentRequestsEventSource.onmessage = async function(event) {
-            try {
+          recentRequestsEventSource.onmessage = async function(event) {{
+            try {{
               const data = JSON.parse(event.data || "{}");
-              if (data.error) {
+              if (data.error) {{
                 console.error("RECENT_REQUESTS_STREAM_ERROR =", data.error);
                 return;
-              }
+              }}
         
-              if (!document.hidden) {
+              if (!document.hidden) {{
                 await refreshRecentRequests();
-              }
-            } catch (e) {
+              }}
+            }} catch (e) {{
               console.error("RECENT_REQUESTS_STREAM_PARSE_ERROR =", e);
-            }
-          };
+            }}
+          }};
         
           recentRequestsEventSource.onerror = function(err) {
             console.error("RECENT_REQUESTS_STREAM_CONNECTION_ERROR =", err);
         
-            try {
+            try {{
               recentRequestsEventSource.close();
-            } catch (_) {}
+            }} catch (_) {}
         
-            setTimeout(() => {
+            setTimeout(() => {{
               startRecentRequestsStream();
-            }, 5000);
-          };
-        }
+            }}, 5000);
+          }};
+        }}
 
       </script>
     </body>
     </html>
-        """
+    """
         try:
             redis_conn.setex(cache_key, PANEL_HTML_TTL, html)
         except Exception:
