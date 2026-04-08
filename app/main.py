@@ -5147,7 +5147,7 @@ def panel_actas(
         
             try {{
               recentRequestsEventSource.close();
-            }} catch (_) {}
+            }} catch (_) {{}}
         
             setTimeout(() => {{
               startRecentRequestsStream();
