@@ -1,5 +1,6 @@
 import base64
 import time
+import threading
 import re
 import random
 from datetime import datetime, timezone
@@ -15,6 +16,7 @@ from app.utils.provider_format import provider2_command
 from app.services.provider3 import Provider3Client, decode_pdf_base64
 from app.services.provider4 import Provider4Client
 from app.queue import redis_conn
+from app.provider_status_cache import refresh_providers_status
 
 from zoneinfo import ZoneInfo
 
@@ -33,6 +35,17 @@ CURP_RE = re.compile(
     r"^[A-Z][AEIOUX][A-Z]{2}\d{6}[HM][A-Z]{5}[A-Z0-9]\d$",
     re.IGNORECASE
 )
+
+
+def providers_status_loop():
+    while True:
+        try:
+            refresh_providers_status()
+        except Exception as e:
+            print("PROVIDERS_STATUS_LOOP_ERROR =", str(e), flush=True)
+        time.sleep(600)
+
+threading.Thread(target=providers_status_loop, daemon=True).start()
 
 
 def _notify_support_error(req, err: str, extra_msg: str = ""):
