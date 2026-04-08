@@ -49,8 +49,8 @@ PANEL_HTML_TTL = 180
 PANEL_RECENT_TTL = 60
 PANEL_GROUP_DETAIL_TTL = 180
 GROUP_NAME_CACHE_TTL = 300
-PANEL_STREAM_SLEEP = 8
-PANEL_STREAM_ENABLED = False
+PANEL_STREAM_SLEEP = 10
+PANEL_STREAM_ENABLED = True
 
 
 def _utc_now_naive():
@@ -4653,6 +4653,7 @@ def panel_actas(
       </div>
     
       <script>
+        const PANEL_STREAM_ENABLED = {"true" if PANEL_STREAM_ENABLED else "false"};
         let broadcastRunning = false;
     
         async function toggleProvider(provider, action) {
@@ -5004,7 +5005,7 @@ def panel_actas(
           }
         
           filterSharedPromoGroups();
-          if (!document.hidden) {
+          if (PANEL_STREAM_ENABLED && !document.hidden) {
             startRecentRequestsStream();
           }
         
@@ -5117,6 +5118,8 @@ def panel_actas(
         let recentRequestsEventSource = null;
         
         function startRecentRequestsStream() {
+          if (!PANEL_STREAM_ENABLED) return;
+
           if (recentRequestsEventSource) {
             recentRequestsEventSource.close();
           }
