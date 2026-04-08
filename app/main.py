@@ -4645,7 +4645,7 @@ def panel_actas(
         else:
             html += '<tr><td colspan="10">Sin solicitudes en este periodo.</td></tr>'
     
-        html += """
+        html += f"""
               </tbody>
             </table>
           </div>
