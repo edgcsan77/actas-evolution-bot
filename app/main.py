@@ -45,6 +45,13 @@ app = FastAPI(title=settings.APP_NAME)
 PANEL_TZ = "America/Monterrey"
 BLOCKED_GROUPS_KEY = "blocked_groups_no_response"
 
+PANEL_HTML_TTL = 45
+PANEL_RECENT_TTL = 15
+PANEL_GROUP_DETAIL_TTL = 60
+GROUP_NAME_CACHE_TTL = 300
+PANEL_STREAM_SLEEP = 8
+PANEL_STREAM_ENABLED = True
+
 
 def _utc_now_naive():
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -146,6 +153,22 @@ def bot_is_open():
     return 1 <= hour < 23
 
 
+def _clear_panel_cache():
+    try:
+        keys = redis_conn.keys("panel:*")
+        if keys:
+            redis_conn.delete(*keys)
+    except Exception:
+        pass
+
+
+def _clear_group_name_cache():
+    try:
+        redis_conn.delete("panel:group_name_cache")
+    except Exception:
+        pass
+
+
 def _panel_now():
     return datetime.now(ZoneInfo(PANEL_TZ))
 
@@ -230,6 +253,7 @@ def _query_requests_for_panel(
     if group_jid:
         val = group_jid.strip()
         val_like = f"%{val}%"
+        val_lower = val.lower()
 
         alias_matches = [
             gid for (gid,) in (
@@ -246,7 +270,7 @@ def _query_requests_for_panel(
 
         map_matches = [
             gid for gid, name in GROUP_NAME_MAP.items()
-            if val.lower() in gid.lower() or val.lower() in (name or "").lower()
+            if val_lower in gid.lower() or val_lower in (name or "").lower()
         ]
 
         matching_group_ids = list(dict.fromkeys(alias_matches + map_matches))
@@ -586,17 +610,28 @@ def _cache_set_json(key: str, value, ttl: int = 30):
 
 
 def _build_group_name_cache(db: Session) -> dict[str, str]:
+    cache_key = "panel:group_name_cache"
+
+    cached = _cache_get_json(cache_key)
+    if isinstance(cached, dict) and cached:
+        return cached
+
     cache = {"PRIVADO": "PRIVADO"}
 
     for gid, name in GROUP_NAME_MAP.items():
         if gid:
             cache[gid] = (name or "").strip() or gid
 
-    alias_rows = db.query(GroupAlias.group_jid, GroupAlias.custom_name).all()
+    alias_rows = (
+        db.query(GroupAlias.group_jid, GroupAlias.custom_name)
+        .all()
+    )
+
     for gid, custom_name in alias_rows:
         if gid:
             cache[gid] = (custom_name or "").strip() or cache.get(gid, gid)
 
+    _cache_set_json(cache_key, cache, ttl=GROUP_NAME_CACHE_TTL)
     return cache
 
 
@@ -631,6 +666,9 @@ Group JID:
 
 @app.get("/panel/recent-requests/stream")
 async def panel_recent_requests_stream():
+    if not PANEL_STREAM_ENABLED:
+        return HTMLResponse(content="", status_code=204)
+
     async def event_generator():
         last_seen_id = 0
         last_seen_updated = ""
@@ -638,16 +676,24 @@ async def panel_recent_requests_stream():
         while True:
             db = SessionLocal()
             try:
-                row = (
-                    db.query(RequestLog.id, RequestLog.updated_at)
-                    .order_by(RequestLog.updated_at.desc(), RequestLog.id.desc())
-                    .first()
-                )
+                cache_key = "panel:recent_requests:latest_marker"
+                marker = _cache_get_json(cache_key)
 
-                current_id = row.id if row else 0
-                current_updated = (
-                    row.updated_at.isoformat() if row and row.updated_at else ""
-                )
+                if not marker:
+                    row = (
+                        db.query(RequestLog.id, RequestLog.updated_at)
+                        .order_by(RequestLog.updated_at.desc(), RequestLog.id.desc())
+                        .first()
+                    )
+
+                    marker = {
+                        "latest_id": row.id if row else 0,
+                        "latest_updated_at": row.updated_at.isoformat() if row and row.updated_at else "",
+                    }
+                    _cache_set_json(cache_key, marker, ttl=10)
+
+                current_id = marker.get("latest_id", 0)
+                current_updated = marker.get("latest_updated_at", "")
 
                 changed = (
                     current_id != last_seen_id
@@ -669,7 +715,7 @@ async def panel_recent_requests_stream():
             finally:
                 db.close()
 
-            await asyncio.sleep(3)
+            await asyncio.sleep(PANEL_STREAM_SLEEP)
 
     return StreamingResponse(
         event_generator(),
@@ -691,6 +737,20 @@ def panel_recent_requests(
     act_type: str = "",
     db: Session = Depends(get_db),
 ):
+    cache_key = "panel:recent_requests_html:" + "|".join([
+        (view or "").strip(),
+        (group_jid or "").strip(),
+        (provider_name or "").strip(),
+        (status or "").strip(),
+        (act_type or "").strip(),
+    ])
+
+    cached_html = redis_conn.get(cache_key)
+    if cached_html:
+        if isinstance(cached_html, bytes):
+            cached_html = cached_html.decode("utf-8", errors="ignore")
+        return HTMLResponse(content=cached_html)
+
     time_min, time_max, view = _panel_period_bounds(view)
     group_cache = _build_group_name_cache(db)
 
@@ -721,8 +781,6 @@ def panel_recent_requests(
         .all()
     )
 
-    latest = rows
-    
     html = """
     <table>
       <thead>
@@ -742,8 +800,8 @@ def panel_recent_requests(
       <tbody>
     """
 
-    if latest:
-        for r in latest:
+    if rows:
+        for r in rows:
             status_class = {
                 "QUEUED": "status-q",
                 "PROCESSING": "status-p",
@@ -772,6 +830,22 @@ def panel_recent_requests(
       </tbody>
     </table>
     """
+
+    try:
+        redis_conn.setex(cache_key, PANEL_RECENT_TTL, html)
+    except Exception:
+        pass
+
+    try:
+        if rows:
+            latest_row = rows[0]
+            marker = {
+                "latest_id": latest_row.id,
+                "latest_updated_at": latest_row.updated_at.isoformat() if latest_row.updated_at else "",
+            }
+            _cache_set_json("panel:recent_requests:latest_marker", marker, ttl=10)
+    except Exception:
+        pass
 
     return HTMLResponse(content=html)
 
@@ -822,6 +896,7 @@ def panel_remove_shared_promotion(
     except Exception as e:
         print("PROMOTION_REMOVE_NOTIFY_ERROR =", str(e), flush=True)
 
+    _clear_panel_cache()
     return {"ok": True, "shared_key": shared_key}
 
 
@@ -872,6 +947,7 @@ Ahora puede usar libremente la bolsa compartida disponible.
     except Exception as e:
         print("PROMO_LIMIT_NOTIFY_ERROR:", e)
 
+    _clear_panel_cache()
     return {
         "ok": True,
         "message": "Límite individual actualizado correctamente",
@@ -999,6 +1075,7 @@ def panel_apply_shared_promotion(
     except Exception as notify_exc:
         print("PROMOTION_ACTIVATION_NOTIFY_ERROR =", str(notify_exc), flush=True)
 
+    _clear_panel_cache()
     return {
         "ok": True,
         "message": "Promoción compartida aplicada correctamente",
@@ -1144,6 +1221,7 @@ def panel_add_group_to_shared_promotion(
     except Exception as notify_exc:
         print("PROMOTION_ADD_GROUP_NOTIFY_ERROR =", str(notify_exc), flush=True)
 
+    _clear_panel_cache()
     return {
         "ok": True,
         "message": "Grupo agregado correctamente a la bolsa compartida",
@@ -1185,6 +1263,7 @@ def panel_register_group_promotion_abono(
 
     db.commit()
 
+    _clear_panel_cache()
     return {
         "ok": True,
         "message": "Abono registrado correctamente",
@@ -1582,6 +1661,8 @@ def _set_group_category(db: Session, group_jid: str, category: str):
         db.add(row)
 
     db.commit()
+    _clear_panel_cache()
+    _clear_group_name_cache()
     return row
 
 
@@ -1594,6 +1675,7 @@ def _remove_group_category(db: Session, group_jid: str):
     if row:
         db.delete(row)
         db.commit()
+        _clear_panel_cache()
 
 
 GROUP_CATEGORY_OPTIONS = [
@@ -1695,6 +1777,7 @@ A partir de ahora este grupo ya no utilizará el saldo compartido.
     except Exception as e:
         print("SHARED_PROMO_REMOVE_NOTIFY_ERROR:", e)
 
+    _clear_panel_cache()
     return {
         "ok": True,
         "message": "El grupo fue eliminado de la bolsa compartida",
@@ -1710,6 +1793,13 @@ def panel_group_detail(
 ):
     if not group_jid:
         return HTMLResponse("<pre>Falta group_jid</pre>", status_code=400)
+
+    cache_key = f"panel:group_detail:{(group_jid or '').strip()}:{(view or 'month').strip()}"
+    cached_html = redis_conn.get(cache_key)
+    if cached_html:
+        if isinstance(cached_html, bytes):
+            cached_html = cached_html.decode("utf-8", errors="ignore")
+        return HTMLResponse(content=cached_html)
 
     group_cache = _build_group_name_cache(db)
 
@@ -2472,6 +2562,11 @@ def panel_group_detail(
     </html>
     """
 
+    try:
+        redis_conn.setex(cache_key, PANEL_GROUP_DETAIL_TTL, html)
+    except Exception:
+        pass
+
     return HTMLResponse(content=html)
 
 
@@ -3008,14 +3103,21 @@ def panel_actas(
     db: Session = Depends(get_db),
 ):
     try:
-        cache_key = f"panel:{view}:{group_mode}:{group_jid}:{provider_name}:{status}:{act_type}"
+        cache_key = _panel_cache_key(
+            view=view,
+            group_jid=group_jid,
+            provider_name=provider_name,
+            status=status,
+            act_type=act_type,
+            group_mode=group_mode,
+        )
 
         cached_panel = redis_conn.get(cache_key)
         if cached_panel:
             if isinstance(cached_panel, bytes):
                 cached_panel = cached_panel.decode("utf-8", errors="ignore")
             return HTMLResponse(content=cached_panel)
-    
+
         time_min, time_max, view = _panel_period_bounds(view)
 
         base_q = _query_requests_for_panel(
@@ -5055,7 +5157,7 @@ def panel_actas(
     </html>
         """
         try:
-            redis_conn.setex(cache_key, 5, html)
+            redis_conn.setex(cache_key, PANEL_HTML_TTL, html)
         except Exception:
             pass
             
