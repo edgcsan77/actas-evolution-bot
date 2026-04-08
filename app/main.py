@@ -5665,8 +5665,8 @@ def _providers_status_text(db: Session) -> str:
             curp_left = p3_cached.get("curp")
             cadena_left = p3_cached.get("cadena")
             provider3_extra = (
-                f" | CURP: {curp_left if curp_left is not None else 'N/D'}"
-                f" | CADENA: {cadena_left if cadena_left is not None else 'N/D'}"
+                f" | CURP restantes: {curp_left if curp_left is not None else 'N/D'}"
+                f" | CADENA restantes: {cadena_left if cadena_left is not None else 'N/D'}"
             )
     
     if p4.is_enabled:
