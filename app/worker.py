@@ -1019,6 +1019,7 @@ def process_request(request_id: int):
                 should_fallback = (
                     p4_err.startswith("PROVIDER4_WRONG_ACT_TYPE")
                     or p4_err.startswith("PROVIDER4_WRONG_CURP_IN_PDF")
+                    or p4_err.startswith("PROVIDER4_NO_FORM_ACTION")
                     or (fallback_errors and p4_elapsed >= 90)
                 )
         
