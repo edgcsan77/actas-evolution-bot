@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import datetime, timezone, timedelta
 from app.config import settings
 from app.services.provider3 import Provider3Client
@@ -45,12 +46,25 @@ def refresh_providers_status():
     try:
         phpsessid = _get_app_setting(db, "PROVIDER3_PHPSESSID", settings.PROVIDER3_PHPSESSID)
 
+
         if phpsessid:
             client = Provider3Client(phpsessid=phpsessid)
-            lic = client.get_licenses()
 
-            result["provider3"]["curp"] = lic.get("acta_curp")
-            result["provider3"]["cadena"] = lic.get("acta_cadena")
+            try:
+                lic = client.get_licenses()
+
+                result["provider3"]["curp"] = lic.get("acta_curp")
+                result["provider3"]["cadena"] = lic.get("acta_cadena")
+
+            except Exception as e:
+                err = str(e)
+
+                if "PROVIDER3_LICENSES_RATE_LIMIT" in err:
+                    print("PROVIDER3 RATE LIMIT DETECTADO, esperando 60s...", flush=True)
+                    time.sleep(60)
+                    result["provider3"]["error"] = "RATE LIMIT (60s)"
+                else:
+                    result["provider3"]["error"] = err
         else:
             result["provider3"]["error"] = "SIN PHPSESSID"
 
