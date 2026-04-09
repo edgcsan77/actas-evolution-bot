@@ -6405,41 +6405,58 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     print("PROVIDER_PDF_DUPLICATE_IGNORED =", pdf_dedupe_key, flush=True)
                     return {"ok": True, "ignored": "provider_pdf_duplicate"}
                 
-                media_json = get_media_base64("document", media_message_id)
-                media_b64 = (
-                    media_json.get("base64")
-                    or media_json.get("data")
-                    or media_json.get("media")
-                    or ""
-                )
+                safe_media = None
+                used_direct_url = False
                 
-                if not media_b64:
-                    print("PROVIDER_PDF_BASE64_EMPTY =", media_json, flush=True)
-                    return {"ok": True, "ignored": "provider_pdf_base64_empty"}
+                # PRIMERO: intentar reenviar directo por URL/directPath para evitar descargar + re-subir base64
+                if pdf_url:
+                    try:
+                        safe_media = pdf_url
+                        used_direct_url = True
+                        print("PROVIDER_PDF_USING_DIRECT_URL =", pdf_url, flush=True)
+                    except Exception as e:
+                        print("PROVIDER_PDF_DIRECT_URL_PREP_FAILED =", str(e), flush=True)
+                        safe_media = None
+                        used_direct_url = False
                 
-                if media_b64.startswith("data:"):
-                    parts = media_b64.split(",", 1)
-                    media_b64 = parts[1] if len(parts) > 1 else media_b64
+                # FALLBACK: si no hay URL útil, usar base64 como antes
+                if not safe_media:
+                    media_json = get_media_base64("document", media_message_id)
+                    media_b64 = (
+                        media_json.get("base64")
+                        or media_json.get("data")
+                        or media_json.get("media")
+                        or ""
+                    )
                 
-                media_b64 = media_b64.replace("\n", "").replace("\r", "").strip()
+                    if not media_b64:
+                        print("PROVIDER_PDF_BASE64_EMPTY =", media_json, flush=True)
+                        return {"ok": True, "ignored": "provider_pdf_base64_empty"}
                 
-                missing_padding = len(media_b64) % 4
-                if missing_padding:
-                    media_b64 += "=" * (4 - missing_padding)
+                    if media_b64.startswith("data:"):
+                        parts = media_b64.split(",", 1)
+                        media_b64 = parts[1] if len(parts) > 1 else media_b64
                 
-                pdf_bytes = base64.b64decode(media_b64, validate=False)
-
-                print("PDF_HEADER =", pdf_bytes[:8], flush=True)
-                print("PDF_BYTES_LEN =", len(pdf_bytes), flush=True)
+                    media_b64 = media_b64.replace("\n", "").replace("\r", "").strip()
                 
-                if b"%PDF" not in pdf_bytes[:20]:
-                    print("PROVIDER_PDF_INVALID_BINARY", flush=True)
-                    return {"ok": True, "ignored": "provider_pdf_invalid_binary"}
+                    missing_padding = len(media_b64) % 4
+                    if missing_padding:
+                        media_b64 += "=" * (4 - missing_padding)
                 
-                safe_media_b64 = base64.b64encode(pdf_bytes).decode()
+                    pdf_bytes = base64.b64decode(media_b64, validate=False)
                 
-                open_req.pdf_url = None
-                open_req.provider_media_url = "BASE64_FROM_MEDIA_MESSAGE"
+                    print("PDF_HEADER =", pdf_bytes[:8], flush=True)
+                    print("PDF_BYTES_LEN =", len(pdf_bytes), flush=True)
+                
+                    if b"%PDF" not in pdf_bytes[:20]:
+                        print("PROVIDER_PDF_INVALID_BINARY", flush=True)
+                        return {"ok": True, "ignored": "provider_pdf_invalid_binary"}
+                
+                    safe_media = base64.b64encode(pdf_bytes).decode()
+                    used_direct_url = False
+                
+                open_req.pdf_url = pdf_url or None
+                open_req.provider_media_url = "URL_FROM_PROVIDER_MESSAGE" if used_direct_url else "BASE64_FROM_MEDIA_MESSAGE"
                 open_req.status = "DONE"
                 open_req.updated_at = _utc_now_naive()
                 
@@ -6447,9 +6464,13 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 
                 print("PROVIDER_PDF_MATCHED_REQ_ID =", open_req.id, flush=True)
                 print("PROVIDER_PDF_MATCHED_CURP =", open_req.curp, flush=True)
-                print("PROVIDER_PDF_BASE64_LEN =", len(safe_media_b64), flush=True)
+                print("PROVIDER_PDF_USED_DIRECT_URL =", used_direct_url, flush=True)
                 
-                _deliver_pdf_result(open_req, safe_media_b64, filename=filename or f"{open_req.curp}.pdf")
+                _deliver_pdf_result(
+                    open_req,
+                    safe_media,
+                    filename=filename or f"{open_req.curp}.pdf"
+                )
                 
                 return {"ok": True, "provider_result": "pdf_delivered"}
 
