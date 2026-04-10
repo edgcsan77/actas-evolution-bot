@@ -902,7 +902,37 @@ def process_request(request_id: int):
             return
 
         if provider_name == "PROVIDER3":
-            provider3_result = _process_provider3(req, db)
+            try:
+                provider3_result = _process_provider3(req, db)
+            except Exception as e:
+                err = str(e)
+                print("PROVIDER3_GENERATION_FAILED =", err, flush=True)
+                print("PROVIDER3_FALLBACK_TO_PROVIDER1 =", req.id, req.curp, flush=True)
+        
+                provider_name = "PROVIDER1"
+                provider_group_id = _pick_provider_group(provider_name, req.act_type, req.id)
+                text_to_provider = _build_provider_message(provider_name, req.curp, req.act_type)
+        
+                req.provider_name = provider_name
+                req.provider_group_id = provider_group_id
+                req.provider_message = text_to_provider
+                req.status = "PROCESSING"
+                req.error_message = None
+                req.updated_at = _utc_now_naive()
+                db.commit()
+        
+                send_group_text(provider_group_id, text_to_provider)
+        
+                print(
+                    "PROVIDER3_FALLBACK_SENT_TO_PROVIDER1 =",
+                    {
+                        "req_id": req.id,
+                        "provider_group_id": provider_group_id,
+                        "text": text_to_provider,
+                    },
+                    flush=True,
+                )
+                return
         
             pdf_bytes = provider3_result["pdf_bytes"]
             safe_media_b64 = base64.b64encode(pdf_bytes).decode()
@@ -929,7 +959,6 @@ def process_request(request_id: int):
         
             delivery_key = f"provider3_delivery:{req.id}:{req.curp}:{req.source_group_id or req.requester_wa_id}"
         
-            # Si ya se entregó antes, no volver a mandar
             if redis_conn.exists(delivery_key):
                 print("PROVIDER3_DUPLICATE_DELIVERY_IGNORED =", delivery_key, flush=True)
                 return
@@ -977,7 +1006,6 @@ def process_request(request_id: int):
             if not send_ok:
                 raise RuntimeError("PROVIDER3_PDF_SEND_FAILED")
         
-            # Marcar duplicado solo después de envío exitoso
             redis_conn.set(delivery_key, "1", ex=3600)
         
             req.provider_media_url = "BASE64_PROVIDER3"
