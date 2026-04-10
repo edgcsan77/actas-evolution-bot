@@ -908,6 +908,11 @@ def process_request(request_id: int):
                 err = str(e)
                 print("PROVIDER3_GENERATION_FAILED =", err, flush=True)
                 print("PROVIDER3_FALLBACK_TO_PROVIDER1 =", req.id, req.curp, flush=True)
+
+                enabled = _enabled_providers(db)
+
+                if "PROVIDER1" not in enabled
+                    raise RuntimeError("NO_PROVIDER_ENABLED")
         
                 provider_name = "PROVIDER1"
                 provider_group_id = _pick_provider_group(provider_name, req.act_type, req.id)
