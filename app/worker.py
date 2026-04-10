@@ -912,7 +912,7 @@ def process_request(request_id: int):
                 enabled = _enabled_providers(db)
 
                 if "PROVIDER1" not in enabled:
-                    raise RuntimeError("NO_PROVIDER_ENABLED")
+                    raise RuntimeError(f"NO_PROVIDER_ENABLED | ORIGIN={err}")
         
                 provider_name = "PROVIDER1"
                 provider_group_id = _pick_provider_group(provider_name, req.act_type, req.id)
@@ -1232,7 +1232,7 @@ def process_request(request_id: int):
                 _notify_support_error(req, err, msg)
                 return
 
-            if err == "NO_PROVIDER_ENABLED":
+            if err.startswith("NO_PROVIDER_ENABLED"):
                 req.status = "ERROR"
                 req.error_message = err
                 db.commit()
