@@ -911,7 +911,7 @@ def process_request(request_id: int):
 
                 enabled = _enabled_providers(db)
 
-                if "PROVIDER1" not in enabled
+                if "PROVIDER1" not in enabled:
                     raise RuntimeError("NO_PROVIDER_ENABLED")
         
                 provider_name = "PROVIDER1"
