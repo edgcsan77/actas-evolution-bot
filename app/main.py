@@ -135,6 +135,74 @@ def unblock_group(group_jid: str):
     print("BLOCKED_GROUPS_NOW =", redis_conn.smembers(BLOCKED_GROUPS_KEY), flush=True)
 
 
+@app.post("/panel/groups/manual-add")
+async def panel_manual_add_group(request: Request, db: Session = Depends(get_db)):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    group_jid = (payload.get("group_jid") or "").strip()
+    custom_name = (payload.get("custom_name") or "").strip()
+    category = (payload.get("category") or "otro").strip().lower()
+
+    if not group_jid:
+        return {"ok": False, "error": "GROUP_JID_REQUIRED"}
+
+    if not group_jid.endswith("@g.us"):
+        return {"ok": False, "error": "GROUP_JID_INVALID"}
+
+    if category not in {"papeleria_ciber", "gestor", "otro"}:
+        category = "otro"
+
+    alias_row = (
+        db.query(GroupAlias)
+        .filter(GroupAlias.group_jid == group_jid)
+        .first()
+    )
+
+    if alias_row:
+        alias_row.custom_name = custom_name or group_jid
+        alias_row.updated_at = _utc_now_naive()
+    else:
+        alias_row = GroupAlias(
+            group_jid=group_jid,
+            custom_name=custom_name or group_jid,
+            updated_at=_utc_now_naive(),
+        )
+        db.add(alias_row)
+
+    category_row = (
+        db.query(GroupCategory)
+        .filter(GroupCategory.group_jid == group_jid)
+        .first()
+    )
+
+    if category_row:
+        category_row.category = category
+        category_row.updated_at = _utc_now_naive()
+    else:
+        category_row = GroupCategory(
+            group_jid=group_jid,
+            category=category,
+            created_at=_utc_now_naive(),
+            updated_at=_utc_now_naive(),
+        )
+        db.add(category_row)
+
+    db.commit()
+    _clear_panel_cache()
+    _clear_group_name_cache()
+
+    return {
+        "ok": True,
+        "message": "Grupo agregado manualmente",
+        "group_jid": group_jid,
+        "custom_name": alias_row.custom_name,
+        "category": category,
+    }
+    
+
 @app.post("/cron/provider3/keepalive")
 def cron_provider3_keepalive(request: Request):
     secret = request.headers.get("x-keepalive-secret", "").strip()
@@ -4480,7 +4548,40 @@ def panel_actas(
           </div>
         </div>
         """
-    
+
+        html += """
+        <div class="box">
+          <div class="head"><strong>Agregar grupo manualmente</strong></div>
+        
+          <div class="filters" style="grid-template-columns: 1.2fr 1fr 220px 220px;">
+            <div>
+              <div class="small">Group JID</div>
+              <input id="manualGroupJid" placeholder="1203634XXXXXXXXXX@g.us">
+            </div>
+        
+            <div>
+              <div class="small">Nombre del grupo</div>
+              <input id="manualGroupName" placeholder="Nombre del grupo">
+            </div>
+        
+            <div>
+              <div class="small">Categoría</div>
+              <select id="manualGroupCategory">
+                <option value="papeleria_ciber">Papelería / Ciber</option>
+                <option value="gestor">Gestor</option>
+                <option value="otro" selected>Otro</option>
+              </select>
+            </div>
+        
+            <div style="display:flex;align-items:end;">
+              <button type="button" class="btn btn-primary" style="width:100%;" onclick="addManualGroup()">
+                Agregar grupo
+              </button>
+            </div>
+          </div>
+        </div>
+        """
+
         html += """
         <div class="box">
           <div class="head collapsible-head open" onclick="toggleSection('grupoClienteBody', this)">
@@ -4730,6 +4831,47 @@ def panel_actas(
         
             if (data.ok) {{
               alert(data.message || "Grupo agregado correctamente");
+              location.reload();
+            }} else {{
+              alert(data.error || "No se pudo agregar el grupo");
+            }}
+          }} catch (e) {{
+            alert("No se pudo conectar con el servidor");
+          }}
+        }}
+
+        async function addManualGroup() {{
+          const group_jid = (document.getElementById("manualGroupJid")?.value || "").trim();
+          const custom_name = (document.getElementById("manualGroupName")?.value || "").trim();
+          const category = (document.getElementById("manualGroupCategory")?.value || "otro").trim();
+        
+          if (!group_jid) {{
+            alert("Ingresa el Group JID");
+            return;
+          }}
+        
+          if (!group_jid.endsWith("@g.us")) {{
+            alert("El Group JID debe terminar en @g.us");
+            return;
+          }}
+        
+          try {{
+            const res = await fetch("/panel/groups/manual-add", {{
+              method: "POST",
+              headers: {{
+                "Content-Type": "application/json"
+              }},
+              body: JSON.stringify({{
+                group_jid,
+                custom_name,
+                category
+              }})
+            }});
+        
+            const data = await res.json();
+        
+            if (data.ok) {{
+              alert(data.message || "Grupo agregado");
               location.reload();
             }} else {{
               alert(data.error || "No se pudo agregar el grupo");
