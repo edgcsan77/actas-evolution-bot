@@ -357,9 +357,15 @@ def _pick_provider1_group(act_type: str, request_id: int) -> str:
     ]
     nacimiento_groups = [g for g in nacimiento_groups if g]
 
-    especiales_group = settings.PROVIDER_GROUP_ESPECIALES
+    especiales_group = (settings.PROVIDER_GROUP_ESPECIALES or "").strip()
+    foliadas_group = (settings.PROVIDER_GROUP_FOLIADAS or "").strip()
 
-    if act_type.startswith("NACIMIENTO"):
+    if "FOLIO" in act_type or "FOLIAD" in act_type or " FOL " in f" {act_type} ":
+        if not foliadas_group:
+            raise RuntimeError("NO_FOLIADAS_PROVIDER_GROUP_CONFIGURED")
+        return foliadas_group
+
+    if act_type.startswith("NACIMIENTO") or act_type.startswith("NAC"):
         if not nacimiento_groups:
             raise RuntimeError("NO_BIRTH_PROVIDER_GROUPS_CONFIGURED")
         idx = (request_id - 1) % len(nacimiento_groups)
