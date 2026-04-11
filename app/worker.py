@@ -906,6 +906,10 @@ def process_request(request_id: int):
                 provider3_result = _process_provider3(req, db)
             except Exception as e:
                 err = str(e)
+
+                if err.startswith("PROVIDER3_NO_RECORD"):
+                    raise
+                
                 print("PROVIDER3_GENERATION_FAILED =", err, flush=True)
                 print("PROVIDER3_FALLBACK_TO_PROVIDER1 =", req.id, req.curp, flush=True)
 
