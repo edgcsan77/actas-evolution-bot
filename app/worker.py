@@ -1242,9 +1242,10 @@ def process_request(request_id: int):
                 db.commit()
 
                 msg = (
-                    "⚠️ *Proveedores no disponibles*\n\n"
-                    "En este momento no hay proveedores activos para procesar la solicitud.\n\n"
-                    "Intenta nuevamente más tarde."
+                    f"⚠️ Solicitud sin éxito en Registro Civil\n"
+                    f"Dato: {req.curp}\n"
+                    f"Tipo: {req.act_type}\n\n"
+                    f"Reenviar nuevamente en unos minutos"
                 )
 
                 if req.source_group_id:
