@@ -5479,6 +5479,7 @@ def _all_provider_groups() -> set[str]:
         settings.PROVIDER_GROUP_NACIMIENTO_2,
         settings.PROVIDER_GROUP_NACIMIENTO_3,
         settings.PROVIDER_GROUP_ESPECIALES,
+        settings.PROVIDER_GROUP_FOLIADAS,
         settings.PROVIDER2_GROUP_1,
         settings.PROVIDER2_GROUP_2,
     }
