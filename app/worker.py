@@ -919,6 +919,7 @@ def process_request(request_id: int):
         print("WORKER_TEXT_TO_PROVIDER =", text_to_provider, flush=True)
 
         if provider_name in ("PROVIDER1", "PROVIDER2"):
+            print("PROVIDER1_SEND_TO_PROVIDER =", req.id, time.time(), flush=True)
             send_group_text(provider_group_id, text_to_provider)
             return
 
