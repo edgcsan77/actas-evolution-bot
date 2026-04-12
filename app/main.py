@@ -6551,8 +6551,21 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 if not already_sent:
                     print("PROVIDER_PDF_DUPLICATE_IGNORED =", pdf_dedupe_key, flush=True)
                     return {"ok": True, "ignored": "provider_pdf_duplicate"}
+
+                print("PROVIDER1_MEDIA_B64_START =", media_message_id, time.time(), flush=True)
+                t_media_b64_start = time.perf_counter()
                 
                 media_json = get_media_base64("document", media_message_id)
+
+                print(
+                    "PROVIDER1_MEDIA_B64_DONE =",
+                    media_message_id,
+                    time.time(),
+                    "elapsed_s=",
+                    round(time.perf_counter() - t_media_b64_start, 3),
+                    flush=True,
+                )
+
                 media_b64 = (
                     media_json.get("base64")
                     or media_json.get("data")
