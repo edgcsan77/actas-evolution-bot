@@ -6513,6 +6513,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 print("PROVIDER_DOC_FILENAME_IDENTIFIER =", filename_id, flush=True)
                 print("PROVIDER_DOC_URL =", pdf_url, flush=True)
 
+                print("PROVIDER1_PDF_RECEIVED =", media_message_id, time.time(), flush=True)
                 open_req = None
 
                 if filename_id:
@@ -6592,7 +6593,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 
                 print("PROVIDER_PDF_MATCHED_REQ_ID =", open_req.id, flush=True)
                 print("PROVIDER_PDF_MATCHED_CURP =", open_req.curp, flush=True)
-                
+
+                print("PROVIDER1_PDF_RELAYED =", open_req.id, time.time(), flush=True)
                 _deliver_pdf_result(
                     open_req,
                     safe_media_b64,
