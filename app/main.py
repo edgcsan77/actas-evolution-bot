@@ -947,6 +947,8 @@ def panel_remove_shared_promotion(
         row.shared_key = None
         row.credit_abono = 0
         row.credit_debe = 0
+        row.shared_group_limit_actas = None
+        row.shared_group_used_actas = 0
         row.warning_sent_200 = False
         row.warning_sent_100 = False
         row.warning_sent_50 = False
@@ -1216,7 +1218,7 @@ def panel_add_group_to_shared_promotion(
         row.client_key = leader.client_key
         row.shared_key = leader.shared_key
         row.total_actas = leader.total_actas
-        row.used_actas = leader.used_actas
+        row.used_actas = 0
         row.price_per_piece = leader.price_per_piece
         row.is_credit = leader.is_credit
         row.credit_abono = leader.credit_abono or 0
@@ -1237,7 +1239,7 @@ def panel_add_group_to_shared_promotion(
             client_key=leader.client_key,
             shared_key=leader.shared_key,
             total_actas=leader.total_actas,
-            used_actas=leader.used_actas,
+            used_actas=0,
             price_per_piece=leader.price_per_piece,
             is_credit=leader.is_credit,
             credit_abono=leader.credit_abono or 0,
