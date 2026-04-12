@@ -6601,8 +6601,15 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 open_req.pdf_url = None
                 open_req.provider_media_url = "BASE64_FROM_MEDIA_MESSAGE"
                 open_req.status = "DONE"
+                open_req.error_message = None
                 open_req.updated_at = _utc_now_naive()
                 db.commit()
+
+                try:
+                     from app.worker import _handle_group_promotion_after_done
+                     _handle_group_promotion_after_done(open_req, db)
+                except Exception as promo_exc:
+                     print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
                 
                 print("PROVIDER_PDF_MATCHED_REQ_ID =", open_req.id, flush=True)
                 print("PROVIDER_PDF_MATCHED_CURP =", open_req.curp, flush=True)
