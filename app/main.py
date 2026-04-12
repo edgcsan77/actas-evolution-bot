@@ -1829,6 +1829,8 @@ def remove_group_from_shared_promotion(
     row.shared_key = None
     row.shared_group_limit_actas = None
     row.shared_group_used_actas = 0
+    row.used_actas = 0
+    row.total_actas = 0
     row.updated_at = _utc_now_naive()
 
     db.commit()
