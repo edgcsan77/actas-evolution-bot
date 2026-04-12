@@ -554,12 +554,16 @@ def _handle_group_promotion_after_done(req, db):
     if not req.source_group_id:
         return
 
+    source_group_id = (req.source_group_id or "").strip()
+
+    # 1) Bloquear primero la fila del grupo actual
     current = (
         db.query(GroupPromotion)
         .filter(
-            GroupPromotion.group_jid == req.source_group_id,
+            GroupPromotion.group_jid == source_group_id,
             GroupPromotion.is_active == True
         )
+        .with_for_update()
         .first()
     )
 
@@ -568,6 +572,8 @@ def _handle_group_promotion_after_done(req, db):
 
     shared_key = (current.shared_key or "").strip()
 
+    # 2) Si es bolsa compartida, bloquear TODAS las filas de esa bolsa
+    #    en orden fijo para evitar lost updates y lecturas inconsistentes
     if shared_key:
         rows = (
             db.query(GroupPromotion)
@@ -575,6 +581,8 @@ def _handle_group_promotion_after_done(req, db):
                 GroupPromotion.shared_key == shared_key,
                 GroupPromotion.is_active == True
             )
+            .order_by(GroupPromotion.id.asc())
+            .with_for_update()
             .all()
         )
     else:
@@ -592,13 +600,20 @@ def _handle_group_promotion_after_done(req, db):
     used_after = used_before + 1
     available_after = max(0, total_before - used_after)
 
+    current_group_row = None
+
+    # 3) Incremento atómico dentro del lock
     for row in rows:
         row.total_actas = total_before
         row.used_actas = used_after
 
-        if row.group_jid == req.source_group_id:
-            row.shared_group_used_actas = int(row.shared_group_used_actas or 0) + 1
-        
+        if (row.group_jid or "").strip() == source_group_id:
+            current_group_row = row
+
+            # Solo en bolsa compartida tiene sentido este contador individual
+            if shared_key:
+                row.shared_group_used_actas = int(row.shared_group_used_actas or 0) + 1
+
         row.updated_at = _utc_now_naive()
 
     msg = None
@@ -627,7 +642,7 @@ def _handle_group_promotion_after_done(req, db):
         msg = (
             f"🚨 *Saldo crítico*\n\n"
             f"Tu paquete promocional cuenta actualmente con solo *{available_after} actas disponibles*.\n\n"
-            f"{'Este aviso aplica para todos los grupos asociados a esta bolsa.\n\n' if shared_key else ''}"
+            f"{'Este aviso aplica para todos los grupos asociados a esta bolsa compartida.\n\n' if shared_key else ''}"
             f"Quedamos atentos."
         )
         notify_level = "10"
@@ -638,7 +653,7 @@ def _handle_group_promotion_after_done(req, db):
         msg = (
             f"⚠️ *Aviso importante de saldo*\n\n"
             f"Tu paquete promocional cuenta actualmente con *{available_after} actas disponibles*.\n\n"
-            f"{'Este aviso aplica para todos los grupos asociados a esta bolsa.\n\n' if shared_key else ''}"
+            f"{'Este aviso aplica para todos los grupos asociados a esta bolsa compartida.\n\n' if shared_key else ''}"
             f"Quedamos atentos."
         )
         notify_level = "50"
@@ -649,7 +664,7 @@ def _handle_group_promotion_after_done(req, db):
         msg = (
             f"⚠️ *Aviso de saldo*\n\n"
             f"Tu paquete promocional cuenta actualmente con *{available_after} actas disponibles*.\n\n"
-            f"{'Este aviso aplica para todos los grupos asociados a esta bolsa.\n\n' if shared_key else ''}"
+            f"{'Este aviso aplica para todos los grupos asociados a esta bolsa compartida.\n\n' if shared_key else ''}"
             f"Quedamos atentos."
         )
         notify_level = "100"
@@ -666,15 +681,11 @@ def _handle_group_promotion_after_done(req, db):
         for row in rows:
             row.warning_sent_200 = True
 
-    current_group_row = next(
-        (x for x in rows if (x.group_jid or "").strip() == (req.source_group_id or "").strip()),
-        None
-    )
-
     individual_limit_msg = None
     reached_individual_limit = False
 
-    if current_group_row:
+    # 4) Revisar límite individual solo en bolsa compartida
+    if shared_key and current_group_row:
         limit_actas = int(current_group_row.shared_group_limit_actas or 0)
         used_group = int(current_group_row.shared_group_used_actas or 0)
 
@@ -691,6 +702,7 @@ def _handle_group_promotion_after_done(req, db):
 
     db.commit()
 
+    # 5) Acciones posteriores al commit
     if reached_individual_limit and current_group_row and current_group_row.group_jid:
         try:
             from app.main import block_group
@@ -727,7 +739,10 @@ def _handle_group_promotion_after_done(req, db):
 
         if first_notify:
             if shared_key:
-                _notify_client_groups(rows, msg)
+                try:
+                    _notify_client_groups(rows, msg)
+                except Exception as e:
+                    print("PROMOTION_SHARED_GROUP_NOTIFY_ERROR =", str(e), flush=True)
             else:
                 try:
                     send_group_text(current.group_jid, msg)
