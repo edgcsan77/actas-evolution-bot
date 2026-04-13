@@ -6475,15 +6475,18 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             # 1) INTENTAR DETECTAR PDF
             doc = None
+            doc_mode = "none"
             media_message_id = msg_id
             
             msg_unwrapped = _unwrap_message(message) or message
             
             if "documentMessage" in msg_unwrapped:
+                doc_mode = "direct_document"
                 doc = msg_unwrapped.get("documentMessage")
                 media_message_id = msg_id
             
             elif "documentWithCaptionMessage" in msg_unwrapped:
+                doc_mode = "direct_document_with_caption"
                 doc_wrap = msg_unwrapped.get("documentWithCaptionMessage", {})
                 doc = doc_wrap.get("message", {}).get("documentMessage")
                 media_message_id = msg_id
@@ -6496,24 +6499,27 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 quoted_msg_id = ctx.get("stanzaId", "") or ctx.get("quotedStanzaID", "") or ""
             
                 if "documentMessage" in quoted:
+                    doc_mode = "quoted_document"
                     doc = quoted.get("documentMessage")
                     media_message_id = quoted_msg_id or msg_id
             
                 elif "documentWithCaptionMessage" in quoted:
+                    doc_mode = "quoted_document_with_caption"
                     doc_wrap = quoted.get("documentWithCaptionMessage", {})
                     doc = doc_wrap.get("message", {}).get("documentMessage")
                     media_message_id = quoted_msg_id or msg_id
-            
+
+            print("DOC_MESSAGE_MODE =", doc_mode, flush=True)
             print("MEDIA_MESSAGE_ID_USED =", media_message_id, flush=True)
 
             if doc:
                 filename = doc.get("fileName") or ""
-                pdf_url = doc.get("url") or doc.get("directPath") or ""
+                #pdf_url = doc.get("url") or doc.get("directPath") or ""
                 filename_id = _extract_identifier_from_filename_local(filename)
 
                 print("PROVIDER_DOC_FILENAME =", filename, flush=True)
                 print("PROVIDER_DOC_FILENAME_IDENTIFIER =", filename_id, flush=True)
-                print("PROVIDER_DOC_URL =", pdf_url, flush=True)
+                #print("PROVIDER_DOC_URL =", pdf_url, flush=True)
 
                 print("PROVIDER1_PDF_RECEIVED =", media_message_id, time.time(), flush=True)
                 open_req = None
@@ -6556,8 +6562,13 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                 print("PROVIDER1_MEDIA_B64_START =", media_message_id, time.time(), flush=True)
                 t_media_b64_start = time.perf_counter()
-                
+
+                t0 = time.perf_counter()
+                print("T_DOC_DETECTED =", source_chat_id, media_message_id, flush=True)
+
+                t1 = time.perf_counter()
                 media_json = get_media_base64("document", media_message_id)
+                print("T_GET_MEDIA_BASE64 =", round(time.perf_counter() - t1, 3), flush=True)
 
                 print(
                     "PROVIDER1_MEDIA_B64_DONE =",
@@ -6588,8 +6599,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 missing_padding = len(media_b64) % 4
                 if missing_padding:
                     media_b64 += "=" * (4 - missing_padding)
-                
+
+                t_decode = time.perf_counter()
                 pdf_bytes = base64.b64decode(media_b64, validate=False)
+                print("T_BASE64_DECODE =", round(time.perf_counter() - t_decode, 3), flush=True)
                 
                 print("PDF_HEADER =", pdf_bytes[:8], flush=True)
                 print("PDF_BYTES_LEN =", len(pdf_bytes), flush=True)
@@ -6598,31 +6611,52 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     print("PROVIDER_PDF_INVALID_BINARY", flush=True)
                     return {"ok": True, "ignored": "provider_pdf_invalid_binary"}
                 
+                t_encode = time.perf_counter()
                 safe_media_b64 = base64.b64encode(pdf_bytes).decode()
+                print("T_BASE64_REENCODE =", round(time.perf_counter() - t_encode, 3), flush=True)
                 
                 open_req.pdf_url = None
                 open_req.provider_media_url = "BASE64_FROM_MEDIA_MESSAGE"
                 open_req.status = "DONE"
                 open_req.error_message = None
                 open_req.updated_at = _utc_now_naive()
-                db.commit()
 
+                t2 = time.perf_counter()
+                db.commit()
+                print("T_DB_COMMIT =", round(time.perf_counter() - t2, 3), flush=True)
+
+                t3 = time.perf_counter()
                 try:
                      from app.worker import _handle_group_promotion_after_done
                      _handle_group_promotion_after_done(open_req, db)
                 except Exception as promo_exc:
                      print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
+                finally:
+                     print("T_PROMO =", round(time.perf_counter() - t3, 3), flush=True)
                 
                 print("PROVIDER_PDF_MATCHED_REQ_ID =", open_req.id, flush=True)
                 print("PROVIDER_PDF_MATCHED_CURP =", open_req.curp, flush=True)
 
+                print("PROVIDER1_RELAY_CONTEXT =", {
+                    "req_id": open_req.id,
+                    "curp": open_req.curp,
+                    "act_type": open_req.act_type,
+                    "provider_group_id": open_req.provider_group_id,
+                    "source_group_id": open_req.source_group_id,
+                    "doc_mode": doc_mode,
+                }, flush=True)
+
+                t4 = time.perf_counter()
                 _deliver_pdf_result(
                     open_req,
                     safe_media_b64,
                     filename=filename or f"{open_req.curp}.pdf"
                 )
+                print("T_DELIVER_PDF_RESULT =", round(time.perf_counter() - t4, 3), flush=True)
+
+                print("T_TOTAL_PROVIDER1_RELAY =", round(time.perf_counter() - t0, 3), flush=True)
                 print("PROVIDER1_PDF_RELAYED =", open_req.id, time.time(), flush=True)
-                
+        
                 return {"ok": True, "provider_result": "pdf_delivered"}
 
             # 2) SI NO HAY PDF, INTENTAR TEXTO
