@@ -920,8 +920,42 @@ def process_request(request_id: int):
 
         if provider_name in ("PROVIDER1", "PROVIDER2"):
             print("PROVIDER1_SEND_TO_PROVIDER =", req.id, time.time(), flush=True)
-            send_group_text(provider_group_id, text_to_provider)
-            return
+        
+            try:
+                send_group_text(provider_group_id, text_to_provider)
+                return
+        
+            except Exception as send_exc:
+                err = str(send_exc)
+                print("PROVIDER_SEND_TO_GROUP_ERROR =", err, flush=True)
+        
+                req.status = "ERROR"
+                req.error_message = f"PROVIDER_SEND_FAILED:{provider_name}:{err}"
+                req.updated_at = _utc_now_naive()
+                db.commit()
+        
+                msg = (
+                    f"⚠️ Solicitud sin éxito en Registro Civil\n"
+                    f"Dato: {req.curp}\n"
+                    f"Tipo: {req.act_type}\n\n"
+                    f"Reenviar nuevamente en unos minutos"
+                )
+        
+                try:
+                    if req.source_group_id:
+                        send_group_text(req.source_group_id, msg)
+                    else:
+                        from app.services.evolution import send_text
+                        send_text(req.requester_wa_id, msg)
+                except Exception as notify_exc:
+                    print("CLIENT_NOTIFY_AFTER_PROVIDER_SEND_FAIL_ERROR =", str(notify_exc), flush=True)
+        
+                try:
+                    _notify_support_error(req, req.error_message, "FALLO AL ENVIAR AL GRUPO PROVEEDOR")
+                except Exception as support_exc:
+                    print("SUPPORT_NOTIFY_AFTER_PROVIDER_SEND_FAIL_ERROR =", str(support_exc), flush=True)
+        
+                return
 
         if provider_name == "PROVIDER3":
             try:
