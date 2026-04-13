@@ -6514,10 +6514,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             if doc:
                 filename = doc.get("fileName") or ""
+                pdf_url = doc.get("url") or doc.get("directPath") or ""
                 filename_id = _extract_identifier_from_filename_local(filename)
             
                 print("PROVIDER_DOC_FILENAME =", filename, flush=True)
                 print("PROVIDER_DOC_FILENAME_IDENTIFIER =", filename_id, flush=True)
+                print("PROVIDER_DOC_URL =", pdf_url, flush=True)
             
                 provider_msg_ts = data.get("messageTimestamp")
                 webhook_received_ts = time.time()
@@ -6534,6 +6536,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             
                 pdf_received_ts = time.time()
                 print("PROVIDER1_PDF_RECEIVED =", media_message_id, pdf_received_ts, flush=True)
+
+                t0 = time.perf_counter()
             
                 open_req = None
             
@@ -6572,13 +6576,61 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 if not already_sent:
                     print("PROVIDER_PDF_DUPLICATE_IGNORED =", pdf_dedupe_key, flush=True)
                     return {"ok": True, "ignored": "provider_pdf_duplicate"}
-            
+
+                if pdf_url and str(pdf_url).startswith("http"):
+                    print("PDF_DELIVERY_MODE = url_direct_provider_doc", flush=True)
+                
+                    open_req.pdf_url = pdf_url
+                    open_req.provider_media_url = pdf_url
+                    open_req.status = "DONE"
+                    open_req.error_message = None
+                    open_req.updated_at = _utc_now_naive()
+                
+                    t2 = time.perf_counter()
+                    db.commit()
+                    print("T_DB_COMMIT =", round(time.perf_counter() - t2, 3), flush=True)
+                
+                    print("PROVIDER_PDF_MATCHED_REQ_ID =", open_req.id, flush=True)
+                    print("PROVIDER_PDF_MATCHED_CURP =", open_req.curp, flush=True)
+                
+                    print("PROVIDER1_RELAY_CONTEXT =", {
+                        "req_id": open_req.id,
+                        "curp": open_req.curp,
+                        "act_type": open_req.act_type,
+                        "provider_group_id": open_req.provider_group_id,
+                        "source_group_id": open_req.source_group_id,
+                        "doc_mode": doc_mode,
+                        "delivery_mode": "url_direct_provider_doc",
+                    }, flush=True)
+                
+                    t4 = time.perf_counter()
+                    _deliver_pdf_result(
+                        open_req,
+                        pdf_url,
+                        filename=filename or f"{open_req.curp}.pdf"
+                    )
+                    print("T_DELIVER_PDF_RESULT =", round(time.perf_counter() - t4, 3), flush=True)
+                
+                    t3 = time.perf_counter()
+                    try:
+                        from app.worker import _handle_group_promotion_after_done
+                        _handle_group_promotion_after_done(open_req, db)
+                    except Exception as promo_exc:
+                        print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
+                    finally:
+                        print("T_PROMO =", round(time.perf_counter() - t3, 3), flush=True)
+                
+                    print("T_TOTAL_PROVIDER1_RELAY =", round(time.perf_counter() - t0, 3), flush=True)
+                    print("PROVIDER1_PDF_RELAYED =", open_req.id, time.time(), flush=True)
+                
+                    return {"ok": True, "provider_result": "pdf_delivered_url_direct"}
+
+                print("PDF_DELIVERY_MODE = base64_fallback", flush=True)
                 media_b64_start_ts = time.time()
                 print("PROVIDER1_MEDIA_B64_START =", media_message_id, media_b64_start_ts, flush=True)
                 print("PDF_RECEIVED_TO_MEDIA_B64_START_S =", round(media_b64_start_ts - pdf_received_ts, 3), flush=True)
             
                 t_media_b64_start = time.perf_counter()
-                t0 = time.perf_counter()
                 print("T_DOC_DETECTED =", source_chat_id, media_message_id, flush=True)
             
                 t1 = time.perf_counter()
