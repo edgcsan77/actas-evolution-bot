@@ -930,7 +930,19 @@ def process_request(request_id: int):
                 err = str(e)
 
                 if err.startswith("PROVIDER3_NO_RECORD"):
-                    raise
+                    err_up = err.upper()
+                
+                    transient_p3 = (
+                        "503" in err_up
+                        or "SATURADO" in err_up
+                        or "FILA LLENA" in err_up
+                        or "INTENTE MAS TARDE" in err_up
+                        or "INTENTE MÁS TARDE" in err_up
+                        or "TIMEOUT" in err_up
+                    )
+                
+                    if not transient_p3:
+                        raise
                 
                 print("PROVIDER3_GENERATION_FAILED =", err, flush=True)
                 print("PROVIDER3_FALLBACK_TO_PROVIDER1 =", req.id, req.curp, flush=True)
