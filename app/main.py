@@ -6514,16 +6514,29 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             if doc:
                 filename = doc.get("fileName") or ""
-                #pdf_url = doc.get("url") or doc.get("directPath") or ""
                 filename_id = _extract_identifier_from_filename_local(filename)
-
+            
                 print("PROVIDER_DOC_FILENAME =", filename, flush=True)
                 print("PROVIDER_DOC_FILENAME_IDENTIFIER =", filename_id, flush=True)
-                #print("PROVIDER_DOC_URL =", pdf_url, flush=True)
-
-                print("PROVIDER1_PDF_RECEIVED =", media_message_id, time.time(), flush=True)
+            
+                provider_msg_ts = data.get("messageTimestamp")
+                webhook_received_ts = time.time()
+            
+                print("PROVIDER_EVENT_MESSAGE_TIMESTAMP =", provider_msg_ts, flush=True)
+                print("WEBHOOK_RECEIVED_TS =", webhook_received_ts, flush=True)
+            
+                try:
+                    if provider_msg_ts:
+                        lag_s = webhook_received_ts - float(provider_msg_ts)
+                        print("PROVIDER_TO_WEBHOOK_LAG_S =", round(lag_s, 3), flush=True)
+                except Exception as ts_exc:
+                    print("PROVIDER_TO_WEBHOOK_LAG_ERROR =", str(ts_exc), flush=True)
+            
+                pdf_received_ts = time.time()
+                print("PROVIDER1_PDF_RECEIVED =", media_message_id, pdf_received_ts, flush=True)
+            
                 open_req = None
-
+            
                 if filename_id:
                     open_req = (
                         db.query(RequestLog)
@@ -6535,7 +6548,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         .order_by(RequestLog.created_at.desc())
                         .first()
                     )
-                
+            
                 if not open_req and not filename_id and provider_id:
                     open_req = (
                         db.query(RequestLog)
@@ -6547,29 +6560,31 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         .order_by(RequestLog.created_at.desc())
                         .first()
                     )
-
+            
                 if not open_req:
                     print("PROVIDER_PDF_WITHOUT_MATCH =", filename, flush=True)
                     return {"ok": True, "ignored": "provider_pdf_without_match"}
-                
+            
                 match_term = filename_id or provider_id or open_req.curp or "NO_TERM"
                 pdf_dedupe_key = f"provider_pdf:{source_chat_id}:{match_term}:{filename or 'nofile'}"
-                
+            
                 already_sent = redis_conn.set(pdf_dedupe_key, "1", ex=3600, nx=True)
                 if not already_sent:
                     print("PROVIDER_PDF_DUPLICATE_IGNORED =", pdf_dedupe_key, flush=True)
                     return {"ok": True, "ignored": "provider_pdf_duplicate"}
-
-                print("PROVIDER1_MEDIA_B64_START =", media_message_id, time.time(), flush=True)
+            
+                media_b64_start_ts = time.time()
+                print("PROVIDER1_MEDIA_B64_START =", media_message_id, media_b64_start_ts, flush=True)
+                print("PDF_RECEIVED_TO_MEDIA_B64_START_S =", round(media_b64_start_ts - pdf_received_ts, 3), flush=True)
+            
                 t_media_b64_start = time.perf_counter()
-
                 t0 = time.perf_counter()
                 print("T_DOC_DETECTED =", source_chat_id, media_message_id, flush=True)
-
+            
                 t1 = time.perf_counter()
                 media_json = get_media_base64("document", media_message_id)
                 print("T_GET_MEDIA_BASE64 =", round(time.perf_counter() - t1, 3), flush=True)
-
+            
                 print(
                     "PROVIDER1_MEDIA_B64_DONE =",
                     media_message_id,
