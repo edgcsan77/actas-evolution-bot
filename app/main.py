@@ -6625,15 +6625,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 db.commit()
                 print("T_DB_COMMIT =", round(time.perf_counter() - t2, 3), flush=True)
 
-                t3 = time.perf_counter()
-                try:
-                     from app.worker import _handle_group_promotion_after_done
-                     _handle_group_promotion_after_done(open_req, db)
-                except Exception as promo_exc:
-                     print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
-                finally:
-                     print("T_PROMO =", round(time.perf_counter() - t3, 3), flush=True)
-                
                 print("PROVIDER_PDF_MATCHED_REQ_ID =", open_req.id, flush=True)
                 print("PROVIDER_PDF_MATCHED_CURP =", open_req.curp, flush=True)
 
@@ -6653,6 +6644,15 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     filename=filename or f"{open_req.curp}.pdf"
                 )
                 print("T_DELIVER_PDF_RESULT =", round(time.perf_counter() - t4, 3), flush=True)
+
+                t3 = time.perf_counter()
+                try:
+                     from app.worker import _handle_group_promotion_after_done
+                     _handle_group_promotion_after_done(open_req, db)
+                except Exception as promo_exc:
+                     print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
+                finally:
+                     print("T_PROMO =", round(time.perf_counter() - t3, 3), flush=True)
 
                 print("T_TOTAL_PROVIDER1_RELAY =", round(time.perf_counter() - t0, 3), flush=True)
                 print("PROVIDER1_PDF_RELAYED =", open_req.id, time.time(), flush=True)
