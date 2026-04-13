@@ -44,29 +44,22 @@ def send_text(number: str, text: str):
     return resp.json()
 
 
-def send_document(number: str, pdf_url: str, filename: str = "acta.pdf", caption: str = ""):
+def send_document(wa_id: str, pdf_url: str, filename: str = "acta.pdf", caption: str = ""):
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{settings.EVOLUTION_INSTANCE}"
 
-    r = requests.get(pdf_url, timeout=60)
-    r.raise_for_status()
-
-    if b"%PDF" not in r.content[:20]:
-        raise ValueError("La URL no devolvió un PDF válido")
-
-    media_b64 = base64.b64encode(r.content).decode()
-
     payload = {
-        "number": _normalize_number(number),
+        "number": _normalize_number(wa_id),
         "mediatype": "document",
         "mimetype": "application/pdf",
         "caption": caption,
         "fileName": filename,
-        "media": media_b64
+        "media": pdf_url
     }
 
     resp = requests.post(url, headers=_headers(), json=payload, timeout=60)
 
     print("SEND_DOCUMENT_URL =", url, flush=True)
+    print("SEND_DOCUMENT_MEDIA_URL =", pdf_url, flush=True)
     print("SEND_DOCUMENT_STATUS =", resp.status_code, flush=True)
     print("SEND_DOCUMENT_BODY =", resp.text, flush=True)
 
@@ -95,26 +88,19 @@ def send_group_text(group_jid: str, text: str):
 def send_group_document(group_jid: str, pdf_url: str, filename: str = "acta.pdf", caption: str = ""):
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{settings.EVOLUTION_INSTANCE}"
 
-    r = requests.get(pdf_url, timeout=60)
-    r.raise_for_status()
-
-    if b"%PDF" not in r.content[:20]:
-        raise ValueError("La URL no devolvió un PDF válido")
-
-    media_b64 = base64.b64encode(r.content).decode()
-
     payload = {
         "number": _normalize_number(group_jid),
         "mediatype": "document",
         "mimetype": "application/pdf",
         "caption": caption,
         "fileName": filename,
-        "media": media_b64
+        "media": pdf_url
     }
 
     resp = requests.post(url, headers=_headers(), json=payload, timeout=60)
 
     print("SEND_GROUP_DOCUMENT_URL =", url, flush=True)
+    print("SEND_GROUP_DOCUMENT_MEDIA_URL =", pdf_url, flush=True)
     print("SEND_GROUP_DOCUMENT_STATUS =", resp.status_code, flush=True)
     print("SEND_GROUP_DOCUMENT_BODY =", resp.text, flush=True)
 
