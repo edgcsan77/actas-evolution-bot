@@ -95,7 +95,7 @@ DAYS_ES = {
 
 PROVIDER_LABELS = {
     "PROVIDER1": "ADMIN DIGITAL",
-    "PROVIDER2": "AUSTRAM BOT",
+    "PROVIDER2": "ACTAS DEL SURESTE",
     "PROVIDER3": "AUSTRAM WEB",
     "PROVIDER4": "LAZARO WEB",
 }
@@ -4174,6 +4174,14 @@ def panel_actas(
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER1','off')">Desactivar</button>
                       </div>
                     </div>
+
+                    <div class="provider-card">
+                      <div class="provider-name">ACTAS DEL SURESTE</div>
+                      <div class="provider-actions">
+                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER2','on')">Activar</button>
+                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER2','off')">Desactivar</button>
+                      </div>
+                    </div>
         
                     <div class="provider-card">
                       <div class="provider-name">AUSTRAM WEB</div>
@@ -5771,14 +5779,17 @@ def _set_app_setting(db: Session, key: str, value: str):
 
 def _providers_status_text(db: Session) -> str:
     p1 = _get_or_create_provider(db, "PROVIDER1", True)
+    p2 = _get_or_create_provider(db, "PROVIDER2", False)
     p3 = _get_or_create_provider(db, "PROVIDER3", False)
     p4 = _get_or_create_provider(db, "PROVIDER4", False)
 
     s1 = "ON" if p1.is_enabled else "OFF"
+    s2 = "ON" if p2.is_enabled else "OFF"
     s3 = "ON" if p3.is_enabled else "OFF"
     s4 = "ON" if p4.is_enabled else "OFF"
 
     provider1_extra = ""
+    provider2_extra = ""
     provider3_extra = ""
     provider4_extra = ""
 
@@ -5801,6 +5812,21 @@ def _providers_status_text(db: Session) -> str:
         provider1_extra = f" | CURP y CADENA hechas: {provider1_total}"
     except Exception as e:
         provider1_extra = f" | ERROR DB: {str(e)}"
+
+    try:
+        provider2_total = (
+            db.query(func.count(RequestLog.id))
+            .filter(
+                RequestLog.provider_name == "PROVIDER2",
+                RequestLog.status == "DONE",
+                RequestLog.created_at >= utc_start,
+                RequestLog.created_at < utc_end,
+            )
+            .scalar()
+        ) or 0
+        provider2_extra = f" | CURP y CADENA hechas: {provider2_total}"
+    except Exception as e:
+        provider2_extra = f" | ERROR DB: {str(e)}"
 
     cached = _cache_get_json("panel:providers_status_cached") or {}
 
@@ -5829,6 +5855,7 @@ def _providers_status_text(db: Session) -> str:
 
     text = (
         f"ADMIN DIGITAL:\n{s1}{provider1_extra}\n\n"
+        f"ACTAS DEL SURESTE:\n{s2}{provider2_extra}\n\n"
         f"AUSTRAM WEB:\n{s3}{provider3_extra}\n\n"
         f"LAZARO WEB:\n{s4}{provider4_extra}"
     )
