@@ -1,4 +1,3 @@
-
 import os
 import base64
 import time
@@ -2694,6 +2693,7 @@ GROUP_NAME_MAP = {
     "120363408639542108@g.us": "AD 1",
     "120363427054214985@g.us": "AD 2",
     "120363409374690453@g.us": "AD 3",
+    "120363424119914828@g.us": "SURESTE",
     "120363422785755828@g.us": "Gpo. No. 4 Karen",
     "120363426949877636@g.us": "Gpo. No. 11 Morelos",
     "120363425014097597@g.us": "Gpo. No. 7 Karen Marvin",
@@ -3165,6 +3165,63 @@ def _panel_cache_key(
         (group_mode or "").strip(),
     ])
                                                                                                         
+
+def _panel_delivery_metrics(db, time_min, time_max):
+    try:
+        required_cols = (
+            "provider_to_webhook_lag_s",
+            "t_total_provider1_relay",
+        )
+
+        if not all(hasattr(RequestLog, c) for c in required_cols):
+            return None
+
+        rows = (
+            db.query(
+                RequestLog.provider_to_webhook_lag_s,
+                RequestLog.t_total_provider1_relay,
+            )
+            .filter(
+                RequestLog.created_at >= time_min,
+                RequestLog.created_at < time_max,
+                RequestLog.t_total_provider1_relay.isnot(None),
+            )
+            .all()
+        )
+
+        if not rows:
+            return None
+
+        provider_lags = [
+            float(r[0]) for r in rows
+            if r[0] is not None
+        ]
+        total_times = [
+            float(r[1]) for r in rows
+            if r[1] is not None
+        ]
+
+        if not total_times:
+            return None
+
+        avg_provider = round(sum(provider_lags) / len(provider_lags), 2) if provider_lags else 0.0
+        avg_total = round(sum(total_times) / len(total_times), 2)
+        fastest = round(min(total_times), 2)
+        slowest = round(max(total_times), 2)
+        processed = len(total_times)
+
+        return {
+            "avg_provider": avg_provider,
+            "avg_total": avg_total,
+            "fastest": fastest,
+            "slowest": slowest,
+            "processed": processed,
+        }
+
+    except Exception as e:
+        print("PANEL_DELIVERY_METRICS_ERROR =", repr(e), flush=True)
+        return None
+
                     
 @app.get("/panel", response_class=HTMLResponse)
 def panel_actas(
@@ -3205,6 +3262,7 @@ def panel_actas(
         )
         
         group_cache = _build_group_name_cache(db)
+        delivery_metrics = _panel_delivery_metrics(db, time_min, time_max)
         
         status_rows = (
             base_q.with_entities(
@@ -3410,6 +3468,39 @@ def panel_actas(
         )
         
         provider_states = _esc(_providers_status_text(db)).replace("\n", "<br>")
+
+        metrics_html = ""
+        if delivery_metrics:
+            metrics_html = f"""
+            <div class="box">
+              <div class="head">
+                <strong>⚡ Métricas del sistema</strong>
+                <span class="small">Tiempos promedio del periodo seleccionado.</span>
+              </div>
+
+              <div class="cards" style="padding:16px;">
+                <div class="card">
+                  <div class="label">Proveedor → servidor</div>
+                  <div class="value">{delivery_metrics["avg_provider"]} s</div>
+                </div>
+
+                <div class="card">
+                  <div class="label">Tiempo total de entrega</div>
+                  <div class="value">{delivery_metrics["avg_total"]} s</div>
+                </div>
+
+                <div class="card">
+                  <div class="label">Entrega más rápida</div>
+                  <div class="value">{delivery_metrics["fastest"]} s</div>
+                </div>
+
+                <div class="card">
+                  <div class="label">Entrega más lenta</div>
+                  <div class="value">{delivery_metrics["slowest"]} s</div>
+                </div>
+              </div>
+            </div>
+            """
     
         html = f"""
         <!doctype html>
@@ -4255,6 +4346,8 @@ def panel_actas(
                 
               </div>
             </div>
+
+            {metrics_html}
         
             <form class="box" method="get" action="/panel">
               <div class="head">
