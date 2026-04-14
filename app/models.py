@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, Float
 from sqlalchemy.sql import func
 
 from app.db import Base
@@ -61,6 +61,9 @@ class RequestLog(Base):
     provider_group_id = Column(String(120), nullable=True, index=True)
     provider_message = Column(Text, nullable=True)
     provider_media_url = Column(Text, nullable=True)
+
+    provider_to_webhook_lag_s = Column(Float, nullable=True)
+    t_total_provider1_relay = Column(Float, nullable=True)
 
     pdf_url = Column(Text, nullable=True)
 
