@@ -3478,7 +3478,7 @@ def panel_actas(
                 <span class="small">Tiempos promedio del periodo seleccionado.</span>
               </div>
 
-              <div class="cards" style="padding:16px;">
+              <div class="cards" style="padding:16px; grid-template-columns: repeat(4, minmax(0, 1fr));">
                 <div class="card">
                   <div class="label">Proveedor → servidor</div>
                   <div class="value">{delivery_metrics["avg_provider"]} s</div>
@@ -4529,13 +4529,40 @@ def panel_actas(
         html += metrics_html
 
         html += f"""
-        <div class="cards">
-          <div class="card"><div class="label">Total</div><div class="value">{summary["total"]}</div></div>
-          <div class="card"><div class="label">En cola</div><div class="value">{summary["queued"]}</div></div>
-          <div class="card"><div class="label">Procesando</div><div class="value">{summary["processing"]}</div></div>
-          <div class="card"><div class="label">Hecho</div><div class="value">{summary["done"]}</div></div>
-          <div class="card"><div class="label">Error</div><div class="value">{summary["error"]}</div></div>
+        <div class="box">
+          <div class="head">
+            <strong>📊 Estado de solicitudes</strong>
+            <span class="small">Resumen del periodo seleccionado</span>
+          </div>
+        
+          <div class="cards" style="padding:16px; grid-template-columns: repeat(5, minmax(0, 1fr));">
+            <div class="card">
+              <div class="label">Total</div>
+              <div class="value">{summary["total"]}</div>
+            </div>
+        
+            <div class="card">
+              <div class="label">En cola</div>
+              <div class="value">{summary["queued"]}</div>
+            </div>
+        
+            <div class="card">
+              <div class="label">Procesando</div>
+              <div class="value">{summary["processing"]}</div>
+            </div>
+        
+            <div class="card">
+              <div class="label">Hecho</div>
+              <div class="value">{summary["done"]}</div>
+            </div>
+        
+            <div class="card">
+              <div class="label">Error</div>
+              <div class="value">{summary["error"]}</div>
+            </div>
+          </div>
         </div>
+        """
     
         <div class="box">
           <div class="head"><strong>Resumen por proveedor</strong></div>
