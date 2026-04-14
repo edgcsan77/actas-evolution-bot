@@ -4563,7 +4563,8 @@ def panel_actas(
           </div>
         </div>
         """
-    
+
+        html += f"""
         <div class="box">
           <div class="head"><strong>Resumen por proveedor</strong></div>
           <div class="table-wrap">
