@@ -409,7 +409,8 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
         return f"{term} {provider_type}"
 
     if provider_name == "PROVIDER2":
-        return provider2_command(term, act_type)
+        provider_type = provider_label_for_type(act_type)
+        return f"{term} {provider_type}"
 
     if provider_name == "PROVIDER3":
         return None
