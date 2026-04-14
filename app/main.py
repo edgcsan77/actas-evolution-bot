@@ -4346,8 +4346,6 @@ def panel_actas(
                 
               </div>
             </div>
-
-            {metrics_html}
         
             <form class="box" method="get" action="/panel">
               <div class="head">
@@ -4527,6 +4525,8 @@ def panel_actas(
           </div>
         </div>
         """
+
+        html += metrics_html
 
         html += f"""
         <div class="cards">
@@ -6645,7 +6645,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             
                 print("PROVIDER_EVENT_MESSAGE_TIMESTAMP =", provider_msg_ts, flush=True)
                 print("WEBHOOK_RECEIVED_TS =", webhook_received_ts, flush=True)
-            
+
+                lag_s = None
                 try:
                     if provider_msg_ts:
                         lag_s = webhook_received_ts - float(provider_msg_ts)
@@ -6756,6 +6757,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 open_req.status = "DONE"
                 open_req.error_message = None
                 open_req.updated_at = _utc_now_naive()
+                open_req.provider_to_webhook_lag_s = round(lag_s, 3) if lag_s is not None else None
 
                 t2 = time.perf_counter()
                 db.commit()
@@ -6772,7 +6774,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     "source_group_id": open_req.source_group_id,
                     "doc_mode": doc_mode,
                 }, flush=True)
-
+    
+                total_relay_s = None
                 t4 = time.perf_counter()
                 _deliver_pdf_result(
                     open_req,
@@ -6790,7 +6793,14 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 finally:
                      print("T_PROMO =", round(time.perf_counter() - t3, 3), flush=True)
 
-                print("T_TOTAL_PROVIDER1_RELAY =", round(time.perf_counter() - t0, 3), flush=True)
+                total_relay_s = round(time.perf_counter() - t0, 3)
+                open_req.t_total_provider1_relay = total_relay_s
+                
+                t_save = time.perf_counter()
+                db.commit()
+                print("T_DB_COMMIT_FINAL_METRICS =", round(time.perf_counter() - t_save, 3), flush=True)
+                
+                print("T_TOTAL_PROVIDER1_RELAY =", total_relay_s, flush=True)
                 print("PROVIDER1_PDF_RELAYED =", open_req.id, time.time(), flush=True)
         
                 return {"ok": True, "provider_result": "pdf_delivered"}
