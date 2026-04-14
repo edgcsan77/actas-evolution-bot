@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     EVOLUTION_BASE_URL: str
     EVOLUTION_API_KEY: str
     EVOLUTION_INSTANCE: str
+    EVOLUTION_INSTANCE_PDF: str
 
     ADMIN_PHONE: str = ""
 
