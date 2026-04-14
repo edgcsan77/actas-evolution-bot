@@ -3791,10 +3791,10 @@ def panel_actas(
                 -webkit-overflow-scrolling: touch;
               }}
             
-              table {{
+              .table-wrap table {{
                 width: 100%;
                 border-collapse: collapse;
-                min-width: 820px;
+                min-width: 1100px;
               }}
             
               th, td {{
