@@ -5766,14 +5766,17 @@ def is_authorized_group(db: Session, group_jid: str) -> bool:
     return db.query(AuthorizedGroup).filter(AuthorizedGroup.group_jid == group_jid).first() is not None
 
 
-def _deliver_text_result(req: RequestLog, text: str):
+def _deliver_text_result(req: RequestLog, text: str, instance_name: str = None):
+    instance = instance_name or req.instance_name or "docifybot3"
+
     if req.source_group_id:
-        send_group_text(req.source_group_id, text)
+        send_group_text(req.source_group_id, text, instance)
     else:
-        send_text(req.requester_wa_id, text)
+        send_text(req.requester_wa_id, text, instance)
 
 
-def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = None):
+def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = None, instance_name: str = None):
+    instance = instance_name or req.instance_name or "docifybot3"
     filename = filename or f"{req.curp}.pdf"
 
     caption_text = ""
@@ -5804,6 +5807,7 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
         if req.source_group_id not in NO_TIME_CAPTION_GROUPS:
             caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
 
+    print("PDF_DELIVER_INSTANCE =", instance, flush=True)
     print("PDF_CAPTION =", caption_text, flush=True)
 
     is_base64 = not pdf_data.startswith("http")
@@ -5814,14 +5818,16 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
                 req.source_group_id,
                 pdf_data,
                 filename=filename,
-                caption=caption_text
+                caption=caption_text,
+                instance_name=instance,
             )
         else:
             send_group_document(
                 req.source_group_id,
                 pdf_data,
                 filename=filename,
-                caption=caption_text
+                caption=caption_text,
+                instance_name=instance,
             )
     else:
         if is_base64:
@@ -5829,14 +5835,16 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
                 req.requester_wa_id,
                 pdf_data,
                 filename=filename,
-                caption=caption_text
+                caption=caption_text,
+                instance_name=instance,
             )
         else:
             send_document(
                 req.requester_wa_id,
                 pdf_data,
                 filename=filename,
-                caption=caption_text
+                caption=caption_text,
+                instance_name=instance,
             )
 
 
@@ -5919,11 +5927,11 @@ def _is_admin(requester_wa_id: str, from_me: bool = False) -> bool:
     return from_me or requester in admins
     
 
-def _reply_to_origin(source_group_id: str | None, requester_wa_id: str, text: str):
+def _reply_to_origin(source_group_id: str | None, requester_wa_id: str, text: str, instance_name: str = None):
     if source_group_id:
-        send_group_text(source_group_id, text)
+        send_group_text(source_group_id, text, instance_name)
     else:
-        send_text(requester_wa_id, text)
+        send_text(requester_wa_id, text, instance_name)
 
 
 def _all_provider_groups() -> set[str]:
@@ -6808,9 +6816,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             )
 
             if source_group_id:
-                send_group_text(source_group_id, msg)
+                send_group_text(source_group_id, msg, instance_name)
             else:
-                send_text(requester_wa_id, msg)
+                send_text(requester_wa_id, msg, instance_name)
 
             return {"ok": True, "ignored": "outside_hours"}
 
@@ -6945,9 +6953,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                         try:
                             if open_req.source_group_id:
-                                send_group_text(open_req.source_group_id, msg)
+                                send_group_text(open_req.source_group_id, msg, instance_name)
                             else:
-                                send_text(open_req.requester_wa_id, msg)
+                                send_text(open_req.requester_wa_id, msg, instance_name)
                         except Exception as notify_exc:
                             print("PROVIDER5_SIN_NOTIFY_ERROR =", str(notify_exc), flush=True)
 
@@ -6987,9 +6995,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                         try:
                             if open_req.source_group_id:
-                                send_group_text(open_req.source_group_id, msg)
+                                send_group_text(open_req.source_group_id, msg, instance_name)
                             else:
-                                send_text(open_req.requester_wa_id, msg)
+                                send_text(open_req.requester_wa_id, msg, instance_name)
                         except Exception as notify_exc:
                             print("PROVIDER5_FALLBACK_NOTIFY_ERROR =", str(notify_exc), flush=True)
 
@@ -7076,7 +7084,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 print("T_DOC_DETECTED =", source_chat_id, media_message_id, flush=True)
             
                 t1 = time.perf_counter()
-                media_json = get_media_base64("document", media_message_id)
+                media_json = get_media_base64("document", media_message_id, instance_name)
                 print("T_GET_MEDIA_BASE64 =", round(time.perf_counter() - t1, 3), flush=True)
             
                 print(
@@ -7152,7 +7160,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 _deliver_pdf_result(
                     open_req,
                     safe_media_b64,
-                    filename=filename or f"{open_req.curp}.pdf"
+                    filename=filename or f"{open_req.curp}.pdf",
+                    instance_name=instance_name,
                 )
                 print("T_DELIVER_PDF_RESULT =", round(time.perf_counter() - t4, 3), flush=True)
 
@@ -7223,7 +7232,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                 _deliver_text_result(
                     open_req,
-                    f"❌ No hay registros disponibles.\nDato: {open_req.curp}\nTipo: {open_req.act_type}\n\nVerificar que la CURP esté certificada en RENAPO"
+                    f"❌ No hay registros disponibles.\nDato: {open_req.curp}\nTipo: {open_req.act_type}\n\nVerificar que la CURP esté certificada en RENAPO",
+                    instance_name
                 )
                 return {"ok": True, "provider_result": "no_record"}
 
@@ -7235,9 +7245,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         if not terms and not is_admin_command:
             if problem:
                 if source_group_id:
-                    send_group_text(source_group_id, problem)
+                    send_group_text(source_group_id, problem, instance_name)
                 else:
-                    send_text(requester_wa_id, problem)
+                    send_text(requester_wa_id, problem, instance_name)
         
                 return {"ok": True, "ignored": "invalid_identifier"}
         
@@ -7282,9 +7292,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 return {"ok": True, "ignored": "not_admin"}
 
             if is_group:
-                send_group_text(source_group_id, f"🆔 Group ID:\n{source_group_id}")
+                send_group_text(source_group_id, f"🆔 Group ID:\n{source_group_id}", instance_name)
             else:
-                send_text(requester_wa_id, "⚠️ Usa /GROUPID dentro de un grupo.")
+                send_text(requester_wa_id, "⚠️ Usa /GROUPID dentro de un grupo.", instance_name)
 
             return {"ok": True}
         
@@ -7298,7 +7308,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     db.add(AuthorizedGroup(group_jid=source_group_id, group_name=""))
                     db.commit()
 
-                send_group_text(source_group_id, f"✅ Grupo autorizado: {source_group_id}")
+                send_group_text(source_group_id, f"✅ Grupo autorizado: {source_group_id}", instance_name)
 
             return {"ok": True}
 
@@ -7372,14 +7382,16 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         source_group_id,
                         last.pdf_url,
                         filename=f"{last.curp}.pdf",
-                        caption="♻️ Reenviado desde historial"
+                        caption="♻️ Reenviado desde historial",
+                        instance_name
                     )
                 else:
                     send_document(
                         requester_wa_id,
                         last.pdf_url,
                         filename=f"{last.curp}.pdf",
-                        caption="♻️ Reenviado desde historial"
+                        caption="♻️ Reenviado desde historial",
+                        instance_name
                     )
             else:
                 _reply_to_origin(source_group_id, requester_wa_id, "⚠️ No encontré PDF reciente para ese dato.")
@@ -7496,9 +7508,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 final_msg = problem_msg
         
                 if source_group_id:
-                    send_group_text(source_group_id, final_msg)
+                    send_group_text(source_group_id, final_msg, instance_name)
                 else:
-                    send_text(requester_wa_id, final_msg)
+                    send_text(requester_wa_id, final_msg, instance_name)
         
             return {"ok": True, "ignored": "no_identifier"}
         
@@ -7536,9 +7548,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 )
         
                 if source_group_id:
-                    send_group_text(source_group_id, dup_msg)
+                    send_group_text(source_group_id, dup_msg, instance_name)
                 else:
-                    send_text(requester_wa_id, dup_msg)
+                    send_text(requester_wa_id, dup_msg, instance_name)
         
                 continue
         
@@ -7562,9 +7574,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 )
         
                 if source_group_id:
-                    send_group_text(source_group_id, limit_msg)
+                    send_group_text(source_group_id, limit_msg, instance_name)
                 else:
-                    send_text(requester_wa_id, limit_msg)
+                    send_text(requester_wa_id, limit_msg, instance_name)
         
                 continue
         
@@ -7616,9 +7628,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 )
         
                 if source_group_id:
-                    send_group_text(source_group_id, retry_msg)
+                    send_group_text(source_group_id, retry_msg, instance_name)
                 else:
-                    send_text(requester_wa_id, retry_msg)
+                    send_text(requester_wa_id, retry_msg, instance_name)
         
                 continue
         
@@ -7654,9 +7666,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 )
             
                 if source_group_id:
-                    send_group_text(source_group_id, dup_msg)
+                    send_group_text(source_group_id, dup_msg, instance_name)
                 else:
-                    send_text(requester_wa_id, dup_msg)
+                    send_text(requester_wa_id, dup_msg, instance_name)
             
                 continue
         
@@ -7677,9 +7689,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             )
         
             if source_group_id:
-                send_group_text(source_group_id, ack_msg)
+                send_group_text(source_group_id, ack_msg, instance_name)
             else:
-                send_text(requester_wa_id, ack_msg)
+                send_text(requester_wa_id, ack_msg, instance_name)
         else:
             print("IGNORED_REASON = nothing_created", flush=True)
         
