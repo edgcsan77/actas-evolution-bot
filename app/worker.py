@@ -12,7 +12,6 @@ from app.models import RequestLog, ProviderSetting, AppSetting, GroupPromotion
 from app.services.evolution import send_group_text, send_document_base64, send_group_document_base64
 from app.config import settings
 from app.utils.curp import provider_label_for_type, is_chain
-from app.utils.provider_format import provider2_command
 from app.services.provider3 import Provider3Client, decode_pdf_base64
 from app.services.provider4 import Provider4Client
 from app.queue import redis_conn
@@ -295,6 +294,7 @@ def _enabled_providers(db) -> list[str]:
     p2 = _get_or_create_provider(db, "PROVIDER2", False)
     p3 = _get_or_create_provider(db, "PROVIDER3", False)
     p4 = _get_or_create_provider(db, "PROVIDER4", False)
+    p5 = _get_or_create_provider(db, "PROVIDER5", False)
 
     enabled = []
     if p1.is_enabled:
@@ -305,6 +305,8 @@ def _enabled_providers(db) -> list[str]:
         enabled.append("PROVIDER3")
     if p4.is_enabled:
         enabled.append("PROVIDER4")
+    if p5.is_enabled:
+        enabled.append("PROVIDER5")
 
     return enabled
 
@@ -400,6 +402,19 @@ def _pick_provider_group(provider_name: str, act_type: str, request_id: int) -> 
     if provider_name == "PROVIDER4":
         return None
 
+    if provider_name == "PROVIDER5":
+        provider5_groups = [
+            settings.PROVIDER5_GROUP_1,
+            settings.PROVIDER5_GROUP_2,
+        ]
+        provider5_groups = [g for g in provider5_groups if g]
+
+        if not provider5_groups:
+            raise RuntimeError("PROVIDER5_GROUPS_NOT_CONFIGURED")
+
+        idx = (request_id - 1) % len(provider5_groups)
+        return provider5_groups[idx]
+
     raise RuntimeError("UNKNOWN_PROVIDER")
 
 
@@ -417,6 +432,10 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
 
     if provider_name == "PROVIDER4":
         return None
+
+    if provider_name == "PROVIDER5":
+        provider_type = provider_label_for_type(act_type)
+        return f"{term} {provider_type}"
 
     raise RuntimeError("UNKNOWN_PROVIDER")
 
@@ -919,17 +938,31 @@ def process_request(request_id: int):
         print("WORKER_PROVIDER_GROUP_ID =", provider_group_id, flush=True)
         print("WORKER_TEXT_TO_PROVIDER =", text_to_provider, flush=True)
 
-        if provider_name in ("PROVIDER1", "PROVIDER2"):
-            print("PROVIDER1_SEND_TO_PROVIDER =", req.id, time.time(), flush=True)
+        if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5"):
+            print("PROVIDER_SEND_TO_PROVIDER =", req.id, time.time(), flush=True)
         
             send_ok = False
             last_err = None
         
             for attempt in range(3):
                 try:
-                    send_group_text(provider_group_id, text_to_provider)
+                    resp_json = send_group_text(provider_group_id, text_to_provider)
                     send_ok = True
+            
+                    provider_sent_msg_id = (
+                        (resp_json or {}).get("key", {}).get("id")
+                        or (resp_json or {}).get("data", {}).get("key", {}).get("id")
+                        or (resp_json or {}).get("id")
+                        or ""
+                    )
+            
+                    if provider_sent_msg_id:
+                        req.provider_message_id = provider_sent_msg_id
+                        req.updated_at = _utc_now_naive()
+                        db.commit()
+            
                     print(f"PROVIDER_SEND_OK_ATTEMPT_{attempt+1} =", req.id, flush=True)
+                    print("PROVIDER_SENT_MSG_ID =", provider_sent_msg_id, flush=True)
                     break
                 except Exception as e:
                     last_err = str(e)
