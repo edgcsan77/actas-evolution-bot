@@ -49,6 +49,8 @@ class Settings(BaseSettings):
         "ACTA NO ENCONTRADA|"
         "DOCUMENTO NO ENCONTRADO|"
         "SIN REGISTRO|"
+        "NO ESTA|"
+        "SIN|"
         "ERROR! CURP INVALIDA"
     )
 
