@@ -7100,6 +7100,15 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 open_req.t_total_provider1_relay = total_relay_s
 
                 try:
+                    if open_req.created_at:
+                        created_ts = open_req.created_at.timestamp()
+                        provider_ts = pdf_received_ts
+                        open_req.provider_processing_time = round(provider_ts - created_ts, 3)
+                        print("PROVIDER_PROCESSING_TIME =", open_req.provider_processing_time, flush=True)
+                except Exception as e:
+                    print("PROVIDER_PROCESSING_TIME_ERROR =", str(e), flush=True)
+
+                try:
                     delivered_ts = time.time()
                     created_ts = open_req.created_at.timestamp()
                     open_req.total_delivery_time = round(delivered_ts - created_ts, 3)
