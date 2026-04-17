@@ -54,6 +54,7 @@ class RequestLog(Base):
 
     source_chat_id = Column(String(120), nullable=False, index=True)
     source_group_id = Column(String(120), nullable=True, index=True)
+    instance_name = Column(String(50), nullable=True, index=True)
 
     evolution_message_id = Column(String(120), nullable=True)
 
