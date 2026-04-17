@@ -6506,20 +6506,51 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
     try:
         print("WEBHOOK PAYLOAD =", payload, flush=True)
         event = payload.get("event", "")
-        data = payload.get("data", {})
-
+        data = payload.get("data", {}) or {}
+        
         if event != "messages.upsert":
             return {"ok": True, "ignored": event}
-
-        key = data.get("key", {})
-        message = data.get("message", {})
-        push_name = data.get("pushName", "")
-
-        remote_jid = key.get("remoteJid", "")
-        from_me = key.get("fromMe", False)
-        participant = key.get("participant", "")
-        msg_id = key.get("id", "")
-
+        
+        msg_container = data
+        messages = data.get("messages") or []
+        
+        if isinstance(messages, list) and messages:
+            first_msg = messages[0] or {}
+            if isinstance(first_msg, dict):
+                msg_container = first_msg
+        
+        key = msg_container.get("key", {}) or {}
+        message = msg_container.get("message", {}) or {}
+        
+        push_name = (
+            msg_container.get("pushName")
+            or data.get("pushName")
+            or ""
+        )
+        
+        remote_jid = (
+            key.get("remoteJid")
+            or data.get("remoteJid")
+            or ""
+        )
+        
+        from_me = bool(
+            key.get("fromMe", data.get("fromMe", False))
+        )
+        
+        participant = (
+            key.get("participant")
+            or data.get("participant")
+            or data.get("participantAlt")
+            or data.get("sender")
+            or ""
+        )
+        
+        msg_id = (
+            key.get("id")
+            or data.get("id")
+            or ""
+        )
         if webhook_msg_seen(msg_id):
             print("IGNORED_REASON = duplicate_msg_id", flush=True)
             print("IGNORED_MSG_ID =", msg_id, flush=True)
@@ -6570,7 +6601,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         print("EARLY_MSG_ID =", msg_id, flush=True)
         print("EARLY_FROM_ME =", from_me, flush=True)
         print("EARLY_REMOTE_JID =", remote_jid, flush=True)
-        print("EARLY_MESSAGE_KEYS =", list(message.keys()), flush=True)
+        print("EARLY_MESSAGE_KEYS =", list(message.keys()) if isinstance(message, dict) else [], flush=True)
         
         if from_me and not any(text_upper.startswith(cmd) for cmd in admin_commands):
             print("IGNORED_REASON = from_me", flush=True)
