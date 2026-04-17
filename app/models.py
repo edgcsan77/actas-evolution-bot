@@ -67,7 +67,6 @@ class RequestLog(Base):
 
     pdf_url = Column(Text, nullable=True)
 
-    status = Column(String(20), default="QUEUED", index=True)
     status = Column(String(20), default="QUEUED", nullable=False, index=True)
     error_message = Column(Text, nullable=True)
 
