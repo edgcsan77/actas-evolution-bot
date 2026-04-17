@@ -6504,6 +6504,7 @@ def _unwrap_message(msg: dict) -> dict:
 @app.post("/webhook/evolution")
 async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
     try:
+        print("WEBHOOK PAYLOAD =", payload, flush=True)
         event = payload.get("event", "")
         data = payload.get("data", {})
 
