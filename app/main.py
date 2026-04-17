@@ -6506,51 +6506,20 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
     try:
         print("WEBHOOK PAYLOAD =", payload, flush=True)
         event = payload.get("event", "")
-        data = payload.get("data", {}) or {}
+        data = payload.get("data", {})
         
         if event != "messages.upsert":
             return {"ok": True, "ignored": event}
         
-        msg_container = data
-        messages = data.get("messages") or []
+        key = data.get("key", {})
+        message = data.get("message", {})
+        push_name = data.get("pushName", "")
         
-        if isinstance(messages, list) and messages:
-            first_msg = messages[0] or {}
-            if isinstance(first_msg, dict):
-                msg_container = first_msg
+        remote_jid = key.get("remoteJid", "")
+        from_me = key.get("fromMe", False)
+        participant = key.get("participant", "")
+        msg_id = key.get("id", "")
         
-        key = msg_container.get("key", {}) or {}
-        message = msg_container.get("message", {}) or {}
-        
-        push_name = (
-            msg_container.get("pushName")
-            or data.get("pushName")
-            or ""
-        )
-        
-        remote_jid = (
-            key.get("remoteJid")
-            or data.get("remoteJid")
-            or ""
-        )
-        
-        from_me = bool(
-            key.get("fromMe", data.get("fromMe", False))
-        )
-        
-        participant = (
-            key.get("participant")
-            or data.get("participant")
-            or data.get("participantAlt")
-            or data.get("sender")
-            or ""
-        )
-        
-        msg_id = (
-            key.get("id")
-            or data.get("id")
-            or ""
-        )
         if webhook_msg_seen(msg_id):
             print("IGNORED_REASON = duplicate_msg_id", flush=True)
             print("IGNORED_MSG_ID =", msg_id, flush=True)
