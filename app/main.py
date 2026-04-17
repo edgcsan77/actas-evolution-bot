@@ -5858,41 +5858,49 @@ def _extract_identifier_from_filename_local(filename: str) -> str | None:
     return extract_identifier_from_filename(filename)
 
 
-def _extract_quoted_message_id(message: dict) -> str:
+def _extract_quoted_message_id(message: dict, data: dict | None = None) -> str:
     try:
-        if "extendedTextMessage" in message:
-            return (
-                message.get("extendedTextMessage", {})
-                .get("contextInfo", {})
-                .get("stanzaId", "")
-            ) or ""
+        if data:
+            top_ctx = (data.get("contextInfo", {}) or {})
+            top_id = top_ctx.get("stanzaId", "") or top_ctx.get("quotedStanzaID", "") or ""
+            if top_id:
+                return top_id
 
-        if "documentWithCaptionMessage" in message:
-            inner = message.get("documentWithCaptionMessage", {}).get("message", {})
-            return (
-                inner.get("extendedTextMessage", {})
-                .get("contextInfo", {})
-                .get("stanzaId", "")
-            ) or ""
+        msg_unwrapped = _unwrap_message(message) or message
 
-        if "ephemeralMessage" in message:
-            inner = message.get("ephemeralMessage", {}).get("message", {})
+        if "extendedTextMessage" in msg_unwrapped:
+            ctx = msg_unwrapped.get("extendedTextMessage", {}).get("contextInfo", {}) or {}
+            qid = ctx.get("stanzaId", "") or ctx.get("quotedStanzaID", "") or ""
+            if qid:
+                return qid
+
+        ctx2 = msg_unwrapped.get("contextInfo", {}) or {}
+        qid2 = ctx2.get("stanzaId", "") or ctx2.get("quotedStanzaID", "") or ""
+        if qid2:
+            return qid2
+
+        if "documentWithCaptionMessage" in msg_unwrapped:
+            inner = msg_unwrapped.get("documentWithCaptionMessage", {}).get("message", {}) or {}
             return _extract_quoted_message_id(inner)
 
-        if "viewOnceMessage" in message:
-            inner = message.get("viewOnceMessage", {}).get("message", {})
+        if "ephemeralMessage" in msg_unwrapped:
+            inner = msg_unwrapped.get("ephemeralMessage", {}).get("message", {}) or {}
             return _extract_quoted_message_id(inner)
 
-        if "viewOnceMessageV2" in message:
-            inner = message.get("viewOnceMessageV2", {}).get("message", {})
+        if "viewOnceMessage" in msg_unwrapped:
+            inner = msg_unwrapped.get("viewOnceMessage", {}).get("message", {}) or {}
             return _extract_quoted_message_id(inner)
 
-        if "viewOnceMessageV2Extension" in message:
-            inner = message.get("viewOnceMessageV2Extension", {}).get("message", {})
+        if "viewOnceMessageV2" in msg_unwrapped:
+            inner = msg_unwrapped.get("viewOnceMessageV2", {}).get("message", {}) or {}
             return _extract_quoted_message_id(inner)
 
-    except Exception:
-        pass
+        if "viewOnceMessageV2Extension" in msg_unwrapped:
+            inner = msg_unwrapped.get("viewOnceMessageV2Extension", {}).get("message", {}) or {}
+            return _extract_quoted_message_id(inner)
+
+    except Exception as e:
+        print("EXTRACT_QUOTED_MESSAGE_ID_ERROR =", str(e), flush=True)
 
     return ""
 
@@ -6815,7 +6823,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             print("PROVIDER_TEXT =", text_body, flush=True)
             print("PROVIDER_IDENTIFIER_DETECTED =", provider_id, flush=True)
 
-            quoted_msg_id = _extract_quoted_message_id(message)
+            quoted_msg_id = _extract_quoted_message_id(message, data)
             text_norm = (text_body or "").strip().upper()
             
             print("PROVIDER_QUOTED_MSG_ID =", quoted_msg_id, flush=True)
