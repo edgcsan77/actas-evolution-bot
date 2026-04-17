@@ -21,8 +21,9 @@ def _normalize_number(number: str) -> str:
     return number.strip()
 
 
-def send_text(number: str, text: str):
-    url = f"{settings.EVOLUTION_BASE_URL}/message/sendText/{settings.EVOLUTION_INSTANCE}"
+def send_text(number: str, text: str, instance_name: str = None):
+    instance = instance_name or settings.EVOLUTION_INSTANCE
+    url = f"{settings.EVOLUTION_BASE_URL}/message/sendText/{instance}"
 
     clean_number = _normalize_number(number)
     clean_text = (text or "").strip()
@@ -44,8 +45,9 @@ def send_text(number: str, text: str):
     return resp.json()
 
 
-def send_document(number: str, pdf_url: str, filename: str = "acta.pdf", caption: str = ""):
-    url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{settings.EVOLUTION_INSTANCE}"
+def send_document(number: str, pdf_url: str, filename: str = "acta.pdf", caption: str = "", instance_name: str = None):
+    instance = instance_name or settings.EVOLUTION_INSTANCE
+    url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{instance}"
 
     r = requests.get(pdf_url, timeout=60)
     r.raise_for_status()
@@ -74,8 +76,10 @@ def send_document(number: str, pdf_url: str, filename: str = "acta.pdf", caption
     return resp.json()
 
 
-def send_group_text(group_jid: str, text: str):
-    url = f"{settings.EVOLUTION_BASE_URL}/message/sendText/{settings.EVOLUTION_INSTANCE}"
+def send_group_text(group_jid: str, text: str, instance_name: str = None):
+    instance = instance_name or settings.EVOLUTION_INSTANCE
+    url = f"{settings.EVOLUTION_BASE_URL}/message/sendText/{instance}"
+    
     payload = {
         "number": _normalize_number(group_jid),
         "text": (text or "").strip()
@@ -92,8 +96,9 @@ def send_group_text(group_jid: str, text: str):
     return resp.json()
 
 
-def send_group_document(group_jid: str, pdf_url: str, filename: str = "acta.pdf", caption: str = ""):
-    url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{settings.EVOLUTION_INSTANCE}"
+def send_group_document(group_jid: str, pdf_url: str, filename: str = "acta.pdf", caption: str = "", instance_name: str = None):
+    instance = instance_name or settings.EVOLUTION_INSTANCE
+    url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{instance}"
 
     r = requests.get(pdf_url, timeout=60)
     r.raise_for_status()
@@ -122,8 +127,10 @@ def send_group_document(group_jid: str, pdf_url: str, filename: str = "acta.pdf"
     return resp.json()
 
 
-def get_media_base64(media_type: str, message_id: str):
-    url = f"{settings.EVOLUTION_BASE_URL}/chat/getBase64FromMediaMessage/{settings.EVOLUTION_INSTANCE}"
+def get_media_base64(media_type: str, message_id: str, instance_name: str = None):
+    instance = instance_name or settings.EVOLUTION_INSTANCE
+    url = f"{settings.EVOLUTION_BASE_URL}/chat/getBase64FromMediaMessage/{instance}"
+    
     payload = {
         "message": {
             "key": {
@@ -146,8 +153,9 @@ def get_media_base64(media_type: str, message_id: str):
     return resp.json()
 
 
-def send_document_base64(number: str, media_b64: str, filename: str = "acta.pdf", caption: str = ""):
-    url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{settings.EVOLUTION_INSTANCE}"
+def send_document_base64(number: str, media_b64: str, filename: str = "acta.pdf", caption: str = "", instance_name: str = None):
+    instance = instance_name or settings.EVOLUTION_INSTANCE
+    url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{instance}"
 
     raw = (media_b64 or "").strip()
     if raw.startswith("data:"):
@@ -177,8 +185,9 @@ def send_document_base64(number: str, media_b64: str, filename: str = "acta.pdf"
     return resp.json()
 
 
-def send_group_document_base64(group_jid: str, media_b64: str, filename: str = "acta.pdf", caption: str = ""):
-    url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{settings.EVOLUTION_INSTANCE}"
+def send_group_document_base64(group_jid: str, media_b64: str, filename: str = "acta.pdf", caption: str = "", instance_name: str = None):
+    instance = instance_name or settings.EVOLUTION_INSTANCE
+    url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{instance}"
 
     raw = (media_b64 or "").strip()
     if raw.startswith("data:"):
