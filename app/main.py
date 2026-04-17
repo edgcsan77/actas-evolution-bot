@@ -3622,7 +3622,7 @@ def panel_actas(
               }}
             
               .wrap {{
-                max-width: 1500px;
+                max-width: 1700px;
                 margin: 0 auto;
                 padding: 16px;
               }}
@@ -3864,22 +3864,28 @@ def panel_actas(
               }}
             
               .table-wrap {{
+                width: 100%;
                 overflow-x: auto;
+                overflow-y: visible;
                 -webkit-overflow-scrolling: touch;
               }}
             
               .table-wrap table {{
-                width: 100%;
+                width: max-content;
+                min-width: 1500px;
                 border-collapse: collapse;
-                min-width: 1100px;
               }}
             
-              th, td {{
-                padding: 12px;
-                border-bottom: 1px solid var(--line);
-                text-align: left;
-                vertical-align: top;
-                font-size: .95rem;
+              .table-wrap th,
+              .table-wrap td {{
+                white-space: nowrap;
+              }}
+
+              .table-wrap td.small {{
+                white-space: normal;
+                min-width: 220px;
+                max-width: 320px;
+                word-break: break-word;
               }}
             
               th {{
@@ -4308,6 +4314,17 @@ def panel_actas(
                 .provider-actions,
                 .actions-row {{
                   flex-direction: column;
+                }}
+              }}
+
+              @media (max-width: 700px) {{
+                .table-wrap table {{
+                  min-width: 1200px;
+                }}
+            
+                th, td {{
+                  padding: 10px;
+                  font-size: .88rem;
                 }}
               }}
             </style>
