@@ -5929,9 +5929,9 @@ def _is_admin(requester_wa_id: str, from_me: bool = False) -> bool:
 
 def _reply_to_origin(source_group_id: str | None, requester_wa_id: str, text: str, instance_name: str = None):
     if source_group_id:
-        send_group_text(source_group_id, text, instance_name)
+        send_group_text(source_group_id, text, instance_name=instance_name)
     else:
-        send_text(requester_wa_id, text, instance_name)
+        send_text(requester_wa_id, text, instance_name=instance_name)
 
 
 def _all_provider_groups() -> set[str]:
@@ -6816,9 +6816,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             )
 
             if source_group_id:
-                send_group_text(source_group_id, msg, instance_name)
+                send_group_text(source_group_id, msg, instance_name=instance_name)
             else:
-                send_text(requester_wa_id, msg, instance_name)
+                send_text(requester_wa_id, msg, instance_name=instance_name)
 
             return {"ok": True, "ignored": "outside_hours"}
 
@@ -6953,9 +6953,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                         try:
                             if open_req.source_group_id:
-                                send_group_text(open_req.source_group_id, msg, instance_name)
+                                send_group_text(open_req.source_group_id, msg, instance_name=instance_name)
                             else:
-                                send_text(open_req.requester_wa_id, msg, instance_name)
+                                send_text(open_req.requester_wa_id, msg, instance_name=instance_name)
                         except Exception as notify_exc:
                             print("PROVIDER5_SIN_NOTIFY_ERROR =", str(notify_exc), flush=True)
 
@@ -6995,9 +6995,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                         try:
                             if open_req.source_group_id:
-                                send_group_text(open_req.source_group_id, msg, instance_name)
+                                send_group_text(open_req.source_group_id, msg, instance_name=instance_name)
                             else:
-                                send_text(open_req.requester_wa_id, msg, instance_name)
+                                send_text(open_req.requester_wa_id, msg, instance_name=instance_name)
                         except Exception as notify_exc:
                             print("PROVIDER5_FALLBACK_NOTIFY_ERROR =", str(notify_exc), flush=True)
 
@@ -7245,9 +7245,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         if not terms and not is_admin_command:
             if problem:
                 if source_group_id:
-                    send_group_text(source_group_id, problem, instance_name)
+                    send_group_text(source_group_id, problem, instance_name=instance_name)
                 else:
-                    send_text(requester_wa_id, problem, instance_name)
+                    send_text(requester_wa_id, problem, instance_name=instance_name)
         
                 return {"ok": True, "ignored": "invalid_identifier"}
         
@@ -7292,9 +7292,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 return {"ok": True, "ignored": "not_admin"}
 
             if is_group:
-                send_group_text(source_group_id, f"🆔 Group ID:\n{source_group_id}", instance_name)
+                send_group_text(source_group_id, f"🆔 Group ID:\n{source_group_id}", instance_name=instance_name)
             else:
-                send_text(requester_wa_id, "⚠️ Usa /GROUPID dentro de un grupo.", instance_name)
+                send_text(requester_wa_id, "⚠️ Usa /GROUPID dentro de un grupo.", instance_name=instance_name)
 
             return {"ok": True}
         
@@ -7308,7 +7308,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     db.add(AuthorizedGroup(group_jid=source_group_id, group_name=""))
                     db.commit()
 
-                send_group_text(source_group_id, f"✅ Grupo autorizado: {source_group_id}", instance_name)
+                send_group_text(source_group_id, f"✅ Grupo autorizado: {source_group_id}", instance_name=instance_name)
 
             return {"ok": True}
 
@@ -7383,7 +7383,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         last.pdf_url,
                         filename=f"{last.curp}.pdf",
                         caption="♻️ Reenviado desde historial",
-                        instance_name
+                        instance_name=instance_name,
                     )
                 else:
                     send_document(
@@ -7391,7 +7391,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         last.pdf_url,
                         filename=f"{last.curp}.pdf",
                         caption="♻️ Reenviado desde historial",
-                        instance_name
+                        instance_name=instance_name,
                     )
             else:
                 _reply_to_origin(source_group_id, requester_wa_id, "⚠️ No encontré PDF reciente para ese dato.")
@@ -7508,9 +7508,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 final_msg = problem_msg
         
                 if source_group_id:
-                    send_group_text(source_group_id, final_msg, instance_name)
+                    send_group_text(source_group_id, final_msg, instance_name=instance_name)
                 else:
-                    send_text(requester_wa_id, final_msg, instance_name)
+                    send_text(requester_wa_id, final_msg, instance_name=instance_name)
         
             return {"ok": True, "ignored": "no_identifier"}
         
@@ -7548,9 +7548,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 )
         
                 if source_group_id:
-                    send_group_text(source_group_id, dup_msg, instance_name)
+                    send_group_text(source_group_id, dup_msg, instance_name=instance_name)
                 else:
-                    send_text(requester_wa_id, dup_msg, instance_name)
+                    send_text(requester_wa_id, dup_msg, instance_name=instance_name)
         
                 continue
         
@@ -7574,9 +7574,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 )
         
                 if source_group_id:
-                    send_group_text(source_group_id, limit_msg, instance_name)
+                    send_group_text(source_group_id, limit_msg, instance_name=instance_name)
                 else:
-                    send_text(requester_wa_id, limit_msg, instance_name)
+                    send_text(requester_wa_id, limit_msg, instance_name=instance_name)
         
                 continue
         
@@ -7628,9 +7628,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 )
         
                 if source_group_id:
-                    send_group_text(source_group_id, retry_msg, instance_name)
+                    send_group_text(source_group_id, retry_msg, instance_name=instance_name)
                 else:
-                    send_text(requester_wa_id, retry_msg, instance_name)
+                    send_text(requester_wa_id, retry_msg, instance_name=instance_name)
         
                 continue
         
@@ -7666,9 +7666,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 )
             
                 if source_group_id:
-                    send_group_text(source_group_id, dup_msg, instance_name)
+                    send_group_text(source_group_id, dup_msg, instance_name=instance_name)
                 else:
-                    send_text(requester_wa_id, dup_msg, instance_name)
+                    send_text(requester_wa_id, dup_msg, instance_name=instance_name)
             
                 continue
         
@@ -7689,9 +7689,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             )
         
             if source_group_id:
-                send_group_text(source_group_id, ack_msg, instance_name)
+                send_group_text(source_group_id, ack_msg, instance_name=instance_name)
             else:
-                send_text(requester_wa_id, ack_msg, instance_name)
+                send_text(requester_wa_id, ack_msg, instance_name=instance_name)
         else:
             print("IGNORED_REASON = nothing_created", flush=True)
         
