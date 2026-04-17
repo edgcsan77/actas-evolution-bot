@@ -96,7 +96,7 @@ PROVIDER_LABELS = {
     "PROVIDER1": "ADMIN DIGITAL",
     "PROVIDER2": "ACTAS DEL SURESTE",
     "PROVIDER3": "AUSTRAM WEB",
-    "PROVIDER4": "LAZARO WEB",
+    "PROVIDER5": "LUIS SID",
 }
 
 
@@ -2729,6 +2729,7 @@ GROUP_NAME_MAP = {
     "120363427054214985@g.us": "AD 2",
     "120363409374690453@g.us": "AD 3",
     "120363424119914828@g.us": "SURESTE",
+    "120363408943747132@g.us": "LUIS SID",
     "120363422785755828@g.us": "Gpo. No. 4 Karen",
     "120363426949877636@g.us": "Gpo. No. 11 Morelos",
     "120363425014097597@g.us": "Gpo. No. 7 Karen Marvin",
@@ -4359,12 +4360,12 @@ def panel_actas(
                         <button class="btn btn-warning" onclick="refreshSID()">Actualizar SID</button>
                       </div>
                     </div>
-        
+
                     <div class="provider-card">
-                      <div class="provider-name">LAZARO WEB</div>
+                      <div class="provider-name">LUIS SID</div>
                       <div class="provider-actions">
-                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER4','on')">Activar</button>
-                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER4','off')">Desactivar</button>
+                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER5','on')">Activar</button>
+                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER5','off')">Desactivar</button>
                       </div>
                     </div>
                   </div>
@@ -5645,6 +5646,7 @@ def startup():
         _get_or_create_provider(db, "PROVIDER2", False)
         _get_or_create_provider(db, "PROVIDER3", False)
         _get_or_create_provider(db, "PROVIDER4", False)
+        _get_or_create_provider(db, "PROVIDER5", False)
 
         current = _get_app_setting(db, "PROVIDER3_PHPSESSID", "")
         if not current and settings.PROVIDER3_PHPSESSID:
@@ -5850,6 +5852,45 @@ def _extract_identifier_from_filename_local(filename: str) -> str | None:
     return extract_identifier_from_filename(filename)
 
 
+def _extract_quoted_message_id(message: dict) -> str:
+    try:
+        if "extendedTextMessage" in message:
+            return (
+                message.get("extendedTextMessage", {})
+                .get("contextInfo", {})
+                .get("stanzaId", "")
+            ) or ""
+
+        if "documentWithCaptionMessage" in message:
+            inner = message.get("documentWithCaptionMessage", {}).get("message", {})
+            return (
+                inner.get("extendedTextMessage", {})
+                .get("contextInfo", {})
+                .get("stanzaId", "")
+            ) or ""
+
+        if "ephemeralMessage" in message:
+            inner = message.get("ephemeralMessage", {}).get("message", {})
+            return _extract_quoted_message_id(inner)
+
+        if "viewOnceMessage" in message:
+            inner = message.get("viewOnceMessage", {}).get("message", {})
+            return _extract_quoted_message_id(inner)
+
+        if "viewOnceMessageV2" in message:
+            inner = message.get("viewOnceMessageV2", {}).get("message", {})
+            return _extract_quoted_message_id(inner)
+
+        if "viewOnceMessageV2Extension" in message:
+            inner = message.get("viewOnceMessageV2Extension", {}).get("message", {})
+            return _extract_quoted_message_id(inner)
+
+    except Exception:
+        pass
+
+    return ""
+
+
 def _is_admin(requester_wa_id: str, from_me: bool = False) -> bool:
     raw = settings.ADMIN_PHONE or ""
 
@@ -5880,6 +5921,8 @@ def _all_provider_groups() -> set[str]:
         settings.PROVIDER_GROUP_FOLIADAS,
         settings.PROVIDER2_GROUP_1,
         settings.PROVIDER2_GROUP_2,
+        settings.PROVIDER5_GROUP_1,
+        settings.PROVIDER5_GROUP_2,
     }
     return {v.strip() for v in vals if v and v.strip()}
 
@@ -6025,16 +6068,19 @@ def _providers_status_text(db: Session) -> str:
     p2 = _get_or_create_provider(db, "PROVIDER2", False)
     p3 = _get_or_create_provider(db, "PROVIDER3", False)
     p4 = _get_or_create_provider(db, "PROVIDER4", False)
+    p5 = _get_or_create_provider(db, "PROVIDER5", False)
 
     s1 = "ON" if p1.is_enabled else "OFF"
     s2 = "ON" if p2.is_enabled else "OFF"
     s3 = "ON" if p3.is_enabled else "OFF"
     s4 = "ON" if p4.is_enabled else "OFF"
+    s5 = "ON" if p5.is_enabled else "OFF"
 
     provider1_extra = ""
     provider2_extra = ""
     provider3_extra = ""
     provider4_extra = ""
+    provider5_extra = ""
 
     local_start = _panel_month_start()
     local_end = _panel_month_end()
@@ -6096,11 +6142,26 @@ def _providers_status_text(db: Session) -> str:
                 f" | CURP hechas: {total_done if total_done is not None else 'N/D'}"
             )
 
+    try:
+        provider5_total = (
+            db.query(func.count(RequestLog.id))
+            .filter(
+                RequestLog.provider_name == "PROVIDER5",
+                RequestLog.status == "DONE",
+                RequestLog.created_at >= utc_start,
+                RequestLog.created_at < utc_end,
+            )
+            .scalar()
+        ) or 0
+        provider5_extra = f" | CURP y CADENA hechas: {provider5_total}"
+    except Exception as e:
+        provider5_extra = f" | ERROR DB: {str(e)}"
+
     text = (
         f"ADMIN DIGITAL:\n{s1}{provider1_extra}\n\n"
         f"ACTAS DEL SURESTE:\n{s2}{provider2_extra}\n\n"
         f"AUSTRAM WEB:\n{s3}{provider3_extra}\n\n"
-        f"LAZARO WEB:\n{s4}{provider4_extra}"
+        f"LUIS SID:\n{s5}{provider5_extra}"
     )
 
     return text
@@ -6748,6 +6809,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             print("PROVIDER_TEXT =", text_body, flush=True)
             print("PROVIDER_IDENTIFIER_DETECTED =", provider_id, flush=True)
 
+            quoted_msg_id = _extract_quoted_message_id(message)
+            text_norm = (text_body or "").strip().upper()
+            
+            print("PROVIDER_QUOTED_MSG_ID =", quoted_msg_id, flush=True)
+            print("PROVIDER_TEXT_NORM =", text_norm, flush=True)
+
             # 1) INTENTAR DETECTAR PDF
             doc = None
             doc_mode = "none"
@@ -6786,6 +6853,59 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             print("DOC_MESSAGE_MODE =", doc_mode, flush=True)
             print("MEDIA_MESSAGE_ID_USED =", media_message_id, flush=True)
+
+            # =========================
+            # MATCH ESPECIAL PROVIDER5: RESPUESTA "SIN" POR REPLY ID
+            # =========================
+            if not doc:
+                sin_values = {
+                    "SIN",
+                    "SIN.",
+                    "SIN REGISTRO",
+                    "SIN REGISTROS",
+                    "SIN DISPONIBLE",
+                }
+
+                if quoted_msg_id and text_norm in sin_values:
+                    open_req = (
+                        db.query(RequestLog)
+                        .filter(
+                            RequestLog.provider_group_id == source_chat_id,
+                            RequestLog.provider_message_id == quoted_msg_id,
+                            RequestLog.status == "PROCESSING",
+                            RequestLog.provider_name == "PROVIDER5",
+                        )
+                        .order_by(RequestLog.created_at.desc())
+                        .first()
+                    )
+
+                    if open_req:
+                        print("PROVIDER5_SIN_MATCHED_REQ_ID =", open_req.id, flush=True)
+                        print("PROVIDER5_SIN_MATCHED_CURP =", open_req.curp, flush=True)
+
+                        open_req.status = "ERROR"
+                        open_req.error_message = "SIN REGISTRO"
+                        open_req.updated_at = _utc_now_naive()
+                        db.commit()
+
+                        msg = (
+                            f"⚠️ Solicitud sin éxito en Registro Civil\n"
+                            f"Dato: {open_req.curp}\n"
+                            f"Tipo: {open_req.act_type}\n\n"
+                            f"Reenviar nuevamente en unos minutos"
+                        )
+
+                        try:
+                            if open_req.source_group_id:
+                                send_group_text(open_req.source_group_id, msg)
+                            else:
+                                send_text(open_req.requester_wa_id, msg)
+                        except Exception as notify_exc:
+                            print("PROVIDER5_SIN_NOTIFY_ERROR =", str(notify_exc), flush=True)
+
+                        return {"ok": True, "provider_result": "provider5_sin_matched_by_reply_id"}
+
+                    print("PROVIDER5_SIN_WITHOUT_MATCH =", quoted_msg_id, flush=True)
 
             if doc:
                 filename = doc.get("fileName") or ""
