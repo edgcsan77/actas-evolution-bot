@@ -6852,18 +6852,18 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 ctx = ext.get("contextInfo", {}) or {}
                 quoted = _unwrap_message(ctx.get("quotedMessage", {}) or {})
             
-                quoted_msg_id = ctx.get("stanzaId", "") or ctx.get("quotedStanzaID", "") or ""
+                quoted_doc_msg_id = ctx.get("stanzaId", "") or ctx.get("quotedStanzaID", "") or ""
             
                 if "documentMessage" in quoted:
                     doc_mode = "quoted_document"
                     doc = quoted.get("documentMessage")
-                    media_message_id = quoted_msg_id or msg_id
+                    media_message_id = quoted_doc_msg_id or msg_id
             
                 elif "documentWithCaptionMessage" in quoted:
                     doc_mode = "quoted_document_with_caption"
                     doc_wrap = quoted.get("documentWithCaptionMessage", {})
                     doc = doc_wrap.get("message", {}).get("documentMessage")
-                    media_message_id = quoted_msg_id or msg_id
+                    media_message_id = quoted_doc_msg_id or msg_id
 
             print("DOC_MESSAGE_MODE =", doc_mode, flush=True)
             print("MEDIA_MESSAGE_ID_USED =", media_message_id, flush=True)
