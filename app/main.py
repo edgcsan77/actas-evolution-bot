@@ -3204,23 +3204,18 @@ def _panel_cache_key(
 
 def _panel_delivery_metrics(db, time_min, time_max):
     try:
-        required_cols = (
-            "provider_to_webhook_lag_s",
-            "t_total_provider1_relay",
-        )
-
-        if not all(hasattr(RequestLog, c) for c in required_cols):
-            return None
 
         rows = (
             db.query(
+                RequestLog.provider_processing_time,
                 RequestLog.provider_to_webhook_lag_s,
                 RequestLog.t_total_provider1_relay,
+                RequestLog.total_delivery_time,
             )
             .filter(
                 RequestLog.created_at >= time_min,
                 RequestLog.created_at < time_max,
-                RequestLog.t_total_provider1_relay.isnot(None),
+                RequestLog.total_delivery_time.isnot(None),
             )
             .all()
         )
@@ -3228,30 +3223,44 @@ def _panel_delivery_metrics(db, time_min, time_max):
         if not rows:
             return None
 
-        provider_lags = [
-            float(r[0]) for r in rows
-            if r[0] is not None
-        ]
-        total_times = [
-            float(r[1]) for r in rows
-            if r[1] is not None
-        ]
+        provider_times = []
+        whatsapp_times = []
+        bot_times = []
+        total_times = []
+
+        for r in rows:
+
+            if r[0] is not None:
+                provider_times.append(float(r[0]))
+
+            if r[1] is not None:
+                whatsapp_times.append(float(r[1]))
+
+            if r[2] is not None:
+                bot_times.append(float(r[2]))
+
+            if r[3] is not None:
+                total_times.append(float(r[3]))
 
         if not total_times:
             return None
 
-        avg_provider = round(sum(provider_lags) / len(provider_lags), 2) if provider_lags else 0.0
+        avg_provider = round(sum(provider_times) / len(provider_times), 2) if provider_times else 0
+        avg_whatsapp = round(sum(whatsapp_times) / len(whatsapp_times), 2) if whatsapp_times else 0
+        avg_bot = round(sum(bot_times) / len(bot_times), 2) if bot_times else 0
         avg_total = round(sum(total_times) / len(total_times), 2)
+
         fastest = round(min(total_times), 2)
         slowest = round(max(total_times), 2)
-        processed = len(total_times)
 
         return {
             "avg_provider": avg_provider,
+            "avg_whatsapp": avg_whatsapp,
+            "avg_bot": avg_bot,
             "avg_total": avg_total,
             "fastest": fastest,
             "slowest": slowest,
-            "processed": processed,
+            "processed": len(total_times),
         }
 
     except Exception as e:
@@ -3552,30 +3561,42 @@ def panel_actas(
             metrics_html = f"""
             <div class="box">
               <div class="head">
-                <strong>⚡ Métricas del sistema</strong>
+                <strong>⚡ Métricas de entrega</strong>
                 <span class="small">Tiempos promedio del periodo seleccionado.</span>
               </div>
-
-              <div class="cards" style="padding:16px; grid-template-columns: repeat(4, minmax(0, 1fr));">
+        
+              <div class="cards" style="padding:16px; grid-template-columns: repeat(3, minmax(0, 1fr));">
+        
                 <div class="card">
-                  <div class="label">Proveedor → servidor</div>
+                  <div class="label">Tiempo proveedor</div>
                   <div class="value">{delivery_metrics["avg_provider"]} s</div>
                 </div>
-
+        
                 <div class="card">
-                  <div class="label">Tiempo total de entrega</div>
+                  <div class="label">WhatsApp / Evolution</div>
+                  <div class="value">{delivery_metrics["avg_whatsapp"]} s</div>
+                </div>
+        
+                <div class="card">
+                  <div class="label">Procesamiento bot</div>
+                  <div class="value">{delivery_metrics["avg_bot"]} s</div>
+                </div>
+        
+                <div class="card">
+                  <div class="label">Entrega total promedio</div>
                   <div class="value">{delivery_metrics["avg_total"]} s</div>
                 </div>
-
+        
                 <div class="card">
                   <div class="label">Entrega más rápida</div>
                   <div class="value">{delivery_metrics["fastest"]} s</div>
                 </div>
-
+        
                 <div class="card">
                   <div class="label">Entrega más lenta</div>
                   <div class="value">{delivery_metrics["slowest"]} s</div>
                 </div>
+        
               </div>
             </div>
             """
@@ -6930,6 +6951,14 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             
                 pdf_received_ts = time.time()
                 print("PROVIDER1_PDF_RECEIVED =", media_message_id, pdf_received_ts, flush=True)
+
+                try:
+                    if open_req.created_at:
+                        created_ts = open_req.created_at.timestamp()
+                        open_req.provider_processing_time = round(pdf_received_ts - created_ts, 3)
+                        print("PROVIDER_PROCESSING_TIME =", open_req.provider_processing_time, flush=True)
+                except Exception as e:
+                    print("PROVIDER_PROCESSING_TIME_ERROR =", str(e), flush=True)
             
                 open_req = None
             
@@ -7069,6 +7098,14 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                 total_relay_s = round(time.perf_counter() - t0, 3)
                 open_req.t_total_provider1_relay = total_relay_s
+
+                try:
+                    delivered_ts = time.time()
+                    created_ts = open_req.created_at.timestamp()
+                    open_req.total_delivery_time = round(delivered_ts - created_ts, 3)
+                    print("TOTAL_DELIVERY_TIME =", open_req.total_delivery_time, flush=True)
+                except Exception as e:
+                    print("TOTAL_DELIVERY_TIME_ERROR =", str(e), flush=True)
                 
                 t_save = time.perf_counter()
                 db.commit()
