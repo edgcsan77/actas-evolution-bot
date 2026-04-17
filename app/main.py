@@ -3204,7 +3204,6 @@ def _panel_cache_key(
 
 def _panel_delivery_metrics(db, time_min, time_max):
     try:
-
         rows = (
             db.query(
                 RequestLog.provider_processing_time,
@@ -3215,6 +3214,9 @@ def _panel_delivery_metrics(db, time_min, time_max):
             .filter(
                 RequestLog.created_at >= time_min,
                 RequestLog.created_at < time_max,
+                RequestLog.provider_processing_time.isnot(None),
+                RequestLog.provider_to_webhook_lag_s.isnot(None),
+                RequestLog.t_total_provider1_relay.isnot(None),
                 RequestLog.total_delivery_time.isnot(None),
             )
             .all()
@@ -3223,31 +3225,14 @@ def _panel_delivery_metrics(db, time_min, time_max):
         if not rows:
             return None
 
-        provider_times = []
-        whatsapp_times = []
-        bot_times = []
-        total_times = []
+        provider_times = [float(r[0]) for r in rows]
+        whatsapp_times = [float(r[1]) for r in rows]
+        bot_times = [float(r[2]) for r in rows]
+        total_times = [float(r[3]) for r in rows]
 
-        for r in rows:
-
-            if r[0] is not None:
-                provider_times.append(float(r[0]))
-
-            if r[1] is not None:
-                whatsapp_times.append(float(r[1]))
-
-            if r[2] is not None:
-                bot_times.append(float(r[2]))
-
-            if r[3] is not None:
-                total_times.append(float(r[3]))
-
-        if not total_times:
-            return None
-
-        avg_provider = round(sum(provider_times) / len(provider_times), 2) if provider_times else 0
-        avg_whatsapp = round(sum(whatsapp_times) / len(whatsapp_times), 2) if whatsapp_times else 0
-        avg_bot = round(sum(bot_times) / len(bot_times), 2) if bot_times else 0
+        avg_provider = round(sum(provider_times) / len(provider_times), 2)
+        avg_whatsapp = round(sum(whatsapp_times) / len(whatsapp_times), 2)
+        avg_bot = round(sum(bot_times) / len(bot_times), 2)
         avg_total = round(sum(total_times) / len(total_times), 2)
 
         fastest = round(min(total_times), 2)
