@@ -6889,10 +6889,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         db.commit()
 
                         msg = (
-                            f"⚠️ Solicitud sin éxito en Registro Civil\n"
+                            f"❌ No hay registros disponibles.\n"
                             f"Dato: {open_req.curp}\n"
                             f"Tipo: {open_req.act_type}\n\n"
-                            f"Reenviar nuevamente en unos minutos"
+                            f"Verificar que la CURP esté certificada en RENAPO"
                         )
 
                         try:
