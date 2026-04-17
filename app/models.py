@@ -58,9 +58,10 @@ class RequestLog(Base):
 
     evolution_message_id = Column(String(120), nullable=True)
 
-    provider_name = Column(String(30), nullable=True, index=True)   # PROVIDER1 / PROVIDER2
+    provider_name = Column(String(30), nullable=True, index=True)
     provider_group_id = Column(String(120), nullable=True, index=True)
     provider_message = Column(Text, nullable=True)
+    provider_message_id = Column(String(120), nullable=True, index=True)
     provider_media_url = Column(Text, nullable=True)
 
     provider_to_webhook_lag_s = Column(Float, nullable=True)
