@@ -787,7 +787,7 @@ def _start_provider3_flow(req, db):
     print("FALLBACK_PROVIDER_GROUP_ID =", provider_group_id, flush=True)
     print("FALLBACK_PROVIDER_TEXT =", text_to_provider, flush=True)
 
-    send_group_text(provider_group_id, text_to_provider)
+    send_group_text(provider_group_id, text_to_provider, settings.EVOLUTION_PROVIDER_INSTANCE)
 
 
 def _validate_pdf_matches_term(pdf_bytes: bytes, term: str) -> bool:
@@ -902,7 +902,7 @@ def process_request(request_id: int):
                     )
 
                     try:
-                        send_group_text(req.source_group_id, msg)
+                        send_group_text(req.source_group_id, msg, req.instance_name)
                     except Exception as notify_exc:
                         print("SHARED_GROUP_LIMIT_NOTIFY_ERROR =", str(notify_exc), flush=True)
 
@@ -946,7 +946,7 @@ def process_request(request_id: int):
         
             for attempt in range(3):
                 try:
-                    resp_json = send_group_text(provider_group_id, text_to_provider)
+                    resp_json = send_group_text(provider_group_id, text_to_provider, settings.EVOLUTION_PROVIDER_INSTANCE)
                     send_ok = True
             
                     provider_sent_msg_id = (
@@ -986,11 +986,14 @@ def process_request(request_id: int):
             )
         
             try:
+                instance = req.instance_name or "docifybot3"
+
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg)
+                    send_group_text(req.source_group_id, msg, instance)
                 else:
                     from app.services.evolution import send_text
-                    send_text(req.requester_wa_id, msg)
+                    send_text(req.requester_wa_id, msg, instance)
+                    
             except Exception as notify_exc:
                 print("CLIENT_NOTIFY_AFTER_PROVIDER_SEND_FAIL_ERROR =", str(notify_exc), flush=True)
         
@@ -1038,7 +1041,7 @@ def process_request(request_id: int):
                 req.updated_at = _utc_now_naive()
                 db.commit()
         
-                send_group_text(provider_group_id, text_to_provider)
+                send_group_text(provider_group_id, text_to_provider, settings.EVOLUTION_PROVIDER_INSTANCE)
         
                 print(
                     "PROVIDER3_FALLBACK_SENT_TO_PROVIDER1 =",
@@ -1190,10 +1193,10 @@ def process_request(request_id: int):
                         )
         
                         if req.source_group_id:
-                            send_group_text(req.source_group_id, msg)
+                            send_group_text(req.source_group_id, msg, req.instance_name)
                         else:
                             from app.services.evolution import send_text
-                            send_text(req.requester_wa_id, msg)
+                            send_text(req.requester_wa_id, msg, req.instance_name)
         
                         req.status = "ERROR"
                         req.error_message = f"PROVIDER4_FALLBACK_NO_PROVIDER3:{p4_err}"
@@ -1315,10 +1318,10 @@ def process_request(request_id: int):
                 )
 
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg)
+                    send_group_text(req.source_group_id, msg, req.instance_name)
                 else:
                     from app.services.evolution import send_text
-                    send_text(req.requester_wa_id, msg)
+                    send_text(req.requester_wa_id, msg, req.instance_name)
 
                 _notify_support_error(req, err, msg)
                 return
@@ -1336,10 +1339,10 @@ def process_request(request_id: int):
                 )
 
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg)
+                    send_group_text(req.source_group_id, msg, req.instance_name)
                 else:
                     from app.services.evolution import send_text
-                    send_text(req.requester_wa_id, msg)
+                    send_text(req.requester_wa_id, msg, req.instance_name)
 
                 _notify_support_error(req, err, msg)
                 return
@@ -1357,10 +1360,10 @@ def process_request(request_id: int):
                 )
 
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg)
+                    send_group_text(req.source_group_id, msg, req.instance_name)
                 else:
                     from app.services.evolution import send_text
-                    send_text(req.requester_wa_id, msg)
+                    send_text(req.requester_wa_id, msg, req.instance_name)
 
                 _notify_support_error(req, err, msg)
                 return
@@ -1381,10 +1384,10 @@ def process_request(request_id: int):
                 )
     
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg)
+                    send_group_text(req.source_group_id, msg, req.instance_name)
                 else:
                     from app.services.evolution import send_text
-                    send_text(req.requester_wa_id, msg)
+                    send_text(req.requester_wa_id, msg, req.instance_name)
 
                 #_notify_support_error(req, err, msg)
                 return
@@ -1402,10 +1405,10 @@ def process_request(request_id: int):
                 )
 
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg)
+                    send_group_text(req.source_group_id, msg, req.instance_name)
                 else:
                     from app.services.evolution import send_text
-                    send_text(req.requester_wa_id, msg)
+                    send_text(req.requester_wa_id, msg, req.instance_name)
 
                 _notify_support_error(req, err, msg)
                 return
@@ -1426,10 +1429,10 @@ def process_request(request_id: int):
                 )
     
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg)
+                    send_group_text(req.source_group_id, msg, req.instance_name)
                 else:
                     from app.services.evolution import send_text
-                    send_text(req.requester_wa_id, msg)
+                    send_text(req.requester_wa_id, msg, req.instance_name)
 
                 _notify_support_error(req, err, msg)
                 return
