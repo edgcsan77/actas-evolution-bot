@@ -7028,14 +7028,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             
                 pdf_received_ts = time.time()
                 print("PROVIDER1_PDF_RECEIVED =", media_message_id, pdf_received_ts, flush=True)
-
-                try:
-                    if open_req.created_at:
-                        created_ts = open_req.created_at.timestamp()
-                        open_req.provider_processing_time = round(pdf_received_ts - created_ts, 3)
-                        print("PROVIDER_PROCESSING_TIME =", open_req.provider_processing_time, flush=True)
-                except Exception as e:
-                    print("PROVIDER_PROCESSING_TIME_ERROR =", str(e), flush=True)
             
                 open_req = None
             
