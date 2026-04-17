@@ -6869,7 +6869,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             print("MEDIA_MESSAGE_ID_USED =", media_message_id, flush=True)
 
             # =========================
-            # MATCH ESPECIAL PROVIDER5: RESPUESTA "SIN" POR REPLY ID
+            # MATCH ESPECIAL PROVIDER5: RESPUESTAS NEGATIVAS
+            # 1) reply id
+            # 2) fallback por CURP en texto
             # =========================
             if not doc:
                 sin_values = {
@@ -6906,9 +6908,13 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     "NO HAY INFORMACIÓN",
                     "REGISTRO NO ENCONTRADO",
                     "REGISTRO NO LOCALIZADO",
+                    "NB",
                 }
 
-                if quoted_msg_id and text_norm in sin_values:
+                is_negative_text = any(v in text_norm for v in sin_values)
+
+                # 1) MATCH POR REPLY ID
+                if quoted_msg_id and is_negative_text:
                     open_req = (
                         db.query(RequestLog)
                         .filter(
@@ -6948,6 +6954,48 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         return {"ok": True, "provider_result": "provider5_sin_matched_by_reply_id"}
 
                     print("PROVIDER5_SIN_WITHOUT_MATCH =", quoted_msg_id, flush=True)
+
+                # 2) FALLBACK POR CURP EN TEXTO
+                if not quoted_msg_id and provider_id and is_negative_text:
+                    open_req = (
+                        db.query(RequestLog)
+                        .filter(
+                            RequestLog.provider_group_id == source_chat_id,
+                            RequestLog.curp == provider_id,
+                            RequestLog.status == "PROCESSING",
+                            RequestLog.provider_name == "PROVIDER5",
+                        )
+                        .order_by(RequestLog.created_at.desc())
+                        .first()
+                    )
+
+                    if open_req:
+                        print("PROVIDER5_FALLBACK_MATCHED_REQ_ID =", open_req.id, flush=True)
+                        print("PROVIDER5_FALLBACK_MATCHED_CURP =", open_req.curp, flush=True)
+
+                        open_req.status = "ERROR"
+                        open_req.error_message = "SIN REGISTRO"
+                        open_req.updated_at = _utc_now_naive()
+                        db.commit()
+
+                        msg = (
+                            f"❌ No hay registros disponibles.\n"
+                            f"Dato: {open_req.curp}\n"
+                            f"Tipo: {open_req.act_type}\n\n"
+                            f"Verificar que la CURP esté certificada en RENAPO"
+                        )
+
+                        try:
+                            if open_req.source_group_id:
+                                send_group_text(open_req.source_group_id, msg)
+                            else:
+                                send_text(open_req.requester_wa_id, msg)
+                        except Exception as notify_exc:
+                            print("PROVIDER5_FALLBACK_NOTIFY_ERROR =", str(notify_exc), flush=True)
+
+                        return {"ok": True, "provider_result": "provider5_fallback_matched_by_curp"}
+
+                    print("PROVIDER5_FALLBACK_WITHOUT_MATCH =", provider_id, flush=True)
 
             if doc:
                 filename = doc.get("fileName") or ""
