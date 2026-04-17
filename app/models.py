@@ -66,6 +66,8 @@ class RequestLog(Base):
 
     provider_to_webhook_lag_s = Column(Float, nullable=True)
     t_total_provider1_relay = Column(Float, nullable=True)
+    provider_processing_time = Column(Float, nullable=True)
+    total_delivery_time = Column(Float, nullable=True)
 
     pdf_url = Column(Text, nullable=True)
 
