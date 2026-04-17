@@ -515,6 +515,38 @@ def _panel_provider_rows(rows: list[RequestLog]) -> list[dict]:
     return out
 
 
+def _panel_instance_rows(rows: list[RequestLog]) -> list[dict]:
+    data = {}
+
+    for r in rows:
+        name = r.instance_name or "docifybot3"
+        if name not in data:
+            data[name] = {
+                "instance_name": name,
+                "total": 0,
+                "queued": 0,
+                "processing": 0,
+                "done": 0,
+                "error": 0,
+            }
+
+        item = data[name]
+        item["total"] += 1
+
+        if r.status == "QUEUED":
+            item["queued"] += 1
+        elif r.status == "PROCESSING":
+            item["processing"] += 1
+        elif r.status == "DONE":
+            item["done"] += 1
+        elif r.status == "ERROR":
+            item["error"] += 1
+
+    out = list(data.values())
+    out.sort(key=lambda x: (-x["total"], x["instance_name"]))
+    return out
+
+
 def _panel_type_rows(rows: list[RequestLog]) -> list[dict]:
     data = {}
 
@@ -838,6 +870,7 @@ def panel_recent_requests(
             RequestLog.act_type,
             RequestLog.status,
             RequestLog.source_group_id,
+            RequestLog.instance_name,
             RequestLog.provider_name,
             RequestLog.provider_group_id,
             RequestLog.created_at,
@@ -858,6 +891,7 @@ def panel_recent_requests(
           <th>Tipo</th>
           <th>Estado</th>
           <th>Grupo cliente</th>
+          <th>Bot</th>
           <th>Proveedor</th>
           <th>Grupo proveedor</th>
           <th>Creado</th>
@@ -883,7 +917,8 @@ def panel_recent_requests(
               <td class="mono">{_esc(r.curp)}</td>
               <td>{_esc(r.act_type)}</td>
               <td class="{status_class}">{_esc(r.status)}</td>
-              <td>{_esc(_group_name_cached(r.source_group_id, group_cache))}</td>
+              <td>{_esc(_group_name_cached(r.source_group_id, group_cache) if (r.instance_name or "docifybot3") == "docifybot3" else "OCULTO")}</td>
+              <td>{_esc(r.instance_name or "docifybot3")}</td>
               <td>{_esc(_provider_label(r.provider_name))}</td>
               <td>{_esc(_group_name_cached(r.provider_group_id, group_cache))}</td>
               <td>{_esc(_fmt_dt(r.created_at))}</td>
@@ -892,7 +927,7 @@ def panel_recent_requests(
             </tr>
             """
     else:
-        html += '<tr><td colspan="10">Sin solicitudes en este periodo.</td></tr>'
+        html += '<tr><td colspan="11">Sin solicitudes en este periodo.</td></tr>'
 
     html += """
       </tbody>
@@ -3441,6 +3476,47 @@ def panel_actas(
         
         by_type = list(type_map.values())
         by_type.sort(key=lambda x: (-x["total"], x["act_type"]))
+
+        by_instance_raw = (
+            base_q.with_entities(
+                RequestLog.instance_name,
+                RequestLog.status,
+                func.count(RequestLog.id),
+            )
+            .group_by(RequestLog.instance_name, RequestLog.status)
+            .all()
+        )
+    
+        instance_map = {}
+    
+        for name, st, cnt in by_instance_raw:
+            name = name or "docifybot3"
+            item = instance_map.setdefault(
+                name,
+                {
+                    "instance_name": name,
+                    "total": 0,
+                    "queued": 0,
+                    "processing": 0,
+                    "done": 0,
+                    "error": 0,
+                }
+            )
+    
+            cnt = int(cnt or 0)
+            item["total"] += cnt
+    
+            if st == "QUEUED":
+                item["queued"] += cnt
+            elif st == "PROCESSING":
+                item["processing"] += cnt
+            elif st == "DONE":
+                item["done"] += cnt
+            elif st == "ERROR":
+                item["error"] += cnt
+    
+        by_instance = list(instance_map.values())
+        by_instance.sort(key=lambda x: (-x["total"], x["instance_name"]))
         
         promo_map = _promotion_summary_map(db)
         
@@ -3451,6 +3527,7 @@ def panel_actas(
                 RequestLog.act_type,
                 RequestLog.status,
                 RequestLog.source_group_id,
+                RequestLog.instance_name,
                 RequestLog.provider_name,
                 RequestLog.provider_group_id,
                 RequestLog.created_at,
@@ -4564,6 +4641,49 @@ def panel_actas(
         </div>
         """
 
+        html += """
+        <div class="box">
+          <div class="head">
+            <strong>Resumen por bot</strong>
+            <span class="small">Solicitudes por instancia de WhatsApp.</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Bot</th>
+                  <th class="right">Total</th>
+                  <th class="right">EN COLA</th>
+                  <th class="right">PROCESANDO</th>
+                  <th class="right">HECHO</th>
+                  <th class="right">ERROR</th>
+                </tr>
+              </thead>
+              <tbody>
+        """
+    
+        if by_instance:
+            for r in by_instance:
+                html += f"""
+                <tr>
+                  <td>{_esc(r["instance_name"])}</td>
+                  <td class="right">{r["total"]}</td>
+                  <td class="right">{r["queued"]}</td>
+                  <td class="right">{r["processing"]}</td>
+                  <td class="right">{r["done"]}</td>
+                  <td class="right">{r["error"]}</td>
+                </tr>
+                """
+        else:
+            html += '<tr><td colspan="6">Sin datos.</td></tr>'
+    
+        html += """
+              </tbody>
+            </table>
+          </div>
+        </div>
+        """
+
         html += f"""
         <div class="box">
           <div class="head"><strong>Resumen por proveedor</strong></div>
@@ -4845,6 +4965,7 @@ def panel_actas(
                   <th>Tipo</th>
                   <th>Estado</th>
                   <th>Grupo cliente</th>
+                  <th>Bot</th>
                   <th>Proveedor</th>
                   <th>Grupo proveedor</th>
                   <th>Creado</th>
@@ -4870,7 +4991,8 @@ def panel_actas(
                   <td class="mono">{_esc(r.curp)}</td>
                   <td>{_esc(r.act_type)}</td>
                   <td class="{status_class}">{_esc(r.status)}</td>
-                  <td>{_esc(_group_name_cached(r.source_group_id, group_cache))}</td>
+                  <td>{_esc(_group_name_cached(r.source_group_id, group_cache) if (r.instance_name or "docifybot3") == "docifybot3" else "OCULTO")}</td>
+                  <td>{_esc(r.instance_name or "docifybot3")}</td>
                   <td>{_esc(_provider_label(r.provider_name))}</td>
                   <td>{_esc(_group_name_cached(r.provider_group_id, group_cache))}</td>
                   <td>{_esc(_fmt_dt(r.created_at))}</td>
@@ -4879,7 +5001,7 @@ def panel_actas(
                 </tr>
                 """
         else:
-            html += '<tr><td colspan="10">Sin solicitudes en este periodo.</td></tr>'
+            html += '<tr><td colspan="11">Sin solicitudes en este periodo.</td></tr>'
     
         html += f"""
               </tbody>
@@ -6507,6 +6629,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         print("WEBHOOK PAYLOAD =", payload, flush=True)
         event = payload.get("event", "")
         data = payload.get("data", {})
+        instance_name = payload.get("instance", "default")
+
+        print("WEBHOOK_INSTANCE =", instance_name, flush=True)
         
         if event != "messages.upsert":
             return {"ok": True, "ignored": event}
@@ -7271,6 +7396,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 requester_name="",
                 source_chat_id=source_chat_id,
                 source_group_id=source_group_id,
+                instance_name=instance_name,
                 evolution_message_id=msg_id,
                 status="QUEUED",
                 created_at=_utc_now_naive(),
