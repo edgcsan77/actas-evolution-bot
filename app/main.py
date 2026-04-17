@@ -3872,7 +3872,7 @@ def panel_actas(
             
               .table-wrap table {{
                 width: max-content;
-                min-width: 1500px;
+                min-width: 1650px;
                 border-collapse: collapse;
               }}
             
@@ -3886,6 +3886,26 @@ def panel_actas(
                 min-width: 220px;
                 max-width: 320px;
                 word-break: break-word;
+              }}
+
+              th, td {{
+                padding: 12px;
+                border-bottom: 1px solid var(--line);
+                text-align: left;
+                vertical-align: top;
+                font-size: .95rem;
+              }}
+            
+              th {{
+                background: #1f2937;
+                color: white;
+                position: sticky;
+                top: 0;
+                z-index: 1;
+              }}
+            
+              tr:hover td {{
+                background: #f9fafb;
               }}
             
               th {{
