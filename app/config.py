@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     PROVIDER3_TIMEOUT_LOGIN: int = 60
     PROVIDER3_TIMEOUT_GENERATE: int = 120
 
+    # PROVIDER 5
+    PROVIDER5_GROUP_1: str = ""
+    PROVIDER5_GROUP_2: str = ""
+
     PROVIDER_NO_RECORD_TEXT: str = (
         "NO HAY REGISTROS DISPONIBLES|"
         "NO SE ENCONTRO EL ACTA EN SISTEMA|"
