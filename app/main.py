@@ -218,7 +218,7 @@ def cron_provider3_keepalive(request: Request):
 def bot_is_open():
     now = datetime.now(ZoneInfo("America/Monterrey"))
     hour = now.hour
-    return 1 <= hour < 23
+    return True
 
 
 def _clear_panel_cache():
