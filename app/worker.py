@@ -295,6 +295,7 @@ def _enabled_providers(db) -> list[str]:
     p3 = _get_or_create_provider(db, "PROVIDER3", False)
     p4 = _get_or_create_provider(db, "PROVIDER4", False)
     p5 = _get_or_create_provider(db, "PROVIDER5", False)
+    p6 = _get_or_create_provider(db, "PROVIDER6", False)
 
     enabled = []
     if p1.is_enabled:
@@ -307,6 +308,8 @@ def _enabled_providers(db) -> list[str]:
         enabled.append("PROVIDER4")
     if p5.is_enabled:
         enabled.append("PROVIDER5")
+    if p6.is_enabled:
+        enabled.append("PROVIDER6")
 
     return enabled
 
@@ -415,6 +418,19 @@ def _pick_provider_group(provider_name: str, act_type: str, request_id: int) -> 
         idx = (request_id - 1) % len(provider5_groups)
         return provider5_groups[idx]
 
+    if provider_name == "PROVIDER6":
+        provider6_groups = [
+            settings.PROVIDER6_GROUP_1,
+            settings.PROVIDER6_GROUP_2,
+        ]
+        provider6_groups = [g for g in provider6_groups if g]
+
+        if not provider6_groups:
+            raise RuntimeError("PROVIDER6_GROUPS_NOT_CONFIGURED")
+
+        idx = (request_id - 1) % len(provider6_groups)
+        return provider6_groups[idx]
+
     raise RuntimeError("UNKNOWN_PROVIDER")
 
 
@@ -434,6 +450,10 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
         return None
 
     if provider_name == "PROVIDER5":
+        provider_type = provider_label_for_type(act_type)
+        return f"{term} {provider_type}"
+
+    if provider_name == "PROVIDER6":
         provider_type = provider_label_for_type(act_type)
         return f"{term} {provider_type}"
 
@@ -938,7 +958,7 @@ def process_request(request_id: int):
         print("WORKER_PROVIDER_GROUP_ID =", provider_group_id, flush=True)
         print("WORKER_TEXT_TO_PROVIDER =", text_to_provider, flush=True)
 
-        if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5"):
+        if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6"):
             print("PROVIDER_SEND_TO_PROVIDER =", req.id, time.time(), flush=True)
         
             send_ok = False
