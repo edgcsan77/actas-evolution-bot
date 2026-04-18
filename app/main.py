@@ -8431,10 +8431,17 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 print("T_DELIVER_PDF_RESULT =", round(time.perf_counter() - t4, 3), flush=True)
 
                 try:
-                    used, limit_value, blocked_now = increment_bot_used_and_maybe_block(db, open_req.instance_name or "docifybot3")
-                    print("BOT_USED_AFTER_DONE =", used, flush=True)
-                    print("BOT_LIMIT =", limit_value, flush=True)
-                    print("BOT_BLOCKED_NOW =", blocked_now, flush=True)
+                    if open_req.instance_name:
+                        used, limit_value, blocked_now = increment_bot_used_and_maybe_block(
+                            db,
+                            open_req.instance_name
+                        )
+                        print("BOT_USED_AFTER_DONE =", used, flush=True)
+                        print("BOT_LIMIT =", limit_value, flush=True)
+                        print("BOT_BLOCKED_NOW =", blocked_now, flush=True)
+                    else:
+                        print("BOT_INSTANCE_MISSING_FOR_REQ =", open_req.id, flush=True)
+                
                 except Exception as bot_limit_exc:
                     print("BOT_LIMIT_UPDATE_ERROR =", str(bot_limit_exc), flush=True)
 
