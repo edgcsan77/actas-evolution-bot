@@ -3841,7 +3841,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
     month_sales = _bot_sales_month(db, instance_name)
     history_rows = _bot_sales_history_30d(db, instance_name)
     groups = _bot_group_stats(db, instance_name)
-    credits = _bot_credits_stats(db, instance_name)
+    credits = _bot_credit_stats(db, instance_name)
 
     credits = credits or {}
     credits.setdefault("limit", 0)
