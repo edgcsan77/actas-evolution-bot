@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     REDIS_URL: str
 
+    ADMIN_PANEL_TOKEN: str
+
     EVOLUTION_BASE_URL: str
     EVOLUTION_API_KEY: str
     EVOLUTION_INSTANCE: str
