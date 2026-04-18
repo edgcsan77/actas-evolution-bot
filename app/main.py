@@ -113,6 +113,11 @@ BOT_LABELS = {
 }
 
 
+BOT_PANEL_TOKENS = {
+    "4a8c92a1e7": "MAX BOT",
+}
+
+
 BOT_DISPLAY_NAMES = {
     "docifybot3": "DOCU EXPRES",
     "docifybot4": "MAX BOT",
@@ -3633,7 +3638,7 @@ def _panel_delivery_metrics(db, time_min, time_max):
         return None
 
 
-@app.post("/panel/bot/{instance_name}/group/{group_jid}/block")
+@app.post("/botpanel/{token}/group/{group_jid}/block")
 def panel_bot_block_group(instance_name: str, group_jid: str, db: Session = Depends(get_db)):
     try:
         _assert_group_owned_by_bot(db, group_jid, instance_name)
@@ -3644,7 +3649,7 @@ def panel_bot_block_group(instance_name: str, group_jid: str, db: Session = Depe
         return {"ok": False, "error": str(e)}
 
 
-@app.post("/panel/bot/{instance_name}/group/{group_jid}/unblock")
+@app.post("/botpanel/{token}/group/{group_jid}/unblock")
 def panel_bot_unblock_group(instance_name: str, group_jid: str, db: Session = Depends(get_db)):
     try:
         _assert_group_owned_by_bot(db, group_jid, instance_name)
@@ -3655,7 +3660,7 @@ def panel_bot_unblock_group(instance_name: str, group_jid: str, db: Session = De
         return {"ok": False, "error": str(e)}
 
 
-@app.post("/panel/bot/{instance_name}/group/{group_jid}/rename")
+@app.post("/botpanel/{token}/group/{group_jid}/rename")
 async def panel_bot_rename_group(instance_name: str, group_jid: str, request: Request, db: Session = Depends(get_db)):
     try:
         _assert_group_owned_by_bot(db, group_jid, instance_name)
@@ -3685,7 +3690,7 @@ async def panel_bot_rename_group(instance_name: str, group_jid: str, request: Re
         return {"ok": False, "error": str(e)}
 
 
-@app.post("/panel/bot/{instance_name}/promotion/set")
+@app.post("/botpanel/{token}/promotion/set")
 async def panel_bot_set_promo(instance_name: str, request: Request, db: Session = Depends(get_db)):
     try:
         payload = await request.json()
@@ -3727,7 +3732,7 @@ async def panel_bot_set_promo(instance_name: str, request: Request, db: Session 
         return {"ok": False, "error": str(e)}
 
 
-@app.get("/panel/bot/{instance_name}")
+@app.get("/botpanel/{token}")
 def panel_bot(instance_name: str, db: Session = Depends(get_db)):
     if not _is_child_bot(instance_name):
         return HTMLResponse("<h3>Este panel es solo para bots desde docifybot4 en adelante.</h3>", status_code=400)
