@@ -287,12 +287,14 @@ def panel_instances(db: Session = Depends(get_db)):
 @app.post("/panel/instance/{instance_name}/block")
 def panel_block_instance(instance_name: str):
     block_instance(instance_name)
+    _clear_panel_cache()
     return {"ok": True, "instance_name": instance_name, "blocked": True}
 
 
 @app.post("/panel/instance/{instance_name}/unblock")
 def panel_unblock_instance(instance_name: str):
     unblock_instance(instance_name)
+    _clear_panel_cache()
     return {"ok": True, "instance_name": instance_name, "blocked": False}
 
 
@@ -305,6 +307,7 @@ async def panel_set_instance_limit(instance_name: str, request: Request, db: Ses
 
     limit_value = int(payload.get("limit") or 0)
     set_bot_limit(db, instance_name, limit_value)
+    _clear_panel_cache()
 
     return {
         "ok": True,
@@ -318,6 +321,7 @@ async def panel_set_instance_limit(instance_name: str, request: Request, db: Ses
 @app.post("/panel/instance/{instance_name}/reset-usage")
 def panel_reset_instance_usage(instance_name: str, db: Session = Depends(get_db)):
     set_bot_used(db, instance_name, 0)
+    _clear_panel_cache()
     return {
         "ok": True,
         "instance_name": instance_name,
@@ -339,6 +343,7 @@ async def panel_recharge_instance(instance_name: str, request: Request, db: Sess
 
     set_bot_limit(db, instance_name, new_limit)
     unblock_instance(instance_name)
+    _clear_panel_cache()
 
     return {
         "ok": True,
