@@ -20,6 +20,7 @@ class AuthorizedGroup(Base):
     group_jid = Column(String(120), unique=True, nullable=False, index=True)
     group_name = Column(String(150), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
+    owner_instance = Column(String(50), nullable=True, index=True)
 
 
 class ProviderSetting(Base):
@@ -88,6 +89,7 @@ class GroupAlias(Base):
     group_jid = Column(String(120), unique=True, nullable=False, index=True)
     custom_name = Column(String(255), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+    owner_instance = Column(String(50), nullable=True, index=True)
 
 
 class GroupCategory(Base):
@@ -98,6 +100,7 @@ class GroupCategory(Base):
     category = Column(String, nullable=False, default="otro")
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)
+    owner_instance = Column(String(50), nullable=True, index=True)
 
 
 class GroupPromotion(Base):
@@ -127,6 +130,7 @@ class GroupPromotion(Base):
     warning_sent_50 = Column(Boolean, default=False, nullable=False)
     warning_sent_10 = Column(Boolean, default=False, nullable=False)
     warning_sent_0 = Column(Boolean, default=False, nullable=False)
+    owner_instance = Column(String(50), nullable=True, index=True)
 
     is_active = Column(Boolean, default=True, nullable=False)
     
