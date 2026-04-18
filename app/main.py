@@ -3993,7 +3993,6 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
           </div>
         </div>
 
-        html += f"""
         <div class="cards">
           <div class="card">
             <div class="label">Actas cargadas</div>
@@ -4015,7 +4014,6 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
             <div class="value">{credits['recharges']}</div>
           </div>
         </div>
-        """
 
         <div class="box">
           <div class="head">
