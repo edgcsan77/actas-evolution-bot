@@ -3937,6 +3937,9 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
         }}
       </style>
     </head>
+    """
+
+    html += f"""
     <body>
       <div class="wrap">
         <div class="hero">
@@ -3949,6 +3952,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
             <div class="label">Vendidas hoy</div>
             <div class="value">{today_sales}</div>
           </div>
+
           <div class="card">
             <div class="label">Vendidas 30 días</div>
             <div class="value">{month_sales}</div>
@@ -3967,7 +3971,6 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
           </div>
         </div>
 
-        html += """
         <div class="box">
           <div class="head">
             <strong>Agregar grupo manualmente</strong>
@@ -3989,7 +3992,6 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
             </div>
           </div>
         </div>
-        """
 
         <div class="box">
           <div class="head">
