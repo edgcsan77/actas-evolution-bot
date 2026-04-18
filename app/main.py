@@ -4990,9 +4990,9 @@ def panel_actas(
                         Reset usadas
                       </button>
                       {
-                        f'<button class="btn btn-success" onclick="unblockBot(\\'{_esc(inst)}\\')">Desbloquear</button>'
+                        f'<button class="btn btn-success" onclick="unblockBot(\'{_esc(inst)}\')">Desbloquear</button>'
                         if bot_blocked
-                        else f'<button class="btn btn-danger" onclick="blockBot(\\'{_esc(inst)}\\')">Bloquear</button>'
+                        else f'<button class="btn btn-danger" onclick="blockBot(\'{_esc(inst)}\')">Bloquear</button>'
                       }
                     </div>
                   </td>
