@@ -4067,6 +4067,7 @@ def panel_bot(instance_name: str, db: Session = Depends(get_db)):
                     
 @app.get("/panel", response_class=HTMLResponse)
 def panel_actas(
+    request: Request,
     view: str = "day",
     group_jid: str = "",
     provider_name: str = "",
