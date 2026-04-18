@@ -102,8 +102,8 @@ PROVIDER_LABELS = {
 
 
 BOT_LABELS = {
-    "docifybot3": "MESINO",
-    "docifybot4": "MAX",
+    "docifybot3": "DOCU EXPRES",
+    "docifybot4": "MAX BOT",
 }
 
 
