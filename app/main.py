@@ -54,6 +54,12 @@ PANEL_STREAM_SLEEP = 10
 PANEL_STREAM_ENABLED = True
 
 
+def _is_valid_admin_panel_token(request: Request) -> bool:
+    token = (request.query_params.get("token") or "").strip()
+    expected = (settings.ADMIN_PANEL_TOKEN or "").strip()
+    return bool(expected) and token == expected
+
+
 def _utc_now_naive():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -4069,6 +4075,9 @@ def panel_actas(
     group_mode: str = "active",
     db: Session = Depends(get_db),
 ):
+    if not _is_valid_admin_panel_token(request):
+        return HTMLResponse("No autorizado", status_code=403)
+
     try:
         cache_key = _panel_cache_key(
             view=view,
