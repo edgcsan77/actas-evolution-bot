@@ -114,7 +114,7 @@ BOT_LABELS = {
 
 
 BOT_PANEL_TOKENS = {
-    "4a8c92a1e7": "MAX BOT",
+    "4a8c92a1e7": "docifybot4",
 }
 
 
