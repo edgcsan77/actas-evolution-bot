@@ -22,6 +22,7 @@ class AuthorizedGroup(Base):
     created_at = Column(DateTime, server_default=func.now())
     owner_instance = Column(String(50), nullable=True, index=True)
     is_hidden = Column(Boolean, default=False, nullable=False)
+    hidden_in_main = Column(Boolean, default=False, nullable=False)
 
 
 class ProviderSetting(Base):
@@ -92,6 +93,7 @@ class GroupAlias(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
     owner_instance = Column(String(50), nullable=True, index=True)
     is_hidden = Column(Boolean, default=False, nullable=False)
+    hidden_in_main = Column(Boolean, default=False, nullable=False)
 
 
 class GroupCategory(Base):
