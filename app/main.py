@@ -108,6 +108,7 @@ PROVIDER_LABELS = {
     "PROVIDER2": "ACTAS DEL SURESTE",
     "PROVIDER3": "AUSTRAM WEB",
     "PROVIDER5": "LUIS SID",
+    "PROVIDER6": "ACTAS ESCALANTE",
 }
 
 
@@ -119,12 +120,6 @@ BOT_LABELS = {
 
 BOT_PANEL_TOKENS = {
     "4a8c92a1e7": "docifybot4",
-}
-
-
-BOT_DISPLAY_NAMES = {
-    "docifybot3": "DOCU EXPRES",
-    "docifybot4": "MAX BOT",
 }
 
 
@@ -3166,6 +3161,7 @@ GROUP_NAME_MAP = {
     "120363409374690453@g.us": "AD 3",
     "120363424119914828@g.us": "SURESTE",
     "120363408943747132@g.us": "LUIS SID",
+    "120363407592512859@g.us": "ESCALANTE",
     "120363422785755828@g.us": "Gpo. No. 4 Karen",
     "120363426949877636@g.us": "Gpo. No. 11 Morelos",
     "120363425014097597@g.us": "Gpo. No. 7 Karen Marvin",
@@ -5479,6 +5475,14 @@ def panel_actas(
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER5','off')">Desactivar</button>
                       </div>
                     </div>
+
+                    <div class="provider-card">
+                      <div class="provider-name">ACTAS ESCALANTE</div>
+                      <div class="provider-actions">
+                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER6','on')">Activar</button>
+                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER6','off')">Desactivar</button>
+                      </div>
+                    </div>
                   </div>
         
                   <div class="status-panel">
@@ -7004,7 +7008,8 @@ def startup():
         _get_or_create_provider(db, "PROVIDER3", False)
         _get_or_create_provider(db, "PROVIDER4", False)
         _get_or_create_provider(db, "PROVIDER5", False)
-
+        _get_or_create_provider(db, "PROVIDER6", False)
+    
         current = _get_app_setting(db, "PROVIDER3_PHPSESSID", "")
         if not current and settings.PROVIDER3_PHPSESSID:
             _set_app_setting(db, "PROVIDER3_PHPSESSID", settings.PROVIDER3_PHPSESSID)
@@ -7296,6 +7301,8 @@ def _all_provider_groups() -> set[str]:
         settings.PROVIDER2_GROUP_2,
         settings.PROVIDER5_GROUP_1,
         settings.PROVIDER5_GROUP_2,
+        settings.PROVIDER6_GROUP_1,
+        settings.PROVIDER6_GROUP_2,
     }
     return {v.strip() for v in vals if v and v.strip()}
 
@@ -7442,18 +7449,21 @@ def _providers_status_text(db: Session) -> str:
     p3 = _get_or_create_provider(db, "PROVIDER3", False)
     p4 = _get_or_create_provider(db, "PROVIDER4", False)
     p5 = _get_or_create_provider(db, "PROVIDER5", False)
+    p6 = _get_or_create_provider(db, "PROVIDER6", False)
 
     s1 = "ON" if p1.is_enabled else "OFF"
     s2 = "ON" if p2.is_enabled else "OFF"
     s3 = "ON" if p3.is_enabled else "OFF"
     s4 = "ON" if p4.is_enabled else "OFF"
     s5 = "ON" if p5.is_enabled else "OFF"
+    s6 = "ON" if p6.is_enabled else "OFF"
 
     provider1_extra = ""
     provider2_extra = ""
     provider3_extra = ""
     provider4_extra = ""
     provider5_extra = ""
+    provider6_extra = ""
 
     local_start = _panel_month_start()
     local_end = _panel_month_end()
@@ -7530,11 +7540,27 @@ def _providers_status_text(db: Session) -> str:
     except Exception as e:
         provider5_extra = f" | ERROR DB: {str(e)}"
 
+    try:
+        provider6_total = (
+            db.query(func.count(RequestLog.id))
+            .filter(
+                RequestLog.provider_name == "PROVIDER6",
+                RequestLog.status == "DONE",
+                RequestLog.created_at >= utc_start,
+                RequestLog.created_at < utc_end,
+            )
+            .scalar()
+        ) or 0
+        provider6_extra = f" | CURP y CADENA hechas: {provider6_total}"
+    except Exception as e:
+        provider6_extra = f" | ERROR DB: {str(e)}"
+
     text = (
         f"ADMIN DIGITAL:\n{s1}{provider1_extra}\n\n"
         f"ACTAS DEL SURESTE:\n{s2}{provider2_extra}\n\n"
         f"AUSTRAM WEB:\n{s3}{provider3_extra}\n\n"
-        f"LUIS SID:\n{s5}{provider5_extra}"
+        f"LUIS SID:\n{s5}{provider5_extra}\n\n"
+        f"ACTAS ESCALANTE:\n{s5}{provider6_extra}"
     )
 
     return text
@@ -9063,7 +9089,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
         if created_any:
             actor = push_name or requester_wa_id
-            bot_name = BOT_DISPLAY_NAMES.get(instance_name, "DOCU EXPRES")
+            bot_name = BOT_LABELS.get(instance_name, "DOCU EXPRES")
             
             ack_msg = (
                 f"🚀 {bot_name}\n"
