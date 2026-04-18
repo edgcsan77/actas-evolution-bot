@@ -5198,8 +5198,8 @@ def panel_actas(
               </div>
         
               <div class="toolbar">
-                <a href="/panel?view=day&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'day' else ''}">Hoy</a>
-                <a href="/panel?view=month&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'month' else ''}">Mes actual</a>
+                <a href="/panel?token=docifymx2026&view=day&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'day' else ''}">Hoy</a>
+                <a href="/panel?token=docifymx2026&view=month&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'month' else ''}">Mes actual</a>
                 <a href="/panel/promotions/report" class="tool-link" target="_blank">Promociones</a>
               </div>
         
