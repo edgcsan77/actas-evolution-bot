@@ -7108,6 +7108,7 @@ def panel_toggle_all_groups():
 def panel_block_group(group_jid: str):
     print("PANEL_BLOCK_GROUP =", group_jid, flush=True)
     block_group(group_jid)
+    _clear_panel_cache()
     return {"ok": True, "group_jid": group_jid, "blocked": True}
 
 
@@ -7115,6 +7116,7 @@ def panel_block_group(group_jid: str):
 def panel_unblock_group(group_jid: str):
     print("PANEL_UNBLOCK_GROUP =", group_jid, flush=True)
     unblock_group(group_jid)
+    _clear_panel_cache()
     return {"ok": True, "group_jid": group_jid, "blocked": False}
 
 
