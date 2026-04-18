@@ -7847,10 +7847,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         is_admin_command = text_upper.startswith("/")
 
         if is_group and not is_provider_message:
-        try:
-            _ensure_group_owner(db, source_group_id, instance_name)
-        except Exception as e:
-            print("ENSURE_GROUP_OWNER_ERROR =", str(e), flush=True)
+            try:
+                _ensure_group_owner(db, source_group_id, instance_name)
+            except Exception as e:
+                print("ENSURE_GROUP_OWNER_ERROR =", str(e), flush=True)
 
         if is_instance_blocked(instance_name) and not is_admin_command:
             msg = (
