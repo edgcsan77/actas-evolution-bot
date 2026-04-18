@@ -5846,11 +5846,11 @@ def panel_actas(
           </div>
           <div class="group-mode-bar">
             <a class="group-mode-link {'group-mode-link-active' if group_mode == 'all' else ''}"
-               href="/panel?view={_esc(view)}&group_mode=all&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
+               href="/panel?token=docifymx2026&view={_esc(view)}&group_mode=all&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
               Ver todos los grupos
             </a>
             <a class="group-mode-link {'group-mode-link-active' if group_mode == 'active' else ''}"
-               href="/panel?view={_esc(view)}&group_mode=active&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
+               href="/panel?token=docifymx2026&view={_esc(view)}&group_mode=active&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
               Solo grupos con compras del día
             </a>
           </div>
