@@ -3646,12 +3646,16 @@ def _bot_credit_stats(db: Session, instance_name: str):
     row = db.query(BotControl).filter_by(instance_name=instance_name).first()
 
     if not row:
-        return {
-            "limit": 0,
-            "used": 0,
-            "available": 0,
-            "recharges": 0
-        }
+        row = BotControl(
+            instance_name=instance_name,
+            limit=0,
+            used=0,
+            recharges=0,
+            is_blocked=False
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
 
     available = max((row.limit or 0) - (row.used or 0), 0)
 
