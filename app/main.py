@@ -131,6 +131,30 @@ BOT_DISPLAY_NAMES = {
 MIN_BOT_PROMO_ACTAS = 10
 
 
+def hide_group_from_panels(db: Session, group_jid: str):
+    row = db.query(AuthorizedGroup).filter_by(group_jid=group_jid).first()
+    if row:
+        row.is_hidden = True
+
+    alias = db.query(GroupAlias).filter_by(group_jid=group_jid).first()
+    if alias and hasattr(alias, "is_hidden"):
+        alias.is_hidden = True
+
+    db.commit()
+
+
+def unhide_group_from_panels(db: Session, group_jid: str):
+    row = db.query(AuthorizedGroup).filter_by(group_jid=group_jid).first()
+    if row:
+        row.is_hidden = False
+
+    alias = db.query(GroupAlias).filter_by(group_jid=group_jid).first()
+    if alias and hasattr(alias, "is_hidden"):
+        alias.is_hidden = False
+
+    db.commit()
+    
+
 def _is_child_bot(instance_name: str) -> bool:
     inst = (instance_name or "").strip().lower()
     return inst.startswith("docifybot") and inst != "docifybot3"
@@ -169,7 +193,10 @@ def _get_bot_group_name(db: Session, group_jid: str) -> str:
 def _bot_groups_for_instance(db: Session, instance_name: str):
     return (
         db.query(AuthorizedGroup)
-        .filter(AuthorizedGroup.owner_instance == instance_name)
+        .filter(
+            AuthorizedGroup.owner_instance == instance_name,
+            AuthorizedGroup.is_hidden == False
+        )
         .order_by(AuthorizedGroup.group_name.asc(), AuthorizedGroup.group_jid.asc())
         .all()
     )
@@ -421,6 +448,48 @@ def unblock_group(group_jid: str):
     redis_conn.srem(BLOCKED_GROUPS_KEY, group_jid)
     print("GROUP_UNBLOCKED =", group_jid, flush=True)
     print("BLOCKED_GROUPS_NOW =", redis_conn.smembers(BLOCKED_GROUPS_KEY), flush=True)
+
+
+@app.post("/panel/group/{group_jid}/hide")
+def panel_hide_group(group_jid: str, db: Session = Depends(get_db)):
+    try:
+        hide_group_from_panels(db, group_jid)
+        _clear_panel_cache()
+        _clear_group_name_cache()
+        return {"ok": True, "group_jid": group_jid, "hidden": True}
+    except Exception as e:
+        db.rollback()
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/panel/group/{group_jid}/unhide")
+def panel_unhide_group(group_jid: str, db: Session = Depends(get_db)):
+    try:
+        unhide_group_from_panels(db, group_jid)
+        _clear_panel_cache()
+        _clear_group_name_cache()
+        return {"ok": True, "group_jid": group_jid, "hidden": False}
+    except Exception as e:
+        db.rollback()
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/botpanel/{token}/group/{group_jid}/hide")
+def panel_bot_hide_group(token: str, group_jid: str, db: Session = Depends(get_db)):
+    try:
+        instance_name = _bot_instance_from_token(token)
+        if not instance_name:
+            return {"ok": False, "error": "Panel no válido"}
+
+        _assert_group_owned_by_bot(db, group_jid, instance_name)
+        hide_group_from_panels(db, group_jid)
+
+        _clear_panel_cache()
+        _clear_group_name_cache()
+        return {"ok": True, "hidden": True}
+    except Exception as e:
+        db.rollback()
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/panel/instances")
@@ -4084,6 +4153,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                 f'<button class="btn btn-success" onclick="unblockBotGroup(\'{_esc(g["group_jid"])}\')">Desbloquear</button>'
                 if g["blocked"] else
                 f'<button class="btn btn-danger" onclick="blockBotGroup(\'{_esc(g["group_jid"])}\')">Bloquear</button>'
+                <button class="btn btn-light" onclick="hideBotGroup('{_esc(g["group_jid"])}')">Quitar</button>
             )
 
             html += f"""
@@ -4176,6 +4246,22 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
           const data = await res.json();
           if (data.ok) location.reload();
           else alert(data.error || "No se pudo desbloquear");
+        }
+
+        async function hideBotGroup(groupJid) {
+          const ok = confirm("¿Quitar este grupo del mini panel?");
+          if (!ok) return;
+        
+          const res = await fetch(`${BOT_PANEL_BASE}/group/${encodeURIComponent(groupJid)}/hide`, {
+            method: "POST"
+          });
+        
+          const data = await res.json();
+          if (data.ok) {
+            location.reload();
+          } else {
+            alert(data.error || "No se pudo quitar el grupo.");
+          }
         }
 
         async function addManualBotGroup() {
@@ -5798,8 +5884,8 @@ def panel_actas(
                       </button>
                       {
                         f'<button class="btn btn-success" onclick="unblockBot(\'{_esc(inst)}\')">Desbloquear</button>'
-                        if bot_blocked
-                        else f'<button class="btn btn-danger" onclick="blockBot(\'{_esc(inst)}\')">Bloquear</button>'
+                        if bot_blocked else 
+                        f'<button class="btn btn-danger" onclick="blockBot(\'{_esc(inst)}\')">Bloquear</button>'
                       }
                     </div>
                   </td>
@@ -5988,7 +6074,7 @@ def panel_actas(
                   <th>Promoción</th>
                   <th>Última actualización</th>
                   <th>Bloqueo</th>
-                  <th>Acción</th>
+                  <th>Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -6001,8 +6087,9 @@ def panel_actas(
                 
                 block_btn = (
                     f'<button class="btn btn-success" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'unblock\')">Desbloquear</button>'
-                    if blocked
-                    else f'<button class="btn btn-danger" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'block\')">Bloquear</button>'
+                    if blocked else 
+                    f'<button class="btn btn-danger" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'block\')">Bloquear</button>'
+                    f'<button class="btn btn-light" onclick="hideGroupFromPanel(\'{r["group_jid"]}\')">Quitar</button>'
                 )
                 
                 action_btn = f'''
@@ -6218,6 +6305,22 @@ def panel_actas(
             }}
           }} catch (e) {{
             alert("Error de conexión al guardar el límite.");
+          }}
+        }}
+
+        async function hideGroupFromPanel(groupJid) {{
+          const ok = confirm("¿Quitar este grupo visualmente del panel?");
+          if (!ok) return;
+        
+          const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/hide`, {{
+            method: "POST"
+          }});
+        
+          const data = await res.json();
+          if (data.ok) {{
+            location.reload();
+          }} else {{
+            alert(data.error || "No se pudo quitar el grupo.");
           }}
         }}
         
