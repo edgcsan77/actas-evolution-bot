@@ -4362,6 +4362,21 @@ def panel_actas(
         
         group_cache = _build_group_name_cache(db)
         delivery_metrics = _panel_delivery_metrics(db, time_min, time_max)
+
+        visible_main_group_ids = {
+            g.group_jid
+            for g in (
+                db.query(AuthorizedGroup.group_jid)
+                .filter(
+                    or_(
+                        AuthorizedGroup.hidden_in_main == False,
+                        AuthorizedGroup.hidden_in_main.is_(None),
+                    )
+                )
+                .all()
+            )
+        }
+        visible_main_group_ids.add("PRIVADO")
         
         status_rows = (
             base_q.with_entities(
@@ -4413,7 +4428,9 @@ def panel_actas(
         group_map = {}
         
         if include_all_groups and not has_active_filters:
-            for gid in set(GROUP_NAME_MAP.keys()) | set(group_cache.keys()):
+            for gid in (set(GROUP_NAME_MAP.keys()) | set(group_cache.keys())):
+                if gid not in visible_main_group_ids:
+                    continue
                 group_map[gid] = {
                     "group_jid": gid,
                     "group_name": _group_name_cached(gid, group_cache),
@@ -4427,6 +4444,8 @@ def panel_actas(
         
         for gid, st, cnt, last_upd in group_rows_raw:
             gid = gid or "PRIVADO"
+            if gid not in visible_main_group_ids:
+                    continue
             item = group_map.setdefault(gid, {
                 "group_jid": gid,
                 "group_name": _group_name_cached(gid, group_cache),
