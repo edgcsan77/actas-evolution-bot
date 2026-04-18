@@ -101,6 +101,22 @@ PROVIDER_LABELS = {
 }
 
 
+BOT_LABELS = {
+    "docifybot3": "MESINO",
+    "docifybot4": "MAX",
+}
+
+
+BOT_DISPLAY_NAMES = {
+    "docifybot3": "DOCU EXPRES",
+    "docifybot4": "MAX BOT",
+}
+
+
+def bot_label(inst):
+    return BOT_LABELS.get(inst, inst)
+
+
 def _provider_label(name: str) -> str:
     if not name:
         return ""
@@ -4888,7 +4904,7 @@ def panel_actas(
             for r in by_instance:
                 html += f"""
                 <tr>
-                  <td>{_esc(r["instance_name"])}</td>
+                  <td>{_esc(bot_label(r["instance_name"]))}</td>
                   <td class="right">{r["total"]}</td>
                   <td class="right">{r["queued"]}</td>
                   <td class="right">{r["processing"]}</td>
@@ -4944,7 +4960,7 @@ def panel_actas(
         
             html += f"""
                 <tr>
-                  <td><strong>{_esc(inst)}</strong></td>
+                  <td><strong>{_esc(bot_label(inst))}</strong></td>
                   <td class="right">{r["total"]}</td>
                   <td class="right">{bot_used}</td>
                   <td class="right">{bot_limit}</td>
@@ -8138,8 +8154,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
         if created_any:
             actor = push_name or requester_wa_id
+            bot_name = BOT_DISPLAY_NAMES.get(instance_name, "DOCU EXPRES")
+            
             ack_msg = (
-                f"🚀 DOCU EXPRES\n"
+                f"🚀 {bot_name}\n"
                 f"Solicitud recibida de {actor}.\n"
                 f"Esto puede tardar unos segundos..."
             )
