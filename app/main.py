@@ -296,7 +296,9 @@ def _bot_group_stats(db: Session, instance_name: str):
 
 
 def bot_label(inst):
-    return BOT_LABELS.get(inst, inst)
+    if not inst:
+        return ""
+    return BOT_LABELS.get(inst.lower(), inst)
 
 
 def _provider_label(name: str) -> str:
