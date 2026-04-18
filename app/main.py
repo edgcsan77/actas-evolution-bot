@@ -3642,6 +3642,27 @@ def _panel_delivery_metrics(db, time_min, time_max):
         return None
 
 
+def _bot_credit_stats(db: Session, instance_name: str):
+    row = db.query(BotControl).filter_by(instance_name=instance_name).first()
+
+    if not row:
+        return {
+            "limit": 0,
+            "used": 0,
+            "available": 0,
+            "recharges": 0
+        }
+
+    available = max((row.limit or 0) - (row.used or 0), 0)
+
+    return {
+        "limit": row.limit or 0,
+        "used": row.used or 0,
+        "available": available,
+        "recharges": row.recharges or 0
+    }
+
+
 @app.post("/botpanel/{token}/group/{group_jid}/block")
 def panel_bot_block_group(token: str, group_jid: str, db: Session = Depends(get_db)):
     try:
@@ -3820,6 +3841,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
     month_sales = _bot_sales_month(db, instance_name)
     history_rows = _bot_sales_history_30d(db, instance_name)
     groups = _bot_group_stats(db, instance_name)
+    credits = _bot_credits_stats(db, instance_name)
 
     total_groups = len(groups)
     blocked_groups = sum(1 for g in groups if g["blocked"])
@@ -3970,6 +3992,30 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
             <div class="value">{active_promos}</div>
           </div>
         </div>
+
+        html += f"""
+        <div class="cards">
+          <div class="card">
+            <div class="label">Actas cargadas</div>
+            <div class="value">{credits['limit']}</div>
+          </div>
+        
+          <div class="card">
+            <div class="label">Actas usadas</div>
+            <div class="value">{credits['used']}</div>
+          </div>
+        
+          <div class="card">
+            <div class="label">Actas disponibles</div>
+            <div class="value">{credits['available']}</div>
+          </div>
+        
+          <div class="card">
+            <div class="label">Recargas realizadas</div>
+            <div class="value">{credits['recharges']}</div>
+          </div>
+        </div>
+        """
 
         <div class="box">
           <div class="head">
