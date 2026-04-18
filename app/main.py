@@ -4153,7 +4153,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                 f'<button class="btn btn-success" onclick="unblockBotGroup(\'{_esc(g["group_jid"])}\')">Desbloquear</button>'
                 if g["blocked"] else
                 f'<button class="btn btn-danger" onclick="blockBotGroup(\'{_esc(g["group_jid"])}\')">Bloquear</button>'
-                f'<button class="btn btn-light" onclick="hideBotGroup('{_esc(g["group_jid"])}')">Quitar</button>'
+                f'<button class="btn btn-light" onclick="hideBotGroup(\'{_esc(g["group_jid"])}\')">Quitar</button>'
             )
 
             html += f"""
