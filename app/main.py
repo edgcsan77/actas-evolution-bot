@@ -3643,28 +3643,26 @@ def _panel_delivery_metrics(db, time_min, time_max):
 
 
 def _bot_credit_stats(db: Session, instance_name: str):
-    row = db.query(BotControl).filter_by(instance_name=instance_name).first()
+    try:
+        limit_value = get_bot_limit(db, instance_name)
+        used_value = get_bot_used(db, instance_name)
 
-    if not row:
-        row = BotControl(
-            instance_name=instance_name,
-            limit=0,
-            used=0,
-            recharges=0,
-            is_blocked=False
-        )
-        db.add(row)
-        db.commit()
-        db.refresh(row)
+        available = max(limit_value - used_value, 0)
 
-    available = max((row.limit or 0) - (row.used or 0), 0)
+        return {
+            "limit": limit_value,
+            "used": used_value,
+            "available": available,
+            "recharges": 0
+        }
 
-    return {
-        "limit": row.limit or 0,
-        "used": row.used or 0,
-        "available": available,
-        "recharges": row.recharges or 0
-    }
+    except Exception:
+        return {
+            "limit": 0,
+            "used": 0,
+            "available": 0,
+            "recharges": 0
+        }
 
 
 @app.post("/botpanel/{token}/group/{group_jid}/block")
