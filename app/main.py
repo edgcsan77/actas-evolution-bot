@@ -113,6 +113,161 @@ BOT_DISPLAY_NAMES = {
 }
 
 
+MIN_BOT_PROMO_ACTAS = 10
+
+
+def _is_child_bot(instance_name: str) -> bool:
+    inst = (instance_name or "").strip().lower()
+    return inst.startswith("docifybot") and inst != "docifybot3"
+
+
+def _bot_title(instance_name: str) -> str:
+    return BOT_LABELS.get(instance_name, instance_name)
+
+
+def _ensure_group_owner(db: Session, group_jid: str | None, instance_name: str | None):
+    if not group_jid or not instance_name or not _is_child_bot(instance_name):
+        return
+
+    row = db.query(AuthorizedGroup).filter_by(group_jid=group_jid).first()
+    if row and not (row.owner_instance or "").strip():
+        row.owner_instance = instance_name
+        db.commit()
+
+
+def _assert_group_owned_by_bot(db: Session, group_jid: str, instance_name: str):
+    row = db.query(AuthorizedGroup).filter_by(group_jid=group_jid).first()
+    if not row:
+        raise ValueError("Grupo no encontrado")
+    if (row.owner_instance or "").strip() != (instance_name or "").strip():
+        raise ValueError("Este grupo no pertenece a este bot")
+    return row
+
+
+def _get_bot_group_name(db: Session, group_jid: str) -> str:
+    alias = db.query(GroupAlias).filter_by(group_jid=group_jid).first()
+    if alias and (alias.custom_name or "").strip():
+        return alias.custom_name.strip()
+    return _group_name(group_jid)
+
+
+def _bot_groups_for_instance(db: Session, instance_name: str):
+    return (
+        db.query(AuthorizedGroup)
+        .filter(AuthorizedGroup.owner_instance == instance_name)
+        .order_by(AuthorizedGroup.group_name.asc(), AuthorizedGroup.group_jid.asc())
+        .all()
+    )
+
+
+def _bot_day_bounds():
+    now_local = _mx_now()
+    start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_local = start_local + timedelta(days=1)
+    return _panel_to_utc_naive(start_local), _panel_to_utc_naive(end_local)
+
+
+def _bot_month_30d_start():
+    now_local = _mx_now()
+    start_local = now_local - timedelta(days=29)
+    start_local = start_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    return _panel_to_utc_naive(start_local)
+
+
+def _bot_sales_today(db: Session, instance_name: str) -> int:
+    start_utc, end_utc = _bot_day_bounds()
+    return (
+        db.query(RequestLog)
+        .filter(
+            RequestLog.instance_name == instance_name,
+            RequestLog.status == "DONE",
+            RequestLog.created_at >= start_utc,
+            RequestLog.created_at < end_utc,
+        )
+        .count()
+    )
+
+
+def _bot_sales_month(db: Session, instance_name: str) -> int:
+    start_utc = _bot_month_30d_start()
+    return (
+        db.query(RequestLog)
+        .filter(
+            RequestLog.instance_name == instance_name,
+            RequestLog.status == "DONE",
+            RequestLog.created_at >= start_utc,
+        )
+        .count()
+    )
+
+
+def _bot_sales_history_30d(db: Session, instance_name: str):
+    start_utc = _bot_month_30d_start()
+    rows = (
+        db.query(
+            func.date(RequestLog.created_at).label("day"),
+            func.count(RequestLog.id).label("total"),
+        )
+        .filter(
+            RequestLog.instance_name == instance_name,
+            RequestLog.status == "DONE",
+            RequestLog.created_at >= start_utc,
+        )
+        .group_by(func.date(RequestLog.created_at))
+        .order_by(func.date(RequestLog.created_at).desc())
+        .all()
+    )
+    return rows
+
+
+def _bot_group_stats(db: Session, instance_name: str):
+    start_day, end_day = _bot_day_bounds()
+    start_30d = _bot_month_30d_start()
+
+    groups = _bot_groups_for_instance(db, instance_name)
+    out = []
+
+    for g in groups:
+        today_done = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.instance_name == instance_name,
+                RequestLog.source_group_id == g.group_jid,
+                RequestLog.status == "DONE",
+                RequestLog.created_at >= start_day,
+                RequestLog.created_at < end_day,
+            )
+            .count()
+        )
+
+        month_done = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.instance_name == instance_name,
+                RequestLog.source_group_id == g.group_jid,
+                RequestLog.status == "DONE",
+                RequestLog.created_at >= start_30d,
+            )
+            .count()
+        )
+
+        promo = db.query(GroupPromotion).filter_by(group_jid=g.group_jid).first()
+
+        out.append({
+            "group_jid": g.group_jid,
+            "group_name": _get_bot_group_name(db, g.group_jid),
+            "today_done": today_done,
+            "month_done": month_done,
+            "blocked": is_group_blocked(g.group_jid),
+            "promo_total": int(promo.total_actas or 0) if promo else 0,
+            "promo_used": int(promo.used_actas or 0) if promo else 0,
+            "promo_active": bool(promo.is_active) if promo else False,
+        })
+
+    out.sort(key=lambda x: (-x["month_done"], x["group_name"].lower()))
+    return out
+
+
 def bot_label(inst):
     return BOT_LABELS.get(inst, inst)
 
@@ -3470,6 +3625,9 @@ def _panel_delivery_metrics(db, time_min, time_max):
     except Exception as e:
         print("PANEL_DELIVERY_METRICS_ERROR =", repr(e), flush=True)
         return None
+
+
+
 
                     
 @app.get("/panel", response_class=HTMLResponse)
@@ -7212,6 +7370,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         print("ADMIN_DEBUG_SENDER =", data.get("sender", ""), flush=True)
         print("ADMIN_DEBUG_REQUESTER_WA_ID =", requester_wa_id, flush=True)
         print("ADMIN_DEBUG_ADMIN_PHONES =", settings.ADMIN_PHONE, flush=True)
+
         
         text_body = ""
         if "conversation" in message:
@@ -7257,6 +7416,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         provider_groups = _all_provider_groups()
         is_provider_message = source_chat_id in provider_groups
         is_admin_command = text_upper.startswith("/")
+
+        if is_group and not is_provider_message:
+        try:
+            _ensure_group_owner(db, source_group_id, instance_name)
+        except Exception as e:
+            print("ENSURE_GROUP_OWNER_ERROR =", str(e), flush=True)
 
         if is_instance_blocked(instance_name) and not is_admin_command:
             msg = (
