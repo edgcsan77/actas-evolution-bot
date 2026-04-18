@@ -131,27 +131,17 @@ BOT_DISPLAY_NAMES = {
 MIN_BOT_PROMO_ACTAS = 10
 
 
-def hide_group_from_panels(db: Session, group_jid: str):
+def hide_group_from_main_panel(db: Session, group_jid: str):
     row = db.query(AuthorizedGroup).filter_by(group_jid=group_jid).first()
     if row:
-        row.is_hidden = True
-
-    alias = db.query(GroupAlias).filter_by(group_jid=group_jid).first()
-    if alias and hasattr(alias, "is_hidden"):
-        alias.is_hidden = True
-
+        row.hidden_in_main = True
     db.commit()
 
 
-def unhide_group_from_panels(db: Session, group_jid: str):
+def hide_group_from_bot_panel(db: Session, group_jid: str, instance_name: str):
     row = db.query(AuthorizedGroup).filter_by(group_jid=group_jid).first()
-    if row:
-        row.is_hidden = False
-
-    alias = db.query(GroupAlias).filter_by(group_jid=group_jid).first()
-    if alias and hasattr(alias, "is_hidden"):
-        alias.is_hidden = False
-
+    if row and (row.owner_instance or "").strip() == (instance_name or "").strip():
+        row.owner_instance = None
     db.commit()
     
 
@@ -453,22 +443,10 @@ def unblock_group(group_jid: str):
 @app.post("/panel/group/{group_jid}/hide")
 def panel_hide_group(group_jid: str, db: Session = Depends(get_db)):
     try:
-        hide_group_from_panels(db, group_jid)
+        hide_group_from_main_panel(db, group_jid)
         _clear_panel_cache()
         _clear_group_name_cache()
         return {"ok": True, "group_jid": group_jid, "hidden": True}
-    except Exception as e:
-        db.rollback()
-        return {"ok": False, "error": str(e)}
-
-
-@app.post("/panel/group/{group_jid}/unhide")
-def panel_unhide_group(group_jid: str, db: Session = Depends(get_db)):
-    try:
-        unhide_group_from_panels(db, group_jid)
-        _clear_panel_cache()
-        _clear_group_name_cache()
-        return {"ok": True, "group_jid": group_jid, "hidden": False}
     except Exception as e:
         db.rollback()
         return {"ok": False, "error": str(e)}
@@ -482,7 +460,7 @@ def panel_bot_hide_group(token: str, group_jid: str, db: Session = Depends(get_d
             return {"ok": False, "error": "Panel no válido"}
 
         _assert_group_owned_by_bot(db, group_jid, instance_name)
-        hide_group_from_panels(db, group_jid)
+        hide_group_from_bot_panel(db, group_jid, instance_name)
 
         _clear_panel_cache()
         _clear_group_name_cache()
