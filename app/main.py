@@ -3846,9 +3846,10 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
     credits = credits or {}
     credits.setdefault("limit", 0)
     credits.setdefault("used", 0)
-    credits.setdefault("available", 0)
+    credits["available"] = max(0, credits["limit"] - credits["used"])
     credits.setdefault("recharges", 0)
 
+    groups = groups or []
     total_groups = len(groups)
     blocked_groups = sum(1 for g in groups if g["blocked"])
     active_promos = sum(1 for g in groups if g["promo_active"])
