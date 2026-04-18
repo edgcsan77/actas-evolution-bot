@@ -44,6 +44,7 @@ from sqlalchemy import func, case, or_
 app = FastAPI(title=settings.APP_NAME)
 PANEL_TZ = "America/Monterrey"
 BLOCKED_GROUPS_KEY = "blocked_groups_no_response"
+BLOCKED_INSTANCES_KEY = "blocked_instances_no_response"
 
 PANEL_HTML_TTL = 180
 PANEL_RECENT_TTL = 60
@@ -111,12 +112,113 @@ def _day_name_es_from_date(day_str: str) -> str:
     return DAYS_ES[dt.weekday()]
 
 
+def _app_setting_get(db: Session, key: str, default: str = "") -> str:
+    row = db.query(AppSetting).filter(AppSetting.key == key).first()
+    return (row.value or default) if row else default
+
+
+def _app_setting_set(db: Session, key: str, value: str):
+    row = db.query(AppSetting).filter(AppSetting.key == key).first()
+    if row:
+        row.value = str(value)
+        row.updated_at = _utc_now_naive()
+    else:
+        row = AppSetting(
+            key=key,
+            value=str(value),
+            updated_at=_utc_now_naive(),
+        )
+        db.add(row)
+    db.commit()
+
+
+def _bot_limit_key(instance_name: str) -> str:
+    return f"bot_limit:{instance_name}"
+
+
+def _bot_used_key(instance_name: str) -> str:
+    return f"bot_used:{instance_name}"
+
+
+def get_bot_limit(db: Session, instance_name: str) -> int:
+    try:
+        return int(_app_setting_get(db, _bot_limit_key(instance_name), "0") or "0")
+    except Exception:
+        return 0
+
+
+def get_bot_used(db: Session, instance_name: str) -> int:
+    try:
+        return int(_app_setting_get(db, _bot_used_key(instance_name), "0") or "0")
+    except Exception:
+        return 0
+
+
+def set_bot_limit(db: Session, instance_name: str, limit_value: int):
+    _app_setting_set(db, _bot_limit_key(instance_name), str(max(0, int(limit_value))))
+
+
+def set_bot_used(db: Session, instance_name: str, used_value: int):
+    _app_setting_set(db, _bot_used_key(instance_name), str(max(0, int(used_value))))
+
+
+def increment_bot_used_and_maybe_block(db: Session, instance_name: str) -> tuple[int, int, bool]:
+    used = get_bot_used(db, instance_name) + 1
+    limit_value = get_bot_limit(db, instance_name)
+
+    set_bot_used(db, instance_name, used)
+
+    blocked_now = False
+    if limit_value > 0 and used >= limit_value:
+        block_instance(instance_name)
+        blocked_now = True
+
+    return used, limit_value, blocked_now
+
+
 def is_group_blocked(group_jid: str) -> bool:
     if not group_jid:
         return False
 
     blocked = redis_conn.sismember(BLOCKED_GROUPS_KEY, group_jid)
     return bool(blocked)
+
+
+def is_instance_blocked(instance_name: str) -> bool:
+    if not instance_name:
+        return False
+    blocked = redis_conn.sismember(BLOCKED_INSTANCES_KEY, instance_name)
+    return bool(blocked)
+
+
+def block_instance(instance_name: str):
+    if not instance_name:
+        return
+    redis_conn.sadd(BLOCKED_INSTANCES_KEY, instance_name)
+    print("INSTANCE_BLOCKED =", instance_name, flush=True)
+    print("BLOCKED_INSTANCES_NOW =", redis_conn.smembers(BLOCKED_INSTANCES_KEY), flush=True)
+
+
+def unblock_instance(instance_name: str):
+    if not instance_name:
+        return
+    redis_conn.srem(BLOCKED_INSTANCES_KEY, instance_name)
+    print("INSTANCE_UNBLOCKED =", instance_name, flush=True)
+    print("BLOCKED_INSTANCES_NOW =", redis_conn.smembers(BLOCKED_INSTANCES_KEY), flush=True)
+
+
+def list_blocked_instances():
+    try:
+        items = redis_conn.smembers(BLOCKED_INSTANCES_KEY) or []
+        out = []
+        for x in items:
+            if isinstance(x, bytes):
+                out.append(x.decode("utf-8", errors="ignore"))
+            else:
+                out.append(str(x))
+        return sorted(out)
+    except Exception:
+        return []
 
 
 def block_group(group_jid: str):
@@ -135,6 +237,102 @@ def unblock_group(group_jid: str):
     print("BLOCKED_GROUPS_NOW =", redis_conn.smembers(BLOCKED_GROUPS_KEY), flush=True)
 
 
+@app.get("/panel/instances")
+def panel_instances(db: Session = Depends(get_db)):
+    rows = (
+        db.query(
+            RequestLog.instance_name,
+            func.count(RequestLog.id)
+        )
+        .group_by(RequestLog.instance_name)
+        .all()
+    )
+
+    items = []
+    for instance_name, total in rows:
+        name = instance_name or "docifybot3"
+        used = get_bot_used(db, name)
+        limit_value = get_bot_limit(db, name)
+        blocked = is_instance_blocked(name)
+
+        items.append({
+            "instance_name": name,
+            "total_requests": int(total or 0),
+            "used": used,
+            "limit": limit_value,
+            "available": max(0, limit_value - used) if limit_value > 0 else None,
+            "blocked": blocked,
+        })
+
+    items.sort(key=lambda x: x["instance_name"])
+    return {"ok": True, "items": items}
+
+
+@app.post("/panel/instance/{instance_name}/block")
+def panel_block_instance(instance_name: str):
+    block_instance(instance_name)
+    return {"ok": True, "instance_name": instance_name, "blocked": True}
+
+
+@app.post("/panel/instance/{instance_name}/unblock")
+def panel_unblock_instance(instance_name: str):
+    unblock_instance(instance_name)
+    return {"ok": True, "instance_name": instance_name, "blocked": False}
+
+
+@app.post("/panel/instance/{instance_name}/limit")
+async def panel_set_instance_limit(instance_name: str, request: Request, db: Session = Depends(get_db)):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    limit_value = int(payload.get("limit") or 0)
+    set_bot_limit(db, instance_name, limit_value)
+
+    return {
+        "ok": True,
+        "instance_name": instance_name,
+        "limit": get_bot_limit(db, instance_name),
+        "used": get_bot_used(db, instance_name),
+        "blocked": is_instance_blocked(instance_name),
+    }
+
+
+@app.post("/panel/instance/{instance_name}/reset-usage")
+def panel_reset_instance_usage(instance_name: str, db: Session = Depends(get_db)):
+    set_bot_used(db, instance_name, 0)
+    return {
+        "ok": True,
+        "instance_name": instance_name,
+        "used": 0,
+        "limit": get_bot_limit(db, instance_name),
+    }
+
+
+@app.post("/panel/instance/{instance_name}/recharge")
+async def panel_recharge_instance(instance_name: str, request: Request, db: Session = Depends(get_db)):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    add_value = int(payload.get("amount") or 0)
+    current_limit = get_bot_limit(db, instance_name)
+    new_limit = current_limit + max(0, add_value)
+
+    set_bot_limit(db, instance_name, new_limit)
+    unblock_instance(instance_name)
+
+    return {
+        "ok": True,
+        "instance_name": instance_name,
+        "limit": new_limit,
+        "used": get_bot_used(db, instance_name),
+        "blocked": is_instance_blocked(instance_name),
+    }
+
+    
 @app.post("/panel/groups/manual-add")
 async def panel_manual_add_group(request: Request, db: Session = Depends(get_db)):
     try:
@@ -4235,6 +4433,23 @@ def panel_actas(
                 margin-top: 14px;
                 flex-wrap: wrap;
               }}
+
+              .table-wrap input[type="number"]{{
+                width: 100%;
+                padding: 10px 12px;
+                border: 1px solid #d1d5db;
+                border-radius: 10px;
+                font: inherit;
+                background: white;
+                color: #1f2937;
+                outline: none;
+                box-sizing: border-box;
+              }}
+            
+              .table-wrap input[type="number"]:focus{{
+                border-color: #334155;
+                box-shadow: 0 0 0 3px rgba(51, 65, 85, .10);
+              }}
             
               @media (max-width: 1200px) {{
                 .grid-hero {{
@@ -4691,6 +4906,106 @@ def panel_actas(
         </div>
         """
 
+        html += """
+        <div class="box">
+          <div class="head">
+            <strong>Control por bot</strong>
+            <span class="small">Configura límite, consumo, bloqueo y recarga por instancia.</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Bot</th>
+                  <th class="right">Solicitudes</th>
+                  <th class="right">Usadas</th>
+                  <th class="right">Límite</th>
+                  <th class="right">Disponibles</th>
+                  <th>Estado</th>
+                  <th>Nuevo límite</th>
+                  <th>Recarga</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+        """
+        for r in by_instance:
+            inst = r["instance_name"]
+            bot_used = get_bot_used(db, inst)
+            bot_limit = get_bot_limit(db, inst)
+            bot_available = max(0, bot_limit - bot_used) if bot_limit > 0 else "∞"
+            bot_blocked = is_instance_blocked(inst)
+        
+            status_badge = (
+                '<span class="badge badge-danger">BLOQUEADO</span>'
+                if bot_blocked else
+                '<span class="badge badge-success">ACTIVO</span>'
+            )
+        
+            html += f"""
+                <tr>
+                  <td><strong>{_esc(inst)}</strong></td>
+                  <td class="right">{r["total"]}</td>
+                  <td class="right">{bot_used}</td>
+                  <td class="right">{bot_limit}</td>
+                  <td class="right">{bot_available}</td>
+                  <td>{status_badge}</td>
+        
+                  <td>
+                    <div style="display:flex;gap:8px;align-items:center;min-width:180px;">
+                      <input
+                        id="bot_limit_{_esc(inst)}"
+                        type="number"
+                        min="0"
+                        step="1"
+                        value="{bot_limit}"
+                        placeholder="Ej. 1000"
+                        style="width:100%;"
+                      >
+                      <button class="btn btn-primary" onclick="saveBotLimit('{_esc(inst)}')">
+                        Guardar
+                      </button>
+                    </div>
+                  </td>
+        
+                  <td>
+                    <div style="display:flex;gap:8px;align-items:center;min-width:180px;">
+                      <input
+                        id="bot_recharge_{_esc(inst)}"
+                        type="number"
+                        min="1"
+                        step="1"
+                        placeholder="Ej. 250"
+                        style="width:100%;"
+                      >
+                      <button class="btn btn-success" onclick="rechargeBotLimit('{_esc(inst)}')">
+                        Recargar
+                      </button>
+                    </div>
+                  </td>
+        
+                  <td>
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                      <button class="btn btn-light" onclick="resetBotUsage('{_esc(inst)}')">
+                        Reset usadas
+                      </button>
+                      {
+                        f'<button class="btn btn-success" onclick="unblockBot(\\'{_esc(inst)}\\')">Desbloquear</button>'
+                        if bot_blocked
+                        else f'<button class="btn btn-danger" onclick="blockBot(\\'{_esc(inst)}\\')">Bloquear</button>'
+                      }
+                    </div>
+                  </td>
+                </tr>
+            """
+        
+        html += """
+              </tbody>
+            </table>
+          </div>
+        </div>
+        """
+
         html += f"""
         <div class="box">
           <div class="head"><strong>Resumen por proveedor</strong></div>
@@ -5063,6 +5378,135 @@ def panel_actas(
             }}
           }} catch (e) {{
             alert("No se pudo conectar con el servidor");
+          }}
+        }}
+
+        async function saveBotLimit(instanceName) {{
+          const input = document.getElementById(`bot_limit_${{instanceName}}`);
+          const value = Number((input?.value || "0").trim());
+        
+          if (Number.isNaN(value) || value < 0) {{
+            alert("Ingresa un límite válido.");
+            return;
+          }}
+        
+          try {{
+            const res = await fetch(`/panel/instance/${{encodeURIComponent(instanceName)}}/limit`, {{
+              method: "POST",
+              headers: {{
+                "Content-Type": "application/json"
+              }},
+              body: JSON.stringify({{
+                limit: value
+              }})
+            }});
+        
+            const data = await res.json();
+        
+            if (data.ok) {{
+              alert(`Límite actualizado para ${{instanceName}}: ${{data.limit}}`);
+              location.reload();
+            }} else {{
+              alert(data.error || "No se pudo guardar el límite.");
+            }}
+          }} catch (e) {{
+            alert("Error de conexión al guardar el límite.");
+          }}
+        }}
+        
+        async function rechargeBotLimit(instanceName) {{
+          const input = document.getElementById(`bot_recharge_${{instanceName}}`);
+          const value = Number((input?.value || "").trim());
+        
+          if (Number.isNaN(value) || value <= 0) {{
+            alert("Ingresa una recarga válida mayor a 0.");
+            return;
+          }}
+        
+          try {{
+            const res = await fetch(`/panel/instance/${{encodeURIComponent(instanceName)}}/recharge`, {{
+              method: "POST",
+              headers: {{
+                "Content-Type": "application/json"
+              }},
+              body: JSON.stringify({{
+                amount: value
+              }})
+            }});
+        
+            const data = await res.json();
+        
+            if (data.ok) {{
+              alert(`Recarga aplicada a ${{instanceName}}. Nuevo límite: ${{data.limit}}`);
+              location.reload();
+            }} else {{
+              alert(data.error || "No se pudo recargar el bot.");
+            }}
+          }} catch (e) {{
+            alert("Error de conexión al recargar el bot.");
+          }}
+        }}
+        
+        async function resetBotUsage(instanceName) {{
+          const ok = confirm(`¿Seguro que deseas resetear las usadas de ${{instanceName}}?`);
+          if (!ok) return;
+        
+          try {{
+            const res = await fetch(`/panel/instance/${{encodeURIComponent(instanceName)}}/reset-usage`, {{
+              method: "POST"
+            }});
+        
+            const data = await res.json();
+        
+            if (data.ok) {{
+              alert(`Usadas reseteadas para ${{instanceName}}.`);
+              location.reload();
+            }} else {{
+              alert(data.error || "No se pudo resetear el consumo.");
+            }}
+          }} catch (e) {{
+            alert("Error de conexión al resetear el consumo.");
+          }}
+        }}
+        
+        async function blockBot(instanceName) {{
+          const ok = confirm(`¿Bloquear ${{instanceName}} para nuevas solicitudes?`);
+          if (!ok) return;
+        
+          try {{
+            const res = await fetch(`/panel/instance/${{encodeURIComponent(instanceName)}}/block`, {{
+              method: "POST"
+            }});
+        
+            const data = await res.json();
+        
+            if (data.ok) {{
+              alert(`${{instanceName}} bloqueado.`);
+              location.reload();
+            }} else {{
+              alert(data.error || "No se pudo bloquear el bot.");
+            }}
+          }} catch (e) {{
+            alert("Error de conexión al bloquear el bot.");
+          }}
+        }}
+        
+        async function unblockBot(instanceName) {{
+          try {{
+            const res = await fetch(`/panel/instance/${{encodeURIComponent(instanceName)}}/unblock`, {{
+              method: "POST"
+            }});
+        
+            const data = await res.json();
+        
+            if (data.ok) {{
+              alert(`${{instanceName}} desbloqueado.`);
+              location.reload();
+            }} else {{
+              alert(data.error || "No se pudo desbloquear el bot.");
+            }}
+          }} catch (e) {{
+            alert("Error de conexión al desbloquear el bot.");
           }}
         }}
         
@@ -6712,9 +7156,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         print("WEBHOOK PAYLOAD =", payload, flush=True)
         event = payload.get("event", "")
         data = payload.get("data", {})
+        
         instance_name = payload.get("instance", "default")
-
         print("WEBHOOK_INSTANCE =", instance_name, flush=True)
+        print("WEBHOOK_IS_INSTANCE_BLOCKED =", is_instance_blocked(instance_name), flush=True)
         
         if event != "messages.upsert":
             return {"ok": True, "ignored": event}
@@ -6789,6 +7234,19 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         provider_groups = _all_provider_groups()
         is_provider_message = source_chat_id in provider_groups
         is_admin_command = text_upper.startswith("/")
+
+        if is_instance_blocked(instance_name) and not is_admin_command:
+            msg = (
+                "⚠️ Este bot alcanzó su límite de solicitudes.\n\n"
+                "Por el momento está bloqueado para nuevas entradas."
+            )
+        
+            if source_group_id:
+                send_group_text(source_group_id, msg, instance_name)
+            else:
+                send_text(requester_wa_id, msg, instance_name)
+        
+            return {"ok": True, "ignored": "instance_blocked"}
 
         print("WEBHOOK_SOURCE_GROUP_ID =", source_group_id, flush=True)
         print("WEBHOOK_IS_GROUP_BLOCKED =", is_group_blocked(source_group_id), flush=True)
@@ -7156,6 +7614,14 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     instance_name=instance_name,
                 )
                 print("T_DELIVER_PDF_RESULT =", round(time.perf_counter() - t4, 3), flush=True)
+
+                try:
+                    used, limit_value, blocked_now = increment_bot_used_and_maybe_block(db, open_req.instance_name or "docifybot3")
+                    print("BOT_USED_AFTER_DONE =", used, flush=True)
+                    print("BOT_LIMIT =", limit_value, flush=True)
+                    print("BOT_BLOCKED_NOW =", blocked_now, flush=True)
+                except Exception as bot_limit_exc:
+                    print("BOT_LIMIT_UPDATE_ERROR =", str(bot_limit_exc), flush=True)
 
                 t3 = time.perf_counter()
                 try:
