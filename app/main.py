@@ -7556,11 +7556,11 @@ def _providers_status_text(db: Session) -> str:
         provider6_extra = f" | ERROR DB: {str(e)}"
 
     text = (
-        f"ADMIN DIGITAL: {s1}{provider1_extra}\n\n"
-        f"ACTAS DEL SURESTE: {s2}{provider2_extra}\n\n"
-        f"AUSTRAM WEB: {s3}{provider3_extra}\n\n"
-        f"LUIS SID: {s5}{provider5_extra}\n\n"
-        f"ACTAS ESCALANTE: {s5}{provider6_extra}"
+        f"ADMIN DIGITAL:     {s1}{provider1_extra}\n"
+        f"ACTAS DEL SURESTE: {s2}{provider2_extra}\n"
+        f"AUSTRAM WEB:       {s3}{provider3_extra}\n"
+        f"LUIS SID:          {s5}{provider5_extra}\n"
+        f"ACTAS ESCALANTE:   {s6}{provider6_extra}"
     )
 
     return text
