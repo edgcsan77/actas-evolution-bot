@@ -8291,6 +8291,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     "REGISTRO NO ENCONTRADO",
                     "REGISTRO NO LOCALIZADO",
                     "NB",
+                    "VERI",
+                    "VERIFICAR",
                 }
 
                 is_negative_text = any(v in text_norm for v in sin_values)
