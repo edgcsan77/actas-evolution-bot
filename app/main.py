@@ -6211,7 +6211,7 @@ def is_authorized_group(db: Session, group_jid: str) -> bool:
 
 
 def _deliver_text_result(req: RequestLog, text: str, instance_name: str = None):
-    instance = instance_name or req.instance_name or "docifybot3"
+    instance = req.instance_name or instance_name or "docifybot3"
 
     if req.source_group_id:
         send_group_text(req.source_group_id, text, instance)
@@ -6220,7 +6220,7 @@ def _deliver_text_result(req: RequestLog, text: str, instance_name: str = None):
 
 
 def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = None, instance_name: str = None):
-    instance = instance_name or req.instance_name or "docifybot3"
+    instance = req.instance_name or instance_name or "docifybot3"
     filename = filename or f"{req.curp}.pdf"
 
     caption_text = ""
@@ -7611,7 +7611,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     open_req,
                     safe_media_b64,
                     filename=filename or f"{open_req.curp}.pdf",
-                    instance_name=instance_name,
                 )
                 print("T_DELIVER_PDF_RESULT =", round(time.perf_counter() - t4, 3), flush=True)
 
@@ -7691,7 +7690,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 _deliver_text_result(
                     open_req,
                     f"❌ No hay registros disponibles.\nDato: {open_req.curp}\nTipo: {open_req.act_type}\n\nVerificar que la CURP esté certificada en RENAPO",
-                    instance_name=instance_name,
                 )
                 return {"ok": True, "provider_result": "no_record"}
 
