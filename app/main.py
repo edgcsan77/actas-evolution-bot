@@ -54,10 +54,14 @@ PANEL_STREAM_SLEEP = 10
 PANEL_STREAM_ENABLED = True
 
 
-def _is_valid_admin_panel_token(request: Request) -> bool:
+def _is_valid_admin_panel_token(request: Requ/boest) -> bool:
     token = (request.query_params.get("token") or "").strip()
     expected = (settings.ADMIN_PANEL_TOKEN or "").strip()
     return bool(expected) and token == expected
+
+
+def _bot_instance_from_token(token: str) -> str | None:
+    return BOT_PANEL_TOKENS.get((token or "").strip())
 
 
 def _utc_now_naive():
@@ -3639,8 +3643,12 @@ def _panel_delivery_metrics(db, time_min, time_max):
 
 
 @app.post("/botpanel/{token}/group/{group_jid}/block")
-def panel_bot_block_group(instance_name: str, group_jid: str, db: Session = Depends(get_db)):
+def panel_bot_block_group(token: str, group_jid: str, db: Session = Depends(get_db)):
     try:
+        instance_name = _bot_instance_from_token(token)
+        if not instance_name:
+            return {"ok": False, "error": "Panel no válido"}
+
         _assert_group_owned_by_bot(db, group_jid, instance_name)
         block_group(group_jid)
         _clear_panel_cache()
@@ -3650,8 +3658,12 @@ def panel_bot_block_group(instance_name: str, group_jid: str, db: Session = Depe
 
 
 @app.post("/botpanel/{token}/group/{group_jid}/unblock")
-def panel_bot_unblock_group(instance_name: str, group_jid: str, db: Session = Depends(get_db)):
+def panel_bot_unblock_group(token: str, group_jid: str, db: Session = Depends(get_db)):
     try:
+        instance_name = _bot_instance_from_token(token)
+        if not instance_name:
+            return {"ok": False, "error": "Panel no válido"}
+
         _assert_group_owned_by_bot(db, group_jid, instance_name)
         unblock_group(group_jid)
         _clear_panel_cache()
@@ -3661,8 +3673,12 @@ def panel_bot_unblock_group(instance_name: str, group_jid: str, db: Session = De
 
 
 @app.post("/botpanel/{token}/group/{group_jid}/rename")
-async def panel_bot_rename_group(instance_name: str, group_jid: str, request: Request, db: Session = Depends(get_db)):
+async def panel_bot_rename_group(token: str, group_jid: str, request: Request, db: Session = Depends(get_db)):
     try:
+        instance_name = _bot_instance_from_token(token)
+        if not instance_name:
+            return {"ok": False, "error": "Panel no válido"}
+
         _assert_group_owned_by_bot(db, group_jid, instance_name)
         payload = await request.json()
         custom_name = (payload.get("custom_name") or "").strip()
@@ -3687,12 +3703,17 @@ async def panel_bot_rename_group(instance_name: str, group_jid: str, request: Re
         _clear_panel_cache()
         return {"ok": True}
     except Exception as e:
+        db.rollback()
         return {"ok": False, "error": str(e)}
 
 
 @app.post("/botpanel/{token}/promotion/set")
-async def panel_bot_set_promo(instance_name: str, request: Request, db: Session = Depends(get_db)):
+async def panel_bot_set_promo(token: str, request: Request, db: Session = Depends(get_db)):
     try:
+        instance_name = _bot_instance_from_token(token)
+        if not instance_name:
+            return {"ok": False, "error": "Panel no válido"}
+
         payload = await request.json()
         group_jid = (payload.get("group_jid") or "").strip()
         promo_name = (payload.get("promo_name") or "").strip()
@@ -3729,11 +3750,17 @@ async def panel_bot_set_promo(instance_name: str, request: Request, db: Session 
         _clear_panel_cache()
         return {"ok": True}
     except Exception as e:
+        db.rollback()
         return {"ok": False, "error": str(e)}
 
 
 @app.get("/botpanel/{token}")
-def panel_bot(instance_name: str, db: Session = Depends(get_db)):
+def panel_bot(token: str, db: Session = Depends(get_db)):
+    instance_name = _bot_instance_from_token(token)
+
+    if not instance_name:
+        return HTMLResponse("<h3>Panel no válido.</h3>", status_code=404)
+
     if not _is_child_bot(instance_name):
         return HTMLResponse("<h3>Este panel es solo para bots desde docifybot4 en adelante.</h3>", status_code=400)
 
@@ -3835,7 +3862,6 @@ def panel_bot(instance_name: str, db: Session = Depends(get_db)):
         .btn-success {{ background: #166534; color: white; }}
         .btn-danger {{ background: #b91c1c; color: white; }}
         .btn-primary {{ background: #1d4ed8; color: white; }}
-        .btn-light {{ background: #e5e7eb; color: #111827; }}
         .badge {{
           display: inline-flex;
           padding: 4px 10px;
@@ -3925,9 +3951,9 @@ def panel_bot(instance_name: str, db: Session = Depends(get_db)):
             )
 
             block_btn = (
-                f'<button class="btn btn-success" onclick="unblockBotGroup(\'{_esc(instance_name)}\', \'{_esc(g["group_jid"])}\')">Desbloquear</button>'
+                f'<button class="btn btn-success" onclick="unblockBotGroup(\'{_esc(g["group_jid"])}\')">Desbloquear</button>'
                 if g["blocked"] else
-                f'<button class="btn btn-danger" onclick="blockBotGroup(\'{_esc(instance_name)}\', \'{_esc(g["group_jid"])}\')">Bloquear</button>'
+                f'<button class="btn btn-danger" onclick="blockBotGroup(\'{_esc(g["group_jid"])}\')">Bloquear</button>'
             )
 
             html += f"""
@@ -3944,7 +3970,7 @@ def panel_bot(instance_name: str, db: Session = Depends(get_db)):
                   <td>
                     <div style="display:flex;gap:8px;min-width:220px;">
                       <input id="rename_{_esc(g["group_jid"])}" placeholder="Nuevo nombre">
-                      <button class="btn btn-primary" onclick="renameBotGroup('{_esc(instance_name)}','{_esc(g["group_jid"])}')">Guardar</button>
+                      <button class="btn btn-primary" onclick="renameBotGroup('{_esc(g["group_jid"])}')">Guardar</button>
                     </div>
                   </td>
 
@@ -3953,7 +3979,7 @@ def panel_bot(instance_name: str, db: Session = Depends(get_db)):
                       <input id="promo_name_{_esc(g["group_jid"])}" placeholder="Nombre promo">
                       <input id="promo_total_{_esc(g["group_jid"])}" type="number" min="10" step="1" placeholder="Total actas (mín. 10)">
                       <input id="promo_price_{_esc(g["group_jid"])}" placeholder="Precio por acta">
-                      <button class="btn btn-success" onclick="assignBotPromo('{_esc(instance_name)}','{_esc(g["group_jid"])}')">Aplicar promo</button>
+                      <button class="btn btn-success" onclick="assignBotPromo('{_esc(g["group_jid"])}')">Aplicar promo</button>
                     </div>
                   </td>
 
@@ -3998,7 +4024,7 @@ def panel_bot(instance_name: str, db: Session = Depends(get_db)):
     else:
         html += '<tr><td colspan="2">Sin ventas en los últimos 30 días.</td></tr>'
 
-    html += f"""
+    html += """
               </tbody>
             </table>
           </div>
@@ -4006,63 +4032,65 @@ def panel_bot(instance_name: str, db: Session = Depends(get_db)):
       </div>
 
       <script>
-        async function blockBotGroup(instanceName, groupJid) {{
-          const res = await fetch(`/panel/bot/${{encodeURIComponent(instanceName)}}/group/${{encodeURIComponent(groupJid)}}/block`, {{ method: "POST" }});
+        const BOT_PANEL_BASE = window.location.pathname;
+
+        async function blockBotGroup(groupJid) {
+          const res = await fetch(`${BOT_PANEL_BASE}/group/${encodeURIComponent(groupJid)}/block`, { method: "POST" });
           const data = await res.json();
           if (data.ok) location.reload();
           else alert(data.error || "No se pudo bloquear");
-        }}
+        }
 
-        async function unblockBotGroup(instanceName, groupJid) {{
-          const res = await fetch(`/panel/bot/${{encodeURIComponent(instanceName)}}/group/${{encodeURIComponent(groupJid)}}/unblock`, {{ method: "POST" }});
+        async function unblockBotGroup(groupJid) {
+          const res = await fetch(`${BOT_PANEL_BASE}/group/${encodeURIComponent(groupJid)}/unblock`, { method: "POST" });
           const data = await res.json();
           if (data.ok) location.reload();
           else alert(data.error || "No se pudo desbloquear");
-        }}
+        }
 
-        async function renameBotGroup(instanceName, groupJid) {{
-          const name = document.getElementById(`rename_${{groupJid}}`).value.trim();
-          if (!name) {{
+        async function renameBotGroup(groupJid) {
+          const name = document.getElementById(`rename_${groupJid}`).value.trim();
+          if (!name) {
             alert("Escribe un nombre");
             return;
-          }}
+          }
 
-          const res = await fetch(`/panel/bot/${{encodeURIComponent(instanceName)}}/group/${{encodeURIComponent(groupJid)}}/rename`, {{
+          const res = await fetch(`${BOT_PANEL_BASE}/group/${encodeURIComponent(groupJid)}/rename`, {
             method: "POST",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{ custom_name: name }})
-          }});
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ custom_name: name })
+          });
 
           const data = await res.json();
           if (data.ok) location.reload();
           else alert(data.error || "No se pudo renombrar");
-        }}
+        }
 
-        async function assignBotPromo(instanceName, groupJid) {{
-          const promoName = document.getElementById(`promo_name_${{groupJid}}`).value.trim();
-          const totalActas = Number(document.getElementById(`promo_total_${{groupJid}}`).value.trim());
-          const pricePerPiece = document.getElementById(`promo_price_${{groupJid}}`).value.trim();
+        async function assignBotPromo(groupJid) {
+          const promoName = document.getElementById(`promo_name_${groupJid}`).value.trim();
+          const totalActas = Number(document.getElementById(`promo_total_${groupJid}`).value.trim());
+          const pricePerPiece = document.getElementById(`promo_price_${groupJid}`).value.trim();
 
-          if (!totalActas || totalActas < 10) {{
+          if (!totalActas || totalActas < 10) {
             alert("La promoción mínima es de 10 actas");
             return;
-          }}
+          }
 
-          const res = await fetch(`/panel/bot/${{encodeURIComponent(instanceName)}}/promotion/set`, {{
+          const res = await fetch(`${BOT_PANEL_BASE}/promotion/set`, {
             method: "POST",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
               group_jid: groupJid,
               promo_name: promoName,
               total_actas: totalActas,
               price_per_piece: pricePerPiece
-            }})
-          }});
+            })
+          });
 
           const data = await res.json();
           if (data.ok) location.reload();
           else alert(data.error || "No se pudo aplicar la promoción");
-        }}
+        }
       </script>
     </body>
     </html>
