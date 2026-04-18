@@ -3627,7 +3627,436 @@ def _panel_delivery_metrics(db, time_min, time_max):
         return None
 
 
+@app.post("/panel/bot/{instance_name}/group/{group_jid}/block")
+def panel_bot_block_group(instance_name: str, group_jid: str, db: Session = Depends(get_db)):
+    try:
+        _assert_group_owned_by_bot(db, group_jid, instance_name)
+        block_group(group_jid)
+        _clear_panel_cache()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
+
+@app.post("/panel/bot/{instance_name}/group/{group_jid}/unblock")
+def panel_bot_unblock_group(instance_name: str, group_jid: str, db: Session = Depends(get_db)):
+    try:
+        _assert_group_owned_by_bot(db, group_jid, instance_name)
+        unblock_group(group_jid)
+        _clear_panel_cache()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/panel/bot/{instance_name}/group/{group_jid}/rename")
+async def panel_bot_rename_group(instance_name: str, group_jid: str, request: Request, db: Session = Depends(get_db)):
+    try:
+        _assert_group_owned_by_bot(db, group_jid, instance_name)
+        payload = await request.json()
+        custom_name = (payload.get("custom_name") or "").strip()
+        if not custom_name:
+            return {"ok": False, "error": "Nombre vacío"}
+
+        row = db.query(GroupAlias).filter_by(group_jid=group_jid).first()
+        if row:
+            row.custom_name = custom_name
+            row.owner_instance = instance_name
+            row.updated_at = _utc_now_naive()
+        else:
+            row = GroupAlias(
+                group_jid=group_jid,
+                custom_name=custom_name,
+                owner_instance=instance_name,
+                updated_at=_utc_now_naive(),
+            )
+            db.add(row)
+
+        db.commit()
+        _clear_panel_cache()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/panel/bot/{instance_name}/promotion/set")
+async def panel_bot_set_promo(instance_name: str, request: Request, db: Session = Depends(get_db)):
+    try:
+        payload = await request.json()
+        group_jid = (payload.get("group_jid") or "").strip()
+        promo_name = (payload.get("promo_name") or "").strip()
+        total_actas = int(payload.get("total_actas") or 0)
+        price_per_piece = (payload.get("price_per_piece") or "").strip()
+
+        _assert_group_owned_by_bot(db, group_jid, instance_name)
+
+        if total_actas < MIN_BOT_PROMO_ACTAS:
+            return {"ok": False, "error": f"La promoción mínima es de {MIN_BOT_PROMO_ACTAS} actas"}
+
+        row = db.query(GroupPromotion).filter_by(group_jid=group_jid).first()
+        if row:
+            row.promo_name = promo_name
+            row.total_actas = total_actas
+            row.used_actas = 0
+            row.price_per_piece = price_per_piece
+            row.is_active = True
+            row.owner_instance = instance_name
+            row.updated_at = _utc_now_naive()
+        else:
+            row = GroupPromotion(
+                group_jid=group_jid,
+                promo_name=promo_name,
+                total_actas=total_actas,
+                used_actas=0,
+                price_per_piece=price_per_piece,
+                is_active=True,
+                owner_instance=instance_name,
+            )
+            db.add(row)
+
+        db.commit()
+        _clear_panel_cache()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/panel/bot/{instance_name}")
+def panel_bot(instance_name: str, db: Session = Depends(get_db)):
+    if not _is_child_bot(instance_name):
+        return HTMLResponse("<h3>Este panel es solo para bots desde docifybot4 en adelante.</h3>", status_code=400)
+
+    title = _bot_title(instance_name)
+    today_sales = _bot_sales_today(db, instance_name)
+    month_sales = _bot_sales_month(db, instance_name)
+    history_rows = _bot_sales_history_30d(db, instance_name)
+    groups = _bot_group_stats(db, instance_name)
+
+    total_groups = len(groups)
+    blocked_groups = sum(1 for g in groups if g["blocked"])
+    active_promos = sum(1 for g in groups if g["promo_active"])
+
+    html = f"""
+    <html>
+    <head>
+      <title>Mini Panel {title}</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        body {{
+          font-family: Arial, sans-serif;
+          background: #f4f6f8;
+          margin: 0;
+          color: #1f2937;
+        }}
+        .wrap {{
+          max-width: 1400px;
+          margin: 0 auto;
+          padding: 16px;
+        }}
+        .hero {{
+          background: linear-gradient(135deg, #111827 0%, #334155 100%);
+          color: white;
+          border-radius: 20px;
+          padding: 20px;
+          margin-bottom: 16px;
+        }}
+        .cards {{
+          display: grid;
+          grid-template-columns: repeat(5, minmax(0, 1fr));
+          gap: 12px;
+          margin-bottom: 16px;
+        }}
+        .card {{
+          background: white;
+          border-radius: 16px;
+          padding: 16px;
+          border: 1px solid #e5e7eb;
+        }}
+        .label {{
+          color: #6b7280;
+          font-size: 13px;
+          margin-bottom: 8px;
+          font-weight: 700;
+        }}
+        .value {{
+          font-size: 28px;
+          font-weight: 800;
+        }}
+        .box {{
+          background: white;
+          border-radius: 18px;
+          border: 1px solid #e5e7eb;
+          margin-bottom: 16px;
+          overflow: hidden;
+        }}
+        .head {{
+          padding: 16px 18px;
+          border-bottom: 1px solid #e5e7eb;
+          background: #fafafa;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }}
+        .table-wrap {{
+          overflow-x: auto;
+        }}
+        table {{
+          width: 100%;
+          border-collapse: collapse;
+        }}
+        th, td {{
+          padding: 12px;
+          border-bottom: 1px solid #e5e7eb;
+          text-align: left;
+          vertical-align: top;
+        }}
+        th {{
+          background: #111827;
+          color: white;
+        }}
+        .btn {{
+          border: none;
+          border-radius: 10px;
+          padding: 9px 12px;
+          font-weight: 700;
+          cursor: pointer;
+        }}
+        .btn-success {{ background: #166534; color: white; }}
+        .btn-danger {{ background: #b91c1c; color: white; }}
+        .btn-primary {{ background: #1d4ed8; color: white; }}
+        .btn-light {{ background: #e5e7eb; color: #111827; }}
+        .badge {{
+          display: inline-flex;
+          padding: 4px 10px;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 700;
+        }}
+        .badge-success {{ background: #dcfce7; color: #166534; }}
+        .badge-danger {{ background: #fee2e2; color: #991b1b; }}
+        .small {{ font-size: 12px; color: #6b7280; }}
+        input {{
+          width: 100%;
+          padding: 10px 12px;
+          border: 1px solid #d1d5db;
+          border-radius: 10px;
+          box-sizing: border-box;
+        }}
+        @media (max-width: 900px) {{
+          .cards {{
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }}
+        }}
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="hero">
+          <h1 style="margin:0 0 6px 0;">Mini Panel · {title}</h1>
+          <div>Gestión independiente de grupos, promociones y ventas del bot {title}.</div>
+        </div>
+
+        <div class="cards">
+          <div class="card">
+            <div class="label">Vendidas hoy</div>
+            <div class="value">{today_sales}</div>
+          </div>
+          <div class="card">
+            <div class="label">Vendidas 30 días</div>
+            <div class="value">{month_sales}</div>
+          </div>
+          <div class="card">
+            <div class="label">Grupos</div>
+            <div class="value">{total_groups}</div>
+          </div>
+          <div class="card">
+            <div class="label">Grupos bloqueados</div>
+            <div class="value">{blocked_groups}</div>
+          </div>
+          <div class="card">
+            <div class="label">Promociones activas</div>
+            <div class="value">{active_promos}</div>
+          </div>
+        </div>
+
+        <div class="box">
+          <div class="head">
+            <strong>Grupos del bot</strong>
+            <span class="small">Bloquea, renombra y asigna promociones (mínimo 10 actas).</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Grupo</th>
+                  <th>Hoy</th>
+                  <th>30 días</th>
+                  <th>Promoción</th>
+                  <th>Estado</th>
+                  <th>Renombrar</th>
+                  <th>Asignar promoción</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+    """
+
+    if groups:
+        for g in groups:
+            promo_text = (
+                f'{g["promo_used"]}/{g["promo_total"]}'
+                if g["promo_total"] > 0 else "Sin promo"
+            )
+            status_badge = (
+                '<span class="badge badge-danger">BLOQUEADO</span>'
+                if g["blocked"] else
+                '<span class="badge badge-success">ACTIVO</span>'
+            )
+
+            block_btn = (
+                f'<button class="btn btn-success" onclick="unblockBotGroup(\'{_esc(instance_name)}\', \'{_esc(g["group_jid"])}\')">Desbloquear</button>'
+                if g["blocked"] else
+                f'<button class="btn btn-danger" onclick="blockBotGroup(\'{_esc(instance_name)}\', \'{_esc(g["group_jid"])}\')">Bloquear</button>'
+            )
+
+            html += f"""
+                <tr>
+                  <td>
+                    <strong>{_esc(g["group_name"])}</strong><br>
+                    <span class="small">{_esc(g["group_jid"])}</span>
+                  </td>
+                  <td>{g["today_done"]}</td>
+                  <td>{g["month_done"]}</td>
+                  <td>{promo_text}</td>
+                  <td>{status_badge}</td>
+
+                  <td>
+                    <div style="display:flex;gap:8px;min-width:220px;">
+                      <input id="rename_{_esc(g["group_jid"])}" placeholder="Nuevo nombre">
+                      <button class="btn btn-primary" onclick="renameBotGroup('{_esc(instance_name)}','{_esc(g["group_jid"])}')">Guardar</button>
+                    </div>
+                  </td>
+
+                  <td>
+                    <div style="display:grid;gap:8px;min-width:260px;">
+                      <input id="promo_name_{_esc(g["group_jid"])}" placeholder="Nombre promo">
+                      <input id="promo_total_{_esc(g["group_jid"])}" type="number" min="10" step="1" placeholder="Total actas (mín. 10)">
+                      <input id="promo_price_{_esc(g["group_jid"])}" placeholder="Precio por acta">
+                      <button class="btn btn-success" onclick="assignBotPromo('{_esc(instance_name)}','{_esc(g["group_jid"])}')">Aplicar promo</button>
+                    </div>
+                  </td>
+
+                  <td>
+                    {block_btn}
+                  </td>
+                </tr>
+            """
+    else:
+        html += '<tr><td colspan="8">Este bot aún no tiene grupos asignados.</td></tr>'
+
+    html += """
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="box">
+          <div class="head">
+            <strong>Historial último mes</strong>
+            <span class="small">Ventas realizadas por día.</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Total vendidas</th>
+                </tr>
+              </thead>
+              <tbody>
+    """
+
+    if history_rows:
+        for day, total in history_rows:
+            html += f"""
+                <tr>
+                  <td>{_esc(str(day))}</td>
+                  <td>{int(total or 0)}</td>
+                </tr>
+            """
+    else:
+        html += '<tr><td colspan="2">Sin ventas en los últimos 30 días.</td></tr>'
+
+    html += f"""
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <script>
+        async function blockBotGroup(instanceName, groupJid) {{
+          const res = await fetch(`/panel/bot/${{encodeURIComponent(instanceName)}}/group/${{encodeURIComponent(groupJid)}}/block`, {{ method: "POST" }});
+          const data = await res.json();
+          if (data.ok) location.reload();
+          else alert(data.error || "No se pudo bloquear");
+        }}
+
+        async function unblockBotGroup(instanceName, groupJid) {{
+          const res = await fetch(`/panel/bot/${{encodeURIComponent(instanceName)}}/group/${{encodeURIComponent(groupJid)}}/unblock`, {{ method: "POST" }});
+          const data = await res.json();
+          if (data.ok) location.reload();
+          else alert(data.error || "No se pudo desbloquear");
+        }}
+
+        async function renameBotGroup(instanceName, groupJid) {{
+          const name = document.getElementById(`rename_${{groupJid}}`).value.trim();
+          if (!name) {{
+            alert("Escribe un nombre");
+            return;
+          }}
+
+          const res = await fetch(`/panel/bot/${{encodeURIComponent(instanceName)}}/group/${{encodeURIComponent(groupJid)}}/rename`, {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ custom_name: name }})
+          }});
+
+          const data = await res.json();
+          if (data.ok) location.reload();
+          else alert(data.error || "No se pudo renombrar");
+        }}
+
+        async function assignBotPromo(instanceName, groupJid) {{
+          const promoName = document.getElementById(`promo_name_${{groupJid}}`).value.trim();
+          const totalActas = Number(document.getElementById(`promo_total_${{groupJid}}`).value.trim());
+          const pricePerPiece = document.getElementById(`promo_price_${{groupJid}}`).value.trim();
+
+          if (!totalActas || totalActas < 10) {{
+            alert("La promoción mínima es de 10 actas");
+            return;
+          }}
+
+          const res = await fetch(`/panel/bot/${{encodeURIComponent(instanceName)}}/promotion/set`, {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{
+              group_jid: groupJid,
+              promo_name: promoName,
+              total_actas: totalActas,
+              price_per_piece: pricePerPiece
+            }})
+          }});
+
+          const data = await res.json();
+          if (data.ok) location.reload();
+          else alert(data.error || "No se pudo aplicar la promoción");
+        }}
+      </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
 
                     
 @app.get("/panel", response_class=HTMLResponse)
