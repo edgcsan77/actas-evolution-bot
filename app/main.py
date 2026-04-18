@@ -3754,6 +3754,57 @@ async def panel_bot_set_promo(token: str, request: Request, db: Session = Depend
         return {"ok": False, "error": str(e)}
 
 
+@app.post("/botpanel/{token}/group/add")
+async def panel_bot_add_group(token: str, request: Request, db: Session = Depends(get_db)):
+    try:
+        instance_name = _bot_instance_from_token(token)
+        if not instance_name:
+            return {"ok": False, "error": "Panel no válido"}
+
+        payload = await request.json()
+        group_jid = (payload.get("group_jid") or "").strip()
+        group_name = (payload.get("group_name") or "").strip()
+
+        if not group_jid:
+            return {"ok": False, "error": "Group JID vacío"}
+
+        row = db.query(AuthorizedGroup).filter_by(group_jid=group_jid).first()
+
+        if row:
+            row.owner_instance = instance_name
+            if group_name:
+                row.group_name = group_name
+        else:
+            row = AuthorizedGroup(
+                group_jid=group_jid,
+                group_name=group_name or None,
+                owner_instance=instance_name,
+            )
+            db.add(row)
+
+        if group_name:
+            alias = db.query(GroupAlias).filter_by(group_jid=group_jid).first()
+            if alias:
+                alias.custom_name = group_name
+                alias.owner_instance = instance_name
+                alias.updated_at = _utc_now_naive()
+            else:
+                alias = GroupAlias(
+                    group_jid=group_jid,
+                    custom_name=group_name,
+                    owner_instance=instance_name,
+                    updated_at=_utc_now_naive(),
+                )
+                db.add(alias)
+
+        db.commit()
+        _clear_panel_cache()
+        return {"ok": True}
+    except Exception as e:
+        db.rollback()
+        return {"ok": False, "error": str(e)}
+
+
 @app.get("/botpanel/{token}")
 def panel_bot(token: str, db: Session = Depends(get_db)):
     instance_name = _bot_instance_from_token(token)
@@ -3916,6 +3967,30 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
           </div>
         </div>
 
+        html += """
+        <div class="box">
+          <div class="head">
+            <strong>Agregar grupo manualmente</strong>
+            <span class="small">Registra un grupo para este bot y asígnale nombre visible.</span>
+          </div>
+          <div style="padding:16px;">
+            <div style="display:grid;grid-template-columns:1.4fr 1fr auto;gap:12px;align-items:end;">
+              <div>
+                <div class="small" style="margin-bottom:6px;">Group JID</div>
+                <input id="manual_group_jid" placeholder="1203634XXXXXXXXXX@g.us">
+              </div>
+              <div>
+                <div class="small" style="margin-bottom:6px;">Nombre del grupo</div>
+                <input id="manual_group_name" placeholder="Nombre visible del grupo">
+              </div>
+              <div>
+                <button class="btn btn-primary" onclick="addManualBotGroup()">Agregar grupo</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        """
+
         <div class="box">
           <div class="head">
             <strong>Grupos del bot</strong>
@@ -4046,6 +4121,32 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
           const data = await res.json();
           if (data.ok) location.reload();
           else alert(data.error || "No se pudo desbloquear");
+        }
+
+        async function addManualBotGroup() {
+          const groupJid = document.getElementById("manual_group_jid").value.trim();
+          const groupName = document.getElementById("manual_group_name").value.trim();
+        
+          if (!groupJid) {
+            alert("Escribe el Group JID.");
+            return;
+          }
+        
+          const res = await fetch(`${BOT_PANEL_BASE}/group/add`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              group_jid: groupJid,
+              group_name: groupName
+            })
+          });
+        
+          const data = await res.json();
+          if (data.ok) {
+            location.reload();
+          } else {
+            alert(data.error || "No se pudo agregar el grupo.");
+          }
         }
 
         async function renameBotGroup(groupJid) {
