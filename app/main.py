@@ -3873,7 +3873,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
         }}
         .cards {{
           display: grid;
-          grid-template-columns: repeat(5, minmax(0, 1fr));
+          grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
           gap: 12px;
           margin-bottom: 16px;
         }}
