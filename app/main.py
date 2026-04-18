@@ -1316,23 +1316,24 @@ def panel_recent_requests(
     )
 
     html = """
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Dato</th>
-          <th>Tipo</th>
-          <th>Estado</th>
-          <th>Grupo cliente</th>
-          <th>Bot</th>
-          <th>Proveedor</th>
-          <th>Grupo proveedor</th>
-          <th>Creado</th>
-          <th>Actualizado</th>
-          <th>Error</th>
-        </tr>
-      </thead>
-      <tbody>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Dato</th>
+            <th>Tipo</th>
+            <th>Estado</th>
+            <th>Grupo cliente</th>
+            <th>Bot</th>
+            <th>Proveedor</th>
+            <th>Grupo proveedor</th>
+            <th>Creado</th>
+            <th>Actualizado</th>
+            <th>Error</th>
+          </tr>
+        </thead>
+        <tbody>
     """
 
     if rows:
@@ -1351,7 +1352,7 @@ def panel_recent_requests(
               <td>{_esc(r.act_type)}</td>
               <td class="{status_class}">{_esc(r.status)}</td>
               <td>{_esc(_group_name_cached(r.source_group_id, group_cache) if (r.instance_name or "docifybot3") == "docifybot3" else "OCULTO")}</td>
-              <td>{_esc(r.instance_name or "docifybot3")}</td>
+              <td>{_esc(bot_label(r.instance_name))}</td>
               <td>{_esc(_provider_label(r.provider_name))}</td>
               <td>{_esc(_group_name_cached(r.provider_group_id, group_cache))}</td>
               <td>{_esc(_fmt_dt(r.created_at))}</td>
@@ -1363,8 +1364,9 @@ def panel_recent_requests(
         html += '<tr><td colspan="11">Sin solicitudes en este periodo.</td></tr>'
 
     html += """
-      </tbody>
-    </table>
+        </tbody>
+      </table>
+    </div>
     """
 
     try:
