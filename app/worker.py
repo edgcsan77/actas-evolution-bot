@@ -14,6 +14,7 @@ from app.config import settings
 from app.utils.curp import provider_label_for_type, is_chain
 from app.services.provider3 import Provider3Client, decode_pdf_base64
 from app.services.provider4 import Provider4Client
+from app.services.provider7 import Provider7Client
 from app.queue import redis_conn
 from app.provider_status_cache import refresh_providers_status
 
@@ -296,6 +297,7 @@ def _enabled_providers(db) -> list[str]:
     p4 = _get_or_create_provider(db, "PROVIDER4", False)
     p5 = _get_or_create_provider(db, "PROVIDER5", False)
     p6 = _get_or_create_provider(db, "PROVIDER6", False)
+    p7 = _get_or_create_provider(db, "PROVIDER7", False)
 
     enabled = []
     if p1.is_enabled:
@@ -310,6 +312,8 @@ def _enabled_providers(db) -> list[str]:
         enabled.append("PROVIDER5")
     if p6.is_enabled:
         enabled.append("PROVIDER6")
+    if p7.is_enabled:
+        enabled.append("PROVIDER")
 
     return enabled
 
@@ -431,6 +435,9 @@ def _pick_provider_group(provider_name: str, act_type: str, request_id: int) -> 
         idx = (request_id - 1) % len(provider6_groups)
         return provider6_groups[idx]
 
+    if provider_name == "PROVIDER7":
+        return None
+
     raise RuntimeError("UNKNOWN_PROVIDER")
 
 
@@ -445,6 +452,9 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
         return None
 
     if provider_name == "PROVIDER4":
+        return None
+
+    if provider_name == "PROVIDER7":
         return None
 
     raise RuntimeError("UNKNOWN_PROVIDER")
@@ -579,6 +589,34 @@ def _process_provider4(req, db):
         "pdf_bytes": pdf_bytes,
     }
     
+
+def _process_provider7(req, db):
+    access_token = _get_app_setting(db, "PROVIDER7_ACCESS_TOKEN", "")
+    jsessionid = _get_app_setting(db, "PROVIDER7_JSESSIONID", "")
+    oficialia = _get_app_setting(db, "PROVIDER7_OFICIALIA", "")
+    rfc_usuario = _get_app_setting(db, "PROVIDER7_RFC_USUARIO", "")
+
+    client = Provider7Client(
+        access_token=access_token,
+        jsessionid=jsessionid,
+        oficialia=oficialia,
+        rfc_usuario=rfc_usuario,
+    )
+
+    result = client.generar_pdf_bytes(
+        term=req.curp,
+        act_type=req.act_type,
+        agregar_marco_frontal=True,
+        agregar_reverso_estado=True,
+    )
+
+    return {
+        "pdf_bytes": result["pdf_bytes"],
+        "estado": result["estado"],
+        "sexo": result["sexo"],
+        "cadena": result["cadena"],
+    }
+
 
 def _handle_group_promotion_after_done(req, db):
     if not req.source_group_id:
@@ -1304,6 +1342,85 @@ def process_request(request_id: int):
             except Exception as promo_exc:
                 print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
         
+            return
+
+        if provider_name == "PROVIDER7":
+            try:
+                provider7_result = _process_provider7(req, db)
+            except Exception as e:
+                err = str(e)
+                req.status = "ERROR"
+                req.error_message = err[:1000]
+                req.updated_at = _utc_now_naive()
+                db.commit()
+
+                try:
+                    instance = req.instance_name or "docifybot3"
+                    msg = (
+                        f"⚠️ Solicitud sin éxito en Registro Civil\n"
+                        f"Dato: {req.curp}\n"
+                        f"Tipo: {req.act_type}\n\n"
+                        f"Reenviar nuevamente en unos minutos"
+                    )
+
+                    if req.source_group_id:
+                        send_group_text(req.source_group_id, msg, instance)
+                    else:
+                        from app.services.evolution import send_text
+                        send_text(req.requester_wa_id, msg, instance)
+                except Exception as notify_exc:
+                    print("CLIENT_NOTIFY_AFTER_PROVIDER7_FAIL_ERROR =", str(notify_exc), flush=True)
+
+                _notify_support_error(req, "PROVIDER7_ERROR", err)
+                return
+
+            pdf_bytes = provider7_result["pdf_bytes"]
+            safe_media_b64 = base64.b64encode(pdf_bytes).decode()
+
+            total_seconds = max(0.0, time.perf_counter() - process_started_ts)
+
+            if total_seconds >= 60:
+                minutes = int(total_seconds // 60)
+                seconds = total_seconds % 60
+                tiempo = f"{minutes} min {seconds:.2f} segundos"
+            else:
+                tiempo = f"{total_seconds:.2f} segundos"
+
+            caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
+
+            filename = (
+                f"{req.curp}_FOLIO.pdf"
+                if "FOLIO" in (req.act_type or "").upper()
+                else f"{req.curp}.pdf"
+            )
+
+            if req.source_group_id:
+                send_group_document_base64(
+                    req.source_group_id,
+                    safe_media_b64,
+                    filename=filename,
+                    caption=caption_text
+                )
+            else:
+                send_document_base64(
+                    req.requester_wa_id,
+                    safe_media_b64,
+                    filename=filename,
+                    caption=caption_text
+                )
+
+            req.provider_media_url = "BASE64_PROVIDER7"
+            req.pdf_url = None
+            req.status = "DONE"
+            req.error_message = None
+            req.updated_at = _utc_now_naive()
+            db.commit()
+
+            try:
+                _handle_group_promotion_after_done(req, db)
+            except Exception as promo_exc:
+                print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
+
             return
 
         raise RuntimeError("UNKNOWN_PROVIDER")
