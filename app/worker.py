@@ -23,6 +23,11 @@ from zoneinfo import ZoneInfo
 
 PROVIDER4_TEST_GROUPS = set()
 
+PROVIDER7_TEST_GROUPS = {
+    "120363407066931119@g.us",
+}
+
+
 def _utc_now_naive():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -346,6 +351,15 @@ def _pick_provider_name(
 
         enabled = [p for p in enabled if p != "PROVIDER4"]
 
+        if not enabled:
+            raise RuntimeError("NO_PROVIDER_ENABLED")
+
+    if "PROVIDER7" in enabled:
+        if source_group_id and source_group_id in PROVIDER7_TEST_GROUPS:
+            return "PROVIDER7"
+    
+        enabled = [p for p in enabled if p != "PROVIDER7"]
+    
         if not enabled:
             raise RuntimeError("NO_PROVIDER_ENABLED")
 
