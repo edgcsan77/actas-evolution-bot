@@ -1,17 +1,11 @@
 import io
 import re
 import time
-import tempfile
 from pathlib import Path
 from typing import Any
 
 import requests
 from pypdf import PdfReader, PdfWriter
-
-try:
-    from docx2pdf import convert as docx2pdf_convert
-except Exception:
-    docx2pdf_convert = None
 
 from app.config import settings
 from app.services.provider_sid_oaxaca import SidOaxacaClient
@@ -160,19 +154,6 @@ def _unir_pdfs_bytes(pdf1_bytes: bytes, pdf2_path: Path) -> bytes:
     return out.getvalue()
 
 
-def _convertir_docx_a_pdf(docx_path: Path) -> Path:
-    if docx2pdf_convert is None:
-        raise RuntimeError("PROVIDER7_DOCX2PDF_NOT_INSTALLED")
-
-    pdf_path = Path(tempfile.gettempdir()) / f"{docx_path.stem}.pdf"
-    docx2pdf_convert(str(docx_path), str(pdf_path))
-
-    if not pdf_path.exists():
-        raise RuntimeError(f"PROVIDER7_DOCX_TO_PDF_FAILED: {docx_path}")
-
-    return pdf_path
-
-
 def _resolver_reverso_por_estado(estado: str, estados_dir: Path) -> Path:
     estado_norm = _normalize_estado(estado)
 
@@ -180,19 +161,13 @@ def _resolver_reverso_por_estado(estado: str, estados_dir: Path) -> Path:
     if pdf_path.exists():
         return pdf_path
 
-    docx_path = estados_dir / f"{estado_norm}.docx"
-    if docx_path.exists():
-        return _convertir_docx_a_pdf(docx_path)
-
-    for candidate in estados_dir.glob("*"):
-        if candidate.suffix.lower() not in {".pdf", ".docx"}:
-            continue
+    for candidate in estados_dir.glob("*.pdf"):
         if _normalize_estado(candidate.stem) == estado_norm:
-            if candidate.suffix.lower() == ".pdf":
-                return candidate
-            return _convertir_docx_a_pdf(candidate)
+            return candidate
 
-    raise RuntimeError(f"PROVIDER7_REAR_FRAME_NOT_FOUND: estado={estado} dir={estados_dir}")
+    raise RuntimeError(
+        f"PROVIDER7_REAR_FRAME_NOT_FOUND: estado={estado} dir={estados_dir}"
+    )
 
 
 def _enmarcar_pdf_frente(pdf_bytes: bytes, filename: str, timeout: int = 120) -> bytes:
@@ -245,7 +220,6 @@ class Provider7Client:
         jsessionid: str,
         oficialia: int | str,
         rfc_usuario: str,
-        estados_dir: str | Path | None = None,
     ) -> None:
         self.access_token = _strip_or_default(access_token)
         self.jsessionid = _strip_or_default(jsessionid)
