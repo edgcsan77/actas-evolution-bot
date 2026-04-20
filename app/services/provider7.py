@@ -72,6 +72,16 @@ def _normalize_estado(nombre: str) -> str:
     for a, b in reemplazos.items():
         nombre = nombre.replace(a, b)
 
+    alias = {
+        "MICHOACAN DE OCAMPO": "MICHOACAN",
+        "COAHUILA DE ZARAGOZA": "COAHUILA",
+        "VERACRUZ DE IGNACIO DE LA LLAVE": "VERACRUZ",
+        "MEXICO": "MEXICO",
+        "ESTADO DE MEXICO": "MEXICO",
+        "CIUDAD DE MEXICO": "CIUDAD_DE_MEXICO",
+    }
+
+    nombre = alias.get(nombre, nombre)
     nombre = nombre.replace(" ", "_")
     nombre = re.sub(r"[^A-Z_]", "", nombre)
     return nombre
