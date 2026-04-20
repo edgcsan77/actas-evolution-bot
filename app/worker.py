@@ -332,15 +332,28 @@ def _pick_provider_name(
 ) -> str:
     enabled = _enabled_providers(db)
 
+    print("PICK_PROVIDER_ENABLED =", enabled, flush=True)
+    print("PICK_PROVIDER_SOURCE_GROUP_ID =", repr(source_group_id), flush=True)
+    print("PICK_PROVIDER_TERM =", repr(term), flush=True)
+
     if not enabled:
         raise RuntimeError("NO_PROVIDER_ENABLED")
+
+    # FORZAR PROVIDER7 PARA GRUPO DE PRUEBA
+    if (
+        source_group_id
+        and source_group_id in PROVIDER7_TEST_GROUPS
+        and "PROVIDER7" in enabled
+    ):
+        print("FORZANDO PROVIDER7 =", source_group_id, flush=True)
+        return "PROVIDER7"
 
     if not _is_provider4_eligible(term, act_type):
         enabled = [p for p in enabled if p != "PROVIDER4"]
 
         if not enabled:
             raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
-    
+
     if PROVIDER4_TEST_GROUPS:
         if (
             source_group_id
@@ -354,12 +367,10 @@ def _pick_provider_name(
         if not enabled:
             raise RuntimeError("NO_PROVIDER_ENABLED")
 
-    if "PROVIDER7" in enabled:
-        if source_group_id and source_group_id in PROVIDER7_TEST_GROUPS:
-            return "PROVIDER7"
-    
+    # Quitar PROVIDER7 de la rotación para grupos normales
+    if PROVIDER7_TEST_GROUPS and "PROVIDER7" in enabled:
         enabled = [p for p in enabled if p != "PROVIDER7"]
-    
+
         if not enabled:
             raise RuntimeError("NO_PROVIDER_ENABLED")
 
