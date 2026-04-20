@@ -252,9 +252,8 @@ class Provider7Client:
         self.oficialia = _strip_or_default(oficialia)
         self.rfc_usuario = _strip_or_default(rfc_usuario).upper()
 
-        estados_default = getattr(settings, "PROVIDER7_ESTADOS_DIR", "") or ""
-        raw_estados_dir = estados_dir or estados_default
-        self.estados_dir = Path(raw_estados_dir) if raw_estados_dir else None
+        BASE_DIR = Path(__file__).resolve().parent.parent
+        self.estados_dir = BASE_DIR / "assets" / "estados"
 
         self.sid = SidOaxacaClient(
             access_token=self.access_token,
