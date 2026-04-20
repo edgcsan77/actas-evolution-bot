@@ -616,10 +616,10 @@ def _process_provider4(req, db):
     
 
 def _process_provider7(req, db):
-    access_token = _get_app_setting(db, "PROVIDER7_ACCESS_TOKEN", "")
-    jsessionid = _get_app_setting(db, "PROVIDER7_JSESSIONID", "")
-    oficialia = _get_app_setting(db, "PROVIDER7_OFICIALIA", "")
-    rfc_usuario = _get_app_setting(db, "PROVIDER7_RFC_USUARIO", "")
+    access_token = _get_app_setting(db, "PROVIDER7_ACCESS_TOKEN", settings.PROVIDER7_ACCESS_TOKEN)
+    jsessionid = _get_app_setting(db, "PROVIDER7_JSESSIONID", settings.PROVIDER7_JSESSIONID)
+    oficialia = _get_app_setting(db, "PROVIDER7_OFICIALIA", str(settings.PROVIDER7_OFICIALIA))
+    rfc_usuario = _get_app_setting(db, "PROVIDER7_RFC_USUARIO", settings.PROVIDER7_RFC_USUARIO)
 
     client = Provider7Client(
         access_token=access_token,
