@@ -64,7 +64,10 @@ class Settings(BaseSettings):
         "SIN REGISTRO|"
         "NO ESTA|"
         "SIN|"
-        "ERROR! CURP INVALIDA"
+        "ERROR! CURP INVALIDA|"
+        "NO SE HA ENCONTRADO INFORMACION|"
+        "LO SIENTO, NO SE HA ENCONTRADO INFORMACION|"
+        "NO SE ENCONTRARON REGISTROS"
     )
 
     HISTORY_DAYS: int = 7
