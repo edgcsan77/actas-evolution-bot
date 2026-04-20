@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     PROVIDER6_GROUP_1: str = ""
     PROVIDER6_GROUP_2: str = ""
 
+    # PROVIDER 7
+    PROVIDER7_ACCESS_TOKEN: str = ""
+    PROVIDER7_JSESSIONID: str = ""
+    PROVIDER7_OFICIALIA: str = ""
+    PROVIDER7_RFC_USUARIO: str = ""
+
     PROVIDER_NO_RECORD_TEXT: str = (
         "NO HAY REGISTROS DISPONIBLES|"
         "NO SE ENCONTRO EL ACTA EN SISTEMA|"
