@@ -1372,13 +1372,42 @@ def process_request(request_id: int):
         if provider_name == "PROVIDER7":
             try:
                 provider7_result = _process_provider7(req, db)
+        
             except Exception as e:
                 err = str(e)
+        
+                if err.startswith("PROVIDER7_CURP_NO_RESULTS"):
+                    req.status = "ERROR"
+                    req.error_message = err[:1000]
+                    req.updated_at = _utc_now_naive()
+                    db.commit()
+        
+                    msg = (
+                        f"❌ No hay registros disponibles.\n"
+                        f"Dato: {req.curp}\n"
+                        f"Tipo: {req.act_type}\n\n"
+                        f"Verificar que la CURP esté certificada en RENAPO"
+                    )
+        
+                    try:
+                        instance = req.instance_name or "docifybot3"
+        
+                        if req.source_group_id:
+                            send_group_text(req.source_group_id, msg, instance)
+                        else:
+                            from app.services.evolution import send_text
+                            send_text(req.requester_wa_id, msg, instance)
+        
+                    except Exception as notify_exc:
+                        print("CLIENT_NOTIFY_AFTER_PROVIDER7_NO_RESULTS_ERROR =", str(notify_exc), flush=True)
+        
+                    return
+        
                 req.status = "ERROR"
                 req.error_message = err[:1000]
                 req.updated_at = _utc_now_naive()
                 db.commit()
-
+        
                 try:
                     instance = req.instance_name or "docifybot3"
                     msg = (
@@ -1387,38 +1416,39 @@ def process_request(request_id: int):
                         f"Tipo: {req.act_type}\n\n"
                         f"Reenviar nuevamente en unos minutos"
                     )
-
+        
                     if req.source_group_id:
                         send_group_text(req.source_group_id, msg, instance)
                     else:
                         from app.services.evolution import send_text
                         send_text(req.requester_wa_id, msg, instance)
+        
                 except Exception as notify_exc:
                     print("CLIENT_NOTIFY_AFTER_PROVIDER7_FAIL_ERROR =", str(notify_exc), flush=True)
-
+        
                 _notify_support_error(req, "PROVIDER7_ERROR", err)
                 return
-
+        
             pdf_bytes = provider7_result["pdf_bytes"]
             safe_media_b64 = base64.b64encode(pdf_bytes).decode()
-
+        
             total_seconds = max(0.0, time.perf_counter() - process_started_ts)
-
+        
             if total_seconds >= 60:
                 minutes = int(total_seconds // 60)
                 seconds = total_seconds % 60
                 tiempo = f"{minutes} min {seconds:.2f} segundos"
             else:
                 tiempo = f"{total_seconds:.2f} segundos"
-
+        
             caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
-
+        
             filename = (
                 f"{req.curp}_FOLIO.pdf"
                 if "FOLIO" in (req.act_type or "").upper()
                 else f"{req.curp}.pdf"
             )
-
+        
             if req.source_group_id:
                 send_group_document_base64(
                     req.source_group_id,
@@ -1433,19 +1463,19 @@ def process_request(request_id: int):
                     filename=filename,
                     caption=caption_text
                 )
-
+        
             req.provider_media_url = "BASE64_PROVIDER7"
             req.pdf_url = None
             req.status = "DONE"
             req.error_message = None
             req.updated_at = _utc_now_naive()
             db.commit()
-
+        
             try:
                 _handle_group_promotion_after_done(req, db)
             except Exception as promo_exc:
                 print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
-
+        
             return
 
         raise RuntimeError("UNKNOWN_PROVIDER")
@@ -1523,7 +1553,6 @@ def process_request(request_id: int):
             if (
                 err.startswith("PROVIDER3_NO_RECORD")
                 or err.startswith("PROVIDER4_NO_RECORD")
-                or err.startswith("PROVIDER7_CURP_NO_RESULTS")
             ):
                 req.status = "ERROR"
                 req.error_message = err
