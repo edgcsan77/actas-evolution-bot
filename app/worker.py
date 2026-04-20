@@ -313,7 +313,7 @@ def _enabled_providers(db) -> list[str]:
     if p6.is_enabled:
         enabled.append("PROVIDER6")
     if p7.is_enabled:
-        enabled.append("PROVIDER")
+        enabled.append("PROVIDER7")
 
     return enabled
 
