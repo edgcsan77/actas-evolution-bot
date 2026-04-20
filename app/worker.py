@@ -1523,7 +1523,7 @@ def process_request(request_id: int):
             if (
                 err.startswith("PROVIDER3_NO_RECORD:")
                 or err.startswith("PROVIDER4_NO_RECORD:")
-                or err.startswith("PROVIDER7_CURP_NO_RESULTS:")
+                or err.startswith("PROVIDER7_CURP_NO_RESULTS")
             ):
                 req.status = "ERROR"
                 req.error_message = err
