@@ -7551,7 +7551,7 @@ def _providers_status_text(db: Session) -> str:
     s4 = "ON" if p4.is_enabled else "OFF"
     s5 = "ON" if p5.is_enabled else "OFF"
     s6 = "ON" if p6.is_enabled else "OFF"
-    s7 = "ON" if p6.is_enabled else "OFF"
+    s7 = "ON" if p7.is_enabled else "OFF"
 
     provider1_extra = ""
     provider2_extra = ""
