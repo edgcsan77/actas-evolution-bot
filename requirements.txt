@@ -8,3 +8,4 @@ redis==6.4.0
 rq==2.6.0
 pydantic==2.11.7
 pydantic-settings==2.10.1
+pypdf>=5.0.0
