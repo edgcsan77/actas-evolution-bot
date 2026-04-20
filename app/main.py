@@ -20,6 +20,7 @@ from app.queue import request_queue, redis_conn
 from app.worker import process_request, provider3_keepalive_job
 from app.services.provider3 import Provider3Client
 from app.services.provider4 import Provider4Client
+from app.services.provider7 import Provider7Client
 
 from app.utils.curp import (
     extract_request_terms,
@@ -109,6 +110,7 @@ PROVIDER_LABELS = {
     "PROVIDER3": "AUSTRAM WEB",
     "PROVIDER5": "LUIS SID",
     "PROVIDER6": "ACTAS ESCALANTE",
+    "PROVIDER7": "MESINO SID",
 }
 
 
@@ -5487,6 +5489,15 @@ def panel_actas(
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER6','off')">Desactivar</button>
                       </div>
                     </div>
+
+                    <div class="provider-card">
+                      <div class="provider-name">MESINO SID</div>
+                      <div class="provider-actions">
+                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER7','on')">Activar</button>
+                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER7','off')">Desactivar</button>
+                        <button class="btn btn-warning" onclick="updateProvider7Credentials()">Actualizar credenciales</button>
+                      </div>
+                    </div>
                   </div>
         
                   <div class="status-panel">
@@ -6328,6 +6339,46 @@ def panel_actas(
             alert(data.error || "No se pudo quitar el grupo.");
           }}
         }}
+
+        async function updateProvider7Credentials() {{
+          const access_token = prompt("PROVIDER7_ACCESS_TOKEN:");
+          if (access_token === null) return;
+        
+          const jsessionid = prompt("PROVIDER7_JSESSIONID:");
+          if (jsessionid === null) return;
+        
+          const oficialia = prompt("PROVIDER7_OFICIALIA:");
+          if (oficialia === null) return;
+        
+          const rfc_usuario = prompt("PROVIDER7_RFC_USUARIO:");
+          if (rfc_usuario === null) return;
+        
+          try {{
+            const res = await fetch("/panel/provider7/update-credentials", {{
+              method: "POST",
+              headers: {{
+                "Content-Type": "application/json"
+              }},
+              body: JSON.stringify({{
+                access_token,
+                jsessionid,
+                oficialia,
+                rfc_usuario
+              }})
+            }});
+        
+            const data = await res.json();
+        
+            if (data.ok) {{
+              alert("Credenciales de Provider7 actualizadas");
+              location.reload();
+            }} else {{
+              alert(data.error || "No se pudieron actualizar las credenciales");
+            }}
+          }} catch (e) {{
+            alert("Error de conexión al actualizar Provider7");
+          }}
+        }}
         
         async function rechargeBotLimit(instanceName) {{
           const input = document.getElementById(`bot_recharge_${{instanceName}}`);
@@ -6957,6 +7008,43 @@ def update_provider3_sid(
     }
 
 
+@app.post("/panel/provider7/update-credentials")
+def update_provider7_credentials(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    access_token = (payload.get("access_token") or "").strip()
+    jsessionid = (payload.get("jsessionid") or "").strip()
+    oficialia = str(payload.get("oficialia") or "").strip()
+    rfc_usuario = (payload.get("rfc_usuario") or "").strip().upper()
+    estados_dir = (payload.get("estados_dir") or "").strip()
+
+    if not access_token:
+        return {"ok": False, "error": "ACCESS_TOKEN vacío"}
+
+    if not jsessionid:
+        return {"ok": False, "error": "JSESSIONID vacío"}
+
+    if not oficialia:
+        return {"ok": False, "error": "OFICIALIA vacía"}
+
+    if not rfc_usuario:
+        return {"ok": False, "error": "RFC_USUARIO vacío"}
+
+    _set_app_setting(db, "PROVIDER7_ACCESS_TOKEN", access_token)
+    _set_app_setting(db, "PROVIDER7_JSESSIONID", jsessionid)
+    _set_app_setting(db, "PROVIDER7_OFICIALIA", oficialia)
+    _set_app_setting(db, "PROVIDER7_RFC_USUARIO", rfc_usuario)
+
+    if estados_dir:
+        _set_app_setting(db, "PROVIDER7_ESTADOS_DIR", estados_dir)
+
+    return {
+        "ok": True,
+        "message": "Credenciales de Provider 7 actualizadas",
+    }
+
+
 @app.post("/panel/provider/{provider_name}/on")
 def panel_provider_on(provider_name: str, db: Session = Depends(get_db)):
     row = _get_or_create_provider(db, provider_name.upper(), provider_name.upper() == "PROVIDER1")
@@ -7013,6 +7101,7 @@ def startup():
         _get_or_create_provider(db, "PROVIDER4", False)
         _get_or_create_provider(db, "PROVIDER5", False)
         _get_or_create_provider(db, "PROVIDER6", False)
+        _get_or_create_provider(db, "PROVIDER7", False)
     
         current = _get_app_setting(db, "PROVIDER3_PHPSESSID", "")
         if not current and settings.PROVIDER3_PHPSESSID:
@@ -7454,6 +7543,7 @@ def _providers_status_text(db: Session) -> str:
     p4 = _get_or_create_provider(db, "PROVIDER4", False)
     p5 = _get_or_create_provider(db, "PROVIDER5", False)
     p6 = _get_or_create_provider(db, "PROVIDER6", False)
+    p7 = _get_or_create_provider(db, "PROVIDER7", False)
 
     s1 = "ON" if p1.is_enabled else "OFF"
     s2 = "ON" if p2.is_enabled else "OFF"
@@ -7461,6 +7551,7 @@ def _providers_status_text(db: Session) -> str:
     s4 = "ON" if p4.is_enabled else "OFF"
     s5 = "ON" if p5.is_enabled else "OFF"
     s6 = "ON" if p6.is_enabled else "OFF"
+    s7 = "ON" if p6.is_enabled else "OFF"
 
     provider1_extra = ""
     provider2_extra = ""
@@ -7468,6 +7559,7 @@ def _providers_status_text(db: Session) -> str:
     provider4_extra = ""
     provider5_extra = ""
     provider6_extra = ""
+    provider7_extra = ""
 
     local_start = _panel_month_start()
     local_end = _panel_month_end()
@@ -7559,12 +7651,28 @@ def _providers_status_text(db: Session) -> str:
     except Exception as e:
         provider6_extra = f" | ERROR DB: {str(e)}"
 
+    try:
+        provider7_total = (
+            db.query(func.count(RequestLog.id))
+            .filter(
+                RequestLog.provider_name == "PROVIDER7",
+                RequestLog.status == "DONE",
+                RequestLog.created_at >= utc_start,
+                RequestLog.created_at < utc_end,
+            )
+            .scalar()
+        ) or 0
+        provider7_extra = f" | CUPR y CADENA hechas: {provider7_total}"
+    except Exception as e:
+        provider7_extra = f" | ERROR DB: {str(e)}"
+
     text = (
         f"ADMIN DIGITAL:     {s1}{provider1_extra}\n"
         f"ACTAS DEL SURESTE: {s2}{provider2_extra}\n"
         f"AUSTRAM WEB:       {s3}{provider3_extra}\n"
         f"LUIS SID:          {s5}{provider5_extra}\n"
-        f"ACTAS ESCALANTE:   {s6}{provider6_extra}"
+        f"ACTAS ESCALANTE:   {s6}{provider6_extra}\n"
+        f"MESINO SID:        {s7}{provider7_extra}"
     )
 
     return text
