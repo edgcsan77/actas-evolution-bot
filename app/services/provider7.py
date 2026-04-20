@@ -251,7 +251,7 @@ class Provider7Client:
         if not cadena:
             raise RuntimeError("PROVIDER7_CURP_NO_CADENA")
 
-        if sexo not in {"H", "M"}:
+        if sexo not in {"H", "M", "F"}:
             raise RuntimeError(f"PROVIDER7_CURP_INVALID_SEXO: {sexo}")
 
         return {
