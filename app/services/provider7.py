@@ -171,10 +171,7 @@ def _resolver_reverso_por_estado(estado: str, estados_dir: Path) -> Path:
 
 
 def _enmarcar_pdf_frente(pdf_bytes: bytes, filename: str, timeout: int = 120) -> bytes:
-    url = _strip_or_default(
-        getattr(settings, "PROVIDER7_FRAME_URL", ""),
-        DEFAULT_FRAME_URL,
-    )
+    url = (getattr(settings, "PROVIDER7_FRAME_URL", "") or DEFAULT_FRAME_URL).strip()
 
     files = {
         "pdf_file": (filename, pdf_bytes, "application/pdf"),
