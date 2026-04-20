@@ -435,11 +435,9 @@ def _pick_provider_group(provider_name: str, act_type: str, request_id: int) -> 
 
 
 def _build_provider_message(provider_name: str, term: str, act_type: str) -> str | None:
-    if provider_name == "PROVIDER1":
-        provider_type = provider_label_for_type(act_type)
-        return f"{term} {provider_type}"
-
-    if provider_name == "PROVIDER2":
+    if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6"):
+        if is_chain(term):
+            return f"{term}"
         provider_type = provider_label_for_type(act_type)
         return f"{term} {provider_type}"
 
@@ -448,14 +446,6 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
 
     if provider_name == "PROVIDER4":
         return None
-
-    if provider_name == "PROVIDER5":
-        provider_type = provider_label_for_type(act_type)
-        return f"{term} {provider_type}"
-
-    if provider_name == "PROVIDER6":
-        provider_type = provider_label_for_type(act_type)
-        return f"{term} {provider_type}"
 
     raise RuntimeError("UNKNOWN_PROVIDER")
 
