@@ -7662,7 +7662,7 @@ def _providers_status_text(db: Session) -> str:
             )
             .scalar()
         ) or 0
-        provider7_extra = f" | CUPR y CADENA hechas: {provider7_total}"
+        provider7_extra = f" | CURP y CADENA hechas: {provider7_total}"
     except Exception as e:
         provider7_extra = f" | ERROR DB: {str(e)}"
 
