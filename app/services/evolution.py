@@ -13,12 +13,19 @@ def _headers():
 def _normalize_number(number: str) -> str:
     if not number:
         return ""
-    number = str(number)
+
+    number = str(number).strip()
+
+    # si es grupo no tocar
+    if "@g.us" in number:
+        return number
+
+    # si es usuario normal limpiar
     number = number.replace("@s.whatsapp.net", "")
-    number = number.replace("@g.us", "")
     number = number.replace("+", "")
     number = number.replace(" ", "")
-    return number.strip()
+
+    return number
 
 
 def send_text(number: str, text: str, instance_name: str = None):
