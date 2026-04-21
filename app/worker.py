@@ -924,22 +924,19 @@ def _validate_pdf_matches_term(pdf_bytes: bytes, term: str, act_type: str | None
     print("PROVIDER_VALIDATE_FOUND_CURPS =", found_curps, flush=True)
     print("PROVIDER_VALIDATE_ACT_TYPE =", act_type_up, flush=True)
 
+    # Si se detectan CURPs visibles, la esperada debe aparecer.
+    # Ya NO rechazar solo porque existan varias.
     if found_curps:
         if expected not in found_curps:
             return False
 
-        # En matrimonio es normal que aparezcan varias CURP
-        if "MATRIMONIO" in act_type_up:
-            return True
-
-        # En otros tipos, si hay varias CURP distintas, se rechaza
         if len(found_curps) > 1:
-            print("PROVIDER_VALIDATE_MULTIPLE_CURPS_REJECTED = TRUE", flush=True)
-            return False
+            print("PROVIDER_VALIDATE_MULTIPLE_CURPS_ALLOWED = TRUE", flush=True)
 
         return True
 
     normalized_text = _normalize_alnum(text)
+
     if expected in normalized_text:
         return True
 
