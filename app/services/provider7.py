@@ -363,13 +363,7 @@ class Provider7Client:
         filename_base = ctx["filename_base"] or "SID_OAXACA"
 
         act_upper = _strip_or_default(act_type).upper()
-
-        is_folio = any(word in act_upper for word in [
-            "FOLIO",
-            "FOLIADO",
-            "FOLIADA",
-            "FOLIAR",
-        ])
+        is_folio = "FOLI" in act_upper
         
         if agregar_marco_frontal:
             pdf_bytes = _enmarcar_pdf_frente(pdf_bytes, f"{filename_base}.pdf", folio=is_folio)
