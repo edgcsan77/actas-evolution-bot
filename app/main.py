@@ -108,6 +108,7 @@ PROVIDER_LABELS = {
     "PROVIDER1": "ADMIN DIGITAL",
     "PROVIDER2": "ACTAS DEL SURESTE",
     "PROVIDER3": "AUSTRAM WEB",
+    "PROVIDER4": "LAZARO WEB",
     "PROVIDER5": "LUIS SID",
     "PROVIDER6": "ACTAS ESCALANTE",
     "PROVIDER7": "MESINO SID",
@@ -5491,11 +5492,10 @@ def panel_actas(
                     </div>
 
                     <div class="provider-card">
-                      <div class="provider-name">MESINO SID</div>
+                      <div class="provider-name">LAZARO WEB</div>
                       <div class="provider-actions">
-                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER7','on')">Activar</button>
-                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER7','off')">Desactivar</button>
-                        <button class="btn btn-warning" onclick="updateProvider7Credentials()">Actualizar credenciales</button>
+                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER4','on')">Activar</button>
+                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER4','off')">Desactivar</button>
                       </div>
                     </div>
                   </div>
@@ -7672,7 +7672,7 @@ def _providers_status_text(db: Session) -> str:
         f"AUSTRAM WEB:       {s3}{provider3_extra}\n"
         f"LUIS SID:          {s5}{provider5_extra}\n"
         f"ACTAS ESCALANTE:   {s6}{provider6_extra}\n"
-        f"MESINO SID:        {s7}{provider7_extra}"
+        f"LAZARO WEB:        {s4}{provider4_extra}"
     )
 
     return text
