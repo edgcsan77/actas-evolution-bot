@@ -116,7 +116,7 @@ class SidOaxacaClient:
     # =========================================================
     # HELPERS
     # =========================================================
-    def _sleep_jitter(self, min_seconds: float = 0.15, max_seconds: float = 0.9) -> None:
+    def _sleep_jitter(self, min_seconds: float = 0.6, max_seconds: float = 2.2) -> None:
         if max_seconds <= 0:
             return
         time.sleep(random.uniform(min_seconds, max_seconds))
