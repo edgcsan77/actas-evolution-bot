@@ -137,13 +137,19 @@ class Provider4Client:
     
         print("PROVIDER4_VALIDATE_EXPECTED_CURP =", expected, flush=True)
         print("PROVIDER4_VALIDATE_FOUND_CURPS =", found_curps, flush=True)
+        print("PROVIDER4_VALIDATE_TIPOA =", tipoa, flush=True)
     
         if found_curps:
             if expected not in found_curps:
                 return False
-            if len(found_curps) > 1:
-                print("PROVIDER4_VALIDATE_MULTIPLE_CURPS_REJECTED = TRUE", flush=True)
-                return False
+    
+            # En matrimonio es normal que haya varias CURP
+            if (tipoa or "").strip().lower() == "matrimonio":
+                pass
+            else:
+                if len(found_curps) > 1:
+                    print("PROVIDER4_VALIDATE_MULTIPLE_CURPS_REJECTED = TRUE", flush=True)
+                    return False
     
         text_up = text.upper()
         tipoa_up = (tipoa or "").strip().lower()
