@@ -4,6 +4,21 @@ import time
 from pathlib import Path
 from typing import Any
 
+import json
+import random
+import redis
+
+from app.config import settings
+
+
+def _get_redis_client():
+    return redis.from_url(settings.REDIS_URL, decode_responses=True)
+
+_PROVIDER7_LOCK_KEY = "provider7:sid:lock"
+_PROVIDER7_MINUTE_KEY = "provider7:sid:minute_bucket"
+_PROVIDER7_COOLDOWN_KEY = "provider7:sid:cooldown_until"
+_PROVIDER7_BATCH_KEY = "provider7:sid:batch_count"
+
 import requests
 from pypdf import PdfReader, PdfWriter
 
@@ -53,6 +68,103 @@ def _strip_or_default(value: Any, default: str = "") -> str:
     if value is None:
         return default
     return str(value).strip()
+
+
+def _provider7_now() -> float:
+    return time.time()
+
+
+def _provider7_sleep_human(min_s: float, max_s: float) -> None:
+    time.sleep(random.uniform(min_s, max_s))
+
+
+def _provider7_set_cooldown(seconds: int = 600) -> None:
+    r = _get_redis_client()
+    until = _provider7_now() + max(1, int(seconds))
+    r.set(_PROVIDER7_COOLDOWN_KEY, str(until), ex=max(60, int(seconds) + 60))
+
+
+def _provider7_check_cooldown() -> None:
+    r = _get_redis_client()
+    raw = r.get(_PROVIDER7_COOLDOWN_KEY)
+    if not raw:
+        return
+
+    try:
+        until = float(raw)
+    except Exception:
+        return
+
+    now = _provider7_now()
+    if now < until:
+        remaining = until - now
+        raise RuntimeError(f"PROVIDER7_COOLDOWN_ACTIVE: espera {remaining:.1f}s")
+
+
+def _provider7_wait_turn() -> None:
+    r = _get_redis_client()
+
+    _provider7_check_cooldown()
+
+    while True:
+        now = _provider7_now()
+        minute_start = int(now // 60) * 60
+        bucket_value = r.get(_PROVIDER7_MINUTE_KEY)
+
+        if bucket_value:
+            try:
+                bucket = json.loads(bucket_value)
+            except Exception:
+                bucket = {"minute_start": minute_start, "count": 0}
+        else:
+            bucket = {"minute_start": minute_start, "count": 0}
+
+        if bucket["minute_start"] != minute_start:
+            bucket = {"minute_start": minute_start, "count": 0}
+
+        max_this_minute = random.choice([4, 5])
+
+        if bucket["count"] < max_this_minute:
+            bucket["count"] += 1
+            r.set(_PROVIDER7_MINUTE_KEY, json.dumps(bucket), ex=90)
+            break
+
+        wait_s = (minute_start + 60) - now
+        wait_s += random.uniform(2.0, 8.0)
+        time.sleep(max(1.0, wait_s))
+
+    _provider7_sleep_human(8.0, 18.0)
+
+    batch_count = r.incr(_PROVIDER7_BATCH_KEY)
+    if batch_count == 1:
+        r.expire(_PROVIDER7_BATCH_KEY, 3600)
+
+    if batch_count % random.randint(4, 7) == 0:
+        _provider7_sleep_human(30.0, 90.0)
+
+
+class Provider7RedisLock:
+    def __init__(self, key: str, ttl: int = 120):
+        self.key = key
+        self.ttl = ttl
+        self.r = _get_redis_client()
+        self.token = f"{time.time()}-{random.randint(1000,999999)}"
+
+    def __enter__(self):
+        while True:
+            _provider7_check_cooldown()
+            acquired = self.r.set(self.key, self.token, nx=True, ex=self.ttl)
+            if acquired:
+                return self
+            time.sleep(random.uniform(2.0,5.0))
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            current = self.r.get(self.key)
+            if current == self.token:
+                self.r.delete(self.key)
+        except Exception:
+            pass
 
 
 def _normalize_estado(nombre: str) -> str:
@@ -345,47 +457,79 @@ class Provider7Client:
         agregar_marco_frontal: bool = True,
         agregar_reverso_estado: bool = True,
     ) -> dict[str, Any]:
-        warm = self.warm_session()
-        if not warm.get("ok"):
-            raise RuntimeError(f"PROVIDER7_WARM_FAILED: {warm}")
 
-        ctx = self._resolver_contexto(term, act_type)
+        with Provider7RedisLock(_PROVIDER7_LOCK_KEY, ttl=180):
 
-        referencia = f"{ctx['cadena']}__XX_X"
-        folio_impresion = f"{int(time.time())}-S"
+            _provider7_wait_turn()
 
-        pdf_bytes = self.sid.descargar_pdf_acta(
-            folio_impresion=folio_impresion,
-            referencia=referencia,
-            formato=1,
-            sexo=ctx["sexo"],
-        )
+            warm = self.warm_session()
+            if not warm.get("ok"):
+                warm_text = str(warm)
 
-        if not pdf_bytes:
-            raise RuntimeError("PROVIDER7_NO_PDF_DOWNLOADED")
+                if "invalid_token" in warm_text or "SESSION_INVALID" in warm_text:
+                    _provider7_set_cooldown(600)
 
-        filename_base = ctx["filename_base"] or "SID_OAXACA"
+                raise RuntimeError(f"PROVIDER7_WARM_FAILED: {warm}")
 
-        act_upper = _strip_or_default(act_type).upper()
-        is_folio = "FOLI" in act_upper
-        
-        if agregar_marco_frontal:
-            pdf_bytes = _enmarcar_pdf_frente(pdf_bytes, f"{filename_base}.pdf", folio=is_folio)
+            _provider7_wait_turn()
 
-        if agregar_reverso_estado:
-            if not self.estados_dir:
-                raise RuntimeError("PROVIDER7_ESTADOS_DIR_EMPTY")
+            ctx = self._resolver_contexto(term, act_type)
 
-            reverso_path = _resolver_reverso_por_estado(ctx["estado"], self.estados_dir)
-            pdf_bytes = _unir_pdfs_bytes(pdf_bytes, reverso_path)
+            referencia = f"{ctx['cadena']}__XX_X"
+            folio_impresion = f"{int(time.time())}-S"
 
-        return {
-            "pdf_bytes": pdf_bytes,
-            "estado": ctx["estado"],
-            "sexo": ctx["sexo"],
-            "cadena": ctx["cadena"],
-            "term_type": ctx["term_type"],
-            "filename_base": filename_base,
-            "warm": warm,
-            "raw_row": ctx.get("row") or {},
-        }
+            _provider7_wait_turn()
+
+            try:
+                pdf_bytes = self.sid.descargar_pdf_acta(
+                    folio_impresion=folio_impresion,
+                    referencia=referencia,
+                    formato=1,
+                    sexo=ctx["sexo"],
+                )
+            except Exception as e:
+
+                err = str(e)
+
+                if "invalid_token" in err or "SESSION_INVALID" in err:
+                    _provider7_set_cooldown(600)
+
+                raise
+
+            if not pdf_bytes:
+                raise RuntimeError("PROVIDER7_NO_PDF_DOWNLOADED")
+
+            filename_base = ctx["filename_base"] or "SID_OAXACA"
+
+            act_upper = _strip_or_default(act_type).upper()
+            is_folio = "FOLI" in act_upper
+
+            if agregar_marco_frontal:
+                pdf_bytes = _enmarcar_pdf_frente(
+                    pdf_bytes,
+                    f"{filename_base}.pdf",
+                    folio=is_folio,
+                )
+
+            if agregar_reverso_estado:
+
+                if not self.estados_dir:
+                    raise RuntimeError("PROVIDER7_ESTADOS_DIR_EMPTY")
+
+                reverso_path = _resolver_reverso_por_estado(
+                    ctx["estado"],
+                    self.estados_dir,
+                )
+
+                pdf_bytes = _unir_pdfs_bytes(pdf_bytes, reverso_path)
+
+            return {
+                "pdf_bytes": pdf_bytes,
+                "estado": ctx["estado"],
+                "sexo": ctx["sexo"],
+                "cadena": ctx["cadena"],
+                "term_type": ctx["term_type"],
+                "filename_base": filename_base,
+                "warm": warm,
+                "raw_row": ctx.get("row") or {},
+            }
