@@ -9,7 +9,7 @@ import requests
 
 class Provider4Client:
     BASE_URL = "https://www.tramitanet.org"
-    HID = "Isa4cLz"
+    HID = "D0cUExpr3ss"
 
     MANUAL_PAGE_URL = f"{BASE_URL}/servicio/manual.php?HID={HID}"
     MANUAL_ENDPOINT = f"{BASE_URL}/servicio/backend-manualCVL.php"
