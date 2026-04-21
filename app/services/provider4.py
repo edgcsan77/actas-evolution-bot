@@ -264,8 +264,6 @@ class Provider4Client:
         cadena: str = "",
         trami_ine: bool = True,
     ) -> str:
-        self.warm()
-
         params = {
             "curp": curp,
             "tipoa": tipoa,
@@ -274,28 +272,30 @@ class Provider4Client:
             "tramiINE": "true" if trami_ine else "false",
             "cadenaA": cadena,
         }
-
+    
         last_error = None
-
+    
         for attempt in range(3):
             try:
+                self.warm()
+    
                 print("PROVIDER4_REQUEST_PARAMS =", params, flush=True)
                 print(f"PROVIDER4_BACKEND_ATTEMPT_{attempt+1}_START", flush=True)
-
+    
                 resp = self.session.get(
                     self.MANUAL_ENDPOINT,
                     params=params,
                     timeout=(15, 240),
                 )
                 resp.raise_for_status()
-
+    
                 print(
                     f"PROVIDER4_BACKEND_ATTEMPT_{attempt+1}_STATUS = {resp.status_code}",
                     flush=True,
                 )
-
+    
                 return resp.text
-
+    
             except requests.exceptions.RequestException as e:
                 last_error = e
                 print(
@@ -304,7 +304,7 @@ class Provider4Client:
                 )
                 if attempt < 2:
                     time.sleep(5 + attempt * 3)
-
+    
         raise RuntimeError(f"PROVIDER4_BACKEND_FAILED: {last_error}")
 
     def consultar_por_curp(
