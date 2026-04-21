@@ -675,6 +675,13 @@ class Provider4Client:
             )
     
         print("PROVIDER4_BACKEND_HTML_PREVIEW =", html[:1200], flush=True)
+        
+        backend_up = (html or "").upper()
+        term_up = (term or "").strip().upper()
+        
+        if "NO_LOCALIZADO" in backend_up and term_up in backend_up:
+            print("PROVIDER4_NO_RECORD_DETECTED_IN_BACKEND =", term_up, flush=True)
+            raise RuntimeError(f"PROVIDER4_NO_RECORD:{term_up}")
     
         vget_html = self.submit_vget_form(html)
         print("PROVIDER4_VGET_HTML_PREVIEW =", vget_html[:1200], flush=True)
