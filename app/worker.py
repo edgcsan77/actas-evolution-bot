@@ -22,7 +22,9 @@ from zoneinfo import ZoneInfo
 
 
 PROVIDER4_TEST_GROUPS = set()
-PROVIDER7_TEST_GROUPS = set()
+PROVIDER7_TEST_GROUPS = {
+    "120363407066931119@g.us",
+}
 
 
 def _utc_now_naive():
