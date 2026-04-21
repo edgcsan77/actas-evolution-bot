@@ -583,14 +583,39 @@ class Provider4Client:
         code = tipo_map.get((tipoa or "").strip().lower(), "NAC")
         return f"{self.BASE_URL}/servicio/d.php?f={term}_{code}"
     
-    def _history_row_for_term(self, history_html: str, term: str) -> str | None:
-        term = (term or "").strip().upper()
-        row_pattern = rf"<tr>.*?{re.escape(term)}.*?</tr>"
-        m = re.search(row_pattern, history_html, flags=re.IGNORECASE | re.DOTALL)
-        return m.group(0) if m else None
+    def _history_row_for_term(self, history_html: str, term: str, tipoa: str | None = None) -> str | None:
+        term_up = (term or "").strip().upper()
+        tipoa_up = (tipoa or "").strip().upper()
     
-    def _detect_no_result(self, history_html: str, term: str) -> bool:
-        row_html = self._history_row_for_term(history_html, term)
+        rows = re.findall(r"<tr\b[^>]*>.*?</tr>", history_html or "", flags=re.IGNORECASE | re.DOTALL)
+    
+        for row_html in rows:
+            row_text = unescape(re.sub(r"<[^>]+>", " ", row_html))
+            row_text = re.sub(r"\s+", " ", row_text).strip().upper()
+    
+            if term_up not in row_text:
+                continue
+    
+            if tipoa_up:
+                tipo_map = {
+                    "NACIMIENTO": "NACIMIENTO",
+                    "MATRIMONIO": "MATRIMONIO",
+                    "DEFUNCION": "DEFUNCION",
+                    "DIVORCIO": "DIVORCIO",
+                }
+                expected_tipo = tipo_map.get(tipoa_up, tipoa_up)
+                if expected_tipo not in row_text:
+                    continue
+    
+            print("PROVIDER4_HISTORY_ROW_MATCHED_TERM =", term_up, flush=True)
+            print("PROVIDER4_HISTORY_ROW_MATCHED_TIPOA =", tipoa_up, flush=True)
+            print("PROVIDER4_HISTORY_ROW_TEXT =", row_text[:500], flush=True)
+            return row_html
+    
+        return None
+    
+    def _detect_no_result(self, history_html: str, term: str, tipoa: str | None = None) -> bool:
+        row_html = self._history_row_for_term(history_html, term, tipoa)
     
         if not row_html:
             return False
@@ -603,52 +628,44 @@ class Provider4Client:
     
         return False
     
-    def _extract_pdf_link(self, history_html: str, term: str) -> str | None:
-        term = (term or "").strip().upper()
-    
-        row_pattern = rf"<tr>.*?{re.escape(term)}.*?</tr>"
-        row_match = re.search(row_pattern, history_html, flags=re.IGNORECASE | re.DOTALL)
-    
-        if not row_match:
+    def _extract_pdf_link(self, history_html: str, term: str, tipoa: str | None = None) -> str | None:
+        row_html = self._history_row_for_term(history_html, term, tipoa)
+        if not row_html:
             return None
-    
-        row_html = row_match.group(0)
     
         m = re.search(r'href="(\./d\.php\?f=[^"]+)"', row_html, flags=re.IGNORECASE)
         if m:
-            return urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
+            link = urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
+            print("PROVIDER4_EXTRACTED_PDF_LINK =", link, flush=True)
+            return link
     
         return None
 
-    def _extract_folio_link(self, history_html: str, term: str) -> str | None:
-        term = (term or "").strip().upper()
-
-        row_pattern = rf"<tr>.*?{re.escape(term)}.*?</tr>"
-        row_match = re.search(row_pattern, history_html, flags=re.IGNORECASE | re.DOTALL)
-
-        if not row_match:
+    def _extract_folio_link(self, history_html: str, term: str, tipoa: str | None = None) -> str | None:
+        row_html = self._history_row_for_term(history_html, term, tipoa)
+        if not row_html:
             return None
-
-        row_html = row_match.group(0)
-
-        # Prioridad: d.php final
-        m = re.search(
-            r'href="(\./d\.php\?f=[^"]+)"',
-            row_html,
-            flags=re.IGNORECASE,
-        )
-        if m:
-            return urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
-
-        # Respaldo: addFol.php
+    
         m = re.search(
             r'href="(\./ActasN/addFol\.php\?[^"]+)"',
             row_html,
             flags=re.IGNORECASE,
         )
         if m:
-            return urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
-
+            link = urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
+            print("PROVIDER4_EXTRACTED_FOLIO_LINK =", link, flush=True)
+            return link
+    
+        m = re.search(
+            r'href="(\./d\.php\?f=[^"]+)"',
+            row_html,
+            flags=re.IGNORECASE,
+        )
+        if m:
+            link = urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
+            print("PROVIDER4_EXTRACTED_FOLIO_LINK =", link, flush=True)
+            return link
+    
         return None
 
     def download_pdf_bytes(self, url: str) -> bytes:
@@ -828,10 +845,10 @@ class Provider4Client:
                 flush=True,
             )
     
-            if self._detect_no_result(history_html, term):
+            if self._detect_no_result(history_html, term, tipoa):
                 raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
     
-            row_html = self._history_row_for_term(history_html, term)
+            row_html = self._history_row_for_term(history_html, term, tipoa)
     
             if row_html:
                 history_confirmed = True
@@ -846,15 +863,10 @@ class Provider4Client:
                 )
     
                 if inc_folio:
-                    link = self._extract_folio_link(history_html, term)
+                    link = self._extract_folio_link(history_html, term, tipoa)
                     if link:
                         print("PROVIDER4_FINAL_FOLIO_LINK =", link, flush=True)
-
-                        if "addFol.php" in link:
-                            pdf_bytes = self._download_foliated_pdf(link)
-                        else:
-                            pdf_bytes = self.download_pdf_bytes(link)
-                        
+                
                         pdf_bytes = self._download_and_validate_with_retries(
                             url=link,
                             term=term,
@@ -878,7 +890,7 @@ class Provider4Client:
                     #    return early_direct_pdf_bytes
     
                 else:
-                    link = self._extract_pdf_link(history_html, term)
+                    link = self._extract_pdf_link(history_html, term, tipoa)
                     if link:
                         print("PROVIDER4_FINAL_DOWNLOAD_LINK =", link, flush=True)
                         pdf_bytes = self._download_and_validate_with_retries(
@@ -911,7 +923,7 @@ class Provider4Client:
     
         final_history_html = self.get_history_html()
     
-        if self._detect_no_result(final_history_html, term):
+        if self._detect_no_result(final_history_html, term, tipoa):
             raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
     
         # Ya NO usar early direct sin confirmación de history
