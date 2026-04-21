@@ -326,12 +326,9 @@ def detect_identifier_problem(text: str) -> str | None:
             )
 
     return (
-        "⚠️ No se detectó un dato válido.\n\n"
+        "⚠️ No se detectó un dato válido.\n"
         "Envía solo uno de estos formatos:\n\n"
-        "CURP:\n"
-        "AEHN810107MJCCRR09\n\n"
-        "Cadena / Identificador electrónico:\n"
-        "16102000120260027590\n\n"
-        "Código de verificación:\n"
-        "11610200011990009010"
+        "CURP\n"
+        "Cadena / Identificador electrónico\n"
+        "Código de verificación\n"
     )
