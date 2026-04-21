@@ -83,12 +83,6 @@ def _is_curp_term(value: str | None) -> bool:
 def _is_provider4_eligible(term: str | None, act_type: str | None) -> bool:
     if not _is_curp_term(term):
         return False
-
-    act_type_up = (act_type or "").strip().upper()
-
-    if "FOLIO" in act_type_up:
-        return False
-
     return True
 
 
@@ -1491,9 +1485,9 @@ def process_request(request_id: int):
 
                 msg = (
                     "⚠️ *Formato no disponible actualmente*\n\n"
-                    "Las consultas por *cadena, código de verificación o actas foliadas* "
+                    "Las consultas por *cadena o código de verificación* "
                     "no están disponibles en este momento.\n\n"
-                    "Intenta nuevamente más tarde o realiza la búsqueda por *CURP normal*."
+                    "Intenta nuevamente más tarde o realiza la búsqueda por *CURP*."
                 )
 
                 if req.source_group_id:
