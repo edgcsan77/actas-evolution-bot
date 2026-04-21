@@ -78,6 +78,122 @@ class Provider4Client:
             "Referer": self.MANUAL_PAGE_URL,
         })
 
+    def _extract_pdf_visible_text(self, pdf_bytes: bytes) -> str:
+        parts = []
+    
+        try:
+            reader = PdfReader(BytesIO(pdf_bytes))
+            for page in reader.pages:
+                try:
+                    txt = page.extract_text() or ""
+                except Exception:
+                    txt = ""
+                if txt:
+                    parts.append(txt)
+        except Exception as e:
+            print("PROVIDER4_PDF_TEXT_EXTRACT_ERROR =", str(e), flush=True)
+    
+        text = "\n".join(parts).upper().strip()
+    
+        if not text:
+            try:
+                text = pdf_bytes.decode("latin1", errors="ignore").upper()
+            except Exception:
+                text = ""
+    
+        return text
+    
+    
+    def _normalize_alnum(self, value: str) -> str:
+        return re.sub(r"[^A-Z0-9]", "", (value or "").upper())
+    
+    
+    def _find_curps_in_text(self, text: str) -> list[str]:
+        if not text:
+            return []
+    
+        pattern = r"[A-Z][AEIOUX][A-Z]{2}\d{6}[HM][A-Z]{5}[A-Z0-9]\d"
+        found = re.findall(pattern, text, flags=re.IGNORECASE)
+    
+        unique = []
+        seen = set()
+        for item in found:
+            curp = item.upper()
+            if curp not in seen:
+                seen.add(curp)
+                unique.append(curp)
+    
+        return unique
+    
+    
+    def _pdf_matches_expected(self, pdf_bytes: bytes, expected_curp: str, tipoa: str) -> bool:
+        text = self._extract_pdf_visible_text(pdf_bytes)
+        if not text or len(text.strip()) < 30:
+            print("PROVIDER4_VALIDATE_TEXT_TOO_SHORT = TRUE", flush=True)
+            return False
+    
+        expected = self._normalize_alnum(expected_curp)
+        found_curps = self._find_curps_in_text(text)
+    
+        print("PROVIDER4_VALIDATE_EXPECTED_CURP =", expected, flush=True)
+        print("PROVIDER4_VALIDATE_FOUND_CURPS =", found_curps, flush=True)
+    
+        if found_curps:
+            if expected not in found_curps:
+                return False
+            if len(found_curps) > 1:
+                print("PROVIDER4_VALIDATE_MULTIPLE_CURPS_REJECTED = TRUE", flush=True)
+                return False
+    
+        text_up = text.upper()
+        tipoa_up = (tipoa or "").strip().lower()
+    
+        if tipoa_up == "nacimiento" and "ACTA DE NACIMIENTO" not in text_up:
+            return False
+        if tipoa_up == "matrimonio" and "ACTA DE MATRIMONIO" not in text_up:
+            return False
+        if tipoa_up == "defuncion" and ("ACTA DE DEFUNCION" not in text_up and "ACTA DE DEFUNCIÓN" not in text_up):
+            return False
+        if tipoa_up == "divorcio" and "ACTA DE DIVORCIO" not in text_up:
+            return False
+    
+        return True
+
+    def _download_and_validate_with_retries(
+        self,
+        *,
+        url: str,
+        term: str,
+        tipoa: str,
+        inc_folio: bool,
+        use_folio_downloader: bool = False,
+        max_attempts: int = 4,
+        sleep_seconds: int = 4,
+    ) -> bytes:
+        last_pdf_bytes = None
+    
+        for attempt in range(max_attempts):
+            print(f"PROVIDER4_VALIDATE_DOWNLOAD_ATTEMPT_{attempt+1}_URL = {url}", flush=True)
+    
+            if use_folio_downloader:
+                pdf_bytes = self._download_foliated_pdf(url)
+            else:
+                pdf_bytes = self.download_pdf_bytes(url)
+    
+            pdf_bytes = self._repair_pdf_if_needed(pdf_bytes, term, inc_folio)
+            last_pdf_bytes = pdf_bytes
+    
+            if self._pdf_matches_expected(pdf_bytes, term, tipoa):
+                print(f"PROVIDER4_VALIDATE_DOWNLOAD_OK_ATTEMPT_{attempt+1} = {term}", flush=True)
+                return pdf_bytes
+    
+            print(f"PROVIDER4_VALIDATE_DOWNLOAD_BAD_ATTEMPT_{attempt+1} = {term}", flush=True)
+    
+            if attempt < max_attempts - 1:
+                time.sleep(sleep_seconds)
+    
+        raise RuntimeError(f"PROVIDER4_WRONG_CURP_IN_PDF:{term}")
+
     def _pdf_num_pages(self, pdf_bytes: bytes) -> int:
         reader = PdfReader(BytesIO(pdf_bytes))
         return len(reader.pages)
@@ -737,7 +853,15 @@ class Provider4Client:
                         else:
                             pdf_bytes = self.download_pdf_bytes(link)
                         
-                        pdf_bytes = self._repair_pdf_if_needed(pdf_bytes, term, inc_folio)
+                        pdf_bytes = self._download_and_validate_with_retries(
+                            url=link,
+                            term=term,
+                            tipoa=tipoa,
+                            inc_folio=inc_folio,
+                            use_folio_downloader=("addFol.php" in link),
+                            max_attempts=4,
+                            sleep_seconds=4,
+                        )
                         return pdf_bytes
 
                     # Si history ya mostró la fila correcta, ahora sí se permite directo
@@ -755,8 +879,15 @@ class Provider4Client:
                     link = self._extract_pdf_link(history_html, term)
                     if link:
                         print("PROVIDER4_FINAL_DOWNLOAD_LINK =", link, flush=True)
-                        pdf_bytes = self.download_pdf_bytes(link)
-                        pdf_bytes = self._repair_pdf_if_needed(pdf_bytes, term, inc_folio)
+                        pdf_bytes = self._download_and_validate_with_retries(
+                            url=link,
+                            term=term,
+                            tipoa=tipoa,
+                            inc_folio=inc_folio,
+                            use_folio_downloader=False,
+                            max_attempts=4,
+                            sleep_seconds=4,
+                        )
                         return pdf_bytes
     
                     # Si history ya mostró la fila correcta, ahora sí se permite directo
