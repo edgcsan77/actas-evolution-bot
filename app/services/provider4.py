@@ -1,10 +1,19 @@
 import re
 import time
+import requests
 from datetime import datetime, timedelta
 from html import unescape
 from urllib.parse import urljoin
 
-import requests
+from io import BytesIO
+from pypdf import PdfReader
+from pathlib import Path
+
+from app.services.provider7 import (
+    _enmarcar_pdf_frente,
+    _unir_pdfs_bytes,
+    _resolver_reverso_por_estado,
+)
 
 
 class Provider4Client:
@@ -19,6 +28,42 @@ class Provider4Client:
     HISTORY_MAX_POLLS = 60
     HISTORY_POLL_SLEEP = 3
 
+    MAPA_ESTADOS_CURP = {
+        "AS": "AGUASCALIENTES",
+        "BC": "BAJA_CALIFORNIA",
+        "BS": "BAJA_CALIFORNIA_SUR",
+        "CC": "CAMPECHE",
+        "CL": "COAHUILA",
+        "CM": "COLIMA",
+        "CS": "CHIAPAS",
+        "CH": "CHIHUAHUA",
+        "DF": "CIUDAD_DE_MEXICO",
+        "DG": "DURANGO",
+        "GT": "GUANAJUATO",
+        "GR": "GUERRERO",
+        "HG": "HIDALGO",
+        "JC": "JALISCO",
+        "MC": "MEXICO",
+        "MN": "MICHOACAN",
+        "MS": "MORELOS",
+        "NT": "NAYARIT",
+        "NL": "NUEVO_LEON",
+        "OC": "OAXACA",
+        "PL": "PUEBLA",
+        "QT": "QUERETARO",
+        "QR": "QUINTANA_ROO",
+        "SP": "SAN_LUIS_POTOSI",
+        "SL": "SINALOA",
+        "SR": "SONORA",
+        "TC": "TABASCO",
+        "TS": "TAMAULIPAS",
+        "TL": "TLAXCALA",
+        "VZ": "VERACRUZ",
+        "YN": "YUCATAN",
+        "ZS": "ZACATECAS",
+        "NE": "NACIDO_EN_EL_EXTRANJERO",
+    }
+
     def __init__(self) -> None:
         self.session = requests.Session()
         self.session.headers.update({
@@ -32,6 +77,62 @@ class Provider4Client:
             "X-Requested-With": "XMLHttpRequest",
             "Referer": self.MANUAL_PAGE_URL,
         })
+
+    def _pdf_num_pages(self, pdf_bytes: bytes) -> int:
+        reader = PdfReader(BytesIO(pdf_bytes))
+        return len(reader.pages)
+
+    def _pdf_has_two_pages(self, pdf_bytes: bytes) -> bool:
+        try:
+            return self._pdf_num_pages(pdf_bytes) >= 2
+        except Exception:
+            return False
+
+    def _estado_desde_curp(self, curp: str) -> str:
+        curp = (curp or "").strip().upper()
+        if len(curp) < 13:
+            raise RuntimeError("PROVIDER4_CURP_INVALID_FOR_STATE")
+
+        clave = curp[11:13]
+        estado = self.MAPA_ESTADOS_CURP.get(clave)
+
+        if not estado:
+            raise RuntimeError(f"PROVIDER4_STATE_NOT_FOUND:{clave}")
+
+        return estado
+
+    def _repair_pdf_if_needed(self, pdf_bytes: bytes, term: str, inc_folio: bool) -> bytes:
+        if self._pdf_has_two_pages(pdf_bytes):
+            print("PROVIDER4_PDF_ALREADY_COMPLETE = TRUE", flush=True)
+            return pdf_bytes
+
+        print("PROVIDER4_PDF_INCOMPLETE_REPAIRING = TRUE", flush=True)
+
+        estado = self._estado_desde_curp(term)
+
+        base_dir = Path(__file__).resolve().parent.parent
+        estados_dir = base_dir / "assets" / "estados"
+
+        pdf_bytes = _enmarcar_pdf_frente(
+            pdf_bytes,
+            f"{term}.pdf",
+            folio=inc_folio,
+        )
+
+        if estado == "NACIDO_EN_EL_EXTRANJERO":
+            print("PROVIDER4_NO_REAR_FRAME_FOR_FOREIGN_BIRTH = TRUE", flush=True)
+            print(f"PROVIDER4_PDF_PAGE_COUNT = {self._pdf_num_pages(pdf_bytes)}", flush=True)
+            return pdf_bytes
+
+        reverso_path = _resolver_reverso_por_estado(estado, estados_dir)
+        pdf_bytes = _unir_pdfs_bytes(pdf_bytes, reverso_path)
+        
+        print(f"PROVIDER4_PDF_PAGE_COUNT = {self._pdf_num_pages(pdf_bytes)}", flush=True)
+
+        if not self._pdf_has_two_pages(pdf_bytes):
+            raise RuntimeError("PROVIDER4_REPAIRED_PDF_STILL_INCOMPLETE")
+
+        return pdf_bytes
 
     def warm(self) -> None:
         resp = self.session.get(self.MANUAL_PAGE_URL, timeout=(15, 60))
@@ -582,15 +683,15 @@ class Provider4Client:
         poll_sleep_seconds = self.HISTORY_POLL_SLEEP
     
         # Solo intento rápido, NO entrega final sin confirmación de history
-        early_direct_pdf_bytes = None
-        direct_normal_url = self._normal_pdf_direct_url(term, tipoa)
-        print("PROVIDER4_DIRECT_URL =", direct_normal_url, flush=True)
+        #early_direct_pdf_bytes = None
+        #direct_normal_url = self._normal_pdf_direct_url(term, tipoa)
+        #print("PROVIDER4_DIRECT_URL =", direct_normal_url, flush=True)
 
-        try:
-            early_direct_pdf_bytes = self.download_pdf_bytes(direct_normal_url)
-            print("PROVIDER4_DIRECT_EARLY_PDF_READY = TRUE", flush=True)
-        except Exception as direct_exc:
-            print("PROVIDER4_DIRECT_FAILED =", str(direct_exc), flush=True)
+        #try:
+        #    early_direct_pdf_bytes = self.download_pdf_bytes(direct_normal_url)
+        #    print("PROVIDER4_DIRECT_EARLY_PDF_READY = TRUE", flush=True)
+        #except Exception as direct_exc:
+        #    print("PROVIDER4_DIRECT_FAILED =", str(direct_exc), flush=True)
     
         history_confirmed = False
     
@@ -625,9 +726,12 @@ class Provider4Client:
                         print("PROVIDER4_FINAL_FOLIO_LINK =", link, flush=True)
 
                         if "addFol.php" in link:
-                            return self._download_foliated_pdf(link)
-
-                        return self.download_pdf_bytes(link)
+                            pdf_bytes = self._download_foliated_pdf(link)
+                        else:
+                            pdf_bytes = self.download_pdf_bytes(link)
+                        
+                        pdf_bytes = self._repair_pdf_if_needed(pdf_bytes, term, inc_folio)
+                        return pdf_bytes
 
                     # Si history ya mostró la fila correcta, ahora sí se permite directo
                     #try:
@@ -644,7 +748,9 @@ class Provider4Client:
                     link = self._extract_pdf_link(history_html, term)
                     if link:
                         print("PROVIDER4_FINAL_DOWNLOAD_LINK =", link, flush=True)
-                        return self.download_pdf_bytes(link)
+                        pdf_bytes = self.download_pdf_bytes(link)
+                        pdf_bytes = self._repair_pdf_if_needed(pdf_bytes, term, inc_folio)
+                        return pdf_bytes
     
                     # Si history ya mostró la fila correcta, ahora sí se permite directo
                     #try:
