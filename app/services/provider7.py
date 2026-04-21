@@ -302,7 +302,7 @@ class Provider7Client:
             except Exception:
                 estado = ""
 
-        if sexo not in {"H", "M"}:
+        if sexo not in {"H", "M", "F"}:
             raise RuntimeError(
                 "PROVIDER7_CHAIN_NO_SEXO: valida consultar_por_cadena() en provider_sid_oaxaca.py"
             )
@@ -366,6 +366,10 @@ class Provider7Client:
         
         if agregar_marco_frontal:
             pdf_bytes = _enmarcar_pdf_frente(pdf_bytes, f"{filename_base}.pdf", folio=is_folio)
+
+        print("P7_FRAME_URL =", url, flush=True)
+        print("P7_FRAME_FILENAME =", filename, flush=True)
+        print("P7_FRAME_DATA =", data, flush=True)
 
         if agregar_reverso_estado:
             if not self.estados_dir:
