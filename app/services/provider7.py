@@ -368,10 +368,6 @@ class Provider7Client:
         if agregar_marco_frontal:
             pdf_bytes = _enmarcar_pdf_frente(pdf_bytes, f"{filename_base}.pdf", folio=is_folio)
 
-        print("P7_FRAME_URL =", url, flush=True)
-        print("P7_FRAME_FILENAME =", filename, flush=True)
-        print("P7_FRAME_DATA =", data, flush=True)
-
         if agregar_reverso_estado:
             if not self.estados_dir:
                 raise RuntimeError("PROVIDER7_ESTADOS_DIR_EMPTY")
