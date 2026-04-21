@@ -125,7 +125,6 @@ class Provider4Client:
     
         return unique
     
-    
     def _pdf_matches_expected(self, pdf_bytes: bytes, expected_curp: str, tipoa: str) -> bool:
         text = self._extract_pdf_visible_text(pdf_bytes)
         if not text or len(text.strip()) < 30:
@@ -139,17 +138,14 @@ class Provider4Client:
         print("PROVIDER4_VALIDATE_FOUND_CURPS =", found_curps, flush=True)
         print("PROVIDER4_VALIDATE_TIPOA =", tipoa, flush=True)
     
+        # Si se detectan CURPs visibles, la esperada debe aparecer.
+        # Ya NO rechazar solo porque existan varias.
         if found_curps:
             if expected not in found_curps:
                 return False
     
-            # En matrimonio es normal que haya varias CURP
-            if (tipoa or "").strip().lower() == "matrimonio":
-                pass
-            else:
-                if len(found_curps) > 1:
-                    print("PROVIDER4_VALIDATE_MULTIPLE_CURPS_REJECTED = TRUE", flush=True)
-                    return False
+            if len(found_curps) > 1:
+                print("PROVIDER4_VALIDATE_MULTIPLE_CURPS_ALLOWED = TRUE", flush=True)
     
         text_up = text.upper()
         tipoa_up = (tipoa or "").strip().lower()
