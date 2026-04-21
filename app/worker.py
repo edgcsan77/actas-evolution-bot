@@ -907,7 +907,7 @@ def _find_curps_in_text(text: str) -> list[str]:
     return unique
 
 
-def _validate_pdf_matches_term(pdf_bytes: bytes, term: str) -> bool:
+def _validate_pdf_matches_term(pdf_bytes: bytes, term: str, act_type: str | None = None) -> bool:
     expected = _normalize_alnum(term)
     if not expected:
         return True
@@ -918,27 +918,28 @@ def _validate_pdf_matches_term(pdf_bytes: bytes, term: str) -> bool:
         return False
 
     found_curps = _find_curps_in_text(text)
+    act_type_up = (act_type or "").upper().strip()
 
     print("PROVIDER_VALIDATE_EXPECTED_CURP =", expected, flush=True)
     print("PROVIDER_VALIDATE_FOUND_CURPS =", found_curps, flush=True)
+    print("PROVIDER_VALIDATE_ACT_TYPE =", act_type_up, flush=True)
 
-    # Si se detectan CURPs visibles, la esperada debe ser la única o al menos estar presente
-    # y NO debe haber una CURP principal distinta
     if found_curps:
         if expected not in found_curps:
             return False
 
-        # Si aparecen varias CURPs distintas, mejor rechazar para evitar entregar documento cruzado
+        # En matrimonio es normal que aparezcan varias CURP
+        if "MATRIMONIO" in act_type_up:
+            return True
+
+        # En otros tipos, si hay varias CURP distintas, se rechaza
         if len(found_curps) > 1:
             print("PROVIDER_VALIDATE_MULTIPLE_CURPS_REJECTED = TRUE", flush=True)
             return False
 
         return True
 
-    # Si no se detectó ninguna CURP visible, intenta una validación adicional por nombre
     normalized_text = _normalize_alnum(text)
-
-    # Busca la CURP esperada solo en texto visible ya extraído, no en filename externo
     if expected in normalized_text:
         return True
 
@@ -1275,7 +1276,7 @@ def process_request(request_id: int):
                 if not _validate_act_type_pdf(pdf_bytes, req.act_type):
                     raise RuntimeError("PROVIDER4_WRONG_ACT_TYPE")
                 
-                if not _validate_pdf_matches_term(pdf_bytes, req.curp):
+                if not _validate_pdf_matches_term(pdf_bytes, req.curp, req.act_type):
                     print("PROVIDER4_VALIDATE_FAIL_REQ_CURP =", req.curp, flush=True)
                     raise RuntimeError(f"PROVIDER4_WRONG_CURP_IN_PDF:{req.curp}")
         
@@ -1283,7 +1284,32 @@ def process_request(request_id: int):
                 p4_err = str(p4_exc)
                 p4_elapsed = time.perf_counter() - provider4_started_ts
                 enabled = _enabled_providers(db)
-        
+            
+                if (
+                    p4_err.startswith("PROVIDER4_WRONG_CURP_IN_PDF")
+                    or p4_err.startswith("PROVIDER4_WRONG_ACT_TYPE")
+                ):
+                    msg = (
+                        f"⚠️ Solicitud sin éxito en Registro Civil\n"
+                        f"Dato: {req.curp}\n"
+                        f"Tipo: {req.act_type}\n\n"
+                        f"Reenviar nuevamente en unos minutos"
+                    )
+            
+                    if req.source_group_id:
+                        send_group_text(req.source_group_id, msg, req.instance_name)
+                    else:
+                        from app.services.evolution import send_text
+                        send_text(req.requester_wa_id, msg, req.instance_name)
+            
+                    req.status = "ERROR"
+                    req.error_message = p4_err
+                    req.updated_at = _utc_now_naive()
+                    db.commit()
+            
+                    _notify_support_error(req, p4_err, "PDF cruzado o tipo incorrecto devuelto por Provider4")
+                    return
+            
                 fallback_errors = (
                     p4_err.startswith("PROVIDER4_BACKEND_FAILED:")
                     or p4_err.startswith("PROVIDER4_VGET_FAILED:")
@@ -1298,12 +1324,12 @@ def process_request(request_id: int):
                     or p4_err.startswith("PROVIDER4_WRONG_CURP_IN_PDF")
                     or "Read timed out" in p4_err
                 )
-        
+            
                 should_fallback = (
                     p4_err.startswith("PROVIDER4_NO_FORM_ACTION")
                     or (fallback_errors and p4_elapsed >= 90)
                 )
-        
+            
                 if should_fallback:
                     if "PROVIDER3" not in enabled:
                         msg = (
@@ -1311,19 +1337,19 @@ def process_request(request_id: int):
                             "La búsqueda no pudo completarse correctamente en este momento.\n\n"
                             "Intenta nuevamente más tarde."
                         )
-        
+            
                         if req.source_group_id:
                             send_group_text(req.source_group_id, msg, req.instance_name)
                         else:
                             from app.services.evolution import send_text
                             send_text(req.requester_wa_id, msg, req.instance_name)
-        
+            
                         req.status = "ERROR"
                         req.error_message = f"PROVIDER4_FALLBACK_NO_PROVIDER3:{p4_err}"
                         req.updated_at = _utc_now_naive()
                         db.commit()
                         return
-        
+            
                     print(
                         "PROVIDER4_FALLBACK_TO_PROVIDER3 =",
                         {"req_id": req.id, "elapsed": p4_elapsed, "err": p4_err},
@@ -1331,7 +1357,7 @@ def process_request(request_id: int):
                     )
                     _fallback_to_provider3_web(req, db, process_started_ts)
                     return
-        
+            
                 raise
         
             safe_media_b64 = base64.b64encode(pdf_bytes).decode()
