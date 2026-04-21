@@ -26,7 +26,7 @@ class Provider4Client:
     HISTORY_URL = f"{BASE_URL}/servicio/vHistory.php?HID={HID}"
 
     HISTORY_MAX_POLLS = 60
-    HISTORY_POLL_SLEEP = 3
+    HISTORY_POLL_SLEEP = 7
 
     MAPA_ESTADOS_CURP = {
         "AS": "AGUASCALIENTES",
