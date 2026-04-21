@@ -333,7 +333,6 @@ def _pick_provider_name(
     if not enabled:
         raise RuntimeError("NO_PROVIDER_ENABLED")
 
-    # FORZAR PROVIDER7 PARA GRUPO DE PRUEBA
     if (
         source_group_id
         and source_group_id in PROVIDER7_TEST_GROUPS
@@ -361,7 +360,6 @@ def _pick_provider_name(
         if not enabled:
             raise RuntimeError("NO_PROVIDER_ENABLED")
 
-    # Quitar PROVIDER7 de la rotación para grupos normales
     if PROVIDER7_TEST_GROUPS and "PROVIDER7" in enabled:
         enabled = [p for p in enabled if p != "PROVIDER7"]
 
@@ -371,8 +369,33 @@ def _pick_provider_name(
     if len(enabled) == 1:
         return enabled[0]
 
+    # =========================
+    # PONDERACIÓN
+    # =========================
+    if "PROVIDER4" in enabled:
+        others = [p for p in enabled if p != "PROVIDER4"]
+
+        if not others:
+            print("PICK_PROVIDER_WEIGHTED = PROVIDER4_ONLY", flush=True)
+            return "PROVIDER4"
+
+        slot_index = (request_id - 1) % 10
+        print("PICK_PROVIDER_WEIGHTED_SLOT =", slot_index, flush=True)
+
+        if slot_index < 7:
+            print("PICK_PROVIDER_WEIGHTED_CHOSEN = PROVIDER4", flush=True)
+            return "PROVIDER4"
+
+        other_turn = ((request_id - 1) // 10) * 3 + (slot_index - 7)
+        other_idx = other_turn % len(others)
+        chosen = others[other_idx]
+        print("PICK_PROVIDER_WEIGHTED_CHOSEN =", chosen, flush=True)
+        return chosen
+
     idx = (request_id - 1) % len(enabled)
-    return enabled[idx]
+    chosen = enabled[idx]
+    print("PICK_PROVIDER_NORMAL_CHOSEN =", chosen, flush=True)
+    return chosen
 
 
 def _pick_provider1_group(act_type: str, request_id: int) -> str:
