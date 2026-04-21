@@ -13,5 +13,5 @@ redis_conn = Redis.from_url(
 request_queue = Queue(
     "actas",
     connection=redis_conn,
-    default_timeout=300
+    default_timeout=600
 )
