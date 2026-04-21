@@ -382,11 +382,11 @@ def _pick_provider_name(
         slot_index = (request_id - 1) % 10
         print("PICK_PROVIDER_WEIGHTED_SLOT =", slot_index, flush=True)
 
-        if slot_index < 7:
+        if slot_index < 6:
             print("PICK_PROVIDER_WEIGHTED_CHOSEN = PROVIDER4", flush=True)
             return "PROVIDER4"
 
-        other_turn = ((request_id - 1) // 10) * 3 + (slot_index - 7)
+        other_turn = ((request_id - 1) // 10) * 4 + (slot_index - 6)
         other_idx = other_turn % len(others)
         chosen = others[other_idx]
         print("PICK_PROVIDER_WEIGHTED_CHOSEN =", chosen, flush=True)
