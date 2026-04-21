@@ -265,9 +265,12 @@ class Provider7Client:
 
         if not cadena:
             raise RuntimeError("PROVIDER7_CURP_NO_CADENA")
+        
+        if sexo == "H":
+            sexo = "M"
 
-        if sexo not in {"H", "M", "F"}:
-            raise RuntimeError(f"PROVIDER7_CURP_INVALID_SEXO: {sexo}")
+        if sexo not in {"M", "F"}:
+            sexo = "M"
 
         return {
             "row": row,
@@ -302,10 +305,11 @@ class Provider7Client:
             except Exception:
                 estado = ""
 
-        if sexo not in {"H", "M", "F"}:
-            raise RuntimeError(
-                "PROVIDER7_CHAIN_NO_SEXO: valida consultar_por_cadena() en provider_sid_oaxaca.py"
-            )
+        if sexo == "H":
+            sexo = "M"
+
+        if sexo not in {"M", "F"}:
+            sexo = "M"
 
         if not estado:
             estado = _estado_desde_cadena(term)
