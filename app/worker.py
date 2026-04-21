@@ -20,6 +20,9 @@ from app.provider_status_cache import refresh_providers_status
 
 from zoneinfo import ZoneInfo
 
+from io import BytesIO
+from pypdf import PdfReader
+
 
 PROVIDER4_TEST_GROUPS = set()
 PROVIDER7_TEST_GROUPS = set()
@@ -854,77 +857,132 @@ def _start_provider3_flow(req, db):
     send_group_text(provider_group_id, text_to_provider, settings.EVOLUTION_PROVIDER_INSTANCE)
 
 
-def _validate_pdf_matches_term(pdf_bytes: bytes, term: str) -> bool:
-    term = (term or "").strip().upper()
-    if not term:
-        return True
+def _extract_pdf_visible_text(pdf_bytes: bytes) -> str:
+    parts = []
 
     try:
-        text = pdf_bytes.decode("latin1", errors="ignore").upper()
-    except Exception:
+        reader = PdfReader(BytesIO(pdf_bytes))
+        for page in reader.pages:
+            try:
+                txt = page.extract_text() or ""
+            except Exception:
+                txt = ""
+            if txt:
+                parts.append(txt)
+    except Exception as e:
+        print("PDF_TEXT_EXTRACT_ERROR =", str(e), flush=True)
+
+    text = "\n".join(parts).upper().strip()
+
+    # Fallback muy secundario: bytes crudos solo si no hubo texto legible
+    if not text:
+        try:
+            text = pdf_bytes.decode("latin1", errors="ignore").upper()
+        except Exception:
+            text = ""
+
+    return text
+
+
+def _normalize_alnum(value: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "", (value or "").upper())
+
+
+def _find_curps_in_text(text: str) -> list[str]:
+    if not text:
+        return []
+
+    pattern = r"[A-Z][AEIOUX][A-Z]{2}\d{6}[HM][A-Z]{5}[A-Z0-9]\d"
+    found = re.findall(pattern, text, flags=re.IGNORECASE)
+
+    # únicos, preservando orden
+    unique = []
+    seen = set()
+    for item in found:
+        curp = item.upper()
+        if curp not in seen:
+            seen.add(curp)
+            unique.append(curp)
+
+    return unique
+
+
+def _validate_pdf_matches_term(pdf_bytes: bytes, term: str) -> bool:
+    expected = _normalize_alnum(term)
+    if not expected:
         return True
 
-    if not text or len(text.strip()) < 100:
-        return True
-
-    normalized_text = re.sub(r"[^A-Z0-9]", "", text)
-    normalized_term = re.sub(r"[^A-Z0-9]", "", term)
-
-    if normalized_term and normalized_term in normalized_text:
-        return True
-
-    found_curps = set(
-        re.findall(
-            r"[A-Z][AEIOUX][A-Z]{2}\d{6}[HM][A-Z]{5}[A-Z0-9]\d",
-            normalized_text,
-            flags=re.IGNORECASE,
-        )
-    )
-
-    if normalized_term in found_curps:
-        return True
-
-    if found_curps and normalized_term not in found_curps:
-        print("PROVIDER4_VALIDATE_EXPECTED_CURP =", normalized_term, flush=True)
-        print("PROVIDER4_VALIDATE_FOUND_CURPS =", sorted(found_curps), flush=True)
+    text = _extract_pdf_visible_text(pdf_bytes)
+    if not text or len(text.strip()) < 30:
+        print("PROVIDER_VALIDATE_TEXT_TOO_SHORT", flush=True)
         return False
 
-    return True
+    found_curps = _find_curps_in_text(text)
+
+    print("PROVIDER_VALIDATE_EXPECTED_CURP =", expected, flush=True)
+    print("PROVIDER_VALIDATE_FOUND_CURPS =", found_curps, flush=True)
+
+    # Si se detectan CURPs visibles, la esperada debe ser la única o al menos estar presente
+    # y NO debe haber una CURP principal distinta
+    if found_curps:
+        if expected not in found_curps:
+            return False
+
+        # Si aparecen varias CURPs distintas, mejor rechazar para evitar entregar documento cruzado
+        if len(found_curps) > 1:
+            print("PROVIDER_VALIDATE_MULTIPLE_CURPS_REJECTED = TRUE", flush=True)
+            return False
+
+        return True
+
+    # Si no se detectó ninguna CURP visible, intenta una validación adicional por nombre
+    normalized_text = _normalize_alnum(text)
+
+    # Busca la CURP esperada solo en texto visible ya extraído, no en filename externo
+    if expected in normalized_text:
+        return True
+
+    return False
 
 
 def _validate_act_type_pdf(pdf_bytes: bytes, act_type: str | None) -> bool:
-    try:
-        text = pdf_bytes.decode(errors="ignore").upper()
-    except Exception:
-        return True
+    text = _extract_pdf_visible_text(pdf_bytes)
+    if not text or len(text.strip()) < 30:
+        print("PROVIDER_VALIDATE_ACT_TEXT_TOO_SHORT", flush=True)
+        return False
 
+    text = text.upper()
     act_type = (act_type or "").upper()
 
-    # Si no hay texto suficiente en el PDF, no bloquear
-    if not text or len(text.strip()) < 100:
-        return True
-
     if "NAC" in act_type:
+        if "ACTA DE NACIMIENTO" in text:
+            return True
         if "MATRIMONIO" in text or "DIVORCIO" in text or "DEFUNCION" in text or "DEFUNCIÓN" in text:
             return False
-        return True
+        return False
 
     if "MAT" in act_type:
+        if "ACTA DE MATRIMONIO" in text:
+            return True
         if "NACIMIENTO" in text or "DIVORCIO" in text or "DEFUNCION" in text or "DEFUNCIÓN" in text:
             return False
-        return True
+        return False
 
     if "DIV" in act_type:
+        if "ACTA DE DIVORCIO" in text:
+            return True
         if "NACIMIENTO" in text or "MATRIMONIO" in text or "DEFUNCION" in text or "DEFUNCIÓN" in text:
             return False
-        return True
+        return False
 
     if "DEF" in act_type:
+        if "ACTA DE DEFUNCION" in text or "ACTA DE DEFUNCIÓN" in text:
+            return True
         if "NACIMIENTO" in text or "MATRIMONIO" in text or "DIVORCIO" in text:
             return False
-        return True
+        return False
 
-    return True
+    return False
 
 
 def process_request(request_id: int):
@@ -1242,9 +1300,7 @@ def process_request(request_id: int):
                 )
         
                 should_fallback = (
-                    p4_err.startswith("PROVIDER4_WRONG_ACT_TYPE")
-                    or p4_err.startswith("PROVIDER4_WRONG_CURP_IN_PDF")
-                    or p4_err.startswith("PROVIDER4_NO_FORM_ACTION")
+                    p4_err.startswith("PROVIDER4_NO_FORM_ACTION")
                     or (fallback_errors and p4_elapsed >= 90)
                 )
         
