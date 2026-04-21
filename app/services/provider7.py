@@ -180,15 +180,20 @@ def _resolver_reverso_por_estado(estado: str, estados_dir: Path) -> Path:
     )
 
 
-def _enmarcar_pdf_frente(pdf_bytes: bytes, filename: str, timeout: int = 120) -> bytes:
+def _enmarcar_pdf_frente(pdf_bytes: bytes, filename: str, timeout: int = 120, folio: bool = False) -> bytes:
     url = (getattr(settings, "PROVIDER7_FRAME_URL", "") or DEFAULT_FRAME_URL).strip()
 
     files = {
         "pdf_file": (filename, pdf_bytes, "application/pdf"),
     }
+    
     data = {
         "front_frame": "on",
     }
+
+    if folio:
+        data["folio"] = "on"
+    
     headers = {
         "Accept": "*/*",
         "Origin": "https://enmarcadonew-production.up.railway.app",
@@ -357,8 +362,10 @@ class Provider7Client:
 
         filename_base = ctx["filename_base"] or "SID_OAXACA"
 
+        is_folio = "FOLIO" in _strip_or_default(act_type).upper()
+        
         if agregar_marco_frontal:
-            pdf_bytes = _enmarcar_pdf_frente(pdf_bytes, f"{filename_base}.pdf")
+            pdf_bytes = _enmarcar_pdf_frente(pdf_bytes, f"{filename_base}.pdf", folio=is_folio)
 
         if agregar_reverso_estado:
             if not self.estados_dir:
