@@ -646,8 +646,9 @@ class Provider4Client:
         if not row_html:
             return None
     
+        # Prioridad real: d.php = PDF final correcto
         m = re.search(
-            r'href="(\./ActasN/addFol\.php\?[^"]+)"',
+            r'href="(\./d\.php\?f=[^"]+)"',
             row_html,
             flags=re.IGNORECASE,
         )
@@ -656,8 +657,9 @@ class Provider4Client:
             print("PROVIDER4_EXTRACTED_FOLIO_LINK =", link, flush=True)
             return link
     
+        # Respaldo: addFol.php
         m = re.search(
-            r'href="(\./d\.php\?f=[^"]+)"',
+            r'href="(\./ActasN/addFol\.php\?[^"]+)"',
             row_html,
             flags=re.IGNORECASE,
         )
