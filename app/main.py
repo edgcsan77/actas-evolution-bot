@@ -8569,30 +8569,26 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 print("PROVIDER1_PDF_RECEIVED =", media_message_id, pdf_received_ts, flush=True)
             
                 open_req = None
-            
-                if filename_id:
+                lookup_id = filename_id or provider_id
+
+                if not open_req and lookup_id:
                     open_req = (
                         db.query(RequestLog)
                         .filter(
-                            RequestLog.provider_group_id == source_chat_id,
-                            RequestLog.curp == filename_id,
+                            RequestLog.curp == lookup_id,
                             RequestLog.status == "PROCESSING",
                         )
                         .order_by(RequestLog.created_at.desc())
                         .first()
                     )
-            
-                if not open_req and not filename_id and provider_id:
-                    open_req = (
-                        db.query(RequestLog)
-                        .filter(
-                            RequestLog.provider_group_id == source_chat_id,
-                            RequestLog.curp == provider_id,
-                            RequestLog.status == "PROCESSING",
-                        )
-                        .order_by(RequestLog.created_at.desc())
-                        .first()
-                    )
+                
+                    print("PROVIDER_PDF_FALLBACK_MATCH =", {
+                        "lookup_id": lookup_id,
+                        "matched_req_id": getattr(open_req, "id", None),
+                        "matched_provider_group_id": getattr(open_req, "provider_group_id", None),
+                        "matched_source_group_id": getattr(open_req, "source_group_id", None),
+                        "matched_instance_name": getattr(open_req, "instance_name", None),
+                    }, flush=True)
             
                 if not open_req:
                     print("PROVIDER_PDF_WITHOUT_MATCH =", filename, flush=True)
@@ -8761,6 +8757,25 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     .order_by(RequestLog.created_at.asc())
                     .first()
                 )
+            
+                if not open_req:
+                    open_req = (
+                        db.query(RequestLog)
+                        .filter(
+                            RequestLog.curp == provider_id,
+                            RequestLog.status == "PROCESSING",
+                        )
+                        .order_by(RequestLog.created_at.desc())
+                        .first()
+                    )
+            
+                    print("PROVIDER_NO_RECORD_FALLBACK_MATCH =", {
+                        "provider_id": provider_id,
+                        "matched_req_id": getattr(open_req, "id", None),
+                        "matched_provider_group_id": getattr(open_req, "provider_group_id", None),
+                        "matched_source_group_id": getattr(open_req, "source_group_id", None),
+                        "matched_instance_name": getattr(open_req, "instance_name", None),
+                    }, flush=True)
 
             if text_body and _is_no_record_message(text_upper):
                 if not open_req:
