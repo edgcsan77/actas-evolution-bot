@@ -73,7 +73,8 @@ def _notify_support_error(req, err: str, extra_msg: str = ""):
         if extra_msg:
             msg += f"\nDetalle: {extra_msg}\n"
 
-        send_group_text(support_group, msg)
+        instance = getattr(req, "instance_name", None) or "docifybot3"
+        send_group_text(support_group, msg, instance)
     except Exception as support_exc:
         print("SUPPORT_ERROR_NOTIFY_FAILED =", str(support_exc), flush=True)
 
@@ -146,19 +147,23 @@ def _fallback_to_provider3_web(req, db, process_started_ts):
         else f"{req.curp}.pdf"
     )
 
+    instance = req.instance_name or "docifybot3"
+
     if req.source_group_id:
         send_group_document_base64(
             req.source_group_id,
             safe_media_b64,
             filename=filename,
-            caption=caption_text
+            caption=caption_text,
+            instance_name=instance
         )
     else:
         send_document_base64(
             req.requester_wa_id,
             safe_media_b64,
             filename=filename,
-            caption=caption_text
+            caption=caption_text,
+            instance_name=instance
         )
 
     req.provider_media_url = "BASE64_PROVIDER3"
@@ -203,13 +208,14 @@ def _get_client_promotions(db: Session, source_group_id: str) -> list:
     return rows or [base]
 
 
-def _notify_client_groups(rows: list, message: str):
+def _notify_client_groups(rows: list, message: str, instance_name: str | None = None):
     sent = set()
+    instance = instance_name or "docifybot3"
     for row in rows:
         gid = (row.group_jid or "").strip()
         if gid and gid not in sent:
             try:
-                send_group_text(gid, message)
+                send_group_text(gid, message, instance)
                 sent.add(gid)
             except Exception as e:
                 print("PROMO_NOTIFY_GROUP_ERROR =", gid, str(e), flush=True)
@@ -729,6 +735,15 @@ def _handle_group_promotion_after_done(req, db):
     msg = None
     notify_level = None
 
+    extra_shared_msg_long = ""
+    extra_shared_msg_short = ""
+    extra_shared_msg_block = ""
+    
+    if shared_key:
+        extra_shared_msg_long = "Este aviso aplica para todos los grupos asociados a esta bolsa compartida.\n\n"
+        extra_shared_msg_short = "Este aviso aplica para todos los grupos asociados a esta bolsa."
+        extra_shared_msg_block = "Todos los grupos asociados a esta bolsa quedarán bloqueados automáticamente hasta nueva recarga.\n\n"
+
     crossed_0 = available_before > 0 and available_after <= 0 and not bool(getattr(leader, "warning_sent_0", False))
     crossed_10 = available_before > 10 and available_after <= 10 and not bool(getattr(leader, "warning_sent_10", False))
     crossed_50 = available_before > 50 and available_after <= 50 and not bool(getattr(leader, "warning_sent_50", False))
@@ -737,11 +752,11 @@ def _handle_group_promotion_after_done(req, db):
 
     if crossed_0:
         msg = (
-            f"❌ *Paquete agotado*\n\n"
-            f"Tu paquete promocional ha sido consumido en su totalidad.\n"
-            f"Saldo disponible: *0 actas*.\n\n"
-            f"{'Todos los grupos asociados a esta bolsa quedarán bloqueados automáticamente hasta nueva recarga.\n\n' if shared_key else ''}"
-            f"Quedamos atentos."
+            "❌ *Paquete agotado*\n\n"
+            "Tu paquete promocional ha sido consumido en su totalidad.\n"
+            "Saldo disponible: *0 actas*.\n\n"
+            f"{extra_shared_msg_block}"
+            "Quedamos atentos."
         )
         notify_level = "0"
         for row in rows:
@@ -750,10 +765,10 @@ def _handle_group_promotion_after_done(req, db):
 
     elif crossed_10:
         msg = (
-            f"🚨 *Saldo crítico*\n\n"
+            "🚨 *Saldo crítico*\n\n"
             f"Tu paquete promocional cuenta actualmente con solo *{available_after} actas disponibles*.\n\n"
-            f"{'Este aviso aplica para todos los grupos asociados a esta bolsa compartida.\n\n' if shared_key else ''}"
-            f"Quedamos atentos."
+            f"{extra_shared_msg_long}"
+            "Quedamos atentos."
         )
         notify_level = "10"
         for row in rows:
@@ -761,10 +776,10 @@ def _handle_group_promotion_after_done(req, db):
 
     elif crossed_50:
         msg = (
-            f"⚠️ *Aviso importante de saldo*\n\n"
+            "⚠️ *Aviso importante de saldo*\n\n"
             f"Tu paquete promocional cuenta actualmente con *{available_after} actas disponibles*.\n\n"
-            f"{'Este aviso aplica para todos los grupos asociados a esta bolsa compartida.\n\n' if shared_key else ''}"
-            f"Quedamos atentos."
+            f"{extra_shared_msg_long}"
+            "Quedamos atentos."
         )
         notify_level = "50"
         for row in rows:
@@ -772,10 +787,10 @@ def _handle_group_promotion_after_done(req, db):
 
     elif crossed_100:
         msg = (
-            f"⚠️ *Aviso de saldo*\n\n"
+            "⚠️ *Aviso de saldo*\n\n"
             f"Tu paquete promocional cuenta actualmente con *{available_after} actas disponibles*.\n\n"
-            f"{'Este aviso aplica para todos los grupos asociados a esta bolsa compartida.\n\n' if shared_key else ''}"
-            f"Quedamos atentos."
+            f"{extra_shared_msg_long}"
+            "Quedamos atentos."
         )
         notify_level = "100"
         for row in rows:
@@ -783,9 +798,9 @@ def _handle_group_promotion_after_done(req, db):
 
     elif crossed_200:
         msg = (
-            f"ℹ️ *Aviso de saldo*\n\n"
+            "ℹ️ *Aviso de saldo*\n\n"
             f"Actualmente cuentas con *{available_after} actas disponibles* en tu paquete promocional.\n\n"
-            f"{'Este aviso aplica para todos los grupos asociados a esta bolsa.' if shared_key else ''}"
+            f"{extra_shared_msg_short}"
         )
         notify_level = "200"
         for row in rows:
@@ -821,7 +836,8 @@ def _handle_group_promotion_after_done(req, db):
             print("SHARED_GROUP_LIMIT_BLOCK_AFTER_DONE_ERROR =", str(e), flush=True)
 
         try:
-            send_group_text(current_group_row.group_jid, individual_limit_msg)
+            instance = req.instance_name or "docifybot3"
+            send_group_text(current_group_row.group_jid, individual_limit_msg, instance)
         except Exception as e:
             print("SHARED_GROUP_LIMIT_NOTIFY_AFTER_DONE_ERROR =", str(e), flush=True)
 
@@ -837,9 +853,11 @@ def _handle_group_promotion_after_done(req, db):
         if notify_level == "0":
             try:
                 if shared_key:
-                    _notify_client_groups(rows, msg)
+                    instance = req.instance_name or "docifybot3"
+                    _notify_client_groups(rows, msg, instance)
                 else:
-                    send_group_text(current.group_jid, msg)
+                    instance = req.instance_name or "docifybot3"
+                    send_group_text(current.group_jid, msg, instance)
             except Exception as e:
                 print("PROMOTION_NOTIFY_LEVEL_0_ERROR =", str(e), flush=True)
             return
@@ -850,12 +868,14 @@ def _handle_group_promotion_after_done(req, db):
         if first_notify:
             if shared_key:
                 try:
-                    _notify_client_groups(rows, msg)
+                    instance = req.instance_name or "docifybot3"
+                    _notify_client_groups(rows, msg, instance)
                 except Exception as e:
                     print("PROMOTION_SHARED_GROUP_NOTIFY_ERROR =", str(e), flush=True)
             else:
                 try:
-                    send_group_text(current.group_jid, msg)
+                    instance = req.instance_name or "docifybot3"
+                    send_group_text(current.group_jid, msg, instance)
                 except Exception as e:
                     print("PROMOTION_SINGLE_GROUP_NOTIFY_ERROR =", str(e), flush=True)
         else:
@@ -1020,6 +1040,9 @@ def process_request(request_id: int):
         if not req:
             return
 
+        print("REQ_INSTANCE_NAME =", req.instance_name, flush=True)
+        print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
+
         process_started_ts = time.perf_counter()
 
         req.status = "PROCESSING"
@@ -1052,7 +1075,8 @@ def process_request(request_id: int):
                     )
 
                     try:
-                        send_group_text(req.source_group_id, msg, req.instance_name)
+                        instance = req.instance_name or "docifybot3"
+                        send_group_text(req.source_group_id, msg, instance)
                     except Exception as notify_exc:
                         print("SHARED_GROUP_LIMIT_NOTIFY_ERROR =", str(notify_exc), flush=True)
 
@@ -1240,6 +1264,12 @@ def process_request(request_id: int):
             )
         
             send_ok = False
+
+            instance = req.instance_name or "docifybot3"
+
+            print("REQ_INSTANCE_NAME =", req.instance_name, flush=True)
+            print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
+            print("PROVIDER3_SEND_INSTANCE =", instance, flush=True)
         
             for attempt in range(3):
                 try:
@@ -1248,14 +1278,16 @@ def process_request(request_id: int):
                             req.source_group_id,
                             safe_media_b64,
                             filename=f"{req.curp}.pdf",
-                            caption=caption_text
+                            caption=caption_text,
+                            instance_name=instance
                         )
                     else:
                         send_document_base64(
                             req.requester_wa_id,
                             safe_media_b64,
                             filename=f"{req.curp}.pdf",
-                            caption=caption_text
+                            caption=caption_text,
+                            instance_name=instance
                         )
         
                     send_ok = True
@@ -1317,12 +1349,13 @@ def process_request(request_id: int):
                         f"Tipo: {req.act_type}\n\n"
                         f"Reenviar nuevamente en unos minutos"
                     )
-            
+
+                    instance = req.instance_name or "docifybot3"
                     if req.source_group_id:
-                        send_group_text(req.source_group_id, msg, req.instance_name)
+                        send_group_text(req.source_group_id, msg, instance)
                     else:
                         from app.services.evolution import send_text
-                        send_text(req.requester_wa_id, msg, req.instance_name)
+                        send_text(req.requester_wa_id, msg, instance)
             
                     req.status = "ERROR"
                     req.error_message = p4_err
@@ -1359,12 +1392,13 @@ def process_request(request_id: int):
                             "La búsqueda no pudo completarse correctamente en este momento.\n\n"
                             "Intenta nuevamente más tarde."
                         )
-            
+
+                        instance = req.instance_name or "docifybot3"
                         if req.source_group_id:
-                            send_group_text(req.source_group_id, msg, req.instance_name)
+                            send_group_text(req.source_group_id, msg, instance)
                         else:
                             from app.services.evolution import send_text
-                            send_text(req.requester_wa_id, msg, req.instance_name)
+                            send_text(req.requester_wa_id, msg, instance)
             
                         req.status = "ERROR"
                         req.error_message = f"PROVIDER4_FALLBACK_NO_PROVIDER3:{p4_err}"
@@ -1412,6 +1446,12 @@ def process_request(request_id: int):
                 if "FOLIO" in (req.act_type or "").upper()
                 else f"{req.curp}.pdf"
             )
+
+            instance = req.instance_name or "docifybot3"
+
+            print("REQ_INSTANCE_NAME =", req.instance_name, flush=True)
+            print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
+            print("PROVIDER4_SEND_INSTANCE =", instance, flush=True)
         
             for attempt in range(3):
                 try:
@@ -1420,18 +1460,21 @@ def process_request(request_id: int):
                             req.source_group_id,
                             safe_media_b64,
                             filename=filename,
-                            caption=caption_text
+                            caption=caption_text,
+                            instance_name=instance
                         )
                     else:
                         send_document_base64(
                             req.requester_wa_id,
                             safe_media_b64,
                             filename=filename,
-                            caption=caption_text
+                            caption=caption_text,
+                            instance_name=instance
                         )
         
                     send_ok = True
                     print(f"PROVIDER4_SEND_OK_ATTEMPT_{attempt+1} =", req.id, flush=True)
+                    print("PROVIDER4_SEND_INSTANCE =", instance, flush=True)
                     break
         
                 except Exception as e:
@@ -1538,20 +1581,28 @@ def process_request(request_id: int):
                 if "FOLIO" in (req.act_type or "").upper()
                 else f"{req.curp}.pdf"
             )
+
+            instance = req.instance_name or "docifybot3"
+
+            print("REQ_INSTANCE_NAME =", req.instance_name, flush=True)
+            print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
+            print("PROVIDER7_SEND_INSTANCE =", instance, flush=True)
         
             if req.source_group_id:
                 send_group_document_base64(
                     req.source_group_id,
                     safe_media_b64,
                     filename=filename,
-                    caption=caption_text
+                    caption=caption_text,
+                    instance_name=instance
                 )
             else:
                 send_document_base64(
                     req.requester_wa_id,
                     safe_media_b64,
                     filename=filename,
-                    caption=caption_text
+                    caption=caption_text,
+                    instance_name=instance
                 )
         
             req.provider_media_url = "BASE64_PROVIDER7"
@@ -1589,11 +1640,12 @@ def process_request(request_id: int):
                     "Intenta nuevamente más tarde o realiza la búsqueda por *CURP*."
                 )
 
+                instance = req.instance_name or "docifybot3" 
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg, req.instance_name)
+                    send_group_text(req.source_group_id, msg, instance)
                 else:
                     from app.services.evolution import send_text
-                    send_text(req.requester_wa_id, msg, req.instance_name)
+                    send_text(req.requester_wa_id, msg, instance)
 
                 _notify_support_error(req, err, msg)
                 return
@@ -1610,11 +1662,12 @@ def process_request(request_id: int):
                     "Intenta nuevamente más tarde o realiza la búsqueda por *CURP*."
                 )
 
+                instance = req.instance_name or "docifybot3"
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg, req.instance_name)
+                    send_group_text(req.source_group_id, msg, instance)
                 else:
                     from app.services.evolution import send_text
-                    send_text(req.requester_wa_id, msg, req.instance_name)
+                    send_text(req.requester_wa_id, msg, instance)
 
                 _notify_support_error(req, err, msg)
                 return
@@ -1631,11 +1684,12 @@ def process_request(request_id: int):
                     f"Reenviar nuevamente en unos minutos"
                 )
 
+                instance = req.instance_name or "docifybot3"
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg, req.instance_name)
+                    send_group_text(req.source_group_id, msg, instance)
                 else:
                     from app.services.evolution import send_text
-                    send_text(req.requester_wa_id, msg, req.instance_name)
+                    send_text(req.requester_wa_id, msg, instance)
 
                 _notify_support_error(req, err, msg)
                 return
@@ -1654,12 +1708,13 @@ def process_request(request_id: int):
                     f"Tipo: {req.act_type}\n\n"
                     f"Verificar que la CURP esté certificada en RENAPO"
                 )
-    
+
+                instance = req.instance_name or "docifybot3"
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg, req.instance_name)
+                    send_group_text(req.source_group_id, msg, instance)
                 else:
                     from app.services.evolution import send_text
-                    send_text(req.requester_wa_id, msg, req.instance_name)
+                    send_text(req.requester_wa_id, msg, instance)
 
                 #_notify_support_error(req, err, msg)
                 return
@@ -1675,12 +1730,13 @@ def process_request(request_id: int):
                     f"Tipo: {req.act_type}\n\n"
                     f"Intenta nuevamente en unos minutos"
                 )
-
+                
+                instance = req.instance_name or "docifybot3"
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg, req.instance_name)
+                    send_group_text(req.source_group_id, msg, instance)
                 else:
                     from app.services.evolution import send_text
-                    send_text(req.requester_wa_id, msg, req.instance_name)
+                    send_text(req.requester_wa_id, msg, instance)
 
                 _notify_support_error(req, err, msg)
                 return
@@ -1699,12 +1755,13 @@ def process_request(request_id: int):
                     f"Tipo: {req.act_type}\n\n"
                     f"Reenviar nuevamente en unos minutos"
                 )
-    
+
+                instance = req.instance_name or "docifybot3"
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg, req.instance_name)
+                    send_group_text(req.source_group_id, msg, instance)
                 else:
                     from app.services.evolution import send_text
-                    send_text(req.requester_wa_id, msg, req.instance_name)
+                    send_text(req.requester_wa_id, msg, instance)
 
                 _notify_support_error(req, err, msg)
                 return
