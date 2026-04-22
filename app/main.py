@@ -270,21 +270,30 @@ def _bot_sales_month(db: Session, instance_name: str) -> int:
 
 def _bot_sales_history_30d(db: Session, instance_name: str):
     start_utc = _bot_month_30d_start()
-    rows = (
-        db.query(
-            func.date(RequestLog.created_at).label("day"),
-            func.count(RequestLog.id).label("total"),
-        )
+
+    rows_raw = (
+        db.query(RequestLog)
         .filter(
             RequestLog.instance_name == instance_name,
             RequestLog.status == "DONE",
             RequestLog.created_at >= start_utc,
         )
-        .group_by(func.date(RequestLog.created_at))
-        .order_by(func.date(RequestLog.created_at).desc())
+        .order_by(RequestLog.created_at.desc())
         .all()
     )
-    return rows
+
+    rows = _dedupe_panel_rows(rows_raw)
+
+    counter = Counter()
+    for r in rows:
+        local_dt = _to_panel_tz(r.created_at)
+        if not local_dt:
+            continue
+        day = local_dt.strftime("%Y-%m-%d")
+        counter[day] += 1
+
+    out = [{"day": day, "total": total} for day, total in sorted(counter.items(), reverse=True)]
+    return out
 
 
 def _bot_group_stats(db: Session, instance_name: str):
@@ -823,7 +832,46 @@ def _query_requests_for_panel(
         q = q.filter(RequestLog.act_type.ilike(f"%{act_type.strip()}%"))
 
     return q
-    
+
+
+def _panel_unique_key(r: RequestLog):
+    local_dt = _to_panel_tz(r.created_at) if r.created_at else None
+    day_str = local_dt.strftime("%Y-%m-%d") if local_dt else "SIN_FECHA"
+
+    return (
+        r.source_group_id or "PRIVADO",
+        (r.curp or "").strip().upper(),
+        (r.act_type or "").strip().upper(),
+        day_str,
+    )
+
+
+def _dedupe_panel_rows(rows: list[RequestLog]) -> list[RequestLog]:
+    best = {}
+
+    for r in rows:
+        key = _panel_unique_key(r)
+
+        prev = best.get(key)
+        if prev is None:
+            best[key] = r
+            continue
+
+        prev_updated = prev.updated_at or prev.created_at
+        curr_updated = r.updated_at or r.created_at
+
+        if curr_updated and prev_updated:
+            if curr_updated > prev_updated:
+                best[key] = r
+            elif curr_updated == prev_updated and (r.id or 0) > (prev.id or 0):
+                best[key] = r
+        elif curr_updated and not prev_updated:
+            best[key] = r
+
+    out = list(best.values())
+    out.sort(key=lambda x: x.created_at or datetime.min, reverse=True)
+    return out
+
 
 def _panel_summary_from_rows(rows: list[RequestLog]) -> dict:
     out = {
@@ -1047,7 +1095,9 @@ def _panel_type_rows(rows: list[RequestLog]) -> list[dict]:
 def _panel_daily_group_rows(rows: list[RequestLog], db: Session) -> list[dict]:
     data = {}
 
-    for r in rows:
+    clean_rows = _dedupe_panel_rows(rows)
+
+    for r in clean_rows:
         local_dt = _to_panel_tz(r.created_at)
         day = local_dt.strftime("%Y-%m-%d") if local_dt else "SIN_FECHA"
         gid = r.source_group_id or "PRIVADO"
@@ -1109,10 +1159,11 @@ def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str, d
         }
         cur += timedelta(days=1)
 
-    for r in rows:
-        if (r.source_group_id or "PRIVADO") != group_jid:
-            continue
+    # filtrar solo el grupo y deduplicar
+    group_rows = [r for r in rows if (r.source_group_id or "PRIVADO") == group_jid]
+    group_rows = _dedupe_panel_rows(group_rows)
 
+    for r in group_rows:
         if not r.created_at:
             continue
 
@@ -1319,7 +1370,7 @@ def panel_recent_requests(
     time_min, time_max, view = _panel_period_bounds(view)
     group_cache = _build_group_name_cache(db)
 
-    rows = (
+    rows_raw = (
         _query_requests_for_panel(
             db=db,
             time_min=time_min,
@@ -1329,23 +1380,11 @@ def panel_recent_requests(
             status=status or None,
             act_type=act_type or None,
         )
-        .with_entities(
-            RequestLog.id,
-            RequestLog.curp,
-            RequestLog.act_type,
-            RequestLog.status,
-            RequestLog.source_group_id,
-            RequestLog.instance_name,
-            RequestLog.provider_name,
-            RequestLog.provider_group_id,
-            RequestLog.created_at,
-            RequestLog.updated_at,
-            RequestLog.error_message,
-        )
         .order_by(RequestLog.created_at.desc())
-        .limit(15)
         .all()
     )
+
+    rows = _dedupe_panel_rows(rows_raw)
 
     html = """
     <div class="table-wrap">
@@ -1369,7 +1408,7 @@ def panel_recent_requests(
     """
 
     if rows:
-        for r in rows:
+        for r in rows[:15]:
             status_class = {
                 "QUEUED": "status-q",
                 "PROCESSING": "status-p",
@@ -3314,7 +3353,7 @@ def panel_api_actas(
 ):
     time_min, time_max, view = _panel_period_bounds(view)
 
-    rows = _query_requests_for_panel(
+    rows_raw = _query_requests_for_panel(
         db=db,
         time_min=time_min,
         time_max=time_max,
@@ -3323,12 +3362,14 @@ def panel_api_actas(
         status=status or None,
         act_type=act_type or None,
     ).order_by(RequestLog.created_at.desc()).all()
-
+    
+    rows = _dedupe_panel_rows(rows_raw)
+    
     summary = _panel_summary_from_rows(rows)
     by_group = _panel_group_rows(rows, db=db)
     by_provider = _panel_provider_rows(rows)
     by_type = _panel_type_rows(rows)
-
+    
     latest = []
     for r in rows[:100]:
         latest.append({
@@ -3345,7 +3386,7 @@ def panel_api_actas(
             "updated_at": _fmt_dt(r.updated_at),
             "error_message": r.error_message or "",
         })
-
+    
     return {
         "ok": True,
         "view": view,
@@ -3354,6 +3395,8 @@ def panel_api_actas(
         "by_provider": by_provider,
         "by_type": by_type,
         "latest": latest,
+        "raw_total": len(rows_raw),
+        "unique_total": len(rows),
     }
 
 
@@ -9226,6 +9269,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     f"⏳ Ya existe una solicitud en proceso\n"
                     f"Dato: {term}\n"
                     f"Tipo: {act_type}"
+                    f"Espera un momento antes de reenviar."
                 )
             
                 if source_group_id:
