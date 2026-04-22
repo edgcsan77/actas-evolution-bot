@@ -81,8 +81,9 @@ def cleanup_expired_and_mark_pending():
                     f"Reenviar nuevamente en unos minutos"
                 )
 
-                if r.source_group_id and should_notify_failure(r.source_group_id):
-                    send_group_text(r.source_group_id, msg)
+                if r.source_group_id:
+                    if should_notify_failure(r.source_group_id):
+                        send_group_text(r.source_group_id, msg)
                 else:
                     send_text(r.requester_wa_id, msg)
 
