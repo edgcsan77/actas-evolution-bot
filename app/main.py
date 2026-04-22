@@ -40,7 +40,7 @@ from app.services.evolution import (
     get_media_base64,
 )
 
-from sqlalchemy import func, case, or_
+from sqlalchemy import func, case, or_, distinct, cast, Date
 
 app = FastAPI(title=settings.APP_NAME)
 PANEL_TZ = "America/Monterrey"
@@ -204,30 +204,67 @@ def _bot_month_30d_start():
     return _panel_to_utc_naive(start_local)
 
 
-def _bot_sales_today(db: Session, instance_name: str) -> int:
-    start_utc, end_utc = _bot_day_bounds()
-    return (
-        db.query(RequestLog)
+def _bot_done_unique_count(
+    db: Session,
+    instance_name: str,
+    start_utc: datetime,
+    end_utc: datetime | None = None,
+    group_jid: str | None = None,
+) -> int:
+    fecha_local = cast(
+        func.timezone(
+            'America/Monterrey',
+            func.timezone('UTC', RequestLog.created_at)
+        ),
+        Date
+    )
+
+    q = (
+        db.query(
+            RequestLog.source_group_id,
+            RequestLog.curp,
+            RequestLog.act_type,
+            fecha_local.label("fecha_local"),
+        )
         .filter(
             RequestLog.instance_name == instance_name,
             RequestLog.status == "DONE",
             RequestLog.created_at >= start_utc,
-            RequestLog.created_at < end_utc,
         )
-        .count()
+    )
+
+    if end_utc is not None:
+        q = q.filter(RequestLog.created_at < end_utc)
+
+    if group_jid:
+        q = q.filter(RequestLog.source_group_id == group_jid)
+
+    q = q.distinct(
+        RequestLog.source_group_id,
+        RequestLog.curp,
+        RequestLog.act_type,
+        fecha_local
+    )
+
+    return q.count()
+
+    
+def _bot_sales_today(db: Session, instance_name: str) -> int:
+    start_utc, end_utc = _bot_day_bounds()
+    return _bot_done_unique_count(
+        db=db,
+        instance_name=instance_name,
+        start_utc=start_utc,
+        end_utc=end_utc,
     )
 
 
 def _bot_sales_month(db: Session, instance_name: str) -> int:
     start_utc = _bot_month_30d_start()
-    return (
-        db.query(RequestLog)
-        .filter(
-            RequestLog.instance_name == instance_name,
-            RequestLog.status == "DONE",
-            RequestLog.created_at >= start_utc,
-        )
-        .count()
+    return _bot_done_unique_count(
+        db=db,
+        instance_name=instance_name,
+        start_utc=start_utc,
     )
 
 
@@ -258,27 +295,19 @@ def _bot_group_stats(db: Session, instance_name: str):
     out = []
 
     for g in groups:
-        today_done = (
-            db.query(RequestLog)
-            .filter(
-                RequestLog.instance_name == instance_name,
-                RequestLog.source_group_id == g.group_jid,
-                RequestLog.status == "DONE",
-                RequestLog.created_at >= start_day,
-                RequestLog.created_at < end_day,
-            )
-            .count()
+        today_done = _bot_done_unique_count(
+            db=db,
+            instance_name=instance_name,
+            start_utc=start_day,
+            end_utc=end_day,
+            group_jid=g.group_jid,
         )
 
-        month_done = (
-            db.query(RequestLog)
-            .filter(
-                RequestLog.instance_name == instance_name,
-                RequestLog.source_group_id == g.group_jid,
-                RequestLog.status == "DONE",
-                RequestLog.created_at >= start_30d,
-            )
-            .count()
+        month_done = _bot_done_unique_count(
+            db=db,
+            instance_name=instance_name,
+            start_utc=start_30d,
+            group_jid=g.group_jid,
         )
 
         promo = db.query(GroupPromotion).filter_by(group_jid=g.group_jid).first()
