@@ -21,6 +21,7 @@ from app.worker import process_request, provider3_keepalive_job
 from app.services.provider3 import Provider3Client
 from app.services.provider4 import Provider4Client
 from app.services.provider7 import Provider7Client
+from types import SimpleNamespace
 
 from app.utils.curp import (
     extract_request_terms,
@@ -179,15 +180,35 @@ def _get_bot_group_name(db: Session, group_jid: str) -> str:
 
 
 def _bot_groups_for_instance(db: Session, instance_name: str):
-    return (
-        db.query(AuthorizedGroup)
-        .filter(
-            AuthorizedGroup.owner_instance == instance_name,
-            AuthorizedGroup.is_hidden == False
+    hidden_group_ids = {
+        g.group_jid
+        for g in (
+            db.query(AuthorizedGroup.group_jid)
+            .filter(AuthorizedGroup.is_hidden == True)
+            .all()
         )
-        .order_by(AuthorizedGroup.group_name.asc(), AuthorizedGroup.group_jid.asc())
+    }
+
+    rows = (
+        db.query(RequestLog.source_group_id)
+        .filter(
+            RequestLog.instance_name == instance_name,
+            RequestLog.source_group_id.isnot(None),
+        )
+        .distinct()
         .all()
     )
+
+    groups = []
+    for (group_jid,) in rows:
+        if not group_jid:
+            continue
+        if group_jid in hidden_group_ids:
+            continue
+        groups.append(SimpleNamespace(group_jid=group_jid))
+
+    groups.sort(key=lambda x: (_get_bot_group_name(db, x.group_jid) or "").lower())
+    return groups
 
 
 def _bot_day_bounds():
