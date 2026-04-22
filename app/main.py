@@ -5556,10 +5556,13 @@ def panel_actas(
             </div>
         
             <form class="box" method="get" action="/panel">
+              <input type="hidden" name="token" value="docifymx2026">
+              
               <div class="head">
                 <strong>Filtros</strong>
                 <span class="small">Aplica filtros para localizar información específica rápidamente.</span>
               </div>
+              
               <div class="filters">
                 <input type="hidden" name="view" value="{_esc(view)}">
                 <input type="hidden" name="group_mode" value="{_esc(group_mode)}">
@@ -5567,6 +5570,7 @@ def panel_actas(
                 <input name="provider_name" placeholder="Proveedor" value="{_esc(provider_name)}">
                 <input name="status" placeholder="Estado" value="{_esc(status)}">
                 <input name="act_type" placeholder="Tipo de acta" value="{_esc(act_type)}">
+                
                 <button type="submit" class="btn btn-primary">Filtrar</button>
               </div>
             </form>
