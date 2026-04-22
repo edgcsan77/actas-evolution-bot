@@ -1006,6 +1006,13 @@ def _validate_act_type_pdf(pdf_bytes: bytes, act_type: str | None) -> bool:
     return False
 
 
+NO_TIME_CAPTION_GROUPS = {
+    "120363408668441985@g.us",
+    "120363421166637606@g.us",
+    "120363427267191472@g.us",
+}
+
+
 def process_request(request_id: int):
     db = SessionLocal()
     try:
@@ -1209,11 +1216,6 @@ def process_request(request_id: int):
             else:
                 tiempo = f"{total_seconds:.2f} segundos"
         
-            NO_TIME_CAPTION_GROUPS = {
-                "120363408668441985@g.us",
-                "120363421166637606@g.us",
-            }
-        
             caption_text = ""
             if req.source_group_id not in NO_TIME_CAPTION_GROUPS:
                 caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
@@ -1390,11 +1392,6 @@ def process_request(request_id: int):
                 tiempo = f"{minutes} min {seconds:.2f} segundos"
             else:
                 tiempo = f"{total_seconds:.2f} segundos"
-        
-            NO_TIME_CAPTION_GROUPS = {
-                "120363408668441985@g.us",
-                "120363421166637606@g.us",
-            }
         
             caption_text = ""
             if req.source_group_id not in NO_TIME_CAPTION_GROUPS:
