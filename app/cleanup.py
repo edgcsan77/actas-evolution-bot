@@ -7,6 +7,16 @@ from app.models import RequestLog
 from app.config import settings
 from app.services.evolution import send_group_text, send_text
 
+NO_FAIL_NOTIFY_GROUPS = {
+    "120363427267191472@g.us"
+}
+
+
+def should_notify_failure(group_id: str | None) -> bool:
+    if not group_id:
+        return True
+    return group_id not in NO_FAIL_NOTIFY_GROUPS
+    
 
 def _utc_now_naive():
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -71,7 +81,7 @@ def cleanup_expired_and_mark_pending():
                     f"Reenviar nuevamente en unos minutos"
                 )
 
-                if r.source_group_id:
+                if r.source_group_id and should_notify_failure(r.source_group_id):
                     send_group_text(r.source_group_id, msg)
                 else:
                     send_text(r.requester_wa_id, msg)
