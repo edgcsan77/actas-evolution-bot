@@ -7233,6 +7233,7 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
     NO_TIME_CAPTION_GROUPS = {
         "120363408668441985@g.us",
         "120363421166637606@g.us",
+        "120363427267191472@g.us",
     }
 
     if req.created_at:
