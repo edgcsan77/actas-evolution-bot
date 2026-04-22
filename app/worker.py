@@ -23,10 +23,19 @@ from zoneinfo import ZoneInfo
 from io import BytesIO
 from pypdf import PdfReader
 
-
 PROVIDER4_TEST_GROUPS = set()
 PROVIDER7_TEST_GROUPS = set()
 
+NO_FAIL_NOTIFY_GROUPS = {
+    "120363427267191472@g.us"
+}
+
+
+def should_notify_failure(group_id: str | None) -> bool:
+    if not group_id:
+        return True
+    return group_id not in NO_FAIL_NOTIFY_GROUPS
+    
 
 def _utc_now_naive():
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -1163,7 +1172,8 @@ def process_request(request_id: int):
                 instance = req.instance_name or "docifybot3"
 
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg, instance)
+                    if should_notify_failure(req.source_group_id):
+                        send_group_text(req.source_group_id, msg, instance)
                 else:
                     from app.services.evolution import send_text
                     send_text(req.requester_wa_id, msg, instance)
@@ -1351,8 +1361,10 @@ def process_request(request_id: int):
                     )
 
                     instance = req.instance_name or "docifybot3"
+
                     if req.source_group_id:
-                        send_group_text(req.source_group_id, msg, instance)
+                        if should_notify_failure(req.source_group_id):
+                            send_group_text(req.source_group_id, msg, instance)
                     else:
                         from app.services.evolution import send_text
                         send_text(req.requester_wa_id, msg, instance)
@@ -1542,7 +1554,6 @@ def process_request(request_id: int):
                 db.commit()
         
                 try:
-                    instance = req.instance_name or "docifybot3"
                     msg = (
                         f"⚠️ Solicitud sin éxito en Registro Civil\n"
                         f"Dato: {req.curp}\n"
@@ -1550,8 +1561,11 @@ def process_request(request_id: int):
                         f"Reenviar nuevamente en unos minutos"
                     )
         
+                    instance = req.instance_name or "docifybot3"
+
                     if req.source_group_id:
-                        send_group_text(req.source_group_id, msg, instance)
+                        if should_notify_failure(req.source_group_id):
+                            send_group_text(req.source_group_id, msg, instance)
                     else:
                         from app.services.evolution import send_text
                         send_text(req.requester_wa_id, msg, instance)
@@ -1685,8 +1699,10 @@ def process_request(request_id: int):
                 )
 
                 instance = req.instance_name or "docifybot3"
+
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg, instance)
+                    if should_notify_failure(req.source_group_id):
+                        send_group_text(req.source_group_id, msg, instance)
                 else:
                     from app.services.evolution import send_text
                     send_text(req.requester_wa_id, msg, instance)
@@ -1757,8 +1773,10 @@ def process_request(request_id: int):
                 )
 
                 instance = req.instance_name or "docifybot3"
+
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg, instance)
+                    if should_notify_failure(req.source_group_id):
+                        send_group_text(req.source_group_id, msg, instance)
                 else:
                     from app.services.evolution import send_text
                     send_text(req.requester_wa_id, msg, instance)
