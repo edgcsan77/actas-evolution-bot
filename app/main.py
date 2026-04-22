@@ -8202,6 +8202,24 @@ def _unwrap_message(msg: dict) -> dict:
     return current
     
 
+def _get_latest_request(
+    db: Session,
+    term: str,
+    act_type: str,
+    source_chat_id: str | None,
+):
+    return (
+        db.query(RequestLog)
+        .filter(
+            RequestLog.curp == term,
+            RequestLog.act_type == act_type,
+            RequestLog.source_chat_id == source_chat_id,
+        )
+        .order_by(RequestLog.created_at.desc(), RequestLog.id.desc())
+        .first()
+    )
+
+
 @app.post("/webhook/evolution")
 async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
     try:
@@ -9047,6 +9065,33 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             print("PROCESSING_TERM =", term, flush=True)
         
             #last_done = get_last_done_request(db, term, act_type)
+            last_req = _get_latest_request(db, term, act_type, source_chat_id)
+
+            if last_req:
+                print(
+                    "LAST_REQ_FOUND =",
+                    {
+                        "id": last_req.id,
+                        "status": last_req.status,
+                        "term": term,
+                        "act_type": act_type,
+                    },
+                    flush=True,
+                )
+
+            if last_req.status == "DONE":
+                done_msg = (
+                    f"✅ Esta acta ya fue entregada\n"
+                    f"Dato: {term}\n"
+                    f"Tipo: {act_type}"
+                )
+
+                if source_group_id:
+                    send_group_text(source_group_id, done_msg, instance_name=instance_name)
+                else:
+                    send_text(requester_wa_id, done_msg, instance_name=instance_name)
+
+                continue
         
             base_request_key = build_request_key(term, act_type, source_chat_id)
         
