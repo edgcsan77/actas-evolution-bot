@@ -865,16 +865,22 @@ class Provider4Client:
                 )
     
                 if inc_folio:
-                    link = self._extract_folio_link(history_html, term, tipoa)
-                    if link:
-                        print("PROVIDER4_FINAL_FOLIO_LINK =", link, flush=True)
+                    dphp_link = self._extract_pdf_link(history_html, term, tipoa)
+                    folio_link = self._extract_folio_link(history_html, term, tipoa)
                 
+                    print("PROVIDER4_INC_FOLIO_DPHP_LINK =", dphp_link, flush=True)
+                    print("PROVIDER4_INC_FOLIO_FOLIO_LINK =", folio_link, flush=True)
+                
+                    final_link = dphp_link or folio_link
+                    print("PROVIDER4_FINAL_FOLIO_LINK =", final_link, flush=True)
+                
+                    if final_link:
                         pdf_bytes = self._download_and_validate_with_retries(
-                            url=link,
+                            url=final_link,
                             term=term,
                             tipoa=tipoa,
                             inc_folio=inc_folio,
-                            use_folio_downloader=("addFol.php" in link),
+                            use_folio_downloader=False,
                             max_attempts=4,
                             sleep_seconds=4,
                         )
