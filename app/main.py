@@ -8467,7 +8467,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             RequestLog.provider_message_id == quoted_msg_id,
                             RequestLog.status == "PROCESSING",
                             RequestLog.provider_name.in_(["PROVIDER5", "PROVIDER6"]),
-                            RequestLog.instance_name == instance_name,
                         )
                         .order_by(RequestLog.created_at.desc())
                         .first()
@@ -8510,7 +8509,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             RequestLog.curp == provider_id,
                             RequestLog.status == "PROCESSING",
                             RequestLog.provider_name.in_(["PROVIDER5", "PROVIDER6"]),
-                            RequestLog.instance_name == instance_name,
                         )
                         .order_by(RequestLog.created_at.desc())
                         .first()
@@ -8577,7 +8575,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             RequestLog.provider_group_id == source_chat_id,
                             RequestLog.curp == filename_id,
                             RequestLog.status == "PROCESSING",
-                            RequestLog.instance_name == instance_name,
                         )
                         .order_by(RequestLog.created_at.desc())
                         .first()
@@ -8590,7 +8587,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             RequestLog.provider_group_id == source_chat_id,
                             RequestLog.curp == provider_id,
                             RequestLog.status == "PROCESSING",
-                            RequestLog.instance_name == instance_name,
                         )
                         .order_by(RequestLog.created_at.desc())
                         .first()
@@ -8759,7 +8755,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         RequestLog.provider_group_id == source_chat_id,
                         RequestLog.curp == provider_id,
                         RequestLog.status == "PROCESSING",
-                        RequestLog.instance_name == instance_name,
                     )
                     .order_by(RequestLog.created_at.asc())
                     .first()
