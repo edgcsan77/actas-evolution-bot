@@ -8489,10 +8489,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         )
 
                         try:
+                            client_instance = open_req.instance_name or "docifybot3"
                             if open_req.source_group_id:
-                                send_group_text(open_req.source_group_id, msg, instance_name=instance_name)
+                                send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
                             else:
-                                send_text(open_req.requester_wa_id, msg, instance_name=instance_name)
+                                send_text(open_req.requester_wa_id, msg, instance_name=client_instance)
                         except Exception as notify_exc:
                             print("PROVIDER5_SIN_NOTIFY_ERROR =", str(notify_exc), flush=True)
 
@@ -8531,10 +8532,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         )
 
                         try:
+                            client_instance = open_req.instance_name or "docifybot3"
                             if open_req.source_group_id:
-                                send_group_text(open_req.source_group_id, msg, instance_name=instance_name)
+                                send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
                             else:
-                                send_text(open_req.requester_wa_id, msg, instance_name=instance_name)
+                                send_text(open_req.requester_wa_id, msg, instance_name=client_instance)
                         except Exception as notify_exc:
                             print("PROVIDER5_FALLBACK_NOTIFY_ERROR =", str(notify_exc), flush=True)
 
