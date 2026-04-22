@@ -9079,19 +9079,19 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     flush=True,
                 )
 
-            if last_req.status == "DONE":
-                done_msg = (
-                    f"✅ Esta acta ya fue entregada\n"
-                    f"Dato: {term}\n"
-                    f"Tipo: {act_type}"
-                )
+                if last_req.status == "DONE":
+                    done_msg = (
+                        f"✅ Esta acta ya fue entregada\n"
+                        f"Dato: {term}\n"
+                        f"Tipo: {act_type}"
+                    )
 
-                if source_group_id:
-                    send_group_text(source_group_id, done_msg, instance_name=instance_name)
-                else:
-                    send_text(requester_wa_id, done_msg, instance_name=instance_name)
+                    if source_group_id:
+                        send_group_text(source_group_id, done_msg, instance_name=instance_name)
+                    else:
+                        send_text(requester_wa_id, done_msg, instance_name=instance_name)
 
-                continue
+                    continue
         
             base_request_key = build_request_key(term, act_type, source_chat_id)
         
