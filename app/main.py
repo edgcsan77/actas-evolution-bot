@@ -132,8 +132,16 @@ MIN_BOT_PROMO_ACTAS = 10
 
 def hide_group_from_main_panel(db: Session, group_jid: str):
     row = db.query(AuthorizedGroup).filter_by(group_jid=group_jid).first()
+
     if row:
         row.hidden_in_main = True
+    else:
+        row = AuthorizedGroup(
+            group_jid=group_jid,
+            hidden_in_main=True,
+        )
+        db.add(row)
+
     db.commit()
 
 
@@ -474,7 +482,14 @@ def panel_hide_group(group_jid: str, db: Session = Depends(get_db)):
         hide_group_from_main_panel(db, group_jid)
         _clear_panel_cache()
         _clear_group_name_cache()
-        return {"ok": True, "group_jid": group_jid, "hidden": True}
+
+        row = db.query(AuthorizedGroup).filter_by(group_jid=group_jid).first()
+
+        return {
+            "ok": bool(row and row.hidden_in_main),
+            "group_jid": group_jid,
+            "hidden": bool(row and row.hidden_in_main),
+        }
     except Exception as e:
         db.rollback()
         return {"ok": False, "error": str(e)}
