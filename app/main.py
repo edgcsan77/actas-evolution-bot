@@ -8586,7 +8586,33 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             
                 open_req = None
                 lookup_id = filename_id or provider_id
-
+                
+                # 1. match más estricto: mismo provider_group_id + misma CURP + PROCESSING
+                if lookup_id:
+                    open_req = (
+                        db.query(RequestLog)
+                        .filter(
+                            RequestLog.curp == lookup_id,
+                            RequestLog.status == "PROCESSING",
+                            RequestLog.provider_group_id == source_chat_id,
+                        )
+                        .order_by(RequestLog.created_at.desc())
+                        .first()
+                    )
+                
+                # 2. fallback por provider_message_id si el proveedor respondió citando
+                if not open_req and quoted_msg_id:
+                    open_req = (
+                        db.query(RequestLog)
+                        .filter(
+                            RequestLog.provider_message_id == quoted_msg_id,
+                            RequestLog.status == "PROCESSING",
+                        )
+                        .order_by(RequestLog.created_at.desc())
+                        .first()
+                    )
+                
+                # 3. último fallback: misma CURP + PROCESSING + mismo bot
                 if not open_req and lookup_id:
                     open_req = (
                         db.query(RequestLog)
@@ -8598,13 +8624,15 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         .first()
                     )
                 
-                    print("PROVIDER_PDF_FALLBACK_MATCH =", {
-                        "lookup_id": lookup_id,
-                        "matched_req_id": getattr(open_req, "id", None),
-                        "matched_provider_group_id": getattr(open_req, "provider_group_id", None),
-                        "matched_source_group_id": getattr(open_req, "source_group_id", None),
-                        "matched_instance_name": getattr(open_req, "instance_name", None),
-                    }, flush=True)
+                print("PROVIDER_PDF_FALLBACK_MATCH =", {
+                    "lookup_id": lookup_id,
+                    "quoted_msg_id": quoted_msg_id,
+                    "matched_req_id": getattr(open_req, "id", None),
+                    "matched_provider_group_id": getattr(open_req, "provider_group_id", None),
+                    "matched_source_group_id": getattr(open_req, "source_group_id", None),
+                    "matched_instance_name": getattr(open_req, "instance_name", None),
+                    "matched_act_type": getattr(open_req, "act_type", None),
+                }, flush=True)
             
                 if not open_req:
                     print("PROVIDER_PDF_WITHOUT_MATCH =", filename, flush=True)
@@ -8674,6 +8702,48 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 t_encode = time.perf_counter()
                 safe_media_b64 = base64.b64encode(pdf_bytes).decode()
                 print("T_BASE64_REENCODE =", round(time.perf_counter() - t_encode, 3), flush=True)
+
+                if not _validate_act_type_pdf(pdf_bytes, open_req.act_type):
+                    print("PROVIDER_PDF_WRONG_ACT_TYPE =", {
+                        "req_id": open_req.id,
+                        "curp": open_req.curp,
+                        "expected_act_type": open_req.act_type,
+                        "filename": filename,
+                        "source_chat_id": source_chat_id,
+                    }, flush=True)
+                
+                    open_req.status = "ERROR"
+                    open_req.error_message = "WRONG_ACT_TYPE_PDF"
+                    open_req.updated_at = _utc_now_naive()
+                    db.commit()
+                
+                    _notify_support_error(
+                        open_req,
+                        "WRONG_ACT_TYPE_PDF",
+                        f"filename={filename} | expected_act_type={open_req.act_type}"
+                    )
+                    return {"ok": True, "ignored": "provider_pdf_wrong_act_type"}
+                
+                if not _validate_pdf_matches_term(pdf_bytes, open_req.curp, open_req.act_type):
+                    print("PROVIDER_PDF_WRONG_CURP =", {
+                        "req_id": open_req.id,
+                        "curp": open_req.curp,
+                        "expected_act_type": open_req.act_type,
+                        "filename": filename,
+                        "source_chat_id": source_chat_id,
+                    }, flush=True)
+                
+                    open_req.status = "ERROR"
+                    open_req.error_message = "WRONG_CURP_IN_PDF"
+                    open_req.updated_at = _utc_now_naive()
+                    db.commit()
+                
+                    _notify_support_error(
+                        open_req,
+                        "WRONG_CURP_IN_PDF",
+                        f"filename={filename} | expected_curp={open_req.curp}"
+                    )
+                    return {"ok": True, "ignored": "provider_pdf_wrong_curp"}
                 
                 open_req.pdf_url = None
                 open_req.provider_media_url = "BASE64_FROM_MEDIA_MESSAGE"
