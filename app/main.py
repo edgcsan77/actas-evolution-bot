@@ -915,7 +915,10 @@ def _panel_group_rows(
             if gid in hidden_main_group_ids:
                 continue
     
-            if gid != "PRIVADO" and _is_hidden_panel_group(gid, group_name):
+            row = db.query(AuthorizedGroup).filter_by(group_jid=gid).first()
+            owner = (row.owner_instance or "").strip() if row else ""
+            
+            if gid != "PRIVADO" and not owner and _is_hidden_panel_group(gid, group_name):
                 continue
     
             group_map[gid] = {
@@ -4513,7 +4516,11 @@ def panel_actas(
         
                 if gid in hidden_main_group_ids:
                     continue
-                if gid != "PRIVADO" and _is_hidden_panel_group(gid, group_name):
+                    
+                row = db.query(AuthorizedGroup).filter_by(group_jid=gid).first()
+                owner = (row.owner_instance or "").strip() if row else ""
+                
+                if gid != "PRIVADO" and not owner and _is_hidden_panel_group(gid, group_name):
                     continue
         
                 group_map[gid] = {
@@ -4534,7 +4541,10 @@ def panel_actas(
             if gid in hidden_main_group_ids:
                 continue
         
-            if gid != "PRIVADO" and _is_hidden_panel_group(gid, group_name):
+            row = db.query(AuthorizedGroup).filter_by(group_jid=gid).first()
+            owner = (row.owner_instance or "").strip() if row else ""
+            
+            if gid != "PRIVADO" and not owner and _is_hidden_panel_group(gid, group_name):
                 continue
         
             item = group_map.setdefault(gid, {
