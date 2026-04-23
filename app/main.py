@@ -7474,7 +7474,9 @@ def _is_admin(requester_wa_id: str, from_me: bool = False) -> bool:
         if x.strip()
     ]
 
-    requester = (requester_wa_id or "").replace("+", "").replace(" ", "").strip()
+    requester = (requester_wa_id or "")
+    requester = requester.split("@")[0]
+    requester = requester.replace("+", "").replace(" ", "").strip()
 
     return from_me or requester in admins
     
@@ -8316,6 +8318,44 @@ def _get_latest_request(
         .order_by(RequestLog.created_at.desc(), RequestLog.id.desc())
         .first()
     )
+
+
+def is_legacy_known_group(db: Session, group_jid: str) -> bool:
+    try:
+        if not group_jid:
+            return False
+
+        # 1) Si ya está autorizado formalmente, claro que cuenta
+        if is_authorized_group(db, group_jid):
+            return True
+
+        # 2) Si está bloqueado, significa que el sistema ya lo conoce
+        if is_group_blocked(group_jid):
+            return True
+
+        # 3) Si ya existe actividad previa en solicitudes, es grupo viejo conocido
+        existing_req = (
+            db.query(RequestLog.id)
+            .filter(RequestLog.source_group_id == group_jid)
+            .first()
+        )
+        if existing_req:
+            return True
+
+        # 4) Si tiene promoción asociada, también ya es conocido
+        promo = (
+            db.query(GroupPromotion.id)
+            .filter(GroupPromotion.group_jid == group_jid)
+            .first()
+        )
+        if promo:
+            return True
+
+        return False
+
+    except Exception as e:
+        print("is_legacy_known_group error =", str(e), flush=True)
+        return False
 
 
 @app.post("/webhook/evolution")
@@ -9207,11 +9247,17 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         # =========================
         # FLUJO NORMAL DE USUARIO
         # =========================
-        ALLOW_ALL_GROUPS_TEMP = True
-        if not ALLOW_ALL_GROUPS_TEMP and is_group and not is_authorized_group(db, source_group_id):
-            print("IGNORED_REASON = group_not_authorized", flush=True)
-            print("IGNORED_GROUP =", source_group_id, flush=True)
-            return {"ok": True, "ignored": "group_not_authorized"}
+        ALLOW_LEGACY_KNOWN_GROUPS = True
+        if is_group:
+            group_allowed = (
+                is_authorized_group(db, source_group_id)
+                or (ALLOW_LEGACY_KNOWN_GROUPS and is_legacy_known_group(db, source_group_id))
+            )
+        
+            if not group_allowed:
+                print("IGNORED_REASON = group_not_authorized", flush=True)
+                print("IGNORED_GROUP =", source_group_id, flush=True)
+                return {"ok": True, "ignored": "group_not_authorized"}
 
         ALLOW_PRIVATE_TEMP = False
         if not is_group and (not ALLOW_PRIVATE_TEMP or not is_authorized_user(db, requester_wa_id)):
