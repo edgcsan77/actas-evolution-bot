@@ -7478,9 +7478,6 @@ def _is_admin(requester_wa_id: str, from_me: bool = False) -> bool:
     requester = requester.split("@")[0]
     requester = requester.replace("+", "").replace(" ", "").strip()
 
-    if not requester:
-        return bool(from_me)
-
     return from_me or requester in admins
     
 
@@ -7795,39 +7792,24 @@ def _resolve_requester_wa_id(data: dict, key: dict, is_group: bool) -> str:
     remote_jid_alt = data.get("remoteJidAlt", "") or ""
     sender = data.get("sender", "") or ""
 
-    def _is_real_wa_user(v: str) -> bool:
-        v = (v or "").strip().lower()
-        if not v:
-            return False
-        if v.endswith("@s.whatsapp.net"):
-            return True
-        # en privado a veces puede venir solo número
-        if re.fullmatch(r"\d{10,20}", v):
-            return True
-        return False
-
-    # 1) En grupo: participantAlt si existe y es número real
-    if is_group and _is_real_wa_user(participant_alt):
+    # 1) En grupo, intenta primero participantAlt si existe
+    if is_group and participant_alt:
         return _normalize_wa_actor(participant_alt)
 
-    # 2) Luego sender si es número real
-    if _is_real_wa_user(sender):
+    # 2) Luego sender
+    if sender:
         return _normalize_wa_actor(sender)
 
-    # 3) Luego participant, PERO solo si es número real; ignorar @lid
-    if is_group and _is_real_wa_user(participant):
+    # 3) Luego participant
+    if is_group and participant:
         return _normalize_wa_actor(participant)
 
-    # 4) Luego remote_jid_alt si es número real
-    if _is_real_wa_user(remote_jid_alt):
+    # 4) Luego remote_jid_alt
+    if remote_jid_alt:
         return _normalize_wa_actor(remote_jid_alt)
 
-    # 5) En privado, usar remote_jid si es número real
-    if not is_group and _is_real_wa_user(remote_jid):
-        return _normalize_wa_actor(remote_jid)
-
-    # 6) Si no hay número real, regresar vacío
-    return ""
+    # 5) Finalmente remote_jid
+    return _normalize_wa_actor(remote_jid)
 
 
 def webhook_msg_seen(msg_id: str) -> bool:
