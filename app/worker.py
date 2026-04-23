@@ -394,16 +394,23 @@ def _pick_provider_name(
             print("PICK_PROVIDER_WEIGHTED = PROVIDER4_ONLY", flush=True)
             return "PROVIDER4"
 
-        slot_index = (request_id - 1) % 10
+        # 15 de 20 slots para PROVIDER4 (75%), distribuidos uniformemente
+        provider4_slots = {
+            0, 1, 3, 4, 5, 7, 8, 10, 11, 12, 14, 15, 17, 18, 19
+        }
+
+        slot_index = (request_id - 1) % 20
         print("PICK_PROVIDER_WEIGHTED_SLOT =", slot_index, flush=True)
 
-        if slot_index < 6:
+        if slot_index in provider4_slots:
             print("PICK_PROVIDER_WEIGHTED_CHOSEN = PROVIDER4", flush=True)
             return "PROVIDER4"
 
-        other_turn = ((request_id - 1) // 10) * 4 + (slot_index - 6)
+        other_slots_before = sum(1 for s in range(slot_index) if s not in provider4_slots)
+        other_turn = ((request_id - 1) // 20) * 5 + other_slots_before
         other_idx = other_turn % len(others)
         chosen = others[other_idx]
+
         print("PICK_PROVIDER_WEIGHTED_CHOSEN =", chosen, flush=True)
         return chosen
 
