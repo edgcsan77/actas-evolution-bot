@@ -8639,7 +8639,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     return {"ok": True, "ignored": "provider_pdf_without_match"}
             
                 match_term = filename_id or provider_id or open_req.curp or "NO_TERM"
-                pdf_dedupe_key = f"provider_pdf:{source_chat_id}:{match_term}:{filename or 'nofile'}"
+                pdf_dedupe_key = f"provider_pdf:{open_req.id}:{source_chat_id}:{match_term}:{filename or 'nofile'}"
             
                 already_sent = redis_conn.set(pdf_dedupe_key, "1", ex=3600, nx=True)
                 if not already_sent:
