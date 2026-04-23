@@ -447,39 +447,63 @@ def _pick_provider_name(
     return chosen
 
 
-def _pick_provider1_group(act_type: str, request_id: int) -> str:
-    act_type = (act_type or "").upper().strip()
+def _is_folio_act(act_type: str | None) -> bool:
+    act_type_up = (act_type or "").upper().strip()
+    return (
+        "FOLI" in act_type_up
+        or " FOL " in f" {act_type_up} "
+    )
 
-    nacimiento_groups = [
-        settings.PROVIDER_GROUP_NACIMIENTO_1,
-        settings.PROVIDER_GROUP_NACIMIENTO_2,
-        settings.PROVIDER_GROUP_NACIMIENTO_3,
-    ]
-    nacimiento_groups = [g for g in nacimiento_groups if g]
 
+def _pick_provider1_group(term: str | None, act_type: str, request_id: int) -> str:
+    act_type_up = (act_type or "").upper().strip()
+
+    nacimiento_group = (settings.PROVIDER_GROUP_NACIMIENTO_1 or "").strip()
     especiales_group = (settings.PROVIDER_GROUP_ESPECIALES or "").strip()
     foliadas_group = (settings.PROVIDER_GROUP_FOLIADAS or "").strip()
 
-    if "FOLIO" in act_type or "FOLIAD" in act_type or " FOL " in f" {act_type} ":
+    is_nacimiento = act_type_up.startswith("NACIMIENTO") or act_type_up.startswith("NAC")
+    is_cadena_req = is_chain(term)
+    is_folio_req = _is_folio_act(act_type_up)
+
+    # FOLIADAS de todos los tipos -> grupo 3
+    if is_folio_req:
         if not foliadas_group:
             raise RuntimeError("NO_FOLIADAS_PROVIDER_GROUP_CONFIGURED")
         return foliadas_group
 
-    if act_type.startswith("NACIMIENTO") or act_type.startswith("NAC"):
-        if not nacimiento_groups:
-            raise RuntimeError("NO_BIRTH_PROVIDER_GROUPS_CONFIGURED")
-        idx = (request_id - 1) % len(nacimiento_groups)
-        return nacimiento_groups[idx]
+    # CADENA DE NACIMIENTO -> grupo 1
+    if is_cadena_req and is_nacimiento:
+        if not nacimiento_group:
+            raise RuntimeError("NO_BIRTH_PROVIDER_GROUP_CONFIGURED")
+        return nacimiento_group
 
+    # CADENA de todos los tipos EXCEPTO NACIMIENTO -> grupo 3
+    if is_cadena_req:
+        if not foliadas_group:
+            raise RuntimeError("NO_FOLIADAS_PROVIDER_GROUP_CONFIGURED")
+        return foliadas_group
+
+    # NACIMIENTO normal -> grupo 1
+    if is_nacimiento:
+        if not nacimiento_group:
+            raise RuntimeError("NO_BIRTH_PROVIDER_GROUP_CONFIGURED")
+        return nacimiento_group
+
+    # MAT / DEF / DIV normales -> grupo 2
     if not especiales_group:
         raise RuntimeError("NO_SPECIAL_PROVIDER_GROUP_CONFIGURED")
-
     return especiales_group
 
 
-def _pick_provider_group(provider_name: str, act_type: str, request_id: int) -> str | None:
+def _pick_provider_group(
+    provider_name: str,
+    term: str | None,
+    act_type: str,
+    request_id: int
+) -> str | None:
     if provider_name == "PROVIDER1":
-        return _pick_provider1_group(act_type, request_id)
+        return _pick_provider1_group(term, act_type, request_id)
 
     if provider_name == "PROVIDER2":
         provider2_groups = [
@@ -1142,7 +1166,7 @@ def process_request(request_id: int):
             req.curp,
             req.act_type,
         )
-        provider_group_id = _pick_provider_group(provider_name, req.act_type, req.id)
+        provider_group_id = _pick_provider_group(provider_name, req.curp, req.act_type, req.id)
         text_to_provider = _build_provider_message(provider_name, req.curp, req.act_type)
 
         req.provider_name = provider_name
