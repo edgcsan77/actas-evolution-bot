@@ -17,7 +17,7 @@ from app.config import settings
 from app.db import Base, engine, get_db, SessionLocal
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion, GroupAlias, GroupCategory, BotControl
 from app.queue import request_queue, redis_conn
-from app.worker import process_request, provider3_keepalive_job
+from app.worker import process_request, provider3_keepalive_job, _validate_act_type_pdf, _validate_pdf_matches_term
 from app.services.provider3 import Provider3Client
 from app.services.provider4 import Provider4Client
 from app.services.provider7 import Provider7Client
