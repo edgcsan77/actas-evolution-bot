@@ -118,13 +118,13 @@ PROVIDER_LABELS = {
 
 
 BOT_LABELS = {
-    "docifybot3": "DOCU EXPRES",
-    "docifybot3max": "MAX BOT",
+    "docifybot8": "DOCU EXPRES",
+    "docifybot8max": "MAX BOT",
 }
 
 
 BOT_PANEL_TOKENS = {
-    "4a8c92a1e7": "docifybot3max",
+    "4a8c92a1e7": "docifybot8max",
 }
 
 
@@ -155,7 +155,7 @@ def hide_group_from_bot_panel(db: Session, group_jid: str, instance_name: str):
 
 def _is_child_bot(instance_name: str) -> bool:
     inst = (instance_name or "").strip().lower()
-    return inst.startswith("docifybot") and inst != "docifybot3"
+    return inst.startswith("docifybot") and inst != "docifybot8"
 
 
 def _bot_title(instance_name: str) -> str:
@@ -527,7 +527,7 @@ def panel_instances(db: Session = Depends(get_db)):
 
     items = []
     for instance_name, total in rows:
-        name = instance_name or "docifybot3"
+        name = instance_name or "docifybot8"
         used = get_bot_used(db, name)
         limit_value = get_bot_limit(db, name)
         blocked = is_instance_blocked(name)
@@ -1025,7 +1025,7 @@ def _panel_instance_rows(rows: list[RequestLog]) -> list[dict]:
     data = {}
 
     for r in rows:
-        name = r.instance_name or "docifybot3"
+        name = r.instance_name or "docifybot8"
         if name not in data:
             data[name] = {
                 "instance_name": name,
@@ -1424,7 +1424,7 @@ def panel_recent_requests(
               <td class="mono">{_esc(r.curp)}</td>
               <td>{_esc(r.act_type)}</td>
               <td class="{status_class}">{_esc(r.status)}</td>
-              <td>{_esc(_group_name_cached(r.source_group_id, group_cache) if (r.instance_name or "docifybot3") == "docifybot3" else "OCULTO")}</td>
+              <td>{_esc(_group_name_cached(r.source_group_id, group_cache) if (r.instance_name or "docifybot8") == "docifybot8" else "OCULTO")}</td>
               <td>{_esc(bot_label(r.instance_name))}</td>
               <td>{_esc(_provider_label(r.provider_name))}</td>
               <td>{_esc(_group_name_cached(r.provider_group_id, group_cache))}</td>
@@ -3956,7 +3956,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
         return HTMLResponse("<h3>Panel no válido.</h3>", status_code=404)
 
     if not _is_child_bot(instance_name):
-        return HTMLResponse("<h3>Este panel es solo para bots desde docifybot3max en adelante.</h3>", status_code=400)
+        return HTMLResponse("<h3>Este panel es solo para bots desde docifybot8max en adelante.</h3>", status_code=400)
 
     title = _bot_title(instance_name)
     today_sales = _bot_sales_today(db, instance_name)
@@ -4675,7 +4675,7 @@ def panel_actas(
         instance_map = {}
     
         for name, st, cnt in by_instance_raw:
-            name = name or "docifybot3"
+            name = name or "docifybot8"
             item = instance_map.setdefault(
                 name,
                 {
@@ -6326,7 +6326,7 @@ def panel_actas(
                   <td class="mono">{_esc(r.curp)}</td>
                   <td>{_esc(r.act_type)}</td>
                   <td class="{status_class}">{_esc(r.status)}</td>
-                  <td>{_esc(_group_name_cached(r.source_group_id, group_cache) if (r.instance_name or "docifybot3") == "docifybot3" else "OCULTO")}</td>
+                  <td>{_esc(_group_name_cached(r.source_group_id, group_cache) if (r.instance_name or "docifybot8") == "docifybot8" else "OCULTO")}</td>
                   <td>{_esc(bot_label(r.instance_name))}</td>
                   <td>{_esc(_provider_label(r.provider_name))}</td>
                   <td>{_esc(_group_name_cached(r.provider_group_id, group_cache))}</td>
@@ -7319,7 +7319,7 @@ def is_authorized_group(db: Session, group_jid: str) -> bool:
 
 
 def _deliver_text_result(req: RequestLog, text: str, instance_name: str = None):
-    instance = req.instance_name or instance_name or "docifybot3"
+    instance = req.instance_name or instance_name or "docifybot8"
 
     if req.source_group_id:
         send_group_text(req.source_group_id, text, instance)
@@ -7328,7 +7328,7 @@ def _deliver_text_result(req: RequestLog, text: str, instance_name: str = None):
 
 
 def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = None, instance_name: str = None):
-    instance = req.instance_name or instance_name or "docifybot3"
+    instance = req.instance_name or instance_name or "docifybot8"
     filename = filename or f"{req.curp}.pdf"
 
     caption_text = ""
@@ -8370,9 +8370,14 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         print("WEBHOOK_INSTANCE =", instance_name, flush=True)
         print("WEBHOOK_IS_INSTANCE_BLOCKED =", is_instance_blocked(instance_name), flush=True)
         
-        if event != "messages.upsert":
-            return {"ok": True, "ignored": event}
-        
+        event_norm = str(event or "").strip().lower()
+
+        if event_norm not in {"messages.upsert", "messages_upsert"}:
+            print("WEBHOOK_EVENT_IGNORED =", repr(event), flush=True)
+            return {"status": "ignored", "event": event}
+
+        print("WEBHOOK_EVENT_ACCEPTED =", repr(event), flush=True)
+                
         key = data.get("key", {})
         message = data.get("message", {})
         push_name = data.get("pushName", "")
@@ -8628,7 +8633,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         )
 
                         try:
-                            client_instance = open_req.instance_name or "docifybot3"
+                            client_instance = open_req.instance_name or "docifybot8"
                             if open_req.source_group_id:
                                 send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
                             else:
@@ -8671,7 +8676,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         )
 
                         try:
-                            client_instance = open_req.instance_name or "docifybot3"
+                            client_instance = open_req.instance_name or "docifybot8"
                             if open_req.source_group_id:
                                 send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
                             else:

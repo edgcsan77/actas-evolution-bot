@@ -82,7 +82,7 @@ def _notify_support_error(req, err: str, extra_msg: str = ""):
         if extra_msg:
             msg += f"\nDetalle: {extra_msg}\n"
 
-        instance = getattr(req, "instance_name", None) or "docifybot3"
+        instance = getattr(req, "instance_name", None) or "docifybot8"
         send_group_text(support_group, msg, instance)
     except Exception as support_exc:
         print("SUPPORT_ERROR_NOTIFY_FAILED =", str(support_exc), flush=True)
@@ -165,7 +165,7 @@ def _fallback_to_provider3_web(req, db, process_started_ts):
         else f"{req.curp}.pdf"
     )
 
-    instance = req.instance_name or "docifybot3"
+    instance = req.instance_name or "docifybot8"
 
     if req.source_group_id:
         send_group_document_base64(
@@ -228,7 +228,7 @@ def _get_client_promotions(db: Session, source_group_id: str) -> list:
 
 def _notify_client_groups(rows: list, message: str, instance_name: str | None = None):
     sent = set()
-    instance = instance_name or "docifybot3"
+    instance = instance_name or "docifybot8"
     for row in rows:
         gid = (row.group_jid or "").strip()
         if gid and gid not in sent:
@@ -897,7 +897,7 @@ def _handle_group_promotion_after_done(req, db):
             print("SHARED_GROUP_LIMIT_BLOCK_AFTER_DONE_ERROR =", str(e), flush=True)
 
         try:
-            instance = req.instance_name or "docifybot3"
+            instance = req.instance_name or "docifybot8"
             send_group_text(current_group_row.group_jid, individual_limit_msg, instance)
         except Exception as e:
             print("SHARED_GROUP_LIMIT_NOTIFY_AFTER_DONE_ERROR =", str(e), flush=True)
@@ -914,10 +914,10 @@ def _handle_group_promotion_after_done(req, db):
         if notify_level == "0":
             try:
                 if shared_key:
-                    instance = req.instance_name or "docifybot3"
+                    instance = req.instance_name or "docifybot8"
                     _notify_client_groups(rows, msg, instance)
                 else:
-                    instance = req.instance_name or "docifybot3"
+                    instance = req.instance_name or "docifybot8"
                     send_group_text(current.group_jid, msg, instance)
             except Exception as e:
                 print("PROMOTION_NOTIFY_LEVEL_0_ERROR =", str(e), flush=True)
@@ -929,13 +929,13 @@ def _handle_group_promotion_after_done(req, db):
         if first_notify:
             if shared_key:
                 try:
-                    instance = req.instance_name or "docifybot3"
+                    instance = req.instance_name or "docifybot8"
                     _notify_client_groups(rows, msg, instance)
                 except Exception as e:
                     print("PROMOTION_SHARED_GROUP_NOTIFY_ERROR =", str(e), flush=True)
             else:
                 try:
-                    instance = req.instance_name or "docifybot3"
+                    instance = req.instance_name or "docifybot8"
                     send_group_text(current.group_jid, msg, instance)
                 except Exception as e:
                     print("PROMOTION_SINGLE_GROUP_NOTIFY_ERROR =", str(e), flush=True)
@@ -1136,7 +1136,7 @@ def process_request(request_id: int):
                     )
 
                     try:
-                        instance = req.instance_name or "docifybot3"
+                        instance = req.instance_name or "docifybot8"
                         send_group_text(req.source_group_id, msg, instance)
                     except Exception as notify_exc:
                         print("SHARED_GROUP_LIMIT_NOTIFY_ERROR =", str(notify_exc), flush=True)
@@ -1221,7 +1221,7 @@ def process_request(request_id: int):
             )
         
             try:
-                instance = req.instance_name or "docifybot3"
+                instance = req.instance_name or "docifybot8"
 
                 if req.source_group_id:
                     if should_notify_failure(req.source_group_id):
@@ -1327,7 +1327,7 @@ def process_request(request_id: int):
         
             send_ok = False
 
-            instance = req.instance_name or "docifybot3"
+            instance = req.instance_name or "docifybot8"
 
             print("REQ_INSTANCE_NAME =", req.instance_name, flush=True)
             print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
@@ -1424,7 +1424,7 @@ def process_request(request_id: int):
                         f"Reenviar nuevamente en unos minutos"
                     )
 
-                    instance = req.instance_name or "docifybot3"
+                    instance = req.instance_name or "docifybot8"
 
                     if req.source_group_id:
                         if should_notify_failure(req.source_group_id):
@@ -1469,7 +1469,7 @@ def process_request(request_id: int):
                             "Intenta nuevamente más tarde."
                         )
 
-                        instance = req.instance_name or "docifybot3"
+                        instance = req.instance_name or "docifybot8"
                         if req.source_group_id:
                             send_group_text(req.source_group_id, msg, instance)
                         else:
@@ -1523,7 +1523,7 @@ def process_request(request_id: int):
                 else f"{req.curp}.pdf"
             )
 
-            instance = req.instance_name or "docifybot3"
+            instance = req.instance_name or "docifybot8"
 
             print("REQ_INSTANCE_NAME =", req.instance_name, flush=True)
             print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
@@ -1611,7 +1611,7 @@ def process_request(request_id: int):
                     )
         
                     try:
-                        instance = req.instance_name or "docifybot3"
+                        instance = req.instance_name or "docifybot8"
         
                         if req.source_group_id:
                             send_group_text(req.source_group_id, msg, instance)
@@ -1637,7 +1637,7 @@ def process_request(request_id: int):
                         f"Reenviar nuevamente en unos minutos"
                     )
         
-                    instance = req.instance_name or "docifybot3"
+                    instance = req.instance_name or "docifybot8"
 
                     if req.source_group_id:
                         if should_notify_failure(req.source_group_id):
@@ -1672,7 +1672,7 @@ def process_request(request_id: int):
                 else f"{req.curp}.pdf"
             )
 
-            instance = req.instance_name or "docifybot3"
+            instance = req.instance_name or "docifybot8"
 
             print("REQ_INSTANCE_NAME =", req.instance_name, flush=True)
             print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
@@ -1742,7 +1742,7 @@ def process_request(request_id: int):
                     "Intenta nuevamente más tarde o realiza la búsqueda por *CURP*."
                 )
 
-                instance = req.instance_name or "docifybot3" 
+                instance = req.instance_name or "docifybot8" 
                 if req.source_group_id:
                     send_group_text(req.source_group_id, msg, instance)
                 else:
@@ -1764,7 +1764,7 @@ def process_request(request_id: int):
                     "Intenta nuevamente más tarde o realiza la búsqueda por *CURP*."
                 )
 
-                instance = req.instance_name or "docifybot3"
+                instance = req.instance_name or "docifybot8"
                 if req.source_group_id:
                     send_group_text(req.source_group_id, msg, instance)
                 else:
@@ -1786,7 +1786,7 @@ def process_request(request_id: int):
                     f"Reenviar nuevamente en unos minutos"
                 )
 
-                instance = req.instance_name or "docifybot3"
+                instance = req.instance_name or "docifybot8"
 
                 if req.source_group_id:
                     if should_notify_failure(req.source_group_id):
@@ -1813,7 +1813,7 @@ def process_request(request_id: int):
                     f"Verificar que la CURP esté certificada en RENAPO"
                 )
 
-                instance = req.instance_name or "docifybot3"
+                instance = req.instance_name or "docifybot8"
                 if req.source_group_id:
                     send_group_text(req.source_group_id, msg, instance)
                 else:
@@ -1835,7 +1835,7 @@ def process_request(request_id: int):
                     f"Intenta nuevamente en unos minutos"
                 )
                 
-                instance = req.instance_name or "docifybot3"
+                instance = req.instance_name or "docifybot8"
                 if req.source_group_id:
                     send_group_text(req.source_group_id, msg, instance)
                 else:
@@ -1860,7 +1860,7 @@ def process_request(request_id: int):
                     f"Reenviar nuevamente en unos minutos"
                 )
 
-                instance = req.instance_name or "docifybot3"
+                instance = req.instance_name or "docifybot8"
 
                 if req.source_group_id:
                     if should_notify_failure(req.source_group_id):
