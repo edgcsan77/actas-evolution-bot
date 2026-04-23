@@ -373,7 +373,14 @@ def get_bot_limit(db: Session, instance_name: str) -> int:
 
 def get_bot_used(db: Session, instance_name: str) -> int:
     try:
-        return int(_app_setting_get(db, _bot_used_key(instance_name), "0") or "0")
+        return (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.instance_name == instance_name,
+                RequestLog.status == "DONE",
+            )
+            .count()
+        )
     except Exception:
         return 0
 
