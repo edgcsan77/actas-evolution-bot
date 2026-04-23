@@ -886,6 +886,8 @@ class Provider4Client:
                         )
                         return pdf_bytes
 
+                    print(f"PROVIDER4_HISTORY_ROW_FOUND_BUT_FOLIO_LINK_MISSING_ATTEMPT_{poll_attempt+1} = {term}", flush=True)
+
                     # Si history ya mostró la fila correcta, ahora sí se permite directo
                     #try:
                     #    return self.download_pdf_bytes(direct_normal_url)
@@ -911,6 +913,8 @@ class Provider4Client:
                             sleep_seconds=4,
                         )
                         return pdf_bytes
+                
+                    print(f"PROVIDER4_HISTORY_ROW_FOUND_BUT_LINK_MISSING_ATTEMPT_{poll_attempt+1} = {term}", flush=True)
     
                     # Si history ya mostró la fila correcta, ahora sí se permite directo
                     #try:
@@ -930,17 +934,61 @@ class Provider4Client:
             time.sleep(poll_sleep_seconds)
     
         final_history_html = self.get_history_html()
-    
+
         if self._detect_no_result(final_history_html, term, tipoa):
             raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
-    
-        # Ya NO usar early direct sin confirmación de history
+        
         if not history_confirmed:
             if inc_folio:
                 raise RuntimeError(f"PROVIDER4_HISTORY_NOT_CONFIRMED_FOLIO:{term}")
             else:
                 raise RuntimeError(f"PROVIDER4_HISTORY_NOT_CONFIRMED_PDF:{term}")
-    
+        
+        # =====================================================
+        # FASE EXTRA: history ya confirmado, esperar solo el link
+        # =====================================================
+        extra_link_polls = 12  # ~84 segundos extra si HISTORY_POLL_SLEEP=7
+        
+        for extra_attempt in range(extra_link_polls):
+            history_html = self.get_history_html()
+        
+            row_html = self._history_row_for_term(history_html, term, tipoa)
+            if row_html:
+                if inc_folio:
+                    dphp_link = self._extract_pdf_link(history_html, term, tipoa)
+                    folio_link = self._extract_folio_link(history_html, term, tipoa)
+                    final_link = dphp_link or folio_link
+        
+                    if final_link:
+                        print(f"PROVIDER4_LATE_FOLIO_LINK_FOUND_ATTEMPT_{extra_attempt+1} = {final_link}", flush=True)
+                        pdf_bytes = self._download_and_validate_with_retries(
+                            url=final_link,
+                            term=term,
+                            tipoa=tipoa,
+                            inc_folio=inc_folio,
+                            use_folio_downloader=False,
+                            max_attempts=4,
+                            sleep_seconds=4,
+                        )
+                        return pdf_bytes
+                else:
+                    link = self._extract_pdf_link(history_html, term, tipoa)
+                    if link:
+                        print(f"PROVIDER4_LATE_PDF_LINK_FOUND_ATTEMPT_{extra_attempt+1} = {link}", flush=True)
+                        pdf_bytes = self._download_and_validate_with_retries(
+                            url=link,
+                            term=term,
+                            tipoa=tipoa,
+                            inc_folio=inc_folio,
+                            use_folio_downloader=False,
+                            max_attempts=4,
+                            sleep_seconds=4,
+                        )
+                        return pdf_bytes
+        
+            print(f"PROVIDER4_LATE_LINK_STILL_MISSING_ATTEMPT_{extra_attempt+1} = {term}", flush=True)
+            time.sleep(self.HISTORY_POLL_SLEEP)
+        
         if inc_folio:
             raise RuntimeError(f"PROVIDER4_NO_FOLIO_LINK_FOR:{term}")
         else:
