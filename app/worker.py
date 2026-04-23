@@ -353,10 +353,12 @@ def _pick_provider_name(
     print("PICK_PROVIDER_ENABLED =", enabled, flush=True)
     print("PICK_PROVIDER_SOURCE_GROUP_ID =", repr(source_group_id), flush=True)
     print("PICK_PROVIDER_TERM =", repr(term), flush=True)
+    print("PICK_PROVIDER_ACT_TYPE =", repr(act_type), flush=True)
 
     if not enabled:
         raise RuntimeError("NO_PROVIDER_ENABLED")
 
+    # PROVIDER7 forzado solo para grupos de prueba
     if (
         source_group_id
         and source_group_id in PROVIDER7_TEST_GROUPS
@@ -365,32 +367,48 @@ def _pick_provider_name(
         print("FORZANDO PROVIDER7 =", source_group_id, flush=True)
         return "PROVIDER7"
 
+    # PROVIDER4 solo si es elegible
     if not _is_provider4_eligible(term, act_type):
         enabled = [p for p in enabled if p != "PROVIDER4"]
+        print("PROVIDER4_REMOVED_NOT_ELIGIBLE =", enabled, flush=True)
 
         if not enabled:
             raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
 
+    # PROVIDER6 no acepta cadenas
+    if is_chain(term) and "PROVIDER6" in enabled:
+        enabled = [p for p in enabled if p != "PROVIDER6"]
+        print("PROVIDER6_REMOVED_CHAIN =", enabled, flush=True)
+
+        if not enabled:
+            raise RuntimeError("NO_PROVIDER_FOR_CHAIN")
+
+    # PROVIDER4 forzado solo en grupos test
     if PROVIDER4_TEST_GROUPS:
         if (
             source_group_id
             and source_group_id in PROVIDER4_TEST_GROUPS
             and "PROVIDER4" in enabled
         ):
+            print("FORZANDO PROVIDER4_TEST_GROUP =", source_group_id, flush=True)
             return "PROVIDER4"
 
         enabled = [p for p in enabled if p != "PROVIDER4"]
+        print("PROVIDER4_REMOVED_NON_TEST_GROUP =", enabled, flush=True)
 
         if not enabled:
             raise RuntimeError("NO_PROVIDER_ENABLED")
 
+    # Si hay grupos test de provider7, fuera del pool normal
     if PROVIDER7_TEST_GROUPS and "PROVIDER7" in enabled:
         enabled = [p for p in enabled if p != "PROVIDER7"]
+        print("PROVIDER7_REMOVED_NON_TEST_GROUP =", enabled, flush=True)
 
         if not enabled:
             raise RuntimeError("NO_PROVIDER_ENABLED")
 
     if len(enabled) == 1:
+        print("PICK_PROVIDER_SINGLE =", enabled[0], flush=True)
         return enabled[0]
 
     # =========================
@@ -403,7 +421,7 @@ def _pick_provider_name(
             print("PICK_PROVIDER_WEIGHTED = PROVIDER4_ONLY", flush=True)
             return "PROVIDER4"
 
-        # 15 de 20 slots para PROVIDER4 (75%), distribuidos uniformemente
+        # 15 de 20 slots para PROVIDER4 (75%)
         provider4_slots = {
             0, 1, 3, 4, 5, 7, 8, 10, 11, 12, 14, 15, 17, 18, 19
         }
