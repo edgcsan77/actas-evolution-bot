@@ -1321,6 +1321,18 @@ def process_request(request_id: int):
             req.error_message = None
             req.updated_at = _utc_now_naive()
             db.commit()
+
+            try:
+                if req.instance_name:
+                    used, limit_value, blocked_now = increment_bot_used_and_maybe_block(
+                        db,
+                        req.instance_name
+                    )
+                    print("BOT_USED_AFTER_DONE =", used, flush=True)
+                    print("BOT_LIMIT =", limit_value, flush=True)
+                    print("BOT_BLOCKED_NOW =", blocked_now, flush=True)
+            except Exception as bot_limit_exc:
+                print("BOT_LIMIT_UPDATE_ERROR =", str(bot_limit_exc), flush=True)
         
             try:
                 _handle_group_promotion_after_done(req, db)
@@ -1506,6 +1518,18 @@ def process_request(request_id: int):
             req.error_message = None
             req.updated_at = _utc_now_naive()
             db.commit()
+
+            try:
+                if req.instance_name:
+                    used, limit_value, blocked_now = increment_bot_used_and_maybe_block(
+                        db,
+                        req.instance_name
+                    )
+                    print("BOT_USED_AFTER_DONE =", used, flush=True)
+                    print("BOT_LIMIT =", limit_value, flush=True)
+                    print("BOT_BLOCKED_NOW =", blocked_now, flush=True)
+            except Exception as bot_limit_exc:
+                print("BOT_LIMIT_UPDATE_ERROR =", str(bot_limit_exc), flush=True)
         
             try:
                 _handle_group_promotion_after_done(req, db)
@@ -1625,6 +1649,18 @@ def process_request(request_id: int):
             req.error_message = None
             req.updated_at = _utc_now_naive()
             db.commit()
+
+            try:
+                if req.instance_name:
+                    used, limit_value, blocked_now = increment_bot_used_and_maybe_block(
+                        db,
+                        req.instance_name
+                    )
+                    print("BOT_USED_AFTER_DONE =", used, flush=True)
+                    print("BOT_LIMIT =", limit_value, flush=True)
+                    print("BOT_BLOCKED_NOW =", blocked_now, flush=True)
+            except Exception as bot_limit_exc:
+                print("BOT_LIMIT_UPDATE_ERROR =", str(bot_limit_exc), flush=True)
         
             try:
                 _handle_group_promotion_after_done(req, db)
