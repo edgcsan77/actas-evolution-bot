@@ -512,7 +512,7 @@ class Provider4Client:
         """
         self.warm()
         html = self.get_history_html_for_date(fecha)
-        print(f"PROVIDER4_HISTORY_DATE_HTML_PREVIEW_{fecha} =", html[:1500], flush=True)
+        #print(f"PROVIDER4_HISTORY_DATE_HTML_PREVIEW_{fecha} =", html[:1500], flush=True)
         return self.extract_daily_done_count(html)
     
     def get_week_done_counts(self, start_date: datetime, end_date: datetime) -> dict:
