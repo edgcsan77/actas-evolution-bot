@@ -96,6 +96,15 @@ def _is_curp_term(value: str | None) -> bool:
 def _is_provider4_eligible(term: str | None, act_type: str | None) -> bool:
     if not _is_curp_term(term):
         return False
+
+    act_type_up = (act_type or "").upper().strip()
+
+    if "FOLI" in act_type_up:
+        return False
+
+    if is_chain(term):
+        return False
+
     return True
 
 
