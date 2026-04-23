@@ -881,7 +881,15 @@ def _panel_group_rows(
     def _is_hidden_group(gid: str, name: str) -> bool:
         if gid in HIDDEN_PANEL_GROUPS:
             return True
+    
         name_up = (name or "").strip().upper()
+        excluded_words = (
+            "PROV",
+            "PRUEBA",
+            "PRUEBAS",
+            "TEST",
+            "AD",
+        )
         return any(word in name_up for word in excluded_words)
 
     if include_all_groups and not has_active_filters:
