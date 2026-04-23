@@ -893,20 +893,19 @@ def _panel_group_rows(
         return any(word in name_up for word in excluded_words)
 
     if include_all_groups and not has_active_filters:
-        all_group_ids = set(GROUP_NAME_MAP.keys()) | set(group_cache.keys())
-
-        for gid in all_group_ids:
-            if gid == "PRIVADO":
+        for gid in (set(GROUP_NAME_MAP.keys()) | set(group_cache.keys())):
+            gid = gid or "PRIVADO"
+            group_name = _group_name_cached(gid, group_cache)
+    
+            if gid in hidden_main_group_ids:
                 continue
-
-            name = _group_name_cached(gid, group_cache) or "Grupo sin nombre"
-
-            if _is_hidden_group(gid, name):
+    
+            if gid != "PRIVADO" and _is_hidden_panel_group(gid, group_name):
                 continue
-
-            data[gid] = {
+    
+            group_map[gid] = {
                 "group_jid": gid,
-                "group_name": name,
+                "group_name": group_name,
                 "total": 0,
                 "queued": 0,
                 "processing": 0,
@@ -4372,6 +4371,22 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
     """
     return HTMLResponse(content=html)
 
+
+def _is_hidden_panel_group(gid: str | None, name: str | None) -> bool:
+    gid = (gid or "").strip()
+    if gid in HIDDEN_PANEL_GROUPS:
+        return True
+
+    name_up = (name or "").strip().upper()
+    excluded_words = (
+        "PROV",
+        "PRUEBA",
+        "PRUEBAS",
+        "TEST",
+        "AD",
+    )
+    return any(word in name_up for word in excluded_words)
+
                     
 @app.get("/panel", response_class=HTMLResponse)
 def panel_actas(
@@ -4386,31 +4401,6 @@ def panel_actas(
 ):
     if not _is_valid_admin_panel_token(request):
         return HTMLResponse("No autorizado", status_code=403)
-
-    HIDDEN_PANEL_GROUPS = {
-        "120363408639542108@g.us",  # AD 1
-        "120363427054214985@g.us",  # AD 2
-        "120363409374690453@g.us",  # AD 3
-        "120363426725671842@g.us",  # Prov Pruebas 1
-        "120363408272742958@g.us",  # Prov Pruebas 2
-        "120363406806549379@g.us",  # Actas Pruebas 1
-        "120363425323721713@g.us",  # Actas Pruebas 2
-        "120363407066931119@g.us",  # Actas Pruebas 3
-    }
-    
-    def _is_hidden_panel_group(gid: str, name: str) -> bool:
-        if gid in HIDDEN_PANEL_GROUPS:
-            return True
-    
-        name_up = (name or "").strip().upper()
-        excluded_words = (
-            "PROV",
-            "PRUEBA",
-            "PRUEBAS",
-            "TEST",
-            "AD",
-        )
-        return any(word in name_up for word in excluded_words)
 
     try:
         cache_key = _panel_cache_key(
@@ -4500,25 +4490,27 @@ def panel_actas(
         )
         
         group_map = {}
+
+        if include_all_groups and not has_active_filters:
+            for gid in (set(GROUP_NAME_MAP.keys()) | set(group_cache.keys())):
+                gid = gid or "PRIVADO"
+                group_name = _group_name_cached(gid, group_cache)
         
-        for gid in (set(GROUP_NAME_MAP.keys()) | set(group_cache.keys())):
-            group_name = _group_name_cached(gid, group_cache)
+                if gid in hidden_main_group_ids:
+                    continue
+                if gid != "PRIVADO" and _is_hidden_panel_group(gid, group_name):
+                    continue
         
-            if gid in hidden_main_group_ids:
-                continue
-            if gid != "PRIVADO" and _is_hidden_panel_group(gid, group_name):
-                continue
-        
-            group_map[gid] = {
-                "group_jid": gid,
-                "group_name": group_name,
-                "total": 0,
-                "queued": 0,
-                "processing": 0,
-                "done": 0,
-                "error": 0,
-                "last_update": None,
-            }
+                group_map[gid] = {
+                    "group_jid": gid,
+                    "group_name": group_name,
+                    "total": 0,
+                    "queued": 0,
+                    "processing": 0,
+                    "done": 0,
+                    "error": 0,
+                    "last_update": None,
+                }
         
         for gid, st, cnt, last_upd in group_rows_raw:
             gid = gid or "PRIVADO"
@@ -4526,6 +4518,7 @@ def panel_actas(
         
             if gid in hidden_main_group_ids:
                 continue
+        
             if gid != "PRIVADO" and _is_hidden_panel_group(gid, group_name):
                 continue
         
