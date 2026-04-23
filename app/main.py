@@ -8246,7 +8246,7 @@ def _get_latest_request(
 @app.post("/webhook/evolution")
 async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
     try:
-        print("WEBHOOK PAYLOAD =", payload, flush=True)
+        #print("WEBHOOK PAYLOAD =", payload, flush=True)
         event = payload.get("event", "")
         data = payload.get("data", {})
         
