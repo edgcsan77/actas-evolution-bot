@@ -780,6 +780,7 @@ def _query_requests_for_panel(
     q = db.query(RequestLog).filter(
         RequestLog.created_at >= time_min,
         RequestLog.created_at < time_max,
+        ~RequestLog.source_group_id.in_(HIDDEN_PANEL_GROUPS),
     )
 
     if group_jid:
@@ -806,6 +807,7 @@ def _query_requests_for_panel(
         ]
 
         matching_group_ids = list(dict.fromkeys(alias_matches + map_matches))
+        matching_group_ids = [gid for gid in matching_group_ids if gid not in HIDDEN_PANEL_GROUPS]
 
         if matching_group_ids:
             q = q.filter(RequestLog.source_group_id.in_(matching_group_ids))
@@ -847,6 +849,18 @@ def _panel_summary_from_rows(rows: list[RequestLog]) -> dict:
     return out
 
 
+HIDDEN_PANEL_GROUPS = {
+    "120363408639542108@g.us",  # AD 1
+    "120363427054214985@g.us",  # AD 2
+    "120363409374690453@g.us",  # AD 3
+    "120363426725671842@g.us",  # Prov Pruebas 1
+    "120363408272742958@g.us",  # Prov Pruebas 2
+    "120363406806549379@g.us",  # Actas Pruebas 1
+    "120363425323721713@g.us",  # Actas Pruebas 2
+    "120363407066931119@g.us",  # Actas Pruebas 3
+}
+
+
 def _panel_group_rows(
     rows: list[RequestLog],
     db: Session,
@@ -864,7 +878,9 @@ def _panel_group_rows(
         "AD",
     )
 
-    def _is_hidden_group(name: str) -> bool:
+    def _is_hidden_group(gid: str, name: str) -> bool:
+        if gid in HIDDEN_PANEL_GROUPS:
+            return True
         name_up = (name or "").strip().upper()
         return any(word in name_up for word in excluded_words)
 
@@ -877,7 +893,7 @@ def _panel_group_rows(
 
             name = _group_name_cached(gid, group_cache) or "Grupo sin nombre"
 
-            if _is_hidden_group(name):
+            if _is_hidden_group(gid, name):
                 continue
 
             data[gid] = {
@@ -906,7 +922,7 @@ def _panel_group_rows(
         gid = r.source_group_id or "PRIVADO"
         group_name = _group_name_cached(gid, group_cache)
 
-        if gid != "PRIVADO" and _is_hidden_group(group_name):
+        if gid != "PRIVADO" and _is_hidden_group(gid, group_name):
             continue
 
         if gid not in data:
