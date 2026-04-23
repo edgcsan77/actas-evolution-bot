@@ -466,31 +466,25 @@ def _pick_provider1_group(term: str | None, act_type: str, request_id: int) -> s
     is_cadena_req = is_chain(term)
     is_folio_req = _is_folio_act(act_type_up)
 
-    # FOLIADAS de todos los tipos -> grupo 3
+    # 🔴 1. FOLIADAS -> grupo 3
     if is_folio_req:
         if not foliadas_group:
             raise RuntimeError("NO_FOLIADAS_PROVIDER_GROUP_CONFIGURED")
         return foliadas_group
 
-    # CADENA DE NACIMIENTO -> grupo 1
-    if is_cadena_req and is_nacimiento:
-        if not nacimiento_group:
-            raise RuntimeError("NO_BIRTH_PROVIDER_GROUP_CONFIGURED")
-        return nacimiento_group
-
-    # CADENA de todos los tipos EXCEPTO NACIMIENTO -> grupo 3
+    # 🔴 2. TODAS LAS CADENAS -> grupo 3
     if is_cadena_req:
         if not foliadas_group:
             raise RuntimeError("NO_FOLIADAS_PROVIDER_GROUP_CONFIGURED")
         return foliadas_group
 
-    # NACIMIENTO normal -> grupo 1
+    # 🟢 3. NACIMIENTO normal -> grupo 1
     if is_nacimiento:
         if not nacimiento_group:
             raise RuntimeError("NO_BIRTH_PROVIDER_GROUP_CONFIGURED")
         return nacimiento_group
 
-    # MAT / DEF / DIV normales -> grupo 2
+    # 🟡 4. MAT / DEF / DIV normales -> grupo 2
     if not especiales_group:
         raise RuntimeError("NO_SPECIAL_PROVIDER_GROUP_CONFIGURED")
     return especiales_group
