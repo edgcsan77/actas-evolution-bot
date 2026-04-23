@@ -7802,7 +7802,7 @@ def _resolve_requester_wa_id(data: dict, key: dict, is_group: bool) -> str:
         return _normalize_wa_actor(sender)
 
     # 3) Luego participant
-    if is_group and participant:
+    if is_group and participant and not participant.endswith("@lid"):
         return _normalize_wa_actor(participant)
 
     # 4) Luego remote_jid_alt
