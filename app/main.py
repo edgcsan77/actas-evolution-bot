@@ -120,12 +120,13 @@ DAYS_ES = {
 
 PROVIDER_LABELS = {
     "PROVIDER1": "ADMIN DIGITAL",
-    "PROVIDER2": "GESTOR FIEL",
+    "PROVIDER2": "ACTAS DEL SURESTE",
     "PROVIDER3": "AUSTRAM WEB",
     "PROVIDER4": "LAZARO WEB",
     "PROVIDER5": "LUIS SID",
     "PROVIDER6": "ACTAS ESCALANTE",
     "PROVIDER7": "MESINO SID",
+    "PROVIDER8": "GESTOR FIABLE",
 }
 
 
@@ -5576,7 +5577,7 @@ def panel_actas(
                     </div>
 
                     <div class="provider-card">
-                      <div class="provider-name">GESTOR FIEL</div>
+                      <div class="provider-name">ACTAS DEL SURESTE</div>
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER2','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER2','off')">Desactivar</button>
@@ -5593,10 +5594,10 @@ def panel_actas(
                     </div>
 
                     <div class="provider-card">
-                      <div class="provider-name">LUIS SID</div>
+                      <div class="provider-name">LAZARO WEB</div>
                       <div class="provider-actions">
-                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER5','on')">Activar</button>
-                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER5','off')">Desactivar</button>
+                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER4','on')">Activar</button>
+                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER4','off')">Desactivar</button>
                       </div>
                     </div>
 
@@ -5609,10 +5610,10 @@ def panel_actas(
                     </div>
 
                     <div class="provider-card">
-                      <div class="provider-name">LAZARO WEB</div>
+                      <div class="provider-name">GESTOR FIABLE</div>
                       <div class="provider-actions">
-                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER4','on')">Activar</button>
-                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER4','off')">Desactivar</button>
+                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER8','on')">Activar</button>
+                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER8','off')">Desactivar</button>
                       </div>
                     </div>
                   </div>
@@ -7223,6 +7224,7 @@ def startup():
         _get_or_create_provider(db, "PROVIDER5", False)
         _get_or_create_provider(db, "PROVIDER6", False)
         _get_or_create_provider(db, "PROVIDER7", False)
+        _get_or_create_provider(db, "PROVIDER8", False)
     
         current = _get_app_setting(db, "PROVIDER3_PHPSESSID", "")
         if not current and settings.PROVIDER3_PHPSESSID:
@@ -7520,6 +7522,8 @@ def _all_provider_groups() -> set[str]:
         settings.PROVIDER5_GROUP_2,
         settings.PROVIDER6_GROUP_1,
         settings.PROVIDER6_GROUP_2,
+        settings.PROVIDER8_GROUP_1,
+        settings.PROVIDER8_GROUP_2,
     }
     return {v.strip() for v in vals if v and v.strip()}
 
@@ -7668,6 +7672,7 @@ def _providers_status_text(db: Session) -> str:
     p5 = _get_or_create_provider(db, "PROVIDER5", False)
     p6 = _get_or_create_provider(db, "PROVIDER6", False)
     p7 = _get_or_create_provider(db, "PROVIDER7", False)
+    p8 = _get_or_create_provider(db, "PROVIDER8", False)
 
     s1 = "ON" if p1.is_enabled else "OFF"
     s2 = "ON" if p2.is_enabled else "OFF"
@@ -7676,6 +7681,7 @@ def _providers_status_text(db: Session) -> str:
     s5 = "ON" if p5.is_enabled else "OFF"
     s6 = "ON" if p6.is_enabled else "OFF"
     s7 = "ON" if p7.is_enabled else "OFF"
+    s8 = "ON" if p8.is_enabled else "OFF"
 
     provider1_extra = ""
     provider2_extra = ""
@@ -7684,6 +7690,7 @@ def _providers_status_text(db: Session) -> str:
     provider5_extra = ""
     provider6_extra = ""
     provider7_extra = ""
+    provider8_extra = ""
 
     local_start = _panel_month_start()
     local_end = _panel_month_end()
@@ -7790,13 +7797,28 @@ def _providers_status_text(db: Session) -> str:
     except Exception as e:
         provider7_extra = f" | ERROR DB: {str(e)}"
 
+    try:
+        provider8_total = (
+            db.query(func.count(RequestLog.id))
+            .filter(
+                RequestLog.provider_name == "PROVIDER8",
+                RequestLog.status == "DONE",
+                RequestLog.created_at >= utc_start,
+                RequestLog.created_at < utc_end,
+            )
+            .scalar()
+        ) or 0
+        provider8_extra = f" | CURP y CADENA hechas: {provider8_total}"
+    except Exception as e:
+        provider8_extra = f" | ERROR DB: {str(e)}"
+
     text = (
-        f"ADMIN DIGITAL:   {s1}{provider1_extra}\n"
-        f"GESTOR FIEL:     {s2}{provider2_extra}\n"
-        f"AUSTRAM WEB:     {s3}{provider3_extra}\n"
-        f"LUIS SID:        {s5}{provider5_extra}\n"
-        f"ACTAS ESCALANTE: {s6}{provider6_extra}\n"
-        f"LAZARO WEB:      {s4}{provider4_extra}"
+        f"ADMIN DIGITAL:     {s1}{provider1_extra}\n"
+        f"ACTAS DEL SURESTE: {s2}{provider2_extra}\n"
+        f"AUSTRAM WEB:       {s3}{provider3_extra}\n"
+        f"LAZARO WEB:        {s4}{provider4_extra}\n"
+        f"ACTAS ESCALANTE:   {s6}{provider6_extra}\n"
+        f"GESTOR FIABLE:     {s8}{provider8_extra}"
     )
 
     return text
