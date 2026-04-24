@@ -96,14 +96,7 @@ def increment_bot_used_and_maybe_block(
     db: Session,
     instance_name: str
 ) -> tuple[int, int, bool]:
-    """
-    Incrementa el contador de uso del bot y lo bloquea si llega al límite.
 
-    Returns:
-        used (int): uso actual
-        limit_value (int): límite configurado
-        blocked_now (bool): si se bloqueó en esta llamada
-    """
     used = get_bot_used(db, instance_name) + 1
     limit_value = get_bot_limit(db, instance_name)
 
