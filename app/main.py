@@ -121,12 +121,14 @@ BOT_LABELS = {
     "docifybot8": "DOCU EXPRES",
     "docifybot8max": "MAX BOT",
     "docifybot8doficy": "DOCIFY MX",
+    "docifybot8cristina": "ACTAS MAYOREO",
 }
 
 
 BOT_PANEL_TOKENS = {
     "4a8c92a1e7": "docifybot8max",
     "asd5a6d7g9": "docifybot8docify",
+    "63df2dgdae": "docifybot8cristina",
 }
 
 
