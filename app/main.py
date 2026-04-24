@@ -120,7 +120,7 @@ DAYS_ES = {
 
 PROVIDER_LABELS = {
     "PROVIDER1": "ADMIN DIGITAL",
-    "PROVIDER2": "ACTAS DEL SURESTE",
+    "PROVIDER2": "GESTOR FIEL",
     "PROVIDER3": "AUSTRAM WEB",
     "PROVIDER4": "LAZARO WEB",
     "PROVIDER5": "LUIS SID",
@@ -5576,7 +5576,7 @@ def panel_actas(
                     </div>
 
                     <div class="provider-card">
-                      <div class="provider-name">ACTAS DEL SURESTE</div>
+                      <div class="provider-name">GESTOR FIEL</div>
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER2','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER2','off')">Desactivar</button>
@@ -7791,12 +7791,12 @@ def _providers_status_text(db: Session) -> str:
         provider7_extra = f" | ERROR DB: {str(e)}"
 
     text = (
-        f"ADMIN DIGITAL:     {s1}{provider1_extra}\n"
-        f"ACTAS DEL SURESTE: {s2}{provider2_extra}\n"
-        f"AUSTRAM WEB:       {s3}{provider3_extra}\n"
-        f"LUIS SID:          {s5}{provider5_extra}\n"
-        f"ACTAS ESCALANTE:   {s6}{provider6_extra}\n"
-        f"LAZARO WEB:        {s4}{provider4_extra}"
+        f"ADMIN DIGITAL:   {s1}{provider1_extra}\n"
+        f"GESTOR FIEL:     {s2}{provider2_extra}\n"
+        f"AUSTRAM WEB:     {s3}{provider3_extra}\n"
+        f"LUIS SID:        {s5}{provider5_extra}\n"
+        f"ACTAS ESCALANTE: {s6}{provider6_extra}\n"
+        f"LAZARO WEB:      {s4}{provider4_extra}"
     )
 
     return text
