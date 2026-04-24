@@ -8663,7 +8663,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     "VERIFICAR",
                 }
 
-                is_negative_text = any(v in text_norm for v in sin_values)
+                is_negative_text = any(
+                    re.search(rf"\b{re.escape(v)}\b", text_norm)
+                    for v in sin_values
+                )
 
                 # 1) MATCH POR REPLY ID
                 if quoted_msg_id and is_negative_text:
@@ -8709,7 +8712,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     print("PROVIDER5_SIN_WITHOUT_MATCH =", quoted_msg_id, flush=True)
 
                 # 2) FALLBACK POR CURP EN TEXTO
-                if not quoted_msg_id and provider_id and is_negative_text:
+                if provider_id and is_negative_text:
                     open_req = (
                         db.query(RequestLog)
                         .filter(
@@ -8750,6 +8753,48 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         return {"ok": True, "provider_result": "provider5_fallback_matched_by_curp"}
 
                     print("PROVIDER5_FALLBACK_WITHOUT_MATCH =", provider_id, flush=True)
+
+                # 3) FALLBACK SOLO PROVIDER8: si manda solo "SIN" y no coincide reply ni CURP
+                if is_negative_text:
+                    open_req = (
+                        db.query(RequestLog)
+                        .filter(
+                            RequestLog.provider_group_id == source_chat_id,
+                            RequestLog.status == "PROCESSING",
+                            RequestLog.provider_name == "PROVIDER8",
+                        )
+                        .order_by(RequestLog.created_at.desc())
+                        .first()
+                    )
+                
+                    if open_req:
+                        print("PROVIDER8_SIN_FALLBACK_MATCHED_REQ_ID =", open_req.id, flush=True)
+                        print("PROVIDER8_SIN_FALLBACK_MATCHED_CURP =", open_req.curp, flush=True)
+                
+                        open_req.status = "ERROR"
+                        open_req.error_message = "SIN REGISTRO"
+                        open_req.updated_at = _utc_now_naive()
+                        db.commit()
+                
+                        msg = (
+                            f"❌ No hay registros disponibles.\n"
+                            f"Dato: {open_req.curp}\n"
+                            f"Tipo: {open_req.act_type}\n\n"
+                            f"Verificar que la CURP esté certificada en RENAPO"
+                        )
+                
+                        try:
+                            client_instance = open_req.instance_name or "docifybot8"
+                            if open_req.source_group_id:
+                                send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
+                            else:
+                                send_text(open_req.requester_wa_id, msg, instance_name=client_instance)
+                        except Exception as notify_exc:
+                            print("PROVIDER8_SIN_FALLBACK_NOTIFY_ERROR =", str(notify_exc), flush=True)
+                
+                        return {"ok": True, "provider_result": "provider8_sin_fallback_last_processing"}
+                
+                    print("PROVIDER8_SIN_FALLBACK_WITHOUT_MATCH =", source_chat_id, flush=True)
 
             if doc:
                 filename = doc.get("fileName") or ""
