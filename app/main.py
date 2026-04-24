@@ -7716,7 +7716,7 @@ def _providers_status_text(db: Session) -> str:
             )
             .scalar()
         ) or 0
-        provider2_extra = f" | CURP y CADENA hechas: {provider2_total}"
+        provider2_extra = f" | CURP hechas: {provider2_total}"
     except Exception as e:
         provider2_extra = f" | ERROR DB: {str(e)}"
 
