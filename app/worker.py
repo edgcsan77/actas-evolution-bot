@@ -348,7 +348,7 @@ def _pick_provider_name(
     term: str | None = None,
     act_type: str | None = None,
 ) -> str:
-    enabled = _enabled_providers(db)
+    enabled = sorted(_enabled_providers(db))
 
     print("PICK_PROVIDER_ENABLED =", enabled, flush=True)
     print("PICK_PROVIDER_SOURCE_GROUP_ID =", repr(source_group_id), flush=True)
@@ -411,38 +411,9 @@ def _pick_provider_name(
         print("PICK_PROVIDER_SINGLE =", enabled[0], flush=True)
         return enabled[0]
 
-    # =========================
-    # PONDERACIÓN
-    # =========================
-    if "PROVIDER4" in enabled:
-        others = [p for p in enabled if p != "PROVIDER4"]
-
-        if not others:
-            print("PICK_PROVIDER_WEIGHTED = PROVIDER4_ONLY", flush=True)
-            return "PROVIDER4"
-
-        # 17 de 20 slots para PROVIDER4 (85%)
-        provider4_slots = {
-            0, 1, 3, 4, 5, 6, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19
-        }
-
-        slot_index = (request_id - 1) % 20
-        print("PICK_PROVIDER_WEIGHTED_SLOT =", slot_index, flush=True)
-
-        if slot_index in provider4_slots:
-            print("PICK_PROVIDER_WEIGHTED_CHOSEN = PROVIDER4", flush=True)
-            return "PROVIDER4"
-
-        other_slots_before = sum(1 for s in range(slot_index) if s not in provider4_slots)
-        other_turn = ((request_id - 1) // 20) * 3 + other_slots_before
-        other_idx = other_turn % len(others)
-        chosen = others[other_idx]
-
-        print("PICK_PROVIDER_WEIGHTED_CHOSEN =", chosen, flush=True)
-        return chosen
-
     idx = (request_id - 1) % len(enabled)
     chosen = enabled[idx]
+    
     print("PICK_PROVIDER_NORMAL_CHOSEN =", chosen, flush=True)
     return chosen
 
