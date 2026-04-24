@@ -122,7 +122,7 @@ def increment_bot_used_and_maybe_block(
 
     blocked_now = False
     if limit_value > 0 and used >= limit_value:
-        print("BOT_LIMIT_REACHED =", instance_name, used, limit_value, flush=True)
+        block_instance(instance_name)
         blocked_now = True
 
     return used, limit_value, blocked_now
