@@ -389,13 +389,13 @@ def _pick_provider_name(
         if not enabled:
             raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
 
-    # PROVIDER6 no acepta CADENA ni FOLIO
-    if "PROVIDER6" in enabled and (is_chain(term) or _is_folio_type(act_type)):
+    # PROVIDER6 no acepta CADENA
+    if "PROVIDER6" in enabled and is_chain(term):
         enabled = [p for p in enabled if p != "PROVIDER6"]
-        print("PROVIDER6_GESTOR_FIEL_REMOVED_CHAIN_OR_FOLIO =", enabled, flush=True)
+        print("PROVIDER6_ESCALANTE_REMOVED_CHAIN =", enabled, flush=True)
     
         if not enabled:
-            raise RuntimeError("NO_PROVIDER_FOR_CHAIN_OR_FOLIO")
+            raise RuntimeError("NO_PROVIDER_FOR_CHAIN")
 
     # PROVIDER4 forzado solo en grupos test
     if PROVIDER4_TEST_GROUPS:
