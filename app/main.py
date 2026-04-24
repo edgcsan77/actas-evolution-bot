@@ -8377,6 +8377,25 @@ def is_legacy_known_group(db: Session, group_jid: str) -> bool:
         return False
 
 
+BOT_AUTO_MESSAGES_PREFIXES = (
+    "⚠️ La CURP parece incompleta o incorrecta.",
+    "⚠️ No pude identificar una CURP",
+    "✅ Esta acta ya fue entregada",
+    "⏳ Ya existe una solicitud en proceso",
+    "❌ No hay registros disponibles.",
+    "❌ No se pudo procesar",
+    "🔁 Reintentando solicitud",
+    "🚀 DOCU EXPRES",
+)
+
+def is_bot_generated_text(text: str | None) -> bool:
+    if not text:
+        return False
+
+    t = text.strip()
+    return any(t.startswith(prefix) for prefix in BOT_AUTO_MESSAGES_PREFIXES)
+
+
 @app.post("/webhook/evolution")
 async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
     try:
@@ -8430,6 +8449,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             text_body = message.get("extendedTextMessage", {}).get("text", "")
         
         text_upper = normalize_text(text_body)
+
+        if is_bot_generated_text(text_body):
+            print("WEBHOOK_IGNORED_BOT_GENERATED_TEXT =", repr(text_body[:100]), flush=True)
+            return {"ok": True, "ignored": "bot_generated_text"}
         
         admin_commands = (
             "/GROUPID",
