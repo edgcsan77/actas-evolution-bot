@@ -33,6 +33,7 @@ from app.utils.curp import (
     detect_identifier_problem,
     is_chain,
 )
+
 from app.services.evolution import (
     send_text,
     send_document,
@@ -56,6 +57,16 @@ PANEL_GROUP_DETAIL_TTL = 180
 GROUP_NAME_CACHE_TTL = 300
 PANEL_STREAM_SLEEP = 10
 PANEL_STREAM_ENABLED = True
+
+NO_DONE_NOTIFY_GROUPS = {
+    "120363427267191472@g.us"
+}
+
+
+def should_notify_done(group_id: str | None) -> bool:
+    if not group_id:
+        return True
+    return group_id not in NO_DONE_NOTIFY_GROUPS
 
 
 def _is_valid_admin_panel_token(request: Request) -> bool:
@@ -123,6 +134,7 @@ BOT_LABELS = {
     "docifybot8max": "⚡ MAX BOT",
     "docifybot8doficy": "👽 DOCIFY MX",
     "docifybot8cristina": "🌸 ACTAS MAYOREO",
+    "docifybot8maya": "🔱 GESTORIA MAYA",
 }
 
 
@@ -130,6 +142,7 @@ BOT_PANEL_TOKENS = {
     "4a8c92a1e7": "docifybot8max",
     "asd5a6d7g9": "docifybot8docify",
     "63df2dgdae": "docifybot8cristina",
+    "as5613f4se": "docifybot8maya",
 }
 
 
@@ -9327,18 +9340,19 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 )
 
                 if last_req.status == "DONE":
-                    done_msg = (
-                        f"✅ Esta acta ya fue entregada\n"
-                        f"Dato: {term}\n"
-                        f"Tipo: {act_type}"
-                    )
-
-                    if source_group_id:
-                        send_group_text(source_group_id, done_msg, instance_name=instance_name)
-                    else:
-                        send_text(requester_wa_id, done_msg, instance_name=instance_name)
-
-                    continue
+                    if should_notify_done(source_group_id):
+                        done_msg = (
+                            f"✅ Esta acta ya fue entregada\n"
+                            f"Dato: {term}\n"
+                            f"Tipo: {act_type}"
+                        )
+    
+                        if source_group_id:
+                            send_group_text(source_group_id, done_msg, instance_name=instance_name)
+                        else:
+                            send_text(requester_wa_id, done_msg, instance_name=instance_name)
+    
+                        continue
         
             base_request_key = build_request_key(term, act_type, source_chat_id)
         
