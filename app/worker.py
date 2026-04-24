@@ -341,6 +341,17 @@ def _enabled_providers(db) -> list[str]:
     return enabled
 
 
+def _is_folio_type(act_type: str | None) -> bool:
+    t = str(act_type or "").upper().strip()
+    return any(x in t for x in [
+        "FOLIO",
+        "FOLIADO",
+        "FOLIADA",
+        "FOLIADOS",
+        "FOLIADAS",
+    ])
+
+
 def _pick_provider_name(
     db,
     request_id: int,
@@ -375,13 +386,13 @@ def _pick_provider_name(
         if not enabled:
             raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
 
-    # PROVIDER6 no acepta cadenas
-    if is_chain(term) and "PROVIDER6" in enabled:
+    # PROVIDER6 no acepta CADENA ni FOLIO
+    if "PROVIDER6" in enabled and (is_chain(term) or _is_folio_type(act_type)):
         enabled = [p for p in enabled if p != "PROVIDER6"]
-        print("PROVIDER6_REMOVED_CHAIN =", enabled, flush=True)
-
+        print("PROVIDER6_GESTOR_FIEL_REMOVED_CHAIN_OR_FOLIO =", enabled, flush=True)
+    
         if not enabled:
-            raise RuntimeError("NO_PROVIDER_FOR_CHAIN")
+            raise RuntimeError("NO_PROVIDER_FOR_CHAIN_OR_FOLIO")
 
     # PROVIDER4 forzado solo en grupos test
     if PROVIDER4_TEST_GROUPS:
