@@ -50,6 +50,8 @@ from app.utils.bot_limits import (
     set_bot_limit,
     set_bot_used,
     increment_bot_used_and_maybe_block,
+    block_instance,
+    unblock_instance,
 )
 
 from sqlalchemy import func, case, or_
@@ -385,22 +387,6 @@ def is_instance_blocked(instance_name: str) -> bool:
         return False
     blocked = redis_conn.sismember(BLOCKED_INSTANCES_KEY, instance_name)
     return bool(blocked)
-
-
-def block_instance(instance_name: str):
-    if not instance_name:
-        return
-    redis_conn.sadd(BLOCKED_INSTANCES_KEY, instance_name)
-    print("INSTANCE_BLOCKED =", instance_name, flush=True)
-    print("BLOCKED_INSTANCES_NOW =", redis_conn.smembers(BLOCKED_INSTANCES_KEY), flush=True)
-
-
-def unblock_instance(instance_name: str):
-    if not instance_name:
-        return
-    redis_conn.srem(BLOCKED_INSTANCES_KEY, instance_name)
-    print("INSTANCE_UNBLOCKED =", instance_name, flush=True)
-    print("BLOCKED_INSTANCES_NOW =", redis_conn.smembers(BLOCKED_INSTANCES_KEY), flush=True)
 
 
 def list_blocked_instances():
