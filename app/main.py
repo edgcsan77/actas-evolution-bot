@@ -120,11 +120,13 @@ PROVIDER_LABELS = {
 BOT_LABELS = {
     "docifybot8": "DOCU EXPRES",
     "docifybot8max": "MAX BOT",
+    "docifybot8doficy": "DOCIFY MX",
 }
 
 
 BOT_PANEL_TOKENS = {
     "4a8c92a1e7": "docifybot8max",
+    "asd5a6d7g9": "docifybot8docify",
 }
 
 
@@ -3956,7 +3958,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
         return HTMLResponse("<h3>Panel no válido.</h3>", status_code=404)
 
     if not _is_child_bot(instance_name):
-        return HTMLResponse("<h3>Este panel es solo para bots desde docifybot8max en adelante.</h3>", status_code=400)
+        return HTMLResponse("<h3>Este panel es solo para bots desde docifybot8 en adelante.</h3>", status_code=400)
 
     title = _bot_title(instance_name)
     today_sales = _bot_sales_today(db, instance_name)
