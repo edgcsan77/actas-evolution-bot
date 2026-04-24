@@ -1,8 +1,43 @@
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
-from app.models import RequestLog, AppSetting
+
+from app.models import AppSetting, RequestLog
 from app.services.evolution import block_instance
 
 
+# =========================
+# TIME
+# =========================
+def _utc_now_naive():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+# =========================
+# APP SETTINGS (KV STORE)
+# =========================
+def _app_setting_get(db: Session, key: str, default: str = "") -> str:
+    row = db.query(AppSetting).filter(AppSetting.key == key).first()
+    return (row.value or default) if row else default
+
+
+def _app_setting_set(db: Session, key: str, value: str):
+    row = db.query(AppSetting).filter(AppSetting.key == key).first()
+    if row:
+        row.value = str(value)
+        row.updated_at = _utc_now_naive()
+    else:
+        row = AppSetting(
+            key=key,
+            value=str(value),
+            updated_at=_utc_now_naive(),
+        )
+        db.add(row)
+    db.commit()
+
+
+# =========================
+# KEYS
+# =========================
 def _bot_limit_key(instance_name: str) -> str:
     return f"bot_limit:{instance_name}"
 
@@ -11,23 +46,12 @@ def _bot_used_key(instance_name: str) -> str:
     return f"bot_used:{instance_name}"
 
 
-def _app_setting_set(db: Session, key: str, value: str):
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    if row:
-        row.value = value
-    else:
-        db.add(AppSetting(key=key, value=value))
-    db.commit()
-
-
-def _app_setting_get(db: Session, key: str, default: str = "0") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row and row.value is not None else default
-
-
+# =========================
+# GETTERS
+# =========================
 def get_bot_limit(db: Session, instance_name: str) -> int:
     try:
-        return int(_app_setting_get(db, _bot_limit_key(instance_name), "0"))
+        return int(_app_setting_get(db, _bot_limit_key(instance_name), "0") or "0")
     except Exception:
         return 0
 
@@ -46,15 +70,40 @@ def get_bot_used(db: Session, instance_name: str) -> int:
         return 0
 
 
+# =========================
+# SETTERS
+# =========================
 def set_bot_limit(db: Session, instance_name: str, limit_value: int):
-    _app_setting_set(db, _bot_limit_key(instance_name), str(max(0, int(limit_value))))
+    _app_setting_set(
+        db,
+        _bot_limit_key(instance_name),
+        str(max(0, int(limit_value))),
+    )
 
 
 def set_bot_used(db: Session, instance_name: str, used_value: int):
-    _app_setting_set(db, _bot_used_key(instance_name), str(max(0, int(used_value))))
+    _app_setting_set(
+        db,
+        _bot_used_key(instance_name),
+        str(max(0, int(used_value))),
+    )
 
 
-def increment_bot_used_and_maybe_block(db: Session, instance_name: str) -> tuple[int, int, bool]:
+# =========================
+# MAIN LOGIC
+# =========================
+def increment_bot_used_and_maybe_block(
+    db: Session,
+    instance_name: str
+) -> tuple[int, int, bool]:
+    """
+    Incrementa el contador de uso del bot y lo bloquea si llega al límite.
+
+    Returns:
+        used (int): uso actual
+        limit_value (int): límite configurado
+        blocked_now (bool): si se bloqueó en esta llamada
+    """
     used = get_bot_used(db, instance_name) + 1
     limit_value = get_bot_limit(db, instance_name)
 
