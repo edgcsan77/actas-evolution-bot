@@ -321,6 +321,7 @@ def _enabled_providers(db) -> list[str]:
     p5 = _get_or_create_provider(db, "PROVIDER5", False)
     p6 = _get_or_create_provider(db, "PROVIDER6", False)
     p7 = _get_or_create_provider(db, "PROVIDER7", False)
+    p8 = _get_or_create_provider(db, "PROVIDER8", False)
 
     enabled = []
     if p1.is_enabled:
@@ -337,6 +338,8 @@ def _enabled_providers(db) -> list[str]:
         enabled.append("PROVIDER6")
     if p7.is_enabled:
         enabled.append("PROVIDER7")
+    if p8.is_enabled:
+        enabled.append("PROVIDER8")
 
     return enabled
 
@@ -529,11 +532,24 @@ def _pick_provider_group(
     if provider_name == "PROVIDER7":
         return None
 
+    if provider_name == "PROVIDER8":
+        provider8_groups = [
+            settings.PROVIDER8_GROUP_1,
+            settings.PROVIDER8_GROUP_2,
+        ]
+        provider8_groups = [g for g in provider8_groups if g]
+
+        if not provider8_groups:
+            raise RuntimeError("PROVIDER8_GROUPS_NOT_CONFIGURED")
+
+        idx = (request_id - 1) % len(provider8_groups)
+        return provider8_groups[idx]
+
     raise RuntimeError("UNKNOWN_PROVIDER")
 
 
 def _build_provider_message(provider_name: str, term: str, act_type: str) -> str | None:
-    if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6"):
+    if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6", "PROVIDER8"):
         if is_chain(term):
             return f"{term}"
         provider_type = provider_label_for_type(act_type)
@@ -1155,7 +1171,7 @@ def process_request(request_id: int):
         print("WORKER_PROVIDER_GROUP_ID =", provider_group_id, flush=True)
         print("WORKER_TEXT_TO_PROVIDER =", text_to_provider, flush=True)
 
-        if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6"):
+        if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6", "PROVIDER8"):
             print("PROVIDER_SEND_TO_PROVIDER =", req.id, time.time(), flush=True)
         
             send_ok = False
