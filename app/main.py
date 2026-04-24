@@ -44,6 +44,14 @@ from app.services.evolution import (
     get_media_base64,
 )
 
+from app.utils.bot_limits import (
+    get_bot_limit,
+    get_bot_used,
+    set_bot_limit,
+    set_bot_used,
+    increment_bot_used_and_maybe_block,
+)
+
 from sqlalchemy import func, case, or_
 
 app = FastAPI(title=settings.APP_NAME)
@@ -362,77 +370,6 @@ def _provider_label(name: str) -> str:
 def _day_name_es_from_date(day_str: str) -> str:
     dt = datetime.strptime(day_str, "%Y-%m-%d")
     return DAYS_ES[dt.weekday()]
-
-
-def _app_setting_get(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return (row.value or default) if row else default
-
-
-def _app_setting_set(db: Session, key: str, value: str):
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    if row:
-        row.value = str(value)
-        row.updated_at = _utc_now_naive()
-    else:
-        row = AppSetting(
-            key=key,
-            value=str(value),
-            updated_at=_utc_now_naive(),
-        )
-        db.add(row)
-    db.commit()
-
-
-def _bot_limit_key(instance_name: str) -> str:
-    return f"bot_limit:{instance_name}"
-
-
-def _bot_used_key(instance_name: str) -> str:
-    return f"bot_used:{instance_name}"
-
-
-def get_bot_limit(db: Session, instance_name: str) -> int:
-    try:
-        return int(_app_setting_get(db, _bot_limit_key(instance_name), "0") or "0")
-    except Exception:
-        return 0
-
-
-def get_bot_used(db: Session, instance_name: str) -> int:
-    try:
-        return (
-            db.query(RequestLog)
-            .filter(
-                RequestLog.instance_name == instance_name,
-                RequestLog.status == "DONE",
-            )
-            .count()
-        )
-    except Exception:
-        return 0
-
-
-def set_bot_limit(db: Session, instance_name: str, limit_value: int):
-    _app_setting_set(db, _bot_limit_key(instance_name), str(max(0, int(limit_value))))
-
-
-def set_bot_used(db: Session, instance_name: str, used_value: int):
-    _app_setting_set(db, _bot_used_key(instance_name), str(max(0, int(used_value))))
-
-
-def increment_bot_used_and_maybe_block(db: Session, instance_name: str) -> tuple[int, int, bool]:
-    used = get_bot_used(db, instance_name) + 1
-    limit_value = get_bot_limit(db, instance_name)
-
-    set_bot_used(db, instance_name, used)
-
-    blocked_now = False
-    if limit_value > 0 and used >= limit_value:
-        block_instance(instance_name)
-        blocked_now = True
-
-    return used, limit_value, blocked_now
 
 
 def is_group_blocked(group_jid: str) -> bool:
