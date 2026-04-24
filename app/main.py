@@ -31,6 +31,7 @@ from app.utils.curp import (
     extract_identifier_loose,
     extract_identifier_from_filename,
     detect_identifier_problem,
+    is_chain,
 )
 from app.services.evolution import (
     send_text,
