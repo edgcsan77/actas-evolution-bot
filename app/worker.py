@@ -17,6 +17,7 @@ from app.services.provider4 import Provider4Client
 from app.services.provider7 import Provider7Client
 from app.queue import redis_conn
 from app.provider_status_cache import refresh_providers_status
+from app.main import increment_bot_used_and_maybe_block
 
 from zoneinfo import ZoneInfo
 
