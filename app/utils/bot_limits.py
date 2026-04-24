@@ -2,7 +2,6 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.models import AppSetting, RequestLog
-from app.services.evolution import block_instance
 
 
 # =========================
@@ -104,7 +103,7 @@ def increment_bot_used_and_maybe_block(
 
     blocked_now = False
     if limit_value > 0 and used >= limit_value:
-        block_instance(instance_name)
+        print("BOT_LIMIT_REACHED =", instance_name, used, limit_value, flush=True)
         blocked_now = True
 
     return used, limit_value, blocked_now
