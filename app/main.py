@@ -18,7 +18,7 @@ from app.config import settings
 from app.db import Base, engine, get_db, SessionLocal
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion, GroupAlias, GroupCategory, BotControl
 from app.queue import request_queue, redis_conn
-from app.worker import process_request, provider3_keepalive_job, _validate_act_type_pdf, _validate_pdf_matches_term
+from app.worker import process_request, provider3_keepalive_job, _validate_act_type_pdf, _validate_pdf_matches_term, _notify_support_error
 from app.services.provider3 import Provider3Client
 from app.services.provider4 import Provider4Client
 from app.services.provider7 import Provider7Client
@@ -8835,7 +8835,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 safe_media_b64 = base64.b64encode(pdf_bytes).decode()
                 print("T_BASE64_REENCODE =", round(time.perf_counter() - t_encode, 3), flush=True)
 
-                if not _validate_act_type_pdf(pdf_bytes, open_req.act_type):
+                is_chain_req = is_chain(open_req.curp)
+                if (not is_chain_req) and (not _validate_act_type_pdf(pdf_bytes, open_req.act_type)):
                     print("PROVIDER_PDF_WRONG_ACT_TYPE =", {
                         "req_id": open_req.id,
                         "curp": open_req.curp,
@@ -8854,7 +8855,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         "WRONG_ACT_TYPE_PDF",
                         f"filename={filename} | expected_act_type={open_req.act_type}"
                     )
+                
                     return {"ok": True, "ignored": "provider_pdf_wrong_act_type"}
+                
+                if is_chain_req:
+                    print("PROVIDER_CHAIN_SKIP_ACT_TYPE_VALIDATION =", open_req.curp, flush=True)
                 
                 if not _validate_pdf_matches_term(pdf_bytes, open_req.curp, open_req.act_type):
                     print("PROVIDER_PDF_WRONG_CURP =", {
