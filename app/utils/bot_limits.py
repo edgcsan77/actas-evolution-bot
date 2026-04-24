@@ -115,7 +115,7 @@ def increment_bot_used_and_maybe_block(
     instance_name: str
 ) -> tuple[int, int, bool]:
 
-    used = get_bot_used(db, instance_name) + 1
+    used = get_bot_used(db, instance_name)
     limit_value = get_bot_limit(db, instance_name)
 
     set_bot_used(db, instance_name, used)
