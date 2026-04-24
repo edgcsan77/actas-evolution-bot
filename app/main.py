@@ -118,10 +118,10 @@ PROVIDER_LABELS = {
 
 
 BOT_LABELS = {
-    "docifybot8": "DOCU EXPRES",
-    "docifybot8max": "MAX BOT",
-    "docifybot8doficy": "DOCIFY MX",
-    "docifybot8cristina": "ACTAS MAYOREO",
+    "docifybot8": "🚀 DOCU EXPRES",
+    "docifybot8max": "⚡ MAX BOT",
+    "docifybot8doficy": "👽 DOCIFY MX",
+    "docifybot8cristina": "🌸 ACTAS MAYOREO",
 }
 
 
@@ -9503,10 +9503,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
         if created_any:
             actor = push_name or requester_wa_id
-            bot_name = BOT_LABELS.get(instance_name, "DOCU EXPRES")
+            bot_name = BOT_LABELS.get(instance_name, "🚀 DOCU EXPRES")
             
             ack_msg = (
-                f"🚀 {bot_name}\n"
+                f"{bot_name}\n"
                 f"Solicitud recibida de {actor}.\n"
                 f"Esto puede tardar unos segundos..."
             )
