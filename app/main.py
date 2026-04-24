@@ -8862,7 +8862,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 if is_chain_req:
                     print("PROVIDER_CHAIN_SKIP_ACT_TYPE_VALIDATION =", open_req.curp, flush=True)
                 
-                if not _validate_pdf_matches_term(pdf_bytes, open_req.curp, open_req.act_type):
+                if (not is_chain_req) and (not _validate_pdf_matches_term(pdf_bytes, open_req.curp, open_req.act_type)):
                     print("PROVIDER_PDF_WRONG_CURP =", {
                         "req_id": open_req.id,
                         "curp": open_req.curp,
