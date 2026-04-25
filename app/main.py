@@ -2602,6 +2602,11 @@ def panel_group_detail(
           font-weight: 800;
           background: #f8fafc;
         }}
+        .weekly-row td {{
+          font-weight: 800;
+          background: #dbeafe;
+          color: #020617;
+        }}
         @media (max-width: 900px) {{
           .filters {{
             grid-template-columns: 1fr;
@@ -2797,7 +2802,23 @@ def panel_group_detail(
             <tbody>
     """
 
+    weekly_total = 0
+    weekly_done = 0
+    weekly_error = 0
+    weekly_queued = 0
+    weekly_processing = 0
+    weekly_start = None
+    
     for r in detail["rows"]:
+        if weekly_start is None:
+            weekly_start = r["date"]
+    
+        weekly_total += r["total"]
+        weekly_done += r["done"]
+        weekly_error += r["error"]
+        weekly_queued += r["queued"]
+        weekly_processing += r["processing"]
+    
         html += f"""
               <tr>
                 <td>{_esc(r["day_name"])}</td>
@@ -2809,6 +2830,29 @@ def panel_group_detail(
                 <td class="right">{r["processing"]}</td>
               </tr>
         """
+    
+        is_sunday = r["day_name"].upper() == "DOMINGO"
+        is_last_day = r == detail["rows"][-1]
+    
+        if is_sunday or is_last_day:
+            html += f"""
+              <tr class="weekly-row">
+                <td>CORTE SEMANAL</td>
+                <td>{_esc(weekly_start)} a {_esc(r["date"])}</td>
+                <td class="right">{weekly_total}</td>
+                <td class="right">{weekly_done}</td>
+                <td class="right">{weekly_error}</td>
+                <td class="right">{weekly_queued}</td>
+                <td class="right">{weekly_processing}</td>
+              </tr>
+            """
+    
+            weekly_total = 0
+            weekly_done = 0
+            weekly_error = 0
+            weekly_queued = 0
+            weekly_processing = 0
+            weekly_start = None
 
     t = detail["totals"]
     html += f"""
