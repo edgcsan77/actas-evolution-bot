@@ -83,7 +83,7 @@ def _notify_support_error(req, err: str, extra_msg: str = ""):
         if extra_msg:
             msg += f"\nDetalle: {extra_msg}\n"
 
-        instance = getattr(req, "instance_name", None) or "docifybot8"
+        instance = getattr(req, "instance_name", None) or getattr(settings, "EVOLUTION_INSTANCE", "docifybot8")
         send_group_text(support_group, msg, instance)
     except Exception as support_exc:
         print("SUPPORT_ERROR_NOTIFY_FAILED =", str(support_exc), flush=True)
