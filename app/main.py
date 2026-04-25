@@ -8902,11 +8902,40 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     open_req.updated_at = _utc_now_naive()
                     db.commit()
                 
-                    _notify_support_error(
-                        open_req,
-                        "WRONG_ACT_TYPE_PDF",
-                        f"filename={filename} | expected_act_type={open_req.act_type}"
-                    )
+                    try:
+                        _notify_support_error(
+                            open_req,
+                            "WRONG_ACT_TYPE_PDF",
+                            f"filename={filename} | expected_act_type={open_req.act_type}"
+                        )
+                    except Exception as support_exc:
+                        print("NOTIFY_SUPPORT_ERROR_FAILED =", str(support_exc), flush=True)
+
+                    try:
+                        fail_msg = (
+                            f"⚠️ Solicitud sin éxito en Registro Civil\n"
+                            f"Dato: {open_req.curp}\n"
+                            f"Tipo: {open_req.act_type}\n\n"
+                            f"Reenviar nuevamente en unos minutos"
+                        )
+                
+                        if open_req.source_group_id:
+                            send_group_text(
+                                open_req.source_group_id,
+                                fail_msg,
+                                instance_name=open_req.instance_name
+                            )
+                        elif open_req.requester_wa_id:
+                            send_text(
+                                open_req.requester_wa_id,
+                                fail_msg,
+                                instance_name=open_req.instance_name
+                            )
+                        else:
+                            print("WRONG_ACT_TYPE_NO_CLIENT_DESTINATION =", open_req.id, flush=True)
+                
+                    except Exception as client_notify_exc:
+                        print("WRONG_ACT_TYPE_CLIENT_NOTIFY_ERROR =", str(client_notify_exc), flush=True)
                 
                     return {"ok": True, "ignored": "provider_pdf_wrong_act_type"}
                 
