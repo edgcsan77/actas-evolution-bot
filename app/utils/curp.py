@@ -17,49 +17,39 @@ def detect_act_type(text: str) -> str:
     t = normalize_text(text)
     t_nospace = re.sub(r"\s+", "", t)
 
-    if ("FOLIO" in t_nospace or "FOLIADO" in t_nospace or "FOLIADA" in t_nospace) and not any(x in t_nospace for x in ["NAC", "MAT", "DEF", "DIV"]):
-        return "NACIMIENTO FOLIO"
+    # Si es CURP pura, siempre nacimiento
+    if re.fullmatch(CURP_REGEX, t_nospace):
+        return "NACIMIENTO"
 
-    if any(x in t_nospace for x in [
-        "NACIMIENTOFOLIO", "NACIMIENTOCONFOLIO", "ACTADENACIMIENTOFOLIO",
-        "NACIMFOLIO", "NACFOLIO", "FOLIONACIMIENTO", "FOLIONAC",
-        "NACIMIENTOFOLIADO", "ACTADENACIMIENTOFOLIADO",
-        "NACIMFOLIADO", "NACFOLIADO", "FOLIADONACIMIENTO", "FOLIADONAC"
-    ]):
-        return "NACIMIENTO FOLIO"
+    # Quitar CURPs y cadenas antes de detectar tipo
+    t_clean = re.sub(rf"\b{CURP_REGEX}\b", " ", t)
+    t_clean = re.sub(rf"\b{NUM20_REGEX}\b", " ", t_clean)
+    t_nospace = re.sub(r"\s+", "", t_clean)
 
-    if any(x in t_nospace for x in [
-        "MATRIMONIOFOLIO", "ACTADEMATRIMONIOFOLIO",
-        "MATRIFOLIO", "MATFOLIO", "FOLIOMATRIMONIO", "FOLIOMAT"
-    ]):
-        return "MATRIMONIO FOLIO"
+    has_folio = any(x in t_nospace for x in ["FOLIO", "FOLIADO", "FOLIADA"])
 
-    if any(x in t_nospace for x in [
-        "DEFUNCIONFOLIO", "ACTADEDEFUNCIONFOLIO",
-        "DEFFOLIO", "DEFUNFOLIO", "FOLIODEFUNCION", "FOLIODEF"
-    ]):
-        return "DEFUNCION FOLIO"
-
-    if any(x in t_nospace for x in [
-        "DIVORCIOFOLIO", "ACTADEDIVORCIOFOLIO",
-        "DIVFOLIO", "DIVORFOLIO", "FOLIODIVORCIO", "FOLIODIV"
-    ]):
-        return "DIVORCIO FOLIO"
-
-    if "FOLIO" in t_nospace or "FOLIADO" in t_nospace or "FOLIADA" in t_nospace:
-        if any(x in t_nospace for x in ["NACIMIENTO", "NACIM", "NAC"]):
-            return "NACIMIENTO FOLIO"
-        if any(x in t_nospace for x in ["MATRIMONIO", "MATRI", "MAT"]):
+    if has_folio:
+        if any(x in t_nospace for x in [
+            "MATRIMONIO", "ACTADEMATRIMONIO", "MATRI", "MATRIFOLIO", "FOLIOMATRIMONIO"
+        ]):
             return "MATRIMONIO FOLIO"
-        if any(x in t_nospace for x in ["DEFUNCION", "DEFUN", "DEF"]):
+
+        if any(x in t_nospace for x in [
+            "DEFUNCION", "ACTADEDEFUNCION", "DEFUN", "DEFUNFOLIO", "FOLIODEFUNCION"
+        ]):
             return "DEFUNCION FOLIO"
-        if any(x in t_nospace for x in ["DIVORCIO", "DIVOR", "DIV"]):
+
+        if any(x in t_nospace for x in [
+            "DIVORCIO", "ACTADEDIVORCIO", "DIVOR", "DIVORFOLIO", "FOLIODIVORCIO"
+        ]):
             return "DIVORCIO FOLIO"
 
-    if any(x in t_nospace for x in [
-        "NACIMIENTO", "ACTADENACIMIENTO", "NACIM", "NAC"
-    ]):
-        return "NACIMIENTO"
+        if any(x in t_nospace for x in [
+            "NACIMIENTO", "ACTADENACIMIENTO", "NACIM", "NACIMFOLIO", "FOLIONACIMIENTO"
+        ]):
+            return "NACIMIENTO FOLIO"
+
+        return "NACIMIENTO FOLIO"
 
     if any(x in t_nospace for x in [
         "MATRIMONIO", "ACTADEMATRIMONIO", "MATRI"
@@ -67,14 +57,19 @@ def detect_act_type(text: str) -> str:
         return "MATRIMONIO"
 
     if any(x in t_nospace for x in [
-        "DEFUNCION", "ACTADEDEFUNCION", "DEFUN", "DEF"
+        "DEFUNCION", "ACTADEDEFUNCION", "DEFUN"
     ]):
         return "DEFUNCION"
 
     if any(x in t_nospace for x in [
-        "DIVORCIO", "ACTADEDIVORCIO", "DIVOR", "DIV"
+        "DIVORCIO", "ACTADEDIVORCIO", "DIVOR"
     ]):
         return "DIVORCIO"
+
+    if any(x in t_nospace for x in [
+        "NACIMIENTO", "ACTADENACIMIENTO", "NACIM"
+    ]):
+        return "NACIMIENTO"
 
     return "NACIMIENTO"
 
