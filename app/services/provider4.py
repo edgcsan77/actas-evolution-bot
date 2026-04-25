@@ -172,8 +172,6 @@ class Provider4Client:
         max_attempts: int = 4,
         sleep_seconds: int = 4,
     ) -> bytes:
-        last_pdf_bytes = None
-    
         for attempt in range(max_attempts):
             print(f"PROVIDER4_VALIDATE_DOWNLOAD_ATTEMPT_{attempt+1}_URL = {url}", flush=True)
     
@@ -182,19 +180,23 @@ class Provider4Client:
             else:
                 pdf_bytes = self.download_pdf_bytes(url)
     
-                # Primero intenta obtener el PDF completo directamente de Lázaro
-                for retry_complete in range(3):
-                    if self._pdf_has_two_pages(pdf_bytes):
-                        print("PROVIDER4_COMPLETE_PDF_FROM_LAZARO =", retry_complete + 1, flush=True)
-                        break
+            for retry_complete in range(8):
+                if self._pdf_has_two_pages(pdf_bytes):
+                    print("PROVIDER4_COMPLETE_PDF_FROM_LAZARO =", retry_complete + 1, flush=True)
+                    break
     
-                    print("PROVIDER4_PDF_NOT_COMPLETE_RETRY_DOWNLOAD =", retry_complete + 1, flush=True)
-                    time.sleep(4)
-                    pdf_bytes = self.download_pdf_bytes(url)
+                print("PROVIDER4_PDF_NOT_COMPLETE_RETRY_DOWNLOAD =", retry_complete + 1, flush=True)
+                time.sleep(5)
+                pdf_bytes = self._download_foliated_pdf(url) if use_folio_downloader else self.download_pdf_bytes(url)
     
-            # Reparar/enmarcar SOLO una vez, después de los reintentos
             pdf_bytes = self._repair_pdf_if_needed(pdf_bytes, term, inc_folio)
-            last_pdf_bytes = pdf_bytes
+    
+            if not self._pdf_has_two_pages(pdf_bytes):
+                print("PROVIDER4_FINAL_PDF_STILL_ONE_PAGE_RETRY =", term, flush=True)
+                if attempt < max_attempts - 1:
+                    time.sleep(sleep_seconds)
+                    continue
+                raise RuntimeError(f"PROVIDER4_FINAL_PDF_INCOMPLETE:{term}")
     
             if self._pdf_matches_expected(pdf_bytes, term, tipoa):
                 print(f"PROVIDER4_VALIDATE_DOWNLOAD_OK_ATTEMPT_{attempt+1} = {term}", flush=True)
@@ -243,39 +245,41 @@ class Provider4Client:
         try:
             estado = self._estado_desde_curp(term)
         except Exception as e:
-            print("PROVIDER4_REPAIR_SKIP_STATE_ERROR_SEND_ORIGINAL =", str(e), flush=True)
-            return original_pdf_bytes
+            print("PROVIDER4_REPAIR_SKIP_STATE_ERROR_NO_SEND =", str(e), flush=True)
+            raise RuntimeError(f"PROVIDER4_CANNOT_REPAIR_NO_STATE:{term}")
     
         base_dir = Path(__file__).resolve().parent.parent
         estados_dir = base_dir / "assets" / "estados"
     
         try:
-            pdf_bytes = _enmarcar_pdf_frente(
+            framed_pdf = _enmarcar_pdf_frente(
                 original_pdf_bytes,
                 f"{term}.pdf",
                 folio=inc_folio,
             )
         except Exception as e:
-            print("PROVIDER7_FRAME_FAILED_SEND_ORIGINAL =", str(e), flush=True)
-            return original_pdf_bytes
+            print("PROVIDER7_FRAME_FAILED_NO_SEND =", str(e), flush=True)
+            raise RuntimeError(f"PROVIDER7_FRAME_FAILED:{term}")
     
         if estado == "NACIDO_EN_EL_EXTRANJERO":
-            print("PROVIDER4_NO_REAR_FRAME_FOR_FOREIGN_BIRTH = TRUE", flush=True)
-            return pdf_bytes
+            if self._pdf_has_two_pages(framed_pdf):
+                print("PROVIDER4_FOREIGN_BIRTH_FRAMED_OK = TRUE", flush=True)
+                return framed_pdf
+            raise RuntimeError(f"PROVIDER4_FOREIGN_BIRTH_FRAME_INCOMPLETE:{term}")
     
         try:
             reverso_path = _resolver_reverso_por_estado(estado, estados_dir)
-            pdf_bytes = _unir_pdfs_bytes(pdf_bytes, reverso_path)
+            repaired_pdf = _unir_pdfs_bytes(framed_pdf, reverso_path)
         except Exception as e:
-            print("PROVIDER4_REAR_JOIN_FAILED_SEND_FRAMED =", str(e), flush=True)
-            return pdf_bytes
+            print("PROVIDER4_REAR_JOIN_FAILED_NO_SEND =", str(e), flush=True)
+            raise RuntimeError(f"PROVIDER4_REAR_JOIN_FAILED:{term}")
     
-        if not self._pdf_has_two_pages(pdf_bytes):
-            print("PROVIDER4_REPAIRED_STILL_INCOMPLETE_SEND_ORIGINAL =", term, flush=True)
-            return original_pdf_bytes
+        if not self._pdf_has_two_pages(repaired_pdf):
+            print("PROVIDER4_REPAIRED_STILL_INCOMPLETE_NO_SEND =", term, flush=True)
+            raise RuntimeError(f"PROVIDER4_REPAIRED_STILL_INCOMPLETE:{term}")
     
-        print(f"PROVIDER4_PDF_PAGE_COUNT = {self._pdf_num_pages(pdf_bytes)}", flush=True)
-        return pdf_bytes
+        print(f"PROVIDER4_PDF_PAGE_COUNT = {self._pdf_num_pages(repaired_pdf)}", flush=True)
+        return repaired_pdf
 
     def warm(self) -> None:
         resp = self.session.get(self.MANUAL_PAGE_URL, timeout=(15, 60))
