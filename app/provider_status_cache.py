@@ -76,17 +76,20 @@ def refresh_providers_status():
 
     try:
         now = datetime.now()
-        local_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-        if local_start.month == 12:
-            local_end = local_start.replace(year=local_start.year + 1, month=1)
-        else:
-            local_end = local_start.replace(month=local_start.month + 1)
-
+        month_map = {
+            1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr",
+            5: "May", 6: "Jun", 7: "Jul", 8: "Aug",
+            9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec",
+        }
+        
+        fecha_param = f"{now.day:02d}/{month_map[now.month]}/{now.year}"
+        
         client4 = Provider4Client()
-        month_data = client4.get_week_done_counts(local_start, local_end)
-
-        result["provider4"]["total"] = month_data.get("total", 0)
+        today_count = client4.get_done_count_for_date(fecha_param)
+        
+        result["provider4"]["total"] = today_count
+        result["provider4"]["period"] = "today"
 
     except Exception as e:
         result["provider4"]["error"] = str(e)
