@@ -221,7 +221,6 @@ def seems_like_identifier_attempt(text: str) -> bool:
         "CODIGO",
         "CODIGO DE VERIFICACION",
         "VERIFICACION",
-        "ACTA",
         "NACIMIENTO",
         "MATRIMONIO",
         "DEFUNCION",
@@ -320,10 +319,4 @@ def detect_identifier_problem(text: str) -> str | None:
                 "4 letras, 6 dígitos, 6 letras y 2 caracteres alfanuméricos"
             )
 
-    return (
-        "⚠️ No se detectó un dato válido.\n"
-        "Envía solo uno de estos formatos:\n\n"
-        "CURP\n"
-        "Cadena / Identificador electrónico\n"
-        "Código de verificación\n"
-    )
+    return None
