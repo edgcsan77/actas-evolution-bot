@@ -146,6 +146,7 @@ BOT_LABELS = {
     "docifybot8doficy": "👽 DOCIFY MX",
     "docifybot8cristina": "🌸 ACTAS MAYOREO",
     "docifybot8maya": "🔱 GESTORIA MAYA",
+    "docifybot8leli": "🌼 TRAMITES LELI",
 }
 
 
@@ -154,6 +155,7 @@ BOT_PANEL_TOKENS = {
     "asd5a6d7g9": "docifybot8docify",
     "63df2dgdae": "docifybot8cristina",
     "as5613f4se": "docifybot8maya",
+    "65as6d8fg9": "docifybot8leli",
 }
 
 
