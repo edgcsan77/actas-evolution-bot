@@ -1,5 +1,6 @@
 import json
 import time
+from zoneinfo import ZoneInfo
 from datetime import datetime, timezone, timedelta
 from app.config import settings
 from app.services.provider3 import Provider3Client
@@ -75,7 +76,7 @@ def refresh_providers_status():
     result["provider3"]["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     try:
-        now = datetime.now()
+        now = datetime.now(ZoneInfo("America/Monterrey"))
 
         month_map = {
             1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr",
