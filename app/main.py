@@ -8399,6 +8399,27 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         
         text_upper = normalize_text(text_body)
 
+        # =========================
+        # BLOQUEO DE BUCLE ENTRE BOTS
+        # =========================
+        if from_me and not text_upper.startswith("/"):
+            print("IGNORED_REASON = from_me_early", flush=True)
+            return {"ok": True, "ignored": "from_me_early"}
+        
+        BOT_WARNING_PHRASES = [
+            "LA CADENA, IDENTIFICADOR ELECTRONICO O CODIGO DE VERIFICACION",
+            "DEBE TENER EXACTAMENTE 20 DIGITOS",
+            "NO SE DETECTO UNA CADENA VALIDA",
+            "LA CURP PARECE INCOMPLETA O INCORRECTA",
+            "NO SE DETECTO UNA CURP VALIDA",
+            "LA CURP DEBE TENER EXACTAMENTE 18 CARACTERES",
+        ]
+        
+        if any(p in text_upper for p in BOT_WARNING_PHRASES):
+            print("IGNORED_REASON = bot_warning_text", flush=True)
+            print("BOT_WARNING_TEXT =", repr(text_body[:120]), flush=True)
+            return {"ok": True, "ignored": "bot_warning_text"}
+
         if is_bot_generated_text(text_body):
             print("WEBHOOK_IGNORED_BOT_GENERATED_TEXT =", repr(text_body[:100]), flush=True)
             return {"ok": True, "ignored": "bot_generated_text"}
