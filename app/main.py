@@ -6037,8 +6037,6 @@ def panel_actas(
                 <tr>
                   <th>Bot</th>
                   <th class="right">Total</th>
-                  <th class="right">EN COLA</th>
-                  <th class="right">PROCESANDO</th>
                   <th class="right">HECHO</th>
                   <th class="right">ERROR</th>
                 </tr>
@@ -6052,14 +6050,12 @@ def panel_actas(
                 <tr>
                   <td>{_esc(bot_label(r["instance_name"]))}</td>
                   <td class="right">{r["total"]}</td>
-                  <td class="right">{r["queued"]}</td>
-                  <td class="right">{r["processing"]}</td>
                   <td class="right">{r["done"]}</td>
                   <td class="right">{r["error"]}</td>
                 </tr>
                 """
         else:
-            html += '<tr><td colspan="6">Sin datos.</td></tr>'
+            html += '<tr><td colspan="4">Sin datos.</td></tr>'
     
         html += """
               </tbody>
@@ -6177,8 +6173,6 @@ def panel_actas(
                 <tr>
                   <th>Proveedor</th>
                   <th class="right">Total</th>
-                  <th class="right">EN COLA</th>
-                  <th class="right">PROCESANDO</th>
                   <th class="right">HECHO</th>
                   <th class="right">ERROR</th>
                 </tr>
@@ -6192,14 +6186,12 @@ def panel_actas(
                 <tr>
                   <td>{_esc(_provider_label(r["provider_name"]))}</td>
                   <td class="right">{r["total"]}</td>
-                  <td class="right">{r["queued"]}</td>
-                  <td class="right">{r["processing"]}</td>
                   <td class="right">{r["done"]}</td>
                   <td class="right">{r["error"]}</td>
                 </tr>
                 """
         else:
-            html += '<tr><td colspan="6">Sin datos.</td></tr>'
+            html += '<tr><td colspan="4">Sin datos.</td></tr>'
     
         html += """
               </tbody>
@@ -6217,8 +6209,6 @@ def panel_actas(
                 <tr>
                   <th>Tipo</th>
                   <th class="right">Total</th>
-                  <th class="right">EN COLA</th>
-                  <th class="right">PROCESANDO</th>
                   <th class="right">HECHO</th>
                   <th class="right">ERROR</th>
                 </tr>
@@ -6232,14 +6222,12 @@ def panel_actas(
                 <tr>
                   <td>{_esc(r["act_type"])}</td>
                   <td class="right">{r["total"]}</td>
-                  <td class="right">{r["queued"]}</td>
-                  <td class="right">{r["processing"]}</td>
                   <td class="right">{r["done"]}</td>
                   <td class="right">{r["error"]}</td>
                 </tr>
                 """
         else:
-            html += '<tr><td colspan="6">Sin datos.</td></tr>'
+            html += '<tr><td colspan="4">Sin datos.</td></tr>'
     
         html += """
               </tbody>
