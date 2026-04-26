@@ -18,12 +18,7 @@ from app.services.provider7 import (
 
 class Provider4Client:
     BASE_URL = "https://www.tramitanet.org"
-    HID = "D0cuExprR"
-
-    MANUAL_PAGE_URL = f"{BASE_URL}/servicio/manual.php?HID={HID}"
-    MANUAL_ENDPOINT = f"{BASE_URL}/servicio/backend-manualCVL.php"
-    VGET_URL = f"{BASE_URL}/servicio/vGetOfi.php"
-    HISTORY_URL = f"{BASE_URL}/servicio/vHistory.php?HID={HID}"
+    DEFAULT_HID = "D0cuExprR"
 
     HISTORY_MAX_POLLS = 60
     HISTORY_POLL_SLEEP = 7
@@ -64,7 +59,14 @@ class Provider4Client:
         "NE": "NACIDO_EN_EL_EXTRANJERO",
     }
 
-    def __init__(self) -> None:
+    def __init__(self, hid: str | None = None) -> None:
+        self.HID = hid or self.DEFAULT_HID
+
+        self.MANUAL_PAGE_URL = f"{self.BASE_URL}/servicio/manual.php?HID={self.HID}"
+        self.MANUAL_ENDPOINT = f"{self.BASE_URL}/servicio/backend-manualCVL.php"
+        self.VGET_URL = f"{self.BASE_URL}/servicio/vGetOfi.php"
+        self.HISTORY_URL = f"{self.BASE_URL}/servicio/vHistory.php?HID={self.HID}"
+    
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": (
