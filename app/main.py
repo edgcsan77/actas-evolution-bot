@@ -5571,6 +5571,7 @@ def panel_actas(
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER4','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER4','off')">Desactivar</button>
+                        <button class="btn btn-warning" onclick="refreshHID()">Actualizar HID</button>
                       </div>
                     </div>
 
@@ -6388,6 +6389,34 @@ def panel_actas(
               location.reload();
             }} else {{
               alert(data.error || "Error actualizando SID");
+            }}
+          }} catch (e) {{
+            alert("No se pudo conectar con el servidor");
+          }}
+        }}
+
+        async function refreshHID() {{
+          const hid = prompt("Pega el nuevo HID");
+          if (!hid) return;
+        
+          try {{
+            const res = await fetch("/panel/provider4/hid", {{
+              method: "POST",
+              headers: {{
+                "Content-Type": "application/json"
+              }},
+              body: JSON.stringify({{
+                hid: hid
+              }})
+            }});
+        
+            const data = await res.json();
+        
+            if (data.ok) {{
+              alert("HID actualizado");
+              location.reload();
+            }} else {{
+              alert(data.error || "Error actualizando HID");
             }}
           }} catch (e) {{
             alert("No se pudo conectar con el servidor");
@@ -7212,6 +7241,41 @@ def startup():
             _set_app_setting(db, "PROVIDER3_PHPSESSID", settings.PROVIDER3_PHPSESSID)
     finally:
         db.close()
+
+
+@app.post("/panel/provider4/hid")
+def update_provider4_hid(payload: dict, db: Session = Depends(get_db)):
+    try:
+        new_hid = (payload.get("hid") or "").strip()
+
+        if not new_hid:
+            return {"ok": False, "error": "HID vacío"}
+
+        setting = (
+            db.query(ProviderSetting)
+            .filter(ProviderSetting.provider_name == "PROVIDER4_HID")
+            .first()
+        )
+
+        if not setting:
+            setting = ProviderSetting(
+                provider_name="PROVIDER4_HID",
+                is_enabled=True,
+                value=new_hid,
+            )
+            db.add(setting)
+        else:
+            setting.value = new_hid
+
+        db.commit()
+
+        print("PROVIDER4_HID_UPDATED =", new_hid, flush=True)
+
+        return {"ok": True}
+
+    except Exception as e:
+        db.rollback()
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/panel/provider3/session")
