@@ -2866,14 +2866,26 @@ def panel_group_detail(
 
     html += f"""
         <div class="box">
+          <div class="head"><strong>Precio de acta</strong></div>
+          
           <div class="filters" style="grid-template-columns: 220px 180px;">
             <div>
-              <div class="small"><strong>Precio acta</strong></div>
-              <input id="acta_price" value="{acta_price_num}">
+              <div class="small">Precio por acta</div>
+              <input 
+                id="acta_price" 
+                type="number" 
+                step="0.01" 
+                min="0" 
+                value="{acta_price_num}"
+              >
             </div>
-
+    
             <div style="display:flex;align-items:end;">
-              <button type="button" class="btn btn-primary" style="width:100%;" onclick="saveActaPrice('{group_jid}')">
+              <button 
+                type="button" 
+                class="btn btn-primary" 
+                style="width:100%;" 
+                onclick="saveActaPrice('{group_jid}')">
                 Guardar precio
               </button>
             </div>
