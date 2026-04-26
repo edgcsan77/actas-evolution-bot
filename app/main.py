@@ -136,19 +136,19 @@ PROVIDER_LABELS = {
     "PROVIDER5": "LUIS SID",
     "PROVIDER6": "ACTAS ESCALANTE",
     "PROVIDER7": "MESINO SID",
-    "PROVIDER8": "GESTOR FIABLE",
+    "PROVIDER8": "VILLAFUERTE",
 }
 
 
 BOT_LABELS = {
     "docifybot8": "🚀 DOCU EXPRES",
-    "docifybot8max": "⚡ MAX BOT",
+    "docifybot8max": "☄️ MAX BOT",
     "docifybot8doficy": "👽 DOCIFY MX",
     "docifybot8cristina": "🌸 ACTAS MAYOREO",
     "docifybot8maya": "🔱 GESTORIA MAYA",
     "docifybot8leli": "🌼 TRAMITES LELI",
     "docifybot8rywya": "🌹 GESTORIA EXPRESS RYWYA",
-    "docifybot8xpress": "🛰️ DIGITAL XPRESS",
+    "docifybot8xpress": "⚡ DIGITAL XPRESS",
 }
 
 
@@ -5575,6 +5575,14 @@ def panel_actas(
                     </div>
 
                     <div class="provider-card">
+                      <div class="provider-name">LUIS SID</div>
+                      <div class="provider-actions">
+                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER5','on')">Activar</button>
+                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER5','off')">Desactivar</button>
+                      </div>
+                    </div>
+
+                    <div class="provider-card">
                       <div class="provider-name">ACTAS ESCALANTE</div>
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER6','on')">Activar</button>
@@ -5583,7 +5591,7 @@ def panel_actas(
                     </div>
 
                     <div class="provider-card">
-                      <div class="provider-name">GESTOR FIABLE</div>
+                      <div class="provider-name">VILLAFUERTE</div>
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER8','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER8','off')">Desactivar</button>
@@ -7790,8 +7798,9 @@ def _providers_status_text(db: Session) -> str:
         f"ACTAS DEL SURESTE: {s2}{provider2_extra}\n"
         f"AUSTRAM WEB:       {s3}{provider3_extra}\n"
         f"LAZARO WEB:        {s4}{provider4_extra}\n"
+        f"LUIS SID:          {s5}{provider5_extra}\n"
         f"ACTAS ESCALANTE:   {s6}{provider6_extra}\n"
-        f"GESTOR FIABLE:     {s8}{provider8_extra}"
+        f"VILLAFUERTE:       {s8}{provider8_extra}"
     )
 
     return text
@@ -8613,7 +8622,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             print("MEDIA_MESSAGE_ID_USED =", media_message_id, flush=True)
 
             # =========================
-            # MATCH ESPECIAL PROVIDER5: RESPUESTAS NEGATIVAS
+            # MATCH ESPECIAL: RESPUESTAS NEGATIVAS
             # 1) reply id
             # 2) fallback por CURP en texto
             # =========================
