@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, Float
+from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, Float, Numeric
 from sqlalchemy.sql import func
 
 from app.db import Base
@@ -95,6 +95,7 @@ class GroupAlias(Base):
     owner_instance = Column(String(50), nullable=True, index=True)
     is_hidden = Column(Boolean, default=False, nullable=False)
     hidden_in_main = Column(Boolean, default=False, nullable=False)
+    acta_price = Column(Numeric(10, 2), default=0)
 
 
 class GroupCategory(Base):
