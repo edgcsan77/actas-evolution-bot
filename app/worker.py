@@ -681,7 +681,15 @@ def _process_provider4(req, db):
     if PROVIDER4_TEST_GROUPS and req.source_group_id not in PROVIDER4_TEST_GROUPS:
         raise RuntimeError("PROVIDER4_NOT_ALLOWED_GROUP")
 
-    client = Provider4Client()
+    setting = (
+        db.query(ProviderSetting)
+        .filter(ProviderSetting.provider_name == "PROVIDER4_HID")
+        .first()
+    )
+    
+    hid = setting.value if setting and setting.value else None
+    
+    client = Provider4Client(hid=hid)
 
     tipoa = _provider4_tipo_acta(req.act_type)
     inc_folio = "FOLIO" in (req.act_type or "").upper().strip()
