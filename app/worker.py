@@ -944,7 +944,7 @@ def _handle_group_promotion_after_done(req, db):
 
 def _start_provider3_flow(req, db):
     provider_name = "PROVIDER3"
-    provider_group_id = _pick_provider_group(provider_name, req.act_type, req.id)
+    provider_group_id = _pick_provider_group(provider_name, req.curp, req.act_type, req.id)
     text_to_provider = _build_provider_message(provider_name, req.curp, req.act_type)
 
     req.provider_name = provider_name
@@ -1265,7 +1265,7 @@ def process_request(request_id: int):
                     raise RuntimeError(f"NO_PROVIDER_ENABLED | ORIGIN={err}")
         
                 provider_name = "PROVIDER1"
-                provider_group_id = _pick_provider_group(provider_name, req.act_type, req.id)
+                provider_group_id = _pick_provider_group(provider_name, req.curp, req.act_type, req.id)
                 text_to_provider = _build_provider_message(provider_name, req.curp, req.act_type)
         
                 req.provider_name = provider_name
