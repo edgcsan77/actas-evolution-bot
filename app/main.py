@@ -2348,6 +2348,81 @@ A partir de ahora este grupo ya no utilizará el saldo compartido.
     }
 
 
+def _get_group_acta_price(db: Session, group_jid: str) -> float:
+    row = (
+        db.query(GroupAlias)
+        .filter(GroupAlias.group_jid == group_jid)
+        .first()
+    )
+
+    if not row:
+        return 0.0
+
+    try:
+        return float(row.acta_price or 0)
+    except Exception:
+        return 0.0
+
+
+def _set_group_acta_price(db: Session, group_jid: str, price: float):
+    row = (
+        db.query(GroupAlias)
+        .filter(GroupAlias.group_jid == group_jid)
+        .first()
+    )
+
+    if not row:
+        row = GroupAlias(
+            group_jid=group_jid,
+            custom_name="",
+            acta_price=price,
+            updated_at=_utc_now_naive(),
+        )
+        db.add(row)
+    else:
+        row.acta_price = price
+        row.updated_at = _utc_now_naive()
+
+    db.commit()
+    return row
+
+
+@app.post("/panel/group/{group_jid}/acta-price")
+async def panel_save_group_acta_price(
+    group_jid: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    try:
+        data = await request.json()
+        price_raw = str(data.get("acta_price", "")).strip()
+
+        if not price_raw:
+            return {"ok": False, "error": "Falta precio"}
+
+        price = float(price_raw)
+
+        if price < 0:
+            return {"ok": False, "error": "El precio no puede ser negativo"}
+
+        _set_group_acta_price(db, group_jid, price)
+
+        try:
+            redis_conn.delete(f"panel:group_detail:{group_jid}:month")
+            redis_conn.delete(f"panel:group_detail:{group_jid}:day")
+        except Exception:
+            pass
+
+        return {
+            "ok": True,
+            "message": "Precio guardado correctamente",
+            "acta_price": price,
+        }
+
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @app.get("/panel/group-detail", response_class=HTMLResponse)
 def panel_group_detail(
     group_jid: str = "",
@@ -2381,6 +2456,8 @@ def panel_group_detail(
     promo_type_label = "Crédito" if promo_is_credit else "Pagada"
     promo_shared_group_limit = promo.shared_group_limit_actas if promo else 0
     group_category = _get_group_category(db, group_jid)
+
+    acta_price_num = _get_group_acta_price(db, group_jid)
 
     time_min, time_max, view = _panel_period_bounds(view)
 
@@ -2789,6 +2866,23 @@ def panel_group_detail(
 
     html += f"""
         <div class="box">
+          <div class="filters" style="grid-template-columns: 220px 180px;">
+            <div>
+              <div class="small"><strong>Precio acta</strong></div>
+              <input id="acta_price" value="{acta_price_num}">
+            </div>
+
+            <div style="display:flex;align-items:end;">
+              <button type="button" class="btn btn-primary" style="width:100%;" onclick="saveActaPrice('{group_jid}')">
+                Guardar precio
+              </button>
+            </div>
+          </div>
+        </div>
+    """
+
+    html += f"""
+        <div class="box">
           <table>
             <thead>
               <tr>
@@ -2799,6 +2893,8 @@ def panel_group_detail(
                 <th class="right">Error</th>
                 <th class="right">En cola</th>
                 <th class="right">Procesando</th>
+                <th class="right">Precio</th>
+                <th class="right">$ Hecho</th>
               </tr>
             </thead>
             <tbody>
@@ -2820,6 +2916,7 @@ def panel_group_detail(
         weekly_error += r["error"]
         weekly_queued += r["queued"]
         weekly_processing += r["processing"]
+        done_amount = r["done"] * acta_price_num
     
         html += f"""
               <tr>
@@ -2830,6 +2927,8 @@ def panel_group_detail(
                 <td class="right">{r["error"]}</td>
                 <td class="right">{r["queued"]}</td>
                 <td class="right">{r["processing"]}</td>
+                <td class="right">${acta_price_num:,.2f}</td>
+                <td class="right">${done_amount:,.2f}</td>
               </tr>
         """
     
@@ -2837,6 +2936,7 @@ def panel_group_detail(
         is_last_day = r == detail["rows"][-1]
     
         if is_sunday or is_last_day:
+            weekly_amount = weekly_done * acta_price_num
             html += f"""
               <tr class="weekly-row">
                 <td>CORTE SEMANAL</td>
@@ -2846,6 +2946,8 @@ def panel_group_detail(
                 <td class="right">{weekly_error}</td>
                 <td class="right">{weekly_queued}</td>
                 <td class="right">{weekly_processing}</td>
+                <td class="right">${acta_price_num:,.2f}</td>
+                <td class="right">${weekly_amount:,.2f}</td>
               </tr>
             """
     
@@ -2857,6 +2959,7 @@ def panel_group_detail(
             weekly_start = None
 
     t = detail["totals"]
+    total_amount = t["done"] * acta_price_num
     html += f"""
               <tr class="total-row">
                 <td colspan="2">TOTAL</td>
@@ -2865,6 +2968,8 @@ def panel_group_detail(
                 <td class="right">{t["error"]}</td>
                 <td class="right">{t["queued"]}</td>
                 <td class="right">{t["processing"]}</td>
+                <td class="right">${acta_price_num:,.2f}</td>
+                <td class="right">${total_amount:,.2f}</td>
               </tr>
             </tbody>
           </table>
@@ -2872,6 +2977,38 @@ def panel_group_detail(
       </div>
 
       <script>
+          async function saveActaPrice(groupJid) {{
+            const price = document.getElementById("acta_price")?.value?.trim() || "";
+
+            if (!price) {{
+              alert("Ingresa el precio del acta");
+              return;
+            }}
+
+            try {{
+              const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/acta-price`, {{
+                method: "POST",
+                headers: {{
+                  "Content-Type": "application/json"
+                }},
+                body: JSON.stringify({{
+                  acta_price: price
+                }})
+              }});
+
+              const data = await res.json();
+
+              if (data.ok) {{
+                alert("Precio guardado");
+                location.reload();
+              }} else {{
+                alert(data.error || "Error guardando precio");
+              }}
+            }} catch (e) {{
+              alert("No se pudo conectar con el servidor");
+            }}
+          }}
+          
           async function savePromotion(groupJid) {{
             const promoName = document.getElementById("promo_name")?.value?.trim() || "";
             const totalActas = document.getElementById("promo_total")?.value?.trim() || "";
