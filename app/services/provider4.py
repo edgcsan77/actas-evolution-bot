@@ -18,7 +18,7 @@ from app.services.provider7 import (
 
 class Provider4Client:
     BASE_URL = "https://www.tramitanet.org"
-    HID = "L4zar0"
+    HID = "D0cuExprR"
 
     MANUAL_PAGE_URL = f"{BASE_URL}/servicio/manual.php?HID={HID}"
     MANUAL_ENDPOINT = f"{BASE_URL}/servicio/backend-manualCVL.php"
