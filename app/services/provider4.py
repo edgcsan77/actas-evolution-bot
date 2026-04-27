@@ -264,10 +264,21 @@ class Provider4Client:
             raise RuntimeError(f"PROVIDER7_FRAME_FAILED:{term}")
     
         if estado == "NACIDO_EN_EL_EXTRANJERO":
-            if self._pdf_has_two_pages(framed_pdf):
-                print("PROVIDER4_FOREIGN_BIRTH_FRAMED_OK = TRUE", flush=True)
-                return framed_pdf
-            raise RuntimeError(f"PROVIDER4_FOREIGN_BIRTH_FRAME_INCOMPLETE:{term}")
+            print("PROVIDER4_FOREIGN_FORCE_MEXICO_BACK =", term, flush=True)
+        
+            try:
+                reverso_path = _resolver_reverso_por_estado("MEXICO", estados_dir)
+                repaired_pdf = _unir_pdfs_bytes(framed_pdf, reverso_path)
+            except Exception as e:
+                print("PROVIDER4_FOREIGN_MEXICO_REAR_JOIN_FAILED =", str(e), flush=True)
+                raise RuntimeError(f"PROVIDER4_FOREIGN_MEXICO_REAR_JOIN_FAILED:{term}")
+        
+            if not self._pdf_has_two_pages(repaired_pdf):
+                print("PROVIDER4_FOREIGN_MEXICO_REPAIRED_STILL_INCOMPLETE =", term, flush=True)
+                raise RuntimeError(f"PROVIDER4_FOREIGN_MEXICO_REPAIRED_STILL_INCOMPLETE:{term}")
+        
+            print(f"PROVIDER4_FOREIGN_MEXICO_PDF_PAGE_COUNT = {self._pdf_num_pages(repaired_pdf)}", flush=True)
+            return repaired_pdf
     
         try:
             reverso_path = _resolver_reverso_por_estado(estado, estados_dir)
