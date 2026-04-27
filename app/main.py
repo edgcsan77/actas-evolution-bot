@@ -77,6 +77,21 @@ NO_DONE_NOTIFY_GROUPS = {
     "120363427267191472@g.us"
 }
 
+NO_EXTRA_TEXT_GROUPS = {
+    "120363427267191472@g.us"
+}
+
+def should_notify_done(group_id: str | None) -> bool:
+    if not group_id:
+        return True
+    return group_id not in NO_DONE_NOTIFY_GROUPS
+    
+
+def should_send_extra_text(group_id: str | None) -> bool:
+    if not group_id:
+        return True
+    return group_id not in NO_EXTRA_TEXT_GROUPS
+
 
 def _evolution_headers():
     return {"apikey": EVOLUTION_APIKEY}
@@ -163,12 +178,6 @@ def _bot_status_rows(db: Session) -> list[dict]:
 def panel_instance_qr(instance_name: str):
     result = _evolution_connect_qr(instance_name)
     return result
-
-
-def should_notify_done(group_id: str | None) -> bool:
-    if not group_id:
-        return True
-    return group_id not in NO_DONE_NOTIFY_GROUPS
 
 
 def _is_valid_admin_panel_token(request: Request) -> bool:
@@ -8079,7 +8088,8 @@ def _is_admin(requester_wa_id: str, from_me: bool = False) -> bool:
 
 def _reply_to_origin(source_group_id: str | None, requester_wa_id: str, text: str, instance_name: str = None):
     if source_group_id:
-        send_group_text(source_group_id, text, instance_name=instance_name)
+        if should_send_extra_text(source_group_id):
+            send_group_text(source_group_id, text, instance_name=instance_name)
     else:
         send_text(requester_wa_id, text, instance_name=instance_name)
 
@@ -9123,7 +9133,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             )
         
             if source_group_id:
-                send_group_text(source_group_id, msg, instance_name)
+                if should_send_extra_text(source_group_id):
+                    send_group_text(source_group_id, msg, instance_name)
             else:
                 send_text(requester_wa_id, msg, instance_name)
         
@@ -9155,7 +9166,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             )
 
             if source_group_id:
-                send_group_text(source_group_id, msg, instance_name=instance_name)
+                if should_send_extra_text(source_group_id):
+                    send_group_text(source_group_id, msg, instance_name=instance_name)
             else:
                 send_text(requester_wa_id, msg, instance_name=instance_name)
 
@@ -9298,7 +9310,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         try:
                             client_instance = open_req.instance_name or "docifybot8"
                             if open_req.source_group_id:
-                                send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
+                                if should_send_extra_text(open_req.source_group_id):
+                                    send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
                             else:
                                 send_text(open_req.requester_wa_id, msg, instance_name=client_instance)
                         except Exception as notify_exc:
@@ -9341,7 +9354,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         try:
                             client_instance = open_req.instance_name or "docifybot8"
                             if open_req.source_group_id:
-                                send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
+                                if should_send_extra_text(open_req.source_group_id):
+                                    send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
                             else:
                                 send_text(open_req.requester_wa_id, msg, instance_name=client_instance)
                         except Exception as notify_exc:
@@ -9383,7 +9397,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         try:
                             client_instance = open_req.instance_name or "docifybot8"
                             if open_req.source_group_id:
-                                send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
+                                if should_send_extra_text(open_req.source_group_id):
+                                    send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
                             else:
                                 send_text(open_req.requester_wa_id, msg, instance_name=client_instance)
                         except Exception as notify_exc:
@@ -9569,11 +9584,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         )
                 
                         if open_req.source_group_id:
-                            send_group_text(
-                                open_req.source_group_id,
-                                fail_msg,
-                                instance_name=open_req.instance_name
-                            )
+                            if should_send_extra_text(open_req.source_group_id):
+                                send_group_text(
+                                    open_req.source_group_id,
+                                    fail_msg,
+                                    instance_name=open_req.instance_name
+                                )
                         elif open_req.requester_wa_id:
                             send_text(
                                 open_req.requester_wa_id,
@@ -9757,7 +9773,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         if not terms and not is_admin_command:
             if problem:
                 if source_group_id:
-                    send_group_text(source_group_id, problem, instance_name=instance_name)
+                    if should_send_extra_text(source_group_id):
+                        send_group_text(source_group_id, problem, instance_name=instance_name)
                 else:
                     send_text(requester_wa_id, problem, instance_name=instance_name)
         
@@ -9890,13 +9907,14 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             if last and last.pdf_url:
                 if source_group_id:
-                    send_group_document(
-                        source_group_id,
-                        last.pdf_url,
-                        filename=f"{last.curp}.pdf",
-                        caption="♻️ Reenviado desde historial",
-                        instance_name=instance_name,
-                    )
+                    if should_send_extra_text(source_group_id):
+                        send_group_document(
+                            source_group_id,
+                            last.pdf_url,
+                            filename=f"{last.curp}.pdf",
+                            caption="♻️ Reenviado desde historial",
+                            instance_name=instance_name,
+                        )
                 else:
                     send_document(
                         requester_wa_id,
@@ -10026,7 +10044,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 final_msg = problem_msg
         
                 if source_group_id:
-                    send_group_text(source_group_id, final_msg, instance_name=instance_name)
+                    if should_send_extra_text(source_group_id):
+                        send_group_text(source_group_id, final_msg, instance_name=instance_name)
                 else:
                     send_text(requester_wa_id, final_msg, instance_name=instance_name)
         
@@ -10064,7 +10083,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         )
     
                         if source_group_id:
-                            send_group_text(source_group_id, done_msg, instance_name=instance_name)
+                            if should_send_extra_text(source_group_id):
+                                send_group_text(source_group_id, done_msg, instance_name=instance_name)
                         else:
                             send_text(requester_wa_id, done_msg, instance_name=instance_name)
     
@@ -10104,7 +10124,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     )
             
                     if source_group_id:
-                        send_group_text(source_group_id, dup_msg, instance_name=instance_name)
+                        if should_send_extra_text(source_group_id):
+                            send_group_text(source_group_id, dup_msg, instance_name=instance_name)
                     else:
                         send_text(requester_wa_id, dup_msg, instance_name=instance_name)
             
@@ -10130,7 +10151,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 )
         
                 if source_group_id:
-                    send_group_text(source_group_id, limit_msg, instance_name=instance_name)
+                    if should_send_extra_text(source_group_id):
+                        send_group_text(source_group_id, limit_msg, instance_name=instance_name)
                 else:
                     send_text(requester_wa_id, limit_msg, instance_name=instance_name)
         
@@ -10185,7 +10207,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 )
         
                 if source_group_id:
-                    send_group_text(source_group_id, retry_msg, instance_name=instance_name)
+                    if should_send_extra_text(source_group_id):
+                        send_group_text(source_group_id, retry_msg, instance_name=instance_name)
                 else:
                     send_text(requester_wa_id, retry_msg, instance_name=instance_name)
         
@@ -10223,7 +10246,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 )
             
                 if source_group_id:
-                    send_group_text(source_group_id, dup_msg, instance_name=instance_name)
+                    if should_send_extra_text(source_group_id):
+                        send_group_text(source_group_id, dup_msg, instance_name=instance_name)
                 else:
                     send_text(requester_wa_id, dup_msg, instance_name=instance_name)
             
