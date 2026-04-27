@@ -8088,8 +8088,7 @@ def _is_admin(requester_wa_id: str, from_me: bool = False) -> bool:
 
 def _reply_to_origin(source_group_id: str | None, requester_wa_id: str, text: str, instance_name: str = None):
     if source_group_id:
-        if should_send_extra_text(source_group_id):
-            send_group_text(source_group_id, text, instance_name=instance_name)
+        send_group_text(source_group_id, text, instance_name=instance_name)
     else:
         send_text(requester_wa_id, text, instance_name=instance_name)
 
