@@ -109,25 +109,46 @@ def _evolution_get(path: str, timeout: int = 8):
 
 def _evolution_instance_state(instance_name: str) -> dict:
     try:
-        code, data = _evolution_get(f"/instance/connectionState/{instance_name}")
-        state = (
-            data.get("instance", {}).get("state")
-            or data.get("state")
-            or "unknown"
+        url = f"{EVOLUTION_BASE_URL}/instance/connectionState/{instance_name}"
+
+        r = requests.get(
+            url,
+            headers={"apikey": EVOLUTION_APIKEY},
+            timeout=8,
         )
 
+        try:
+            data = r.json()
+        except Exception:
+            data = {"raw": r.text}
+
+        print("EVOLUTION_STATE_CHECK =", instance_name, r.status_code, data, flush=True)
+
+        state = "unknown"
+
+        if isinstance(data, dict):
+            state = (
+                data.get("instance", {}).get("state")
+                or data.get("state")
+                or data.get("connectionState")
+                or data.get("status")
+                or "unknown"
+            )
+
         return {
-            "ok": code < 400,
-            "state": state,
+            "ok": r.status_code < 400,
+            "state": str(state or "unknown").lower(),
             "raw": data,
         }
+
     except Exception as e:
+        print("EVOLUTION_STATE_ERROR =", instance_name, repr(e), flush=True)
         return {
             "ok": False,
-            "state": "error",
+            "state": "unknown",
             "error": str(e),
         }
-
+        
 
 def _evolution_connect_qr(instance_name: str) -> dict:
     try:
