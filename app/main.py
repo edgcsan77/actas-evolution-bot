@@ -9331,8 +9331,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         try:
                             client_instance = open_req.instance_name or "docifybot8"
                             if open_req.source_group_id:
-                                if should_send_extra_text(open_req.source_group_id):
-                                    send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
+                                send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
                             else:
                                 send_text(open_req.requester_wa_id, msg, instance_name=client_instance)
                         except Exception as notify_exc:
@@ -9375,8 +9374,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         try:
                             client_instance = open_req.instance_name or "docifybot8"
                             if open_req.source_group_id:
-                                if should_send_extra_text(open_req.source_group_id):
-                                    send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
+                                send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
                             else:
                                 send_text(open_req.requester_wa_id, msg, instance_name=client_instance)
                         except Exception as notify_exc:
@@ -9418,8 +9416,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         try:
                             client_instance = open_req.instance_name or "docifybot8"
                             if open_req.source_group_id:
-                                if should_send_extra_text(open_req.source_group_id):
-                                    send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
+                                send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
                             else:
                                 send_text(open_req.requester_wa_id, msg, instance_name=client_instance)
                         except Exception as notify_exc:
