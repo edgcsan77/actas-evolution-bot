@@ -1631,8 +1631,7 @@ def process_request(request_id: int):
                         instance = req.instance_name or "docifybot8"
         
                         if req.source_group_id:
-                            if should_send_extra_text(req.source_group_id):
-                                send_group_text(req.source_group_id, msg, instance)
+                            send_group_text(req.source_group_id, msg, instance)
                         else:
                             from app.services.evolution import send_text
                             send_text(req.requester_wa_id, msg, instance)
@@ -1835,8 +1834,7 @@ def process_request(request_id: int):
 
                 instance = req.instance_name or "docifybot8"
                 if req.source_group_id:
-                    if should_send_extra_text(req.source_group_id):
-                        send_group_text(req.source_group_id, msg, instance)
+                    send_group_text(req.source_group_id, msg, instance)
                 else:
                     from app.services.evolution import send_text
                     send_text(req.requester_wa_id, msg, instance)
