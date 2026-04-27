@@ -31,11 +31,20 @@ NO_FAIL_NOTIFY_GROUPS = {
     "120363427267191472@g.us"
 }
 
+NO_EXTRA_TEXT_GROUPS = {
+    "120363427267191472@g.us"
+}
 
 def should_notify_failure(group_id: str | None) -> bool:
     if not group_id:
         return True
     return group_id not in NO_FAIL_NOTIFY_GROUPS
+
+
+def should_send_extra_text(group_id: str | None) -> bool:
+    if not group_id:
+        return True
+    return group_id not in NO_EXTRA_TEXT_GROUPS
     
 
 def _utc_now_naive():
@@ -1231,7 +1240,7 @@ def process_request(request_id: int):
                 instance = req.instance_name or "docifybot8"
 
                 if req.source_group_id:
-                    if should_notify_failure(req.source_group_id):
+                    if should_send_extra_text(req.source_group_id):
                         send_group_text(req.source_group_id, msg, instance)
                 else:
                     from app.services.evolution import send_text
@@ -1434,7 +1443,7 @@ def process_request(request_id: int):
                     instance = req.instance_name or "docifybot8"
 
                     if req.source_group_id:
-                        if should_notify_failure(req.source_group_id):
+                        if should_send_extra_text(req.source_group_id):
                             send_group_text(req.source_group_id, msg, instance)
                     else:
                         from app.services.evolution import send_text
@@ -1478,7 +1487,8 @@ def process_request(request_id: int):
 
                         instance = req.instance_name or "docifybot8"
                         if req.source_group_id:
-                            send_group_text(req.source_group_id, msg, instance)
+                            if should_send_extra_text(req.source_group_id):
+                                send_group_text(req.source_group_id, msg, instance)
                         else:
                             from app.services.evolution import send_text
                             send_text(req.requester_wa_id, msg, instance)
@@ -1621,7 +1631,8 @@ def process_request(request_id: int):
                         instance = req.instance_name or "docifybot8"
         
                         if req.source_group_id:
-                            send_group_text(req.source_group_id, msg, instance)
+                            if should_send_extra_text(req.source_group_id):
+                                send_group_text(req.source_group_id, msg, instance)
                         else:
                             from app.services.evolution import send_text
                             send_text(req.requester_wa_id, msg, instance)
@@ -1647,7 +1658,7 @@ def process_request(request_id: int):
                     instance = req.instance_name or "docifybot8"
 
                     if req.source_group_id:
-                        if should_notify_failure(req.source_group_id):
+                        if should_send_extra_text(req.source_group_id):
                             send_group_text(req.source_group_id, msg, instance)
                     else:
                         from app.services.evolution import send_text
@@ -1751,7 +1762,8 @@ def process_request(request_id: int):
 
                 instance = req.instance_name or "docifybot8" 
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg, instance)
+                    if should_send_extra_text(req.source_group_id):
+                        send_group_text(req.source_group_id, msg, instance)
                 else:
                     from app.services.evolution import send_text
                     send_text(req.requester_wa_id, msg, instance)
@@ -1773,7 +1785,8 @@ def process_request(request_id: int):
 
                 instance = req.instance_name or "docifybot8"
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg, instance)
+                    if should_send_extra_text(req.source_group_id):
+                        send_group_text(req.source_group_id, msg, instance)
                 else:
                     from app.services.evolution import send_text
                     send_text(req.requester_wa_id, msg, instance)
@@ -1796,7 +1809,7 @@ def process_request(request_id: int):
                 instance = req.instance_name or "docifybot8"
 
                 if req.source_group_id:
-                    if should_notify_failure(req.source_group_id):
+                    if should_send_extra_text(req.source_group_id):
                         send_group_text(req.source_group_id, msg, instance)
                 else:
                     from app.services.evolution import send_text
@@ -1822,7 +1835,8 @@ def process_request(request_id: int):
 
                 instance = req.instance_name or "docifybot8"
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg, instance)
+                    if should_send_extra_text(req.source_group_id):
+                        send_group_text(req.source_group_id, msg, instance)
                 else:
                     from app.services.evolution import send_text
                     send_text(req.requester_wa_id, msg, instance)
@@ -1844,7 +1858,8 @@ def process_request(request_id: int):
                 
                 instance = req.instance_name or "docifybot8"
                 if req.source_group_id:
-                    send_group_text(req.source_group_id, msg, instance)
+                    if should_send_extra_text(req.source_group_id):
+                        send_group_text(req.source_group_id, msg, instance)
                 else:
                     from app.services.evolution import send_text
                     send_text(req.requester_wa_id, msg, instance)
@@ -1870,7 +1885,7 @@ def process_request(request_id: int):
                 instance = req.instance_name or "docifybot8"
 
                 if req.source_group_id:
-                    if should_notify_failure(req.source_group_id):
+                    if should_send_extra_text(req.source_group_id):
                         send_group_text(req.source_group_id, msg, instance)
                 else:
                     from app.services.evolution import send_text
