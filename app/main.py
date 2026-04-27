@@ -70,9 +70,99 @@ GROUP_NAME_CACHE_TTL = 300
 PANEL_STREAM_SLEEP = 10
 PANEL_STREAM_ENABLED = True
 
+EVOLUTION_BASE_URL = "http://127.0.0.1:8080"
+EVOLUTION_APIKEY = "DOCIFY_EVOLUTION_KEY_2026"
+
 NO_DONE_NOTIFY_GROUPS = {
     "120363427267191472@g.us"
 }
+
+
+def _evolution_headers():
+    return {"apikey": EVOLUTION_APIKEY}
+
+
+def _evolution_get(path: str, timeout: int = 8):
+    url = f"{EVOLUTION_BASE_URL}{path}"
+    r = requests.get(url, headers=_evolution_headers(), timeout=timeout)
+    try:
+        data = r.json()
+    except Exception:
+        data = {"raw": r.text}
+    return r.status_code, data
+
+
+def _evolution_instance_state(instance_name: str) -> dict:
+    try:
+        code, data = _evolution_get(f"/instance/connectionState/{instance_name}")
+        state = (
+            data.get("instance", {}).get("state")
+            or data.get("state")
+            or "unknown"
+        )
+
+        return {
+            "ok": code < 400,
+            "state": state,
+            "raw": data,
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "state": "error",
+            "error": str(e),
+        }
+
+
+def _evolution_connect_qr(instance_name: str) -> dict:
+    try:
+        code, data = _evolution_get(f"/instance/connect/{instance_name}", timeout=15)
+        return {
+            "ok": code < 400,
+            "data": data,
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": str(e),
+        }
+
+
+def _bot_status_rows(db: Session) -> list[dict]:
+    bots = sorted(set(BOT_LABELS.keys()) | set(BOT_PANEL_TOKENS.values()))
+
+    out = []
+    for inst in bots:
+        total = (
+            db.query(RequestLog)
+            .filter(RequestLog.instance_name == inst)
+            .count()
+        )
+
+        used = get_bot_used(db, inst)
+        limit_value = get_bot_limit(db, inst)
+        blocked = is_instance_blocked(inst)
+        ev = _evolution_instance_state(inst)
+
+        out.append({
+            "instance_name": inst,
+            "label": bot_label(inst),
+            "state": ev.get("state", "unknown"),
+            "evolution_ok": bool(ev.get("ok")),
+            "blocked": blocked,
+            "used": used,
+            "limit": limit_value,
+            "available": max(0, limit_value - used) if limit_value > 0 else None,
+            "total_requests": total,
+        })
+
+    return out
+
+
+@app.get("/panel/instance/{instance_name}/qr")
+def panel_instance_qr(instance_name: str):
+    result = _evolution_connect_qr(instance_name)
+    return result
 
 
 def should_notify_done(group_id: str | None) -> bool:
@@ -145,7 +235,7 @@ PROVIDER_LABELS = {
 BOT_LABELS = {
     "docifybot8": "🚀 DOCU EXPRES",
     "docifybot8max": "☄️ MAX BOT",
-    "docifybot8doficy": "👽 DOCIFY MX",
+    "docifybot8docify": "👽 DOCIFY MX",
     "docifybot8cristina": "🌸 ACTAS MAYOREO",
     "docifybot8maya": "🔱 GESTORIA MAYA",
     "docifybot8leli": "🌼 TRAMITES LELI",
@@ -4787,6 +4877,7 @@ def panel_actas(
         
         group_cache = _build_group_name_cache(db)
         delivery_metrics = _panel_delivery_metrics(db, time_min, time_max)
+        bot_status_rows = _bot_status_rows(db)
 
         hidden_main_group_ids = {
             g.group_jid
@@ -5111,6 +5202,62 @@ def panel_actas(
               </div>
             </div>
             """
+
+        bot_status_html = """
+        <div class="box">
+          <div class="head">
+            <strong>Estado de bots WhatsApp</strong>
+          </div>
+        
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Bot</th>
+                  <th>Instancia</th>
+                  <th>Estado WhatsApp</th>
+                  <th>Bloqueado</th>
+                  <th>Uso</th>
+                  <th>Solicitudes</th>
+                  <th>QR</th>
+                </tr>
+              </thead>
+              <tbody>
+        """
+        
+        for b in bot_status_rows:
+            state = b["state"]
+            color = "green" if state == "open" else "red" if state == "close" else "#92400e"
+
+            status_label = "🟢 Conectado" if state == "open" else "🔴 Desconectado" if state == "close" else "🟡 Desconocido"
+        
+            used_txt = f'{b["used"]}/{b["limit"]}' if b["limit"] else str(b["used"])
+
+            if state != "open":
+                action_html = f'<button class="btn btn-primary" type="button" onclick="getBotQr(\'{_esc(b["instance_name"])}\')">Reconectar / QR</button>'
+            else:
+                action_html = '<span class="badge badge-success">Conectado</span>'
+        
+            bot_status_html += f"""
+                <tr>
+                  <td>{_esc(b["label"])}</td>
+                  <td class="mono">{_esc(b["instance_name"])}</td>
+                  <td style="font-weight:800;color:{color};">{status_label}</td>
+                  <td>{'Sí' if b["blocked"] else 'No'}</td>
+                  <td>{_esc(used_txt)}</td>
+                  <td>{b["total_requests"]}</td>
+                  <td>{action_html}</td>
+                </tr>
+            """
+        
+        bot_status_html += """
+              </tbody>
+            </table>
+          </div>
+        
+          <div id="botQrBox" style="margin-top:14px;"></div>
+        </div>
+        """
     
         html = f"""
         <!doctype html>
@@ -6259,6 +6406,8 @@ def panel_actas(
         </div>
         """
 
+        html += bot_status_html
+
         html += """
         <div class="box">
           <div class="head">
@@ -6801,6 +6950,55 @@ def panel_actas(
             location.reload();
           }} else {{
             alert(data.error || "No se pudo quitar el grupo.");
+          }}
+        }}
+
+        async function getBotQr(instanceName) {{
+          const box = document.getElementById("botQrBox");
+          if (!box) return;
+        
+          box.innerHTML = "<strong>Generando QR...</strong>";
+        
+          try {{
+            const res = await fetch(`/panel/instance/${{instanceName}}/qr`);
+            const data = await res.json();
+        
+            if (!data.ok) {{
+              box.innerHTML = `<div style="color:red;font-weight:800;">Error: ${{data.error || "No se pudo generar QR"}}</div>`;
+              return;
+            }}
+        
+            const payload = data.data || {{}};
+            const qr =
+              payload.base64 ||
+              payload.qrcode ||
+              payload.qr ||
+              payload.code ||
+              payload.pairingCode ||
+              "";
+        
+            if (qr && String(qr).startsWith("data:image")) {{
+              box.innerHTML = `
+                <div style="padding:14px;border:1px solid #e5e7eb;border-radius:14px;background:white;">
+                  <strong>QR para ${{instanceName}}</strong><br><br>
+                  <img src="${{qr}}" style="max-width:280px;width:100%;border-radius:12px;">
+                </div>
+              `;
+            }} else if (qr && String(qr).startsWith("/9j")) {{
+              box.innerHTML = `
+                <div style="padding:14px;border:1px solid #e5e7eb;border-radius:14px;background:white;">
+                  <strong>QR para ${{instanceName}}</strong><br><br>
+                  <img src="data:image/png;base64,${{qr}}" style="max-width:280px;width:100%;border-radius:12px;">
+                </div>
+              `;
+            }} else {{
+              box.innerHTML = `
+                <pre style="white-space:pre-wrap;background:#111827;color:white;padding:14px;border-radius:12px;">${{JSON.stringify(payload, null, 2)}}</pre>
+              `;
+            }}
+        
+          }} catch (e) {{
+            box.innerHTML = `<div style="color:red;font-weight:800;">Error de conexión</div>`;
           }}
         }}
 
