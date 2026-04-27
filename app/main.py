@@ -153,6 +153,7 @@ BOT_LABELS = {
 
 
 BOT_PANEL_TOKENS = {
+    "t777fgh6j5": "docifybot8",
     "4a8c92a1e7": "docifybot8max",
     "asd5a6d7g9": "docifybot8docify",
     "63df2dgdae": "docifybot8cristina",
