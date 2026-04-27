@@ -15,3 +15,9 @@ request_queue = Queue(
     connection=redis_conn,
     default_timeout=600
 )
+
+broadcast_queue = Queue(
+    "broadcast",
+    connection=redis_conn,
+    default_timeout=1800
+)
