@@ -3720,6 +3720,67 @@ async def panel_broadcast_cerrado(
         return {"ok": False, "error": str(e)}
 
 
+@app.post("/botpanel/{token}/broadcast/free")
+def botpanel_free_broadcast(
+    token: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    instance_name = _bot_instance_from_token(token)
+
+    if not instance_name:
+        return {"ok": False, "error": "Panel no válido"}
+
+    if not _is_child_bot(instance_name):
+        return {"ok": False, "error": "No permitido"}
+
+    message = (payload.get("message") or "").strip()
+
+    if not message:
+        return {"ok": False, "error": "Mensaje vacío"}
+
+    groups = _bot_group_stats(db, instance_name) or []
+
+    sent = 0
+    errors = 0
+
+    for g in groups:
+        group_jid = g.get("group_jid")
+
+        if not group_jid:
+            continue
+
+        if g.get("blocked"):
+            continue
+
+        if "@g.us" not in group_jid:
+            continue  # evita errores raros
+
+        try:
+            send_group_text(
+                group_jid,
+                message,
+                instance_name=instance_name,
+            )
+            sent += 1
+        except Exception as e:
+            errors += 1
+            print(
+                "BOTPANEL_BROADCAST_ERROR =",
+                instance_name,
+                group_jid,
+                str(e),
+                flush=True,
+            )
+
+    return {
+        "ok": True,
+        "instance": instance_name,
+        "sent": sent,
+        "errors": errors,
+    }
+
+
 @app.post("/panel/broadcast/free")
 async def panel_broadcast_free(
     request: Request,
@@ -4309,6 +4370,26 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
 
         <div class="box">
           <div class="head">
+            <strong>Mensajes masivos</strong>
+            <span class="small">Enviar mensaje libre solo a grupos de {title}.</span>
+          </div>
+
+          <div style="padding:16px;">
+            <textarea
+              id="botBroadcastMessage"
+              placeholder="Escribe aquí el mensaje que deseas enviar..."
+              style="width:100%;min-height:120px;padding:12px;border:1px solid #d1d5db;border-radius:12px;box-sizing:border-box;"
+            ></textarea>
+
+            <div style="display:flex;gap:8px;margin-top:12px;">
+              <button class="btn btn-success" onclick="sendBotFreeBroadcast()">Enviar mensaje libre</button>
+              <button class="btn" onclick="document.getElementById('botBroadcastMessage').value=''">Limpiar</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="box">
+          <div class="head">
             <strong>Grupos del bot</strong>
             <span class="small">Bloquea, renombra y asigna promociones (mínimo 10 actas).</span>
           </div>
@@ -4453,6 +4534,35 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
             location.reload();
           } else {
             alert(data.error || "No se pudo quitar el grupo.");
+          }
+        }
+
+        async function sendBotFreeBroadcast() {
+          const message = document.getElementById("botBroadcastMessage").value.trim();
+        
+          if (!message) {
+            alert("Escribe un mensaje.");
+            return;
+          }
+        
+          const ok = confirm("¿Enviar este mensaje a todos los grupos activos de este bot?");
+          if (!ok) return;
+        
+          const res = await fetch(`${BOT_PANEL_BASE}/broadcast/free`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              message: message
+            })
+          });
+        
+          const data = await res.json();
+        
+          if (data.ok) {
+            alert(`Mensaje enviado. Enviados: ${data.sent}, errores: ${data.errors}`);
+            document.getElementById("botBroadcastMessage").value = "";
+          } else {
+            alert(data.error || "No se pudo enviar el mensaje.");
           }
         }
 
