@@ -6,6 +6,7 @@ import asyncio
 import re
 import uuid
 import json
+import requests
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from collections import Counter
