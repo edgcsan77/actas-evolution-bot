@@ -4,6 +4,7 @@ import time
 import random
 import asyncio
 import re
+import uuid
 import json
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -17,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.db import Base, engine, get_db, SessionLocal
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion, GroupAlias, GroupCategory, BotControl
-from app.queue import request_queue, redis_conn
+from app.queue import request_queue, redis_conn, broadcast_queue
 from app.worker import process_request, provider3_keepalive_job, _validate_act_type_pdf, _validate_pdf_matches_term, _notify_support_error
 from app.services.provider3 import Provider3Client
 from app.services.provider4 import Provider4Client
@@ -55,6 +56,7 @@ from app.utils.bot_limits import (
 )
 
 from sqlalchemy import func, case, or_
+from app.broadcast_jobs import botpanel_broadcast_job
 
 app = FastAPI(title=settings.APP_NAME)
 PANEL_TZ = "America/Monterrey"
@@ -191,7 +193,7 @@ def hide_group_from_bot_panel(db: Session, group_jid: str, instance_name: str):
 
 def _is_child_bot(instance_name: str) -> bool:
     inst = (instance_name or "").strip().lower()
-    return inst.startswith("docifybot") and inst != "docifybot8"
+    return inst.startswith("docifybot") and inst != "docifybot"
 
 
 def _bot_title(instance_name: str) -> str:
@@ -3742,8 +3744,7 @@ def botpanel_free_broadcast(
 
     groups = _bot_group_stats(db, instance_name) or []
 
-    sent = 0
-    errors = 0
+    group_jids = []
 
     for g in groups:
         group_jid = g.get("group_jid")
@@ -3755,31 +3756,63 @@ def botpanel_free_broadcast(
             continue
 
         if "@g.us" not in group_jid:
-            continue  # evita errores raros
+            continue
 
-        try:
-            send_group_text(
-                group_jid,
-                message,
-                instance_name=instance_name,
-            )
-            sent += 1
-        except Exception as e:
-            errors += 1
-            print(
-                "BOTPANEL_BROADCAST_ERROR =",
-                instance_name,
-                group_jid,
-                str(e),
-                flush=True,
-            )
+        group_jids.append(group_jid)
+
+    if not group_jids:
+        return {"ok": False, "error": "No hay grupos activos para enviar"}
+
+    job_id = uuid.uuid4().hex
+
+    broadcast_queue.enqueue(
+        botpanel_broadcast_job,
+        job_id,
+        instance_name,
+        message,
+        group_jids,
+    )
 
     return {
         "ok": True,
+        "queued": True,
         "instance": instance_name,
-        "sent": sent,
-        "errors": errors,
+        "job_id": job_id,
+        "total": len(group_jids),
     }
+
+
+@app.get("/botpanel/{token}/broadcast/progress/{job_id}")
+def botpanel_broadcast_progress(token: str, job_id: str):
+    instance_name = _bot_instance_from_token(token)
+
+    if not instance_name:
+        return {"ok": False, "error": "Panel no válido"}
+
+    key = f"botpanel:broadcast:{job_id}"
+    raw = redis_conn.get(key)
+
+    if not raw:
+        return {
+            "ok": True,
+            "status": "pending",
+            "instance": instance_name,
+            "sent": 0,
+            "errors": 0,
+            "skipped": 0,
+            "total": 0,
+            "current": "",
+        }
+
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="ignore")
+
+    data = json.loads(raw)
+
+    if data.get("instance") != instance_name:
+        return {"ok": False, "error": "Job no pertenece a esta instancia"}
+
+    return data
 
 
 @app.post("/panel/broadcast/free")
@@ -4386,6 +4419,11 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
               <button class="btn btn-success" onclick="sendBotFreeBroadcast()">Enviar mensaje libre</button>
               <button class="btn" onclick="document.getElementById('botBroadcastMessage').value=''">Limpiar</button>
             </div>
+            
+            <div
+              id="botBroadcastProgress"
+              style="display:none;margin-top:12px;padding:12px;border-radius:12px;background:#f8fafc;border:1px solid #e5e7eb;font-size:13px;"
+            ></div>
           </div>
         </div>
 
@@ -4538,6 +4576,8 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
           }
         }
 
+        let botBroadcastProgressTimer = null;
+
         async function sendBotFreeBroadcast() {
           const message = document.getElementById("botBroadcastMessage").value.trim();
         
@@ -4560,11 +4600,51 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
           const data = await res.json();
         
           if (data.ok) {
-            alert(`Mensaje enviado. Enviados: ${data.sent}, errores: ${data.errors}`);
             document.getElementById("botBroadcastMessage").value = "";
+            alert(`Mensaje masivo en cola para ${data.instance}. Total: ${data.total}`);
+            startBotBroadcastProgress(data.job_id);
           } else {
             alert(data.error || "No se pudo enviar el mensaje.");
           }
+        }
+        
+        function startBotBroadcastProgress(jobId) {
+          const box = document.getElementById("botBroadcastProgress");
+        
+          if (box) {
+            box.style.display = "block";
+            box.innerHTML = "Enviando mensajes...";
+          }
+        
+          if (botBroadcastProgressTimer) {
+            clearInterval(botBroadcastProgressTimer);
+          }
+        
+          botBroadcastProgressTimer = setInterval(async () => {
+            const res = await fetch(`${BOT_PANEL_BASE}/broadcast/progress/${jobId}`);
+            const data = await res.json();
+        
+            if (!data.ok) {
+              if (box) box.innerHTML = data.error || "Error consultando progreso.";
+              clearInterval(botBroadcastProgressTimer);
+              return;
+            }
+        
+            if (box) {
+              box.innerHTML = `
+                <strong>Estado:</strong> ${data.status || "pending"}<br>
+                <strong>Instancia:</strong> ${data.instance || ""}<br>
+                <strong>Enviados:</strong> ${data.sent || 0}/${data.total || 0}<br>
+                <strong>Errores:</strong> ${data.errors || 0}<br>
+                <strong>Saltados:</strong> ${data.skipped || 0}<br>
+                <strong>Actual:</strong> ${data.current || ""}
+              `;
+            }
+        
+            if (data.status === "done" || data.status === "error") {
+              clearInterval(botBroadcastProgressTimer);
+            }
+          }, 2000);
         }
 
         async function addManualBotGroup() {
