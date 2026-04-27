@@ -4641,6 +4641,10 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
               `;
             }
         
+            if (data.status === "done") {
+              box.innerHTML += "<br><strong style='color:green;'>✔ Envío terminado</strong>";
+            }
+            
             if (data.status === "done" || data.status === "error") {
               clearInterval(botBroadcastProgressTimer);
             }
