@@ -1,7 +1,7 @@
 import time
 import json
 
-from app.evolution import send_group_text
+from app.services.evolution import send_group_text
 from app.queue import redis_conn
 
 
