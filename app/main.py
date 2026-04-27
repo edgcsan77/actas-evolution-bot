@@ -123,7 +123,7 @@ def _evolution_instance_state(instance_name: str) -> dict:
         except Exception:
             data = {"raw": r.text}
 
-        print("EVOLUTION_STATE_CHECK =", instance_name, r.status_code, data, flush=True)
+        print("EVOLUTION_STATE_DEBUG =", instance_name, r.status_code, data, flush=True)
 
         state = "unknown"
 
@@ -153,12 +153,29 @@ def _evolution_instance_state(instance_name: str) -> dict:
 
 def _evolution_connect_qr(instance_name: str) -> dict:
     try:
-        code, data = _evolution_get(f"/instance/connect/{instance_name}", timeout=15)
+        url = f"{EVOLUTION_BASE_URL}/instance/connect/{instance_name}"
+
+        r = requests.get(
+            url,
+            headers={"apikey": EVOLUTION_APIKEY},
+            timeout=15,
+        )
+
+        try:
+            data = r.json()
+        except Exception:
+            data = {"raw": r.text}
+
+        print("EVOLUTION_QR_DEBUG =", instance_name, r.status_code, data, flush=True)
+
         return {
-            "ok": code < 400,
+            "ok": r.status_code < 400,
+            "status_code": r.status_code,
             "data": data,
         }
+
     except Exception as e:
+        print("EVOLUTION_QR_ERROR =", instance_name, repr(e), flush=True)
         return {
             "ok": False,
             "error": str(e),
@@ -7002,10 +7019,14 @@ def panel_actas(
             const payload = data.data || {{}};
             const qr =
               payload.base64 ||
-              payload.qrcode ||
+              payload.qrcode?.base64 ||
+              payload.qrcode?.code ||
               payload.qr ||
+              payload.qrCode ||
               payload.code ||
               payload.pairingCode ||
+              payload.instance?.qrcode ||
+              payload.instance?.qr ||
               "";
         
             if (qr && String(qr).startsWith("data:image")) {{
