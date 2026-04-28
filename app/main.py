@@ -6120,15 +6120,15 @@ def panel_actas(
                     <div class="provider-card">
                       <div class="provider-name">ADMIN DIGITAL</div>
                       <div style="margin:6px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Tráfico asignado</div>
-                        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
+                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
                           <div style="display:flex;align-items:center;gap:6px;">
                             <input id="weight_PROVIDER1" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER1', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
-                            <span style="font-size:12px;opacity:.7;">pts</span>
+                            <span style="font-size:12px;opacity:.7;">nivel</span>
                           </div>
                           <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER1')">Aplicar</button>
                         </div>
-                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más puntos = más solicitudes asignadas</div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
                       </div>
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER1','on')">Activar</button>
@@ -6139,15 +6139,15 @@ def panel_actas(
                     <div class="provider-card">
                       <div class="provider-name">ACTAS DEL SURESTE</div>
                       <div style="margin:6px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Tráfico asignado</div>
-                        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
+                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
                           <div style="display:flex;align-items:center;gap:6px;">
                             <input id="weight_PROVIDER2" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER2', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
-                            <span style="font-size:12px;opacity:.7;">pts</span>
+                            <span style="font-size:12px;opacity:.7;">nivel</span>
                           </div>
                           <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER2')">Aplicar</button>
                         </div>
-                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más puntos = más solicitudes asignadas</div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
                       </div>
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER2','on')">Activar</button>
@@ -6158,15 +6158,15 @@ def panel_actas(
                     <div class="provider-card">
                       <div class="provider-name">AUSTRAM WEB</div>
                       <div style="margin:6px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Tráfico asignado</div>
-                        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
+                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
                           <div style="display:flex;align-items:center;gap:6px;">
                             <input id="weight_PROVIDER3" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER3', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
-                            <span style="font-size:12px;opacity:.7;">pts</span>
+                            <span style="font-size:12px;opacity:.7;">nivel</span>
                           </div>
                           <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER3')">Aplicar</button>
                         </div>
-                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más puntos = más solicitudes asignadas</div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
                       </div>
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER3','on')">Activar</button>
@@ -6178,15 +6178,15 @@ def panel_actas(
                     <div class="provider-card">
                       <div class="provider-name">LAZARO WEB</div>
                       <div style="margin:6px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Tráfico asignado</div>
-                        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
+                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
                           <div style="display:flex;align-items:center;gap:6px;">
                             <input id="weight_PROVIDER4" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER4', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
-                            <span style="font-size:12px;opacity:.7;">pts</span>
+                            <span style="font-size:12px;opacity:.7;">nivel</span>
                           </div>
                           <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER4')">Aplicar</button>
                         </div>
-                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más puntos = más solicitudes asignadas</div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
                       </div>
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER4','on')">Activar</button>
@@ -6198,15 +6198,15 @@ def panel_actas(
                     <div class="provider-card">
                       <div class="provider-name">LUIS SID</div>
                       <div style="margin:6px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Tráfico asignado</div>
-                        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
+                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
                           <div style="display:flex;align-items:center;gap:6px;">
                             <input id="weight_PROVIDER5" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER5', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
-                            <span style="font-size:12px;opacity:.7;">pts</span>
+                            <span style="font-size:12px;opacity:.7;">nivel</span>
                           </div>
                           <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER5')">Aplicar</button>
                         </div>
-                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más puntos = más solicitudes asignadas</div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
                       </div>
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER5','on')">Activar</button>
@@ -6217,15 +6217,15 @@ def panel_actas(
                     <div class="provider-card">
                       <div class="provider-name">ACTAS ESCALANTE</div>
                       <div style="margin:6px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Tráfico asignado</div>
-                        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
+                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
                           <div style="display:flex;align-items:center;gap:6px;">
                             <input id="weight_PROVIDER6" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER6', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
-                            <span style="font-size:12px;opacity:.7;">pts</span>
+                            <span style="font-size:12px;opacity:.7;">nivel</span>
                           </div>
                           <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER6')">Aplicar</button>
                         </div>
-                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más puntos = más solicitudes asignadas</div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
                       </div>
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER6','on')">Activar</button>
@@ -6236,15 +6236,15 @@ def panel_actas(
                     <div class="provider-card">
                       <div class="provider-name">VILLAFUERTE</div>
                       <div style="margin:6px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Tráfico asignado</div>
-                        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
+                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
                           <div style="display:flex;align-items:center;gap:6px;">
                             <input id="weight_PROVIDER8" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER8', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
-                            <span style="font-size:12px;opacity:.7;">pts</span>
+                            <span style="font-size:12px;opacity:.7;">nivel</span>
                           </div>
                           <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER8')">Aplicar</button>
                         </div>
-                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más puntos = más solicitudes asignadas</div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
                       </div>
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER8','on')">Activar</button>
