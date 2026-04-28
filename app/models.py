@@ -32,7 +32,7 @@ class ProviderSetting(Base):
     provider_name = Column(String, unique=True, index=True, nullable=False)
     is_enabled = Column(Boolean, default=True, nullable=False)
     value = Column(String, nullable=True)
-    weight = Column(Integer, default=0)
+    weight = Column(Float, default=0)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
