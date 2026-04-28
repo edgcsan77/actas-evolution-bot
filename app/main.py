@@ -6989,6 +6989,7 @@ def panel_actas(
           </div>
         </div>
       </div>
+    </div>
     
       <script>
         const PANEL_STREAM_ENABLED = {json.dumps(PANEL_STREAM_ENABLED)};
