@@ -6114,186 +6114,146 @@ def panel_actas(
               <div class="grid-hero">
                 <div class="glass">
                   <h3 class="section-title">Proveedores</h3>
-        
+            
                   <div class="provider-grid">
+            
                     <div class="provider-card">
                       <div class="provider-name">ADMIN DIGITAL</div>
-                      
-                      <div style="margin:10px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
-                          Tráfico asignado
+                      <div style="margin:6px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Tráfico asignado</div>
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                          <div style="display:flex;align-items:center;gap:6px;">
+                            <input id="weight_PROVIDER1" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER1', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <span style="font-size:12px;opacity:.7;">pts</span>
+                          </div>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER1')">Aplicar</button>
                         </div>
-                     
-                        <div style="display:flex;gap:8px;align-items:center;">
-                          <input id="weight_PROVIDER1" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER1', 0)}" style="width:75px;">
-                          <span style="font-size:13px;opacity:.75;">pts</span>
-                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER1')">Guardar</button>
-                        </div>
-                    
-                        <div style="font-size:11px;opacity:.65;margin-top:4px;">
-                          Más alto = más solicitudes
-                        </div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más puntos = más solicitudes asignadas</div>
                       </div>
-                      
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER1','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER1','off')">Desactivar</button>
                       </div>
                     </div>
-
+            
                     <div class="provider-card">
                       <div class="provider-name">ACTAS DEL SURESTE</div>
-
-                      <div style="margin:10px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
-                          Tráfico asignado
+                      <div style="margin:6px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Tráfico asignado</div>
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                          <div style="display:flex;align-items:center;gap:6px;">
+                            <input id="weight_PROVIDER2" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER2', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <span style="font-size:12px;opacity:.7;">pts</span>
+                          </div>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER2')">Aplicar</button>
                         </div>
-                     
-                        <div style="display:flex;gap:8px;align-items:center;">
-                          <input id="weight_PROVIDER2" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER2', 0)}" style="width:75px;">
-                          <span style="font-size:13px;opacity:.75;">pts</span>
-                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER2')">Guardar</button>
-                        </div>
-                    
-                        <div style="font-size:11px;opacity:.65;margin-top:4px;">
-                          Más alto = más solicitudes
-                        </div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más puntos = más solicitudes asignadas</div>
                       </div>
-                      
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER2','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER2','off')">Desactivar</button>
                       </div>
                     </div>
-        
+            
                     <div class="provider-card">
                       <div class="provider-name">AUSTRAM WEB</div>
-
-                      <div style="margin:10px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
-                          Tráfico asignado
+                      <div style="margin:6px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Tráfico asignado</div>
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                          <div style="display:flex;align-items:center;gap:6px;">
+                            <input id="weight_PROVIDER3" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER3', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <span style="font-size:12px;opacity:.7;">pts</span>
+                          </div>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER3')">Aplicar</button>
                         </div>
-                     
-                        <div style="display:flex;gap:8px;align-items:center;">
-                          <input id="weight_PROVIDER3" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER3', 0)}" style="width:75px;">
-                          <span style="font-size:13px;opacity:.75;">pts</span>
-                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER3')">Guardar</button>
-                        </div>
-                    
-                        <div style="font-size:11px;opacity:.65;margin-top:4px;">
-                          Más alto = más solicitudes
-                        </div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más puntos = más solicitudes asignadas</div>
                       </div>
-                      
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER3','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER3','off')">Desactivar</button>
                         <button class="btn btn-warning" onclick="refreshSID()">Actualizar SID</button>
                       </div>
                     </div>
-
+            
                     <div class="provider-card">
                       <div class="provider-name">LAZARO WEB</div>
-
-                      <div style="margin:10px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
-                          Tráfico asignado
+                      <div style="margin:6px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Tráfico asignado</div>
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                          <div style="display:flex;align-items:center;gap:6px;">
+                            <input id="weight_PROVIDER4" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER4', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <span style="font-size:12px;opacity:.7;">pts</span>
+                          </div>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER4')">Aplicar</button>
                         </div>
-                     
-                        <div style="display:flex;gap:8px;align-items:center;">
-                          <input id="weight_PROVIDER4" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER4', 0)}" style="width:75px;">
-                          <span style="font-size:13px;opacity:.75;">pts</span>
-                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER4')">Guardar</button>
-                        </div>
-                    
-                        <div style="font-size:11px;opacity:.65;margin-top:4px;">
-                          Más alto = más solicitudes
-                        </div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más puntos = más solicitudes asignadas</div>
                       </div>
-                      
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER4','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER4','off')">Desactivar</button>
                         <button class="btn btn-warning" onclick="refreshHID()">Actualizar HID</button>
                       </div>
                     </div>
-
+            
                     <div class="provider-card">
                       <div class="provider-name">LUIS SID</div>
-
-                      <div style="margin:10px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
-                          Tráfico asignado
+                      <div style="margin:6px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Tráfico asignado</div>
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                          <div style="display:flex;align-items:center;gap:6px;">
+                            <input id="weight_PROVIDER5" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER5', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <span style="font-size:12px;opacity:.7;">pts</span>
+                          </div>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER5')">Aplicar</button>
                         </div>
-                     
-                        <div style="display:flex;gap:8px;align-items:center;">
-                          <input id="weight_PROVIDER5" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER5', 0)}" style="width:75px;">
-                          <span style="font-size:13px;opacity:.75;">pts</span>
-                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER5')">Guardar</button>
-                        </div>
-                    
-                        <div style="font-size:11px;opacity:.65;margin-top:4px;">
-                          Más alto = más solicitudes
-                        </div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más puntos = más solicitudes asignadas</div>
                       </div>
-                      
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER5','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER5','off')">Desactivar</button>
                       </div>
                     </div>
-
+            
                     <div class="provider-card">
                       <div class="provider-name">ACTAS ESCALANTE</div>
-
-                      <div style="margin:10px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
-                          Tráfico asignado
+                      <div style="margin:6px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Tráfico asignado</div>
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                          <div style="display:flex;align-items:center;gap:6px;">
+                            <input id="weight_PROVIDER6" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER6', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <span style="font-size:12px;opacity:.7;">pts</span>
+                          </div>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER6')">Aplicar</button>
                         </div>
-                     
-                        <div style="display:flex;gap:8px;align-items:center;">
-                          <input id="weight_PROVIDER6" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER6', 0)}" style="width:75px;">
-                          <span style="font-size:13px;opacity:.75;">pts</span>
-                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER6')">Guardar</button>
-                        </div>
-                    
-                        <div style="font-size:11px;opacity:.65;margin-top:4px;">
-                          Más alto = más solicitudes
-                        </div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más puntos = más solicitudes asignadas</div>
                       </div>
-            
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER6','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER6','off')">Desactivar</button>
                       </div>
                     </div>
-
+            
                     <div class="provider-card">
                       <div class="provider-name">VILLAFUERTE</div>
-
-                      <div style="margin:10px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
-                          Tráfico asignado
+                      <div style="margin:6px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Tráfico asignado</div>
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                          <div style="display:flex;align-items:center;gap:6px;">
+                            <input id="weight_PROVIDER8" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER8', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <span style="font-size:12px;opacity:.7;">pts</span>
+                          </div>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER8')">Aplicar</button>
                         </div>
-                     
-                        <div style="display:flex;gap:8px;align-items:center;">
-                          <input id="weight_PROVIDER8" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER8', 0)}" style="width:75px;">
-                          <span style="font-size:13px;opacity:.75;">pts</span>
-                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER8')">Guardar</button>
-                        </div>
-                    
-                        <div style="font-size:11px;opacity:.65;margin-top:4px;">
-                          Más alto = más solicitudes
-                        </div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más puntos = más solicitudes asignadas</div>
                       </div>
-                
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER8','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER8','off')">Desactivar</button>
                       </div>
                     </div>
+            
                   </div>
-        
+            
                   <div class="status-panel">
                     <strong>Estado actual</strong><br><br>
                     {provider_states}
