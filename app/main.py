@@ -9662,8 +9662,26 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         )
                 
                     if fallback_req:
-                        print("PROVIDER_PDF_LAST_RESORT_MATCH =", fallback_req.id, flush=True)
-                        open_req = fallback_req
+                        active_count = (
+                            db.query(RequestLog)
+                            .filter(
+                                RequestLog.curp == lookup_id,
+                                RequestLog.status == "PROCESSING",
+                            )
+                            .count()
+                        )
+                    
+                        print("PROVIDER_PDF_LAST_RESORT_ACTIVE_COUNT =", active_count, flush=True)
+                    
+                        if active_count == 1:
+                            print("PROVIDER_PDF_LAST_RESORT_MATCH =", fallback_req.id, flush=True)
+                            open_req = fallback_req
+                        else:
+                            print("PROVIDER_PDF_LAST_RESORT_AMBIGUOUS =", {
+                                "lookup_id": lookup_id,
+                                "active_count": active_count,
+                            }, flush=True)
+                            return {"ok": True, "ignored": "ambiguous_multiple_processing_requests"}
                     else:
                         return {"ok": True, "ignored": "provider_pdf_without_safe_match"}
 
