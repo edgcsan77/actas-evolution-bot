@@ -9769,6 +9769,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     db.commit()
                 
                     try:
+                        redis_conn.delete(pdf_dedupe_key)
+                    except Exception as redis_del_exc:
+                        print("PDF_DEDUPE_DELETE_AFTER_DELIVERY_FAILED_ERROR =", str(redis_del_exc), flush=True)
+                
+                    try:
                         _notify_support_error(
                             open_req,
                             "DELIVERY_FAILED",
