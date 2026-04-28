@@ -8066,6 +8066,98 @@ def _extract_identifier_from_filename_local(filename: str) -> str | None:
     return extract_identifier_from_filename(filename)
 
 
+def _pdf_matches_req_type(pdf_bytes: bytes, req: RequestLog) -> bool:
+    try:
+        if is_chain(req.curp):
+            return True
+        return _validate_act_type_pdf(pdf_bytes, req.act_type)
+    except Exception as e:
+        print("PDF_MATCHES_REQ_TYPE_ERROR =", getattr(req, "id", None), str(e), flush=True)
+        return False
+
+
+def _pick_matching_processing_req_for_pdf(
+    db: Session,
+    lookup_id: str | None,
+    source_chat_id: str,
+    quoted_msg_id: str | None,
+    pdf_bytes: bytes,
+):
+    candidates = []
+
+    if lookup_id:
+        candidates = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.curp == lookup_id,
+                RequestLog.status == "PROCESSING",
+                RequestLog.provider_group_id == source_chat_id,
+            )
+            .order_by(RequestLog.created_at.asc())
+            .all()
+        )
+
+    if not candidates and quoted_msg_id:
+        candidates = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.provider_message_id == quoted_msg_id,
+                RequestLog.status == "PROCESSING",
+            )
+            .order_by(RequestLog.created_at.desc())
+            .all()
+        )
+
+    if not candidates and lookup_id:
+        candidates = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.curp == lookup_id,
+                RequestLog.status == "PROCESSING",
+            )
+            .order_by(RequestLog.created_at.asc())
+            .all()
+        )
+
+    print("PROVIDER_PDF_MATCH_CANDIDATES =", [
+        {
+            "id": r.id,
+            "curp": r.curp,
+            "act_type": r.act_type,
+            "provider_group_id": r.provider_group_id,
+            "source_group_id": r.source_group_id,
+            "instance_name": r.instance_name,
+        }
+        for r in candidates
+    ], flush=True)
+
+    # Primero intentamos encontrar el request cuyo tipo coincida con el PDF.
+    for r in candidates:
+        if _pdf_matches_req_type(pdf_bytes, r):
+            print("PROVIDER_PDF_SMART_TYPE_MATCH =", {
+                "matched_req_id": r.id,
+                "matched_act_type": r.act_type,
+            }, flush=True)
+            return r
+
+    # Si solo hay un candidato, lo regresamos para que las validaciones normales decidan.
+    if len(candidates) == 1:
+        print("PROVIDER_PDF_SINGLE_CANDIDATE_NO_TYPE_MATCH =", {
+            "matched_req_id": candidates[0].id,
+            "matched_act_type": candidates[0].act_type,
+        }, flush=True)
+        return candidates[0]
+
+    print("PROVIDER_PDF_NO_SAFE_TYPE_MATCH =", {
+        "lookup_id": lookup_id,
+        "source_chat_id": source_chat_id,
+        "quoted_msg_id": quoted_msg_id,
+        "candidates": len(candidates),
+    }, flush=True)
+
+    return None
+
+
 def _extract_quoted_message_id(message: dict, data: dict | None = None) -> str:
     try:
         if data:
@@ -9473,65 +9565,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             
                 open_req = None
                 lookup_id = filename_id or provider_id
-                
-                # 1. match más estricto: mismo provider_group_id + misma CURP + PROCESSING
-                if lookup_id:
-                    open_req = (
-                        db.query(RequestLog)
-                        .filter(
-                            RequestLog.curp == lookup_id,
-                            RequestLog.status == "PROCESSING",
-                            RequestLog.provider_group_id == source_chat_id,
-                        )
-                        .order_by(RequestLog.created_at.desc())
-                        .first()
-                    )
-                
-                # 2. fallback por provider_message_id si el proveedor respondió citando
-                if not open_req and quoted_msg_id:
-                    open_req = (
-                        db.query(RequestLog)
-                        .filter(
-                            RequestLog.provider_message_id == quoted_msg_id,
-                            RequestLog.status == "PROCESSING",
-                        )
-                        .order_by(RequestLog.created_at.desc())
-                        .first()
-                    )
-                
-                # 3. último fallback: misma CURP + PROCESSING + mismo bot
-                if not open_req and lookup_id:
-                    open_req = (
-                        db.query(RequestLog)
-                        .filter(
-                            RequestLog.curp == lookup_id,
-                            RequestLog.status == "PROCESSING",
-                        )
-                        .order_by(RequestLog.created_at.desc())
-                        .first()
-                    )
-                
-                print("PROVIDER_PDF_FALLBACK_MATCH =", {
-                    "lookup_id": lookup_id,
-                    "quoted_msg_id": quoted_msg_id,
-                    "matched_req_id": getattr(open_req, "id", None),
-                    "matched_provider_group_id": getattr(open_req, "provider_group_id", None),
-                    "matched_source_group_id": getattr(open_req, "source_group_id", None),
-                    "matched_instance_name": getattr(open_req, "instance_name", None),
-                    "matched_act_type": getattr(open_req, "act_type", None),
-                }, flush=True)
-            
-                if not open_req:
-                    print("PROVIDER_PDF_WITHOUT_MATCH =", filename, flush=True)
-                    return {"ok": True, "ignored": "provider_pdf_without_match"}
-            
-                match_term = filename_id or provider_id or open_req.curp or "NO_TERM"
-                pdf_dedupe_key = f"provider_pdf:{open_req.id}:{source_chat_id}:{match_term}:{filename or 'nofile'}"
-            
-                already_sent = redis_conn.set(pdf_dedupe_key, "1", ex=3600, nx=True)
-                if not already_sent:
-                    print("PROVIDER_PDF_DUPLICATE_IGNORED =", pdf_dedupe_key, flush=True)
-                    return {"ok": True, "ignored": "provider_pdf_duplicate"}
             
                 media_b64_start_ts = time.time()
                 print("PROVIDER1_MEDIA_B64_START =", media_message_id, media_b64_start_ts, flush=True)
@@ -9590,58 +9623,66 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 safe_media_b64 = base64.b64encode(pdf_bytes).decode()
                 print("T_BASE64_REENCODE =", round(time.perf_counter() - t_encode, 3), flush=True)
 
+                open_req = _pick_matching_processing_req_for_pdf(
+                    db=db,
+                    lookup_id=lookup_id,
+                    source_chat_id=source_chat_id,
+                    quoted_msg_id=quoted_msg_id,
+                    pdf_bytes=pdf_bytes,
+                )
+                
+                print("PROVIDER_PDF_FALLBACK_MATCH =", {
+                    "lookup_id": lookup_id,
+                    "quoted_msg_id": quoted_msg_id,
+                    "matched_req_id": getattr(open_req, "id", None),
+                    "matched_provider_group_id": getattr(open_req, "provider_group_id", None),
+                    "matched_source_group_id": getattr(open_req, "source_group_id", None),
+                    "matched_instance_name": getattr(open_req, "instance_name", None),
+                    "matched_act_type": getattr(open_req, "act_type", None),
+                }, flush=True)
+                
+                if not open_req:
+                    print("PROVIDER_PDF_WITHOUT_SAFE_MATCH =", {
+                        "filename": filename,
+                        "lookup_id": lookup_id,
+                        "source_chat_id": source_chat_id,
+                        "quoted_msg_id": quoted_msg_id,
+                    }, flush=True)
+                    return {"ok": True, "ignored": "provider_pdf_without_safe_match"}
+                
+                match_term = filename_id or provider_id or open_req.curp or "NO_TERM"
+                pdf_dedupe_key = f"provider_pdf:{open_req.id}:{source_chat_id}:{match_term}:{filename or 'nofile'}"
+                
+                already_sent = redis_conn.set(pdf_dedupe_key, "1", ex=3600, nx=True)
+                if not already_sent:
+                    print("PROVIDER_PDF_DUPLICATE_IGNORED =", pdf_dedupe_key, flush=True)
+                    return {"ok": True, "ignored": "provider_pdf_duplicate"}
+
                 is_chain_req = is_chain(open_req.curp)
                 if (not is_chain_req) and (not _validate_act_type_pdf(pdf_bytes, open_req.act_type)):
-                    print("PROVIDER_PDF_WRONG_ACT_TYPE =", {
+                    print("PROVIDER_PDF_WRONG_ACT_TYPE_AFTER_SMART_MATCH =", {
                         "req_id": open_req.id,
                         "curp": open_req.curp,
                         "expected_act_type": open_req.act_type,
                         "filename": filename,
                         "source_chat_id": source_chat_id,
                     }, flush=True)
-                
-                    open_req.status = "ERROR"
-                    open_req.error_message = "WRONG_ACT_TYPE_PDF"
+
+                    open_req.status = "PROCESSING"
+                    open_req.error_message = "WRONG_ACT_TYPE_PDF_PENDING_RETRY"
                     open_req.updated_at = _utc_now_naive()
                     db.commit()
-                
+                    
                     try:
                         _notify_support_error(
                             open_req,
-                            "WRONG_ACT_TYPE_PDF",
-                            f"filename={filename} | expected_act_type={open_req.act_type}"
+                            "WRONG_ACT_TYPE_PDF_PENDING_RETRY",
+                            f"filename={filename} | expected_act_type={open_req.act_type} | NO se notificó al cliente para evitar falso error"
                         )
                     except Exception as support_exc:
                         print("NOTIFY_SUPPORT_ERROR_FAILED =", str(support_exc), flush=True)
-
-                    try:
-                        fail_msg = (
-                            f"⚠️ Solicitud sin éxito en Registro Civil\n"
-                            f"Dato: {open_req.curp}\n"
-                            f"Tipo: {open_req.act_type}\n\n"
-                            f"Reenviar nuevamente en unos minutos"
-                        )
-                
-                        if open_req.source_group_id:
-                            if should_send_extra_text(open_req.source_group_id):
-                                send_group_text(
-                                    open_req.source_group_id,
-                                    fail_msg,
-                                    instance_name=open_req.instance_name
-                                )
-                        elif open_req.requester_wa_id:
-                            send_text(
-                                open_req.requester_wa_id,
-                                fail_msg,
-                                instance_name=open_req.instance_name
-                            )
-                        else:
-                            print("WRONG_ACT_TYPE_NO_CLIENT_DESTINATION =", open_req.id, flush=True)
-                
-                    except Exception as client_notify_exc:
-                        print("WRONG_ACT_TYPE_CLIENT_NOTIFY_ERROR =", str(client_notify_exc), flush=True)
-                
-                    return {"ok": True, "ignored": "provider_pdf_wrong_act_type"}
+                    
+                    return {"ok": True, "ignored": "provider_pdf_wrong_act_type_pending_retry"}
                 
                 if is_chain_req:
                     print("PROVIDER_CHAIN_SKIP_ACT_TYPE_VALIDATION =", open_req.curp, flush=True)
