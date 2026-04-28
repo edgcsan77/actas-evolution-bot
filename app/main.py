@@ -9649,14 +9649,13 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         "quoted_msg_id": quoted_msg_id,
                     }, flush=True)
                 
-                    # 🔥 intentar fallback FINAL por CURP reciente
                     fallback_req = None
                     if lookup_id:
                         fallback_req = (
                             db.query(RequestLog)
                             .filter(
                                 RequestLog.curp == lookup_id,
-                                RequestLog.status.in_(["PROCESSING", "QUEUED"]),
+                                RequestLog.status.in_(["PROCESSING"]),
                             )
                             .order_by(RequestLog.created_at.desc())
                             .first()
@@ -9667,14 +9666,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         open_req = fallback_req
                     else:
                         return {"ok": True, "ignored": "provider_pdf_without_safe_match"}
-                
-                match_term = filename_id or provider_id or open_req.curp or "NO_TERM"
-                pdf_dedupe_key = f"provider_pdf:{open_req.id}:{source_chat_id}:{match_term}:{filename or 'nofile'}"
-                
-                already_sent = redis_conn.set(pdf_dedupe_key, "1", ex=3600, nx=True)
-                if not already_sent:
-                    print("PROVIDER_PDF_DUPLICATE_IGNORED =", pdf_dedupe_key, flush=True)
-                    return {"ok": True, "ignored": "provider_pdf_duplicate"}
 
                 is_chain_req = is_chain(open_req.curp)
                 if (not is_chain_req) and (not _validate_act_type_pdf(pdf_bytes, open_req.act_type)):
@@ -9725,6 +9716,14 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         f"filename={filename} | expected_curp={open_req.curp}"
                     )
                     return {"ok": True, "ignored": "provider_pdf_wrong_curp"}
+
+                match_term = filename_id or provider_id or open_req.curp or "NO_TERM"
+                pdf_dedupe_key = f"provider_pdf:{open_req.id}:{source_chat_id}:{match_term}:{filename or 'nofile'}"
+                
+                already_sent = redis_conn.set(pdf_dedupe_key, "1", ex=3600, nx=True)
+                if not already_sent:
+                    print("PROVIDER_PDF_DUPLICATE_IGNORED =", pdf_dedupe_key, flush=True)
+                    return {"ok": True, "ignored": "provider_pdf_duplicate"}
                 
                 open_req.pdf_url = None
                 open_req.provider_media_url = "BASE64_FROM_MEDIA_MESSAGE"
