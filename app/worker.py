@@ -365,6 +365,39 @@ def _is_folio_type(act_type: str | None) -> bool:
     ])
 
 
+def _pick_provider_by_weight(db: Session, enabled: list[str]) -> str:
+    rows = (
+        db.query(ProviderSetting)
+        .filter(
+            ProviderSetting.provider_name.in_(enabled),
+            ProviderSetting.is_enabled == True,
+        )
+        .all()
+    )
+
+    weights = {}
+    for r in rows:
+        weights[r.provider_name] = max(0, int(r.weight or 0))
+
+    total = sum(weights.get(p, 0) for p in enabled)
+
+    print("PICK_PROVIDER_WEIGHTS =", weights, "TOTAL =", total, flush=True)
+
+    # Si no hay pesos configurados, conserva tu rotación normal
+    if total <= 0:
+        return ""
+
+    n = random.randint(1, total)
+    acc = 0
+
+    for p in enabled:
+        acc += weights.get(p, 0)
+        if n <= acc:
+            return p
+
+    return enabled[0]
+
+
 def _pick_provider_name(
     db,
     request_id: int,
@@ -434,7 +467,14 @@ def _pick_provider_name(
     if len(enabled) == 1:
         print("PICK_PROVIDER_SINGLE =", enabled[0], flush=True)
         return enabled[0]
-
+    
+    weighted_chosen = _pick_provider_by_weight(db, enabled)
+    
+    if weighted_chosen:
+        print("PICK_PROVIDER_WEIGHTED_CHOSEN =", weighted_chosen, flush=True)
+        return weighted_chosen
+    
+    # fallback: si todos los pesos están en 0, conserva tu rotación anterior
     idx = (request_id - 1) % len(enabled)
     chosen = enabled[idx]
     
