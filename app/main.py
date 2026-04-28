@@ -9648,7 +9648,25 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         "source_chat_id": source_chat_id,
                         "quoted_msg_id": quoted_msg_id,
                     }, flush=True)
-                    return {"ok": True, "ignored": "provider_pdf_without_safe_match"}
+                
+                    # 🔥 intentar fallback FINAL por CURP reciente
+                    fallback_req = None
+                    if lookup_id:
+                        fallback_req = (
+                            db.query(RequestLog)
+                            .filter(
+                                RequestLog.curp == lookup_id,
+                                RequestLog.status.in_(["PROCESSING", "QUEUED"]),
+                            )
+                            .order_by(RequestLog.created_at.desc())
+                            .first()
+                        )
+                
+                    if fallback_req:
+                        print("PROVIDER_PDF_LAST_RESORT_MATCH =", fallback_req.id, flush=True)
+                        open_req = fallback_req
+                    else:
+                        return {"ok": True, "ignored": "provider_pdf_without_safe_match"}
                 
                 match_term = filename_id or provider_id or open_req.curp or "NO_TERM"
                 pdf_dedupe_key = f"provider_pdf:{open_req.id}:{source_chat_id}:{match_term}:{filename or 'nofile'}"
