@@ -9683,11 +9683,13 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     db.commit()
                     
                     try:
-                        _notify_support_error(
-                            open_req,
-                            "WRONG_ACT_TYPE_PDF_PENDING_RETRY",
-                            f"filename={filename} | expected_act_type={open_req.act_type} | NO se notificó al cliente para evitar falso error"
-                        )
+                        support_key = f"support_wrong_type_pending:{open_req.id}"
+                        if redis_conn.set(support_key, "1", ex=120, nx=True):
+                            _notify_support_error(
+                                open_req,
+                                "WRONG_ACT_TYPE_PDF_PENDING_RETRY",
+                                f"filename={filename} | expected_act_type={open_req.act_type} | NO se notificó al cliente para evitar falso error"
+                            )
                     except Exception as support_exc:
                         print("NOTIFY_SUPPORT_ERROR_FAILED =", str(support_exc), flush=True)
                     
