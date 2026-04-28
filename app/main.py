@@ -9729,14 +9729,14 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 
                 open_req.pdf_url = None
                 open_req.provider_media_url = "BASE64_FROM_MEDIA_MESSAGE"
-                open_req.status = "DONE"
+                open_req.status = "PROCESSING"
                 open_req.error_message = None
                 open_req.updated_at = _utc_now_naive()
                 open_req.provider_to_webhook_lag_s = round(lag_s, 3) if lag_s is not None else None
 
                 t2 = time.perf_counter()
                 db.commit()
-                print("T_DB_COMMIT =", round(time.perf_counter() - t2, 3), flush=True)
+                print("T_DB_COMMIT_BEFORE_DELIVERY =", round(time.perf_counter() - t2, 3), flush=True)
 
                 print("PROVIDER_PDF_MATCHED_REQ_ID =", open_req.id, flush=True)
                 print("PROVIDER_PDF_MATCHED_CURP =", open_req.curp, flush=True)
@@ -9752,12 +9752,37 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
     
                 total_relay_s = None
                 t4 = time.perf_counter()
-                _deliver_pdf_result(
-                    open_req,
-                    safe_media_b64,
-                    filename=filename or f"{open_req.curp}.pdf",
-                )
-                print("T_DELIVER_PDF_RESULT =", round(time.perf_counter() - t4, 3), flush=True)
+                try:
+                    _deliver_pdf_result(
+                        open_req,
+                        safe_media_b64,
+                        filename=filename or f"{open_req.curp}.pdf",
+                    )
+                    print("T_DELIVER_PDF_RESULT =", round(time.perf_counter() - t4, 3), flush=True)
+                
+                except Exception as delivery_exc:
+                    print("DELIVERY_FAILED =", str(delivery_exc), flush=True)
+                
+                    open_req.status = "ERROR"
+                    open_req.error_message = f"DELIVERY_FAILED: {str(delivery_exc)[:300]}"
+                    open_req.updated_at = _utc_now_naive()
+                    db.commit()
+                
+                    try:
+                        _notify_support_error(
+                            open_req,
+                            "DELIVERY_FAILED",
+                            f"filename={filename} | error={str(delivery_exc)[:500]}"
+                        )
+                    except Exception as support_exc:
+                        print("DELIVERY_FAILED_SUPPORT_NOTIFY_ERROR =", str(support_exc), flush=True)
+                
+                    return {"ok": True, "ignored": "delivery_failed"}
+
+                open_req.status = "DONE"
+                open_req.error_message = None
+                open_req.updated_at = _utc_now_naive()
+                db.commit()
 
                 try:
                     if open_req.instance_name:
