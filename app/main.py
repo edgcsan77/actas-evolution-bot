@@ -6119,9 +6119,20 @@ def panel_actas(
                     <div class="provider-card">
                       <div class="provider-name">ADMIN DIGITAL</div>
                       
-                      <div style="display:flex;gap:8px;align-items:center;margin:8px 0;">
-                        <input id="weight_PROVIDER1" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER1', 0)}" style="width:90px;">
-                        <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER1')">Guardar peso</button>
+                      <div style="margin:10px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
+                          Tráfico asignado
+                        </div>
+                     
+                        <div style="display:flex;gap:8px;align-items:center;">
+                          <input id="weight_PROVIDER1" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER1', 0)}" style="width:75px;">
+                          <span style="font-size:13px;opacity:.75;">pts</span>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER1')">Guardar</button>
+                        </div>
+                    
+                        <div style="font-size:11px;opacity:.65;margin-top:4px;">
+                          Más alto = más solicitudes
+                        </div>
                       </div>
                       
                       <div class="provider-actions">
@@ -6133,9 +6144,20 @@ def panel_actas(
                     <div class="provider-card">
                       <div class="provider-name">ACTAS DEL SURESTE</div>
 
-                      <div style="display:flex;gap:8px;align-items:center;margin:8px 0;">
-                        <input id="weight_PROVIDER2" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER2', 0)}" style="width:90px;">
-                        <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER2')">Guardar peso</button>
+                      <div style="margin:10px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
+                          Tráfico asignado
+                        </div>
+                     
+                        <div style="display:flex;gap:8px;align-items:center;">
+                          <input id="weight_PROVIDER2" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER2', 0)}" style="width:75px;">
+                          <span style="font-size:13px;opacity:.75;">pts</span>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER2')">Guardar</button>
+                        </div>
+                    
+                        <div style="font-size:11px;opacity:.65;margin-top:4px;">
+                          Más alto = más solicitudes
+                        </div>
                       </div>
                       
                       <div class="provider-actions">
@@ -6147,9 +6169,20 @@ def panel_actas(
                     <div class="provider-card">
                       <div class="provider-name">AUSTRAM WEB</div>
 
-                      <div style="display:flex;gap:8px;align-items:center;margin:8px 0;">
-                        <input id="weight_PROVIDER3" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER3', 0)}" style="width:90px;">
-                        <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER3')">Guardar peso</button>
+                      <div style="margin:10px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
+                          Tráfico asignado
+                        </div>
+                     
+                        <div style="display:flex;gap:8px;align-items:center;">
+                          <input id="weight_PROVIDER3" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER3', 0)}" style="width:75px;">
+                          <span style="font-size:13px;opacity:.75;">pts</span>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER3')">Guardar</button>
+                        </div>
+                    
+                        <div style="font-size:11px;opacity:.65;margin-top:4px;">
+                          Más alto = más solicitudes
+                        </div>
                       </div>
                       
                       <div class="provider-actions">
@@ -6162,9 +6195,20 @@ def panel_actas(
                     <div class="provider-card">
                       <div class="provider-name">LAZARO WEB</div>
 
-                      <div style="display:flex;gap:8px;align-items:center;margin:8px 0;">
-                        <input id="weight_PROVIDER4" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER4', 0)}" style="width:90px;">
-                        <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER4')">Guardar peso</button>
+                      <div style="margin:10px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
+                          Tráfico asignado
+                        </div>
+                     
+                        <div style="display:flex;gap:8px;align-items:center;">
+                          <input id="weight_PROVIDER4" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER4', 0)}" style="width:75px;">
+                          <span style="font-size:13px;opacity:.75;">pts</span>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER4')">Guardar</button>
+                        </div>
+                    
+                        <div style="font-size:11px;opacity:.65;margin-top:4px;">
+                          Más alto = más solicitudes
+                        </div>
                       </div>
                       
                       <div class="provider-actions">
@@ -6177,9 +6221,20 @@ def panel_actas(
                     <div class="provider-card">
                       <div class="provider-name">LUIS SID</div>
 
-                      <div style="display:flex;gap:8px;align-items:center;margin:8px 0;">
-                        <input id="weight_PROVIDER5" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER5', 0)}" style="width:90px;">
-                        <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER5')">Guardar peso</button>
+                      <div style="margin:10px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
+                          Tráfico asignado
+                        </div>
+                     
+                        <div style="display:flex;gap:8px;align-items:center;">
+                          <input id="weight_PROVIDER5" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER5', 0)}" style="width:75px;">
+                          <span style="font-size:13px;opacity:.75;">pts</span>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER5')">Guardar</button>
+                        </div>
+                    
+                        <div style="font-size:11px;opacity:.65;margin-top:4px;">
+                          Más alto = más solicitudes
+                        </div>
                       </div>
                       
                       <div class="provider-actions">
@@ -6191,9 +6246,20 @@ def panel_actas(
                     <div class="provider-card">
                       <div class="provider-name">ACTAS ESCALANTE</div>
 
-                      <div style="display:flex;gap:8px;align-items:center;margin:8px 0;">
-                        <input id="weight_PROVIDER6" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER6', 0)}" style="width:90px;">
-                        <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER6')">Guardar peso</button>
+                      <div style="margin:10px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
+                          Tráfico asignado
+                        </div>
+                     
+                        <div style="display:flex;gap:8px;align-items:center;">
+                          <input id="weight_PROVIDER6" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER6', 0)}" style="width:75px;">
+                          <span style="font-size:13px;opacity:.75;">pts</span>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER6')">Guardar</button>
+                        </div>
+                    
+                        <div style="font-size:11px;opacity:.65;margin-top:4px;">
+                          Más alto = más solicitudes
+                        </div>
                       </div>
             
                       <div class="provider-actions">
@@ -6205,9 +6271,20 @@ def panel_actas(
                     <div class="provider-card">
                       <div class="provider-name">VILLAFUERTE</div>
 
-                      <div style="display:flex;gap:8px;align-items:center;margin:8px 0;">
-                        <input id="weight_PROVIDER8" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER8', 0)}" style="width:90px;">
-                        <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER8')">Guardar peso</button>
+                      <div style="margin:10px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
+                          Tráfico asignado
+                        </div>
+                     
+                        <div style="display:flex;gap:8px;align-items:center;">
+                          <input id="weight_PROVIDER8" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER8', 0)}" style="width:75px;">
+                          <span style="font-size:13px;opacity:.75;">pts</span>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER8')">Guardar</button>
+                        </div>
+                    
+                        <div style="font-size:11px;opacity:.65;margin-top:4px;">
+                          Más alto = más solicitudes
+                        </div>
                       </div>
                 
                       <div class="provider-actions">
