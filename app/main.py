@@ -4884,7 +4884,7 @@ def _is_hidden_panel_group(gid: str | None, name: str | None) -> bool:
 @app.post("/panel/provider-weight")
 def panel_provider_weight(payload: dict, db: Session = Depends(get_db)):
     provider_name = str(payload.get("provider_name") or "").strip().upper()
-    weight = int(payload.get("weight") or 0)
+    weight = float(payload.get("weight") or 0)
 
     if provider_name not in {
         "PROVIDER1",
@@ -6123,7 +6123,7 @@ def panel_actas(
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
                           <div style="display:flex;align-items:center;gap:6px;">
-                            <input id="weight_PROVIDER1" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER1', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <input id="weight_PROVIDER1" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER1', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
                             <span style="font-size:12px;opacity:.7;">nivel</span>
                           </div>
                           <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER1')">Aplicar</button>
@@ -6142,7 +6142,7 @@ def panel_actas(
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
                           <div style="display:flex;align-items:center;gap:6px;">
-                            <input id="weight_PROVIDER2" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER2', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <input id="weight_PROVIDER2" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER2', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
                             <span style="font-size:12px;opacity:.7;">nivel</span>
                           </div>
                           <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER2')">Aplicar</button>
@@ -6161,7 +6161,7 @@ def panel_actas(
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
                           <div style="display:flex;align-items:center;gap:6px;">
-                            <input id="weight_PROVIDER3" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER3', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <input id="weight_PROVIDER3" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER3', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
                             <span style="font-size:12px;opacity:.7;">nivel</span>
                           </div>
                           <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER3')">Aplicar</button>
@@ -6181,7 +6181,7 @@ def panel_actas(
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
                           <div style="display:flex;align-items:center;gap:6px;">
-                            <input id="weight_PROVIDER4" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER4', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <input id="weight_PROVIDER4" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER4', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
                             <span style="font-size:12px;opacity:.7;">nivel</span>
                           </div>
                           <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER4')">Aplicar</button>
@@ -6201,7 +6201,7 @@ def panel_actas(
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
                           <div style="display:flex;align-items:center;gap:6px;">
-                            <input id="weight_PROVIDER5" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER5', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <input id="weight_PROVIDER5" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER5', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
                             <span style="font-size:12px;opacity:.7;">nivel</span>
                           </div>
                           <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER5')">Aplicar</button>
@@ -6220,7 +6220,7 @@ def panel_actas(
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
                           <div style="display:flex;align-items:center;gap:6px;">
-                            <input id="weight_PROVIDER6" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER6', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <input id="weight_PROVIDER6" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER6', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
                             <span style="font-size:12px;opacity:.7;">nivel</span>
                           </div>
                           <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER6')">Aplicar</button>
@@ -6239,7 +6239,7 @@ def panel_actas(
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
                           <div style="display:flex;align-items:center;gap:6px;">
-                            <input id="weight_PROVIDER8" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER8', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <input id="weight_PROVIDER8" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER8', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
                             <span style="font-size:12px;opacity:.7;">nivel</span>
                           </div>
                           <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER8')">Aplicar</button>
