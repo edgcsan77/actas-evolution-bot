@@ -3595,7 +3595,7 @@ GROUP_NAME_MAP = {
     "120363427738529897@g.us": "Gpo. No. 63 Grupo Maya 2",
     "120363426763609841@g.us": "Gpo. No. 27 Comida Master",
     "120363425053127323@g.us": "Gpo. No. 64 Panchinko Actas",
-    "120363407565721999@g.us": "Docify Mx 3 - Eduardo",
+    "120363407565721999@g.us": "Docify Mx 3 - General",
     "120363421862592214@g.us": "Gpo. No. 71 Lazaro 1",
     "120363425433931286@g.us": "Gpo. No. 65 Gestoria Guerrero",
     "120363425691947112@g.us": "Gpo. No. 70 Lazaro 2",
