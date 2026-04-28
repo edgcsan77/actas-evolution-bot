@@ -10358,26 +10358,28 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 age_sec = (_utc_now_naive() - open_existing.created_at).total_seconds()
                 age_sec = max(age_sec, 0)
             
-                if age_sec >= 60:
-                    open_existing.status = "ERROR"
-                    open_existing.error_message = "AUTO_TIMEOUT_RETRY_ALLOWED"
-                    open_existing.updated_at = _utc_now_naive()
-                    db.commit()
+                dup_msg = (
+                    f"⏳ Ya existe una solicitud en proceso\n"
+                    f"Dato: {term}\n"
+                    f"Tipo: {act_type}\n\n"
+                    f"Espera un momento antes de reenviar."
+                )
+            
+                print("DUPLICATE_OPEN_REQUEST_BLOCKED =", {
+                    "term": term,
+                    "act_type": act_type,
+                    "open_req_id": open_existing.id,
+                    "open_status": open_existing.status,
+                    "age_sec": round(age_sec, 2),
+                }, flush=True)
+            
+                if source_group_id:
+                    if should_send_extra_text(source_group_id):
+                        send_group_text(source_group_id, dup_msg, instance_name=instance_name)
                 else:
-                    dup_msg = (
-                        f"⏳ Ya existe una solicitud en proceso\n"
-                        f"Dato: {term}\n"
-                        f"Tipo: {act_type}\n\n"
-                        f"Espera un momento antes de reenviar."
-                    )
+                    send_text(requester_wa_id, dup_msg, instance_name=instance_name)
             
-                    if source_group_id:
-                        if should_send_extra_text(source_group_id):
-                            send_group_text(source_group_id, dup_msg, instance_name=instance_name)
-                    else:
-                        send_text(requester_wa_id, dup_msg, instance_name=instance_name)
-            
-                    continue
+                continue
         
             # contar intentos previos de ese mismo dato/tipo/grupo
             same_requests_count = (
