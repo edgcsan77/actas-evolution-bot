@@ -5099,7 +5099,7 @@ def panel_actas(
         provider_map = {}
 
         provider_weight_map = {
-            r.provider_name: int(r.weight or 0)
+            r.provider_name: float(r.weight or 0)
             for r in db.query(ProviderSetting).all()
         }
         
