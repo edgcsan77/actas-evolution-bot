@@ -68,7 +68,7 @@ PANEL_HTML_TTL = 180
 PANEL_RECENT_TTL = 60
 PANEL_GROUP_DETAIL_TTL = 180
 GROUP_NAME_CACHE_TTL = 300
-PANEL_STREAM_SLEEP = 10
+PANEL_STREAM_SLEEP = 5
 PANEL_STREAM_ENABLED = True
 
 EVOLUTION_BASE_URL = "http://127.0.0.1:8080"
@@ -4880,6 +4880,37 @@ def _is_hidden_panel_group(gid: str | None, name: str | None) -> bool:
     )
     return any(word in name_up for word in excluded_words)
 
+
+@app.post("/panel/provider-weight")
+def panel_provider_weight(payload: dict, db: Session = Depends(get_db)):
+    provider_name = str(payload.get("provider_name") or "").strip().upper()
+    weight = int(payload.get("weight") or 0)
+
+    if provider_name not in {
+        "PROVIDER1",
+        "PROVIDER2",
+        "PROVIDER3",
+        "PROVIDER4",
+        "PROVIDER5",
+        "PROVIDER6",
+        "PROVIDER7",
+        "PROVIDER8",
+    }:
+        return {"ok": False, "error": "Proveedor inválido"}
+
+    row = _get_or_create_provider(db, provider_name, True)
+    row.weight = max(0, weight)
+    row.updated_at = _utc_now_naive()
+    db.commit()
+
+    _clear_panel_cache()
+
+    return {
+        "ok": True,
+        "provider_name": provider_name,
+        "weight": row.weight,
+    }
+
                     
 @app.get("/panel", response_class=HTMLResponse)
 def panel_actas(
@@ -5066,6 +5097,11 @@ def panel_actas(
         )
         
         provider_map = {}
+
+        provider_weight_map = {
+            r.provider_name: int(r.weight or 0)
+            for r in db.query(ProviderSetting).all()
+        }
         
         for name, st, cnt in by_provider_raw:
             name = name or "NO IDENTIFICADO"
@@ -6082,6 +6118,12 @@ def panel_actas(
                   <div class="provider-grid">
                     <div class="provider-card">
                       <div class="provider-name">ADMIN DIGITAL</div>
+                      
+                      <div style="display:flex;gap:8px;align-items:center;margin:8px 0;">
+                        <input id="weight_PROVIDER1" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER1', 0)}" style="width:90px;">
+                        <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER1')">Guardar peso</button>
+                      </div>
+                      
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER1','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER1','off')">Desactivar</button>
@@ -6090,6 +6132,12 @@ def panel_actas(
 
                     <div class="provider-card">
                       <div class="provider-name">ACTAS DEL SURESTE</div>
+
+                      <div style="display:flex;gap:8px;align-items:center;margin:8px 0;">
+                        <input id="weight_PROVIDER2" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER2', 0)}" style="width:90px;">
+                        <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER2')">Guardar peso</button>
+                      </div>
+                      
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER2','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER2','off')">Desactivar</button>
@@ -6098,6 +6146,12 @@ def panel_actas(
         
                     <div class="provider-card">
                       <div class="provider-name">AUSTRAM WEB</div>
+
+                      <div style="display:flex;gap:8px;align-items:center;margin:8px 0;">
+                        <input id="weight_PROVIDER3" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER3', 0)}" style="width:90px;">
+                        <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER3')">Guardar peso</button>
+                      </div>
+                      
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER3','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER3','off')">Desactivar</button>
@@ -6107,6 +6161,12 @@ def panel_actas(
 
                     <div class="provider-card">
                       <div class="provider-name">LAZARO WEB</div>
+
+                      <div style="display:flex;gap:8px;align-items:center;margin:8px 0;">
+                        <input id="weight_PROVIDER4" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER4', 0)}" style="width:90px;">
+                        <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER4')">Guardar peso</button>
+                      </div>
+                      
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER4','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER4','off')">Desactivar</button>
@@ -6116,6 +6176,12 @@ def panel_actas(
 
                     <div class="provider-card">
                       <div class="provider-name">LUIS SID</div>
+
+                      <div style="display:flex;gap:8px;align-items:center;margin:8px 0;">
+                        <input id="weight_PROVIDER5" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER5', 0)}" style="width:90px;">
+                        <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER5')">Guardar peso</button>
+                      </div>
+                      
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER5','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER5','off')">Desactivar</button>
@@ -6124,6 +6190,12 @@ def panel_actas(
 
                     <div class="provider-card">
                       <div class="provider-name">ACTAS ESCALANTE</div>
+
+                      <div style="display:flex;gap:8px;align-items:center;margin:8px 0;">
+                        <input id="weight_PROVIDER6" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER6', 0)}" style="width:90px;">
+                        <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER6')">Guardar peso</button>
+                      </div>
+            
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER6','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER6','off')">Desactivar</button>
@@ -6132,6 +6204,12 @@ def panel_actas(
 
                     <div class="provider-card">
                       <div class="provider-name">VILLAFUERTE</div>
+
+                      <div style="display:flex;gap:8px;align-items:center;margin:8px 0;">
+                        <input id="weight_PROVIDER8" type="number" min="0" step="1" value="{provider_weight_map.get('PROVIDER8', 0)}" style="width:90px;">
+                        <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER8')">Guardar peso</button>
+                      </div>
+                
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER8','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER8','off')">Desactivar</button>
@@ -6950,6 +7028,29 @@ def panel_actas(
           }} catch (e) {{
             alert("No se pudo conectar con el servidor");
           }}
+        }}
+
+        async function saveProviderWeight(providerName) {{
+          const input = document.getElementById("weight_" + providerName);
+          const weight = input ? input.value : 0;
+        
+          const res = await fetch("/panel/provider-weight", {{
+            method: "POST",
+            headers: {{"Content-Type": "application/json"}},
+            body: JSON.stringify({{
+              provider_name: providerName,
+              weight: weight
+            }})
+          }});
+        
+          const data = await res.json();
+        
+          if (!data.ok) {{
+            alert("Error: " + (data.error || "No se pudo guardar"));
+            return;
+          }}
+        
+          alert("Peso actualizado: " + providerName + " = " + data.weight);
         }}
 
         async function saveBotLimit(instanceName) {{
