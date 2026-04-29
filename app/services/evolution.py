@@ -135,6 +135,8 @@ def send_group_document(group_jid: str, pdf_url: str, filename: str = "acta.pdf"
 
 
 def get_media_base64(media_type: str, message_id: str, instance_name: str = None):
+    import time
+
     instance = instance_name or settings.EVOLUTION_INSTANCE
     url = f"{settings.EVOLUTION_BASE_URL}/chat/getBase64FromMediaMessage/{instance}"
     
@@ -151,13 +153,38 @@ def get_media_base64(media_type: str, message_id: str, instance_name: str = None
     print("GET_MEDIA_BASE64_MESSAGE_ID =", message_id, flush=True)
     print("GET_MEDIA_BASE64_PAYLOAD =", payload, flush=True)
 
-    resp = requests.post(url, headers=_headers(), json=payload, timeout=60)
+    last_error = None
 
-    print("GET_MEDIA_BASE64_STATUS =", resp.status_code, flush=True)
-    print("GET_MEDIA_BASE64_BODY =", resp.text[:1000], flush=True)
+    for attempt in range(1, 4):
+        try:
+            print("GET_MEDIA_BASE64_ATTEMPT =", attempt, flush=True)
 
-    resp.raise_for_status()
-    return resp.json()
+            resp = requests.post(
+                url,
+                headers=_headers(),
+                json=payload,
+                timeout=180
+            )
+
+            print("GET_MEDIA_BASE64_STATUS =", resp.status_code, flush=True)
+            print("GET_MEDIA_BASE64_BODY =", resp.text[:1000], flush=True)
+
+            resp.raise_for_status()
+            return resp.json()
+
+        except Exception as e:
+            last_error = e
+            print("GET_MEDIA_BASE64_ATTEMPT_ERROR =", {
+                "attempt": attempt,
+                "message_id": message_id,
+                "instance": instance,
+                "error": str(e),
+            }, flush=True)
+
+            if attempt < 3:
+                time.sleep(3)
+
+    raise last_error
 
 
 def send_document_base64(number: str, media_b64: str, filename: str = "acta.pdf", caption: str = "", instance_name: str = None):
