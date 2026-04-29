@@ -9419,8 +9419,51 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         if is_group and is_group_blocked(source_group_id) and not (is_admin_command and _is_admin(requester_wa_id, from_me)):
             print("IGNORED_REASON = group_blocked", flush=True)
             print("IGNORED_GROUP =", source_group_id, flush=True)
+        
+            terms = extract_request_terms(text_body)
+            problem = detect_identifier_problem(text_body)
+        
+            if terms or problem:
+                promo = (
+                    db.query(GroupPromotion)
+                    .filter(GroupPromotion.group_jid == source_group_id)
+                    .first()
+                )
+        
+                if promo:
+                    remaining = int(promo.total_actas or 0) - int(promo.used_actas or 0)
+        
+                    group_limit = int(promo.shared_group_limit_actas or 0)
+                    group_used = int(promo.shared_group_used_actas or 0)
+        
+                    is_global_exhausted = int(promo.total_actas or 0) > 0 and remaining <= 0
+                    is_individual_limit = group_limit > 0 and group_used >= group_limit
+        
+                    if is_global_exhausted or is_individual_limit:
+                        notify_key = f"blocked_group_notify:{source_group_id}"
+                        first_notify = redis_conn.set(notify_key, "1", ex=60, nx=True)
+        
+                        if first_notify:
+                            if is_individual_limit and not is_global_exhausted:
+                                msg = (
+                                    "⚠️ *Límite alcanzado*\n\n"
+                                    "Este grupo ya alcanzó su límite dentro de la bolsa compartida.\n"
+                                    "Contacta al administrador para continuar."
+                                )
+                            else:
+                                msg = (
+                                    "⚠️ *Paquete agotado*\n\n"
+                                    "Tu promoción ha sido consumida.\n"
+                                    "Contacta al administrador para recargar y continuar."
+                                )
+        
+                            try:
+                                send_group_text(source_group_id, msg, instance_name=instance_name)
+                            except Exception as e:
+                                print("BLOCKED_GROUP_NOTIFY_ERROR =", str(e), flush=True)
+        
             return {"ok": True, "ignored": "group_blocked"}
-
+    
         terms = extract_request_terms(text_body)
         problem = detect_identifier_problem(text_body)
 
