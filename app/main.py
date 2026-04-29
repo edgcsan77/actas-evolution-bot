@@ -2423,12 +2423,14 @@ async def panel_group_set_category(group_jid: str, request: Request, db: Session
         return {"ok": False, "error": "CATEGORIA_INVALIDA"}
 
     _set_group_category(db, group_jid, category)
+    _clear_panel_cache()
     return {"ok": True}
 
 
 @app.post("/panel/group/{group_jid}/category/remove")
 def panel_group_remove_category(group_jid: str, db: Session = Depends(get_db)):
     _remove_group_category(db, group_jid)
+    _clear_panel_cache()
     return {"ok": True}
 
 
@@ -2548,12 +2550,7 @@ async def panel_save_group_acta_price(
 
         _set_group_acta_price(db, group_jid, price)
 
-        try:
-            redis_conn.delete(f"panel:group_detail:{group_jid}:month")
-            redis_conn.delete(f"panel:group_detail:{group_jid}:day")
-        except Exception:
-            pass
-
+        _clear_panel_cache()
         return {
             "ok": True,
             "message": "Precio guardado correctamente",
@@ -8793,6 +8790,8 @@ def panel_set_group_name(
         db.add(row)
 
     db.commit()
+    _clear_panel_cache()
+    _clear_group_name_cache()
 
     return {"ok": True}
 
@@ -8895,6 +8894,7 @@ def panel_set_group_promotion(
     except Exception as notify_exc:
         print("PROMOTION_ACTIVATION_NOTIFY_ERROR =", str(notify_exc), flush=True)
 
+    _clear_panel_cache()
     return {
         "ok": True,
         "message": "Promoción guardada correctamente",
@@ -8962,6 +8962,7 @@ def panel_remove_group_promotion(
     except Exception as notify_exc:
         print("PROMOTION_REMOVE_NOTIFY_ERROR =", str(notify_exc), flush=True)
 
+    _clear_panel_cache()
     return {
         "ok": True,
         "message": "Promoción desactivada correctamente",
@@ -9057,6 +9058,7 @@ def panel_recharge_group_promotion(
         except Exception as e:
             print("PROMOTION_RECHARGE_SHARED_GENERAL_ERROR =", str(e), flush=True)
 
+        _clear_panel_cache()
         return {
             "ok": True,
             "message": f"Recarga aplicada a la bolsa compartida. Nuevo saldo disponible: {available}",
