@@ -9714,7 +9714,37 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 print("T_DOC_DETECTED =", source_chat_id, media_message_id, flush=True)
             
                 t1 = time.perf_counter()
-                media_json = get_media_base64("document", media_message_id, instance_name)
+
+                try:
+                    print("GET_MEDIA_BASE64_CALL_START =", {
+                        "media_message_id": media_message_id,
+                        "instance_name": instance_name,
+                        "filename": filename,
+                        "lookup_id": lookup_id,
+                    }, flush=True)
+                
+                    media_json = get_media_base64("document", media_message_id, instance_name)
+                
+                    print("GET_MEDIA_BASE64_CALL_OK =", {
+                        "media_message_id": media_message_id,
+                        "elapsed_s": round(time.perf_counter() - t1, 3),
+                    }, flush=True)
+                
+                except Exception as media_exc:
+                    print("GET_MEDIA_BASE64_CALL_ERROR =", {
+                        "media_message_id": media_message_id,
+                        "instance_name": instance_name,
+                        "filename": filename,
+                        "lookup_id": lookup_id,
+                        "error": str(media_exc),
+                    }, flush=True)
+                
+                    return {
+                        "ok": True,
+                        "ignored": "provider_pdf_media_download_failed",
+                        "error": str(media_exc),
+                    }
+                
                 print("T_GET_MEDIA_BASE64 =", round(time.perf_counter() - t1, 3), flush=True)
             
                 print(
