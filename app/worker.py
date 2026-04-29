@@ -377,9 +377,9 @@ def _pick_provider_by_weight(db: Session, enabled: list[str]) -> str:
 
     weights = {}
     for r in rows:
-        weights[r.provider_name] = max(0, int(r.weight or 0))
+        weights[r.provider_name] = max(0.0, float(r.weight or 0))
 
-    total = sum(weights.get(p, 0) for p in enabled)
+    total = sum(weights.get(p, 0.0) for p in enabled)
 
     print("PICK_PROVIDER_WEIGHTS =", weights, "TOTAL =", total, flush=True)
 
@@ -387,15 +387,13 @@ def _pick_provider_by_weight(db: Session, enabled: list[str]) -> str:
     if total <= 0:
         return ""
 
-    n = random.randint(1, total)
-    acc = 0
+    chosen = random.choices(
+        enabled,
+        weights=[weights.get(p, 0.0) for p in enabled],
+        k=1,
+    )[0]
 
-    for p in enabled:
-        acc += weights.get(p, 0)
-        if n <= acc:
-            return p
-
-    return enabled[0]
+    return chosen
 
 
 def _pick_provider_name(
