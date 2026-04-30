@@ -289,7 +289,7 @@ BOT_LABELS = {
     "docifybot8leli": "🌼 TRAMITES LELI",
     "docifybot8rywya": "🌹 GESTORIA EXPRESS RYWYA",
     "docifybot8xpress": "⚡ DIGITAL XPRESS",
-    "docifybot8moon": "🌙 DIGITAL XPRESS",
+    "docifybot8moon": "🌙 MOON MX",
 }
 
 
