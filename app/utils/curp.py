@@ -209,10 +209,24 @@ def extract_identifier_from_filename(filename: str) -> str | None:
     return None
 
 
-def seems_like_identifier_attempt(text: str) -> bool:
-    t = normalize_text(text)
+def _strip_mentions_and_phones(text: str) -> str:
+    t = text or ""
 
-    # Palabras que indican que el usuario sí quiso mandar un dato
+    # Quitar menciones tipo @52283408707598
+    t = re.sub(r"@\d{8,20}", " ", t)
+
+    # Quitar teléfonos comunes con +, espacios o guiones
+    t = re.sub(r"\+?\d[\d\s\-()]{7,20}\d", " ", t)
+
+    return t
+
+
+def seems_like_identifier_attempt(text: str) -> bool:
+    raw = text or ""
+    raw_clean = _strip_mentions_and_phones(raw)
+
+    t = normalize_text(raw_clean)
+
     keywords = [
         "CURP",
         "CADENA",
@@ -227,14 +241,14 @@ def seems_like_identifier_attempt(text: str) -> bool:
         "DIVORCIO",
         "FOLIO",
     ]
+
     if any(k in t for k in keywords):
         return True
 
-    # Si trae un bloque largo de números, probablemente intentó mandar cadena/código
-    if re.search(r"\d{8,25}", t):
+    compact = re.sub(r"\s+", "", t)
+    if re.fullmatch(r"\d{8,25}", compact):
         return True
 
-    # Si trae mezcla de letras y números tipo CURP rara
     if re.search(r"\b[A-Z]{2,5}\d{4,}[HM][A-Z0-9]{4,}\b", t):
         return True
 
@@ -242,6 +256,7 @@ def seems_like_identifier_attempt(text: str) -> bool:
 
 
 def detect_identifier_problem(text: str) -> str | None:
+    text = _strip_mentions_and_phones(text)
     t = normalize_text(text)
     cleaned = _remove_type_words(t)
 
