@@ -156,7 +156,6 @@ class BotControl(Base):
 
     limit = Column(Integer, nullable=False, default=0)
     used = Column(Integer, nullable=False, default=0)
-
     recharges = Column(Integer, nullable=False, default=0)
 
     is_blocked = Column(Boolean, default=False, nullable=False)
