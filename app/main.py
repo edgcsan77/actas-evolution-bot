@@ -291,7 +291,7 @@ def panel_create_bot(
     db: Session = Depends(get_db),
 ):
     if token != PANEL_TOKEN:
-        return {"ok": False}
+        return {"ok": False, "error": "UNAUTHORIZED"}
 
     label = (payload.get("label") or "").strip()
     instance_name = (payload.get("instance_name") or "").strip()
@@ -299,19 +299,26 @@ def panel_create_bot(
     if not label or not instance_name:
         return {"ok": False, "error": "FALTAN_DATOS"}
 
-    # 🔴 limite 10
-    total = len(set(BOT_LABELS.keys())) + db.query(BotControl).count()
-    if total >= 10:
-        return {"ok": False, "error": "MAX_10_BOTS"}
+    active_dynamic = (
+        db.query(BotControl)
+        .filter(BotControl.is_active == True)
+        .count()
+    )
 
-    # 🔴 evitar duplicados
-    exists = (
+    total = len(set(BOT_LABELS.keys())) + active_dynamic
+
+    if total >= 12:
+        return {"ok": False, "error": "MAX_12_BOTS"}
+
+    exists_static = instance_name in BOT_LABELS or instance_name in BOT_PANEL_TOKENS.values()
+
+    exists_dynamic = (
         db.query(BotControl)
         .filter(BotControl.instance_name == instance_name)
         .first()
     )
 
-    if exists:
+    if exists_static or exists_dynamic:
         return {"ok": False, "error": "YA_EXISTE"}
 
     new_token = secrets.token_hex(5)
@@ -320,6 +327,10 @@ def panel_create_bot(
         instance_name=instance_name,
         label=label,
         panel_token=new_token,
+        limit=0,
+        used=0,
+        recharges=0,
+        is_blocked=False,
         is_active=True,
     )
 
