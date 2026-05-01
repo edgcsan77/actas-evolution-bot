@@ -290,6 +290,7 @@ BOT_LABELS = {
     "docifybot8rywya": "🌹 GESTORIA EXPRESS RYWYA",
     "docifybot8xpress": "⚡ DIGITAL XPRESS",
     "docifybot8moon": "🌙 MOON MX",
+    "docifybot8trami": "🌪️ TRAMI-EXPRESS",
 }
 
 
@@ -303,6 +304,7 @@ BOT_PANEL_TOKENS = {
     "dg5f5f6g3s": "docifybot8rywya",
     "df48r8dg62": "docifybot8xpress",
     "7f56d65g9d": "docifybot8moon",
+    "fg9er5b6g6": "docifybot8trami",
 }
 
 
