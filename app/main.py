@@ -7,6 +7,7 @@ import re
 import uuid
 import json
 import requests
+import secrets
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from collections import Counter
@@ -186,7 +187,17 @@ def _bot_status_rows(db: Session) -> list[dict]:
     bots = sorted(set(BOT_LABELS.keys()) | set(BOT_PANEL_TOKENS.values()))
 
     out = []
+
     for inst in bots:
+        bc = (
+            db.query(BotControl)
+            .filter(BotControl.instance_name == inst)
+            .first()
+        )
+
+        if bc and bc.is_active is False:
+            continue
+
         total = (
             db.query(RequestLog)
             .filter(RequestLog.instance_name == inst)
@@ -202,7 +213,6 @@ def _bot_status_rows(db: Session) -> list[dict]:
             "instance_name": inst,
             "label": bot_label(inst),
             "state": ev.get("state", "unknown"),
-            "evolution_ok": bool(ev.get("ok")),
             "blocked": blocked,
             "used": used,
             "limit": limit_value,
@@ -219,14 +229,133 @@ def panel_instance_qr(instance_name: str):
     return result
 
 
+@app.post("/panel/bots/{instance_name}/hide")
+def panel_hide_bot(
+    instance_name: str,
+    token: str = "",
+    db: Session = Depends(get_db),
+):
+    if token != PANEL_TOKEN:
+        return {"ok": False}
+
+    row = (
+        db.query(BotControl)
+        .filter(BotControl.instance_name == instance_name)
+        .first()
+    )
+
+    if not row:
+        row = BotControl(
+            instance_name=instance_name,
+            is_active=False,
+        )
+        db.add(row)
+    else:
+        row.is_active = False
+
+    db.commit()
+    _clear_panel_cache()
+
+    return {"ok": True}
+
+
+@app.post("/panel/bots/{instance_name}/disconnect")
+def panel_disconnect_bot(
+    instance_name: str,
+    token: str = "",
+):
+    if token != PANEL_TOKEN:
+        return {"ok": False}
+
+    try:
+        url = f"{EVOLUTION_BASE_URL}/instance/logout/{instance_name}"
+
+        r = requests.delete(
+            url,
+            headers={"apikey": EVOLUTION_API_KEY},
+            timeout=20,
+        )
+
+        _clear_panel_cache()
+
+        return {"ok": r.status_code in (200, 201)}
+
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/panel/bots/create")
+def panel_create_bot(
+    payload: dict = Body(...),
+    token: str = "",
+    db: Session = Depends(get_db),
+):
+    if token != PANEL_TOKEN:
+        return {"ok": False}
+
+    label = (payload.get("label") or "").strip()
+    instance_name = (payload.get("instance_name") or "").strip()
+
+    if not label or not instance_name:
+        return {"ok": False, "error": "FALTAN_DATOS"}
+
+    # 🔴 limite 10
+    total = len(set(BOT_LABELS.keys())) + db.query(BotControl).count()
+    if total >= 10:
+        return {"ok": False, "error": "MAX_10_BOTS"}
+
+    # 🔴 evitar duplicados
+    exists = (
+        db.query(BotControl)
+        .filter(BotControl.instance_name == instance_name)
+        .first()
+    )
+
+    if exists:
+        return {"ok": False, "error": "YA_EXISTE"}
+
+    new_token = secrets.token_hex(5)
+
+    row = BotControl(
+        instance_name=instance_name,
+        label=label,
+        panel_token=new_token,
+        is_active=True,
+    )
+
+    db.add(row)
+    db.commit()
+
+    _clear_panel_cache()
+
+    return {
+        "ok": True,
+        "token": new_token
+    }
+
+
 def _is_valid_admin_panel_token(request: Request) -> bool:
     token = (request.query_params.get("token") or "").strip()
     expected = (settings.ADMIN_PANEL_TOKEN or "").strip()
     return bool(expected) and token == expected
 
 
-def _bot_instance_from_token(token: str) -> str | None:
-    return BOT_PANEL_TOKENS.get((token or "").strip())
+def _bot_instance_from_token(db: Session, token: str) -> str | None:
+    token = (token or "").strip()
+
+    row = (
+        db.query(BotControl)
+        .filter(
+            BotControl.panel_token == token,
+            BotControl.is_active == True,
+        )
+        .first()
+    )
+
+    if row:
+        return row.instance_name
+
+    return BOT_PANEL_TOKENS.get(token)
 
 
 def _utc_now_naive():
@@ -5325,6 +5454,7 @@ def panel_actas(
                   <th>Uso</th>
                   <th>Solicitudes</th>
                   <th>QR</th>
+                  <th>Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -5342,6 +5472,11 @@ def panel_actas(
                 action_html = f'<button class="btn btn-primary" type="button" onclick="getBotQr(\'{_esc(b["instance_name"])}\')">Reconectar / QR</button>'
             else:
                 action_html = '<span class="badge badge-success">Conectado</span>'
+
+            actions_html = f"""
+            <button class="btn btn-warning" onclick="disconnectBot('{_esc(b["instance_name"])}')">Desconectar</button>
+            <button class="btn btn-danger" onclick="hideBot('{_esc(b["instance_name"])}')">Ocultar</button>
+            """
         
             bot_status_html += f"""
                 <tr>
@@ -5352,12 +5487,31 @@ def panel_actas(
                   <td>{_esc(used_txt)}</td>
                   <td>{b["total_requests"]}</td>
                   <td>{action_html}</td>
+                  <td>{actions_html}</td>
                 </tr>
             """
         
         bot_status_html += """
               </tbody>
             </table>
+          </div>
+        
+          <div class="box" style="margin-top:14px;">
+            <div class="head"><strong>Nuevo Bot</strong></div>
+        
+            <div class="filters" style="grid-template-columns: 1fr 1fr 180px;">
+              <div>
+                <input id="newBotLabel" placeholder="Nombre">
+              </div>
+        
+              <div>
+                <input id="newBotInstance" placeholder="Instancia">
+              </div>
+        
+              <div>
+                <button class="btn btn-primary" onclick="createBot()">Crear</button>
+              </div>
+            </div>
           </div>
         
           <div id="botQrBox" style="margin-top:14px;"></div>
@@ -7213,6 +7367,39 @@ def panel_actas(
           }} catch (e) {{
             box.innerHTML = `<div style="color:red;font-weight:800;">Error de conexión</div>`;
           }}
+        }}
+
+        async function disconnectBot(i){{
+          if(!confirm("Desconectar?")) return;
+          await fetch(`/panel/bots/${{i}}/disconnect?token=docifymx2026`,{{method:"POST"}});
+          location.reload();
+        }}
+        
+        async function hideBot(i){{
+          if(!confirm("Ocultar?")) return;
+          await fetch(`/panel/bots/${{i}}/hide?token=docifymx2026`,{{method:"POST"}});
+          location.reload();
+        }}
+        
+        async function createBot(){{
+          const label=document.getElementById("newBotLabel").value;
+          const instance=document.getElementById("newBotInstance").value;
+        
+          const r=await fetch(`/panel/bots/create?token=docifymx2026`,{{
+            method:"POST",
+            headers:{{"Content-Type":"application/json"}},
+            body:JSON.stringify({{label,instance_name:instance}})
+          }});
+        
+          const d=await r.json();
+        
+          if(!d.ok){{
+            alert(d.error||"error");
+            return;
+          }}
+        
+          alert("Token: "+d.token);
+          location.reload();
         }}
 
         async function updateProvider7Credentials() {{
