@@ -336,6 +336,52 @@ def _enmarcar_pdf_frente(pdf_bytes: bytes, filename: str, timeout: int = 120, fo
     return resp.content
 
 
+def procesar_pdf_externo_provider8(
+    *,
+    pdf_bytes: bytes,
+    term: str,
+    act_type: str,
+    filename: str = "provider8.pdf",
+) -> dict:
+    term = _strip_or_default(term).upper()
+    act_upper = _strip_or_default(act_type).upper()
+
+    is_folio = "FOLI" in act_upper
+
+    pdf_bytes = _enmarcar_pdf_frente(
+        pdf_bytes,
+        filename,
+        folio=is_folio,
+    )
+
+    estado = ""
+
+    if _is_chain(term):
+        estado = _estado_desde_cadena(term)
+
+    elif _is_curp(term):
+        # CURP: entidad nacimiento posiciones 12-13 visuales = índices 11:13
+        clave_estado = term[11:13]
+        estado = MAPA_ESTADOS.get(clave_estado, "")
+
+    if not estado or estado == "DESCONOCIDO":
+        raise RuntimeError(f"PROVIDER8_NO_ESTADO_FOR_REAR_FRAME: {term}")
+
+    base_dir = Path(__file__).resolve().parent.parent
+    estados_dir = base_dir / "assets" / "estados"
+
+    reverso_path = _resolver_reverso_por_estado(estado, estados_dir)
+
+    # 3) Agregar reverso del estado
+    pdf_bytes = _unir_pdfs_bytes(pdf_bytes, reverso_path)
+
+    return {
+        "pdf_bytes": pdf_bytes,
+        "estado": estado,
+        "folio": is_folio,
+    }
+
+
 class Provider7Client:
     def __init__(
         self,
