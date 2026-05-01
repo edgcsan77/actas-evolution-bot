@@ -152,6 +152,7 @@ class BotControl(Base):
 
     instance_name = Column(String(50), unique=True, nullable=False, index=True)
     label = Column(String(120), nullable=True)
+    panel_token = Column(String(80), unique=True, nullable=True, index=True)
 
     limit = Column(Integer, nullable=False, default=0)
     used = Column(Integer, nullable=False, default=0)
