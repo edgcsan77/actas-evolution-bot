@@ -151,6 +151,7 @@ class BotControl(Base):
     id = Column(Integer, primary_key=True)
 
     instance_name = Column(String(50), unique=True, nullable=False, index=True)
+    label = Column(String(120), nullable=True)
 
     limit = Column(Integer, nullable=False, default=0)
     used = Column(Integer, nullable=False, default=0)
@@ -158,6 +159,7 @@ class BotControl(Base):
     recharges = Column(Integer, nullable=False, default=0)
 
     is_blocked = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
 
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
