@@ -185,7 +185,21 @@ def _evolution_connect_qr(instance_name: str) -> dict:
 
 
 def _bot_status_rows(db: Session) -> list[dict]:
-    bots = sorted(set(BOT_LABELS.keys()) | set(BOT_PANEL_TOKENS.values()))
+    static_bots = set(BOT_LABELS.keys()) | set(BOT_PANEL_TOKENS.values())
+
+    dynamic_rows = (
+        db.query(BotControl)
+        .filter(BotControl.is_active == True)
+        .all()
+    )
+
+    dynamic_bots = {
+        r.instance_name: r.label
+        for r in dynamic_rows
+        if r.instance_name not in static_bots
+    }
+
+    bots = sorted(static_bots | set(dynamic_bots.keys()))
 
     out = []
 
@@ -212,7 +226,7 @@ def _bot_status_rows(db: Session) -> list[dict]:
 
         out.append({
             "instance_name": inst,
-            "label": bot_label(inst),
+            "label": dynamic_bots.get(inst) or bot_label(inst),
             "state": ev.get("state", "unknown"),
             "blocked": blocked,
             "used": used,
