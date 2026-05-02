@@ -416,7 +416,7 @@ PROVIDER_LABELS = {
     "PROVIDER5": "LUIS SID",
     "PROVIDER6": "ACTAS ESCALANTE",
     "PROVIDER7": "MESINO SID",
-    "PROVIDER8": "VILLAFUERTE",
+    "PROVIDER8": "ANGEL",
 }
 
 
@@ -6421,7 +6421,7 @@ def panel_actas(
                     </div>
             
                     <div class="provider-card">
-                      <div class="provider-name">VILLAFUERTE</div>
+                      <div class="provider-name">ANGEL</div>
                       <div style="margin:6px 0;">
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
@@ -8897,7 +8897,7 @@ def _providers_status_text(db: Session) -> str:
         f"LAZARO WEB:        {s4}{provider4_extra}\n"
         f"LUIS SID:          {s5}{provider5_extra}\n"
         f"ACTAS ESCALANTE:   {s6}{provider6_extra}\n"
-        f"VILLAFUERTE:       {s8}{provider8_extra}"
+        f"ANGEL:             {s8}{provider8_extra}"
     )
 
     return text
@@ -10055,10 +10055,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 if b"%PDF" not in pdf_bytes[:20]:
                     print("PROVIDER_PDF_INVALID_BINARY", flush=True)
                     return {"ok": True, "ignored": "provider_pdf_invalid_binary"}
-                
-                t_encode = time.perf_counter()
-                safe_media_b64 = base64.b64encode(pdf_bytes).decode()
-                print("T_BASE64_REENCODE =", round(time.perf_counter() - t_encode, 3), flush=True)
 
                 open_req = _pick_matching_processing_req_for_pdf(
                     db=db,
@@ -10173,6 +10169,49 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         f"filename={filename} | expected_curp={open_req.curp}"
                     )
                     return {"ok": True, "ignored": "provider_pdf_wrong_curp"}
+
+                if open_req.provider_name == "PROVIDER8":
+                    try:
+                        from app.services.provider7 import procesar_pdf_externo_provider8
+                
+                        result = procesar_pdf_externo_provider8(
+                            pdf_bytes=pdf_bytes,
+                            term=open_req.curp,
+                            act_type=open_req.act_type,
+                            filename=filename or f"{open_req.curp}.pdf",
+                        )
+                
+                        pdf_bytes = result["pdf_bytes"]
+                
+                        print("PROVIDER8_POSTPROCESS_OK =", {
+                            "req_id": open_req.id,
+                            "estado": result.get("estado"),
+                            "folio": result.get("folio"),
+                            "pdf_bytes_len": len(pdf_bytes),
+                        }, flush=True)
+                
+                    except Exception as e:
+                        print("PROVIDER8_POSTPROCESS_ERROR =", str(e), flush=True)
+                
+                        open_req.status = "ERROR"
+                        open_req.error_message = f"PROVIDER8_POSTPROCESS_ERROR: {str(e)[:300]}"
+                        open_req.updated_at = _utc_now_naive()
+                        db.commit()
+                
+                        try:
+                            _notify_support_error(
+                                open_req,
+                                "PROVIDER8_POSTPROCESS_ERROR",
+                                f"filename={filename} | error={str(e)[:500]}"
+                            )
+                        except Exception as support_exc:
+                            print("PROVIDER8_POSTPROCESS_SUPPORT_NOTIFY_ERROR =", str(support_exc), flush=True)
+                
+                        return {"ok": True, "ignored": "provider8_postprocess_failed"}
+                
+                t_encode = time.perf_counter()
+                safe_media_b64 = base64.b64encode(pdf_bytes).decode()
+                print("T_BASE64_REENCODE_FINAL =", round(time.perf_counter() - t_encode, 3), flush=True)
 
                 match_term = filename_id or provider_id or open_req.curp or "NO_TERM"
                 pdf_dedupe_key = f"provider_pdf:{open_req.id}:{source_chat_id}:{match_term}:{filename or 'nofile'}"
