@@ -300,13 +300,18 @@ def panel_create_bot(
     if not label or not instance_name:
         return {"ok": False, "error": "FALTAN_DATOS"}
 
+    static_bots = set(BOT_LABELS.keys()) | set(BOT_PANEL_TOKENS.values())
+
     active_dynamic = (
         db.query(BotControl)
-        .filter(BotControl.is_active == True)
+        .filter(
+            BotControl.is_active == True,
+            ~BotControl.instance_name.in_(static_bots),
+        )
         .count()
     )
 
-    total = len(set(BOT_LABELS.keys())) + active_dynamic
+    total = len(static_bots) + active_dynamic
 
     if total >= 12:
         return {"ok": False, "error": "MAX_12_BOTS"}
