@@ -233,6 +233,11 @@ def _bot_status_rows(db: Session) -> list[dict]:
             "limit": limit_value,
             "available": max(0, limit_value - used) if limit_value > 0 else None,
             "total_requests": total,
+            "panel_token": (
+                db.query(BotControl.panel_token)
+                .filter(BotControl.instance_name == inst)
+                .scalar()
+            )
         })
 
     return out
@@ -567,8 +572,22 @@ def _is_child_bot(instance_name: str) -> bool:
     return inst.startswith("docifybot") and inst != "docifybot"
 
 
-def _bot_title(instance_name: str) -> str:
-    return BOT_LABELS.get(instance_name, instance_name)
+def _bot_title(db: Session, instance_name: str) -> str:
+    name = BOT_LABELS.get(instance_name)
+
+    if name:
+        return name
+
+    row = (
+        db.query(BotControl)
+        .filter(BotControl.instance_name == instance_name)
+        .first()
+    )
+
+    if row and row.label:
+        return row.label
+
+    return instance_name
 
 
 def _ensure_group_owner(db: Session, group_jid: str | None, instance_name: str | None):
@@ -4582,7 +4601,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
     if not _is_child_bot(instance_name):
         return HTMLResponse("<h3>Este panel es solo para bots desde docifybot8 en adelante.</h3>", status_code=400)
 
-    title = _bot_title(instance_name)
+    title = _bot_title(db, instance_name)
     today_sales = _bot_sales_today(db, instance_name)
     month_sales = _bot_sales_month(db, instance_name)
     history_rows = _bot_sales_history_30d(db, instance_name)
@@ -5553,6 +5572,7 @@ def panel_actas(
                   <th>Bloqueado</th>
                   <th>Uso</th>
                   <th>Solicitudes</th>
+                  <th>Token</th>
                   <th>QR</th>
                   <th>Acciones</th>
                 </tr>
@@ -5586,6 +5606,7 @@ def panel_actas(
                   <td>{'Sí' if b["blocked"] else 'No'}</td>
                   <td>{_esc(used_txt)}</td>
                   <td>{b["total_requests"]}</td>
+                  <td class="mono">{_esc(b.get("panel_token") or "-")}</td>
                   <td>{action_html}</td>
                   <td>{actions_html}</td>
                 </tr>
