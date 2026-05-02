@@ -732,7 +732,7 @@ def panel_hide_group(group_jid: str, db: Session = Depends(get_db)):
 @app.post("/botpanel/{token}/group/{group_jid}/hide")
 def panel_bot_hide_group(token: str, group_jid: str, db: Session = Depends(get_db)):
     try:
-        instance_name = _bot_instance_from_token(token)
+        instance_name = _bot_instance_from_token(db, token)
         if not instance_name:
             return {"ok": False, "error": "Panel no válido"}
 
@@ -4028,7 +4028,7 @@ def botpanel_free_broadcast(
     payload: dict,
     db: Session = Depends(get_db),
 ):
-    instance_name = _bot_instance_from_token(token)
+    instance_name = _bot_instance_from_token(db, token)
 
     if not instance_name:
         return {"ok": False, "error": "Panel no válido"}
@@ -4082,8 +4082,8 @@ def botpanel_free_broadcast(
 
 
 @app.get("/botpanel/{token}/broadcast/progress/{job_id}")
-def botpanel_broadcast_progress(token: str, job_id: str):
-    instance_name = _bot_instance_from_token(token)
+def botpanel_broadcast_progress(token: str, job_id: str, db: Session = Depends(get_db)):
+    instance_name = _bot_instance_from_token(db, token)
 
     if not instance_name:
         return {"ok": False, "error": "Panel no válido"}
@@ -4323,7 +4323,7 @@ def _bot_credit_stats(db: Session, instance_name: str):
 @app.post("/botpanel/{token}/group/{group_jid}/block")
 def panel_bot_block_group(token: str, group_jid: str, db: Session = Depends(get_db)):
     try:
-        instance_name = _bot_instance_from_token(token)
+        instance_name = _bot_instance_from_token(db, token)
         if not instance_name:
             return {"ok": False, "error": "Panel no válido"}
 
@@ -4338,7 +4338,7 @@ def panel_bot_block_group(token: str, group_jid: str, db: Session = Depends(get_
 @app.post("/botpanel/{token}/group/{group_jid}/unblock")
 def panel_bot_unblock_group(token: str, group_jid: str, db: Session = Depends(get_db)):
     try:
-        instance_name = _bot_instance_from_token(token)
+        instance_name = _bot_instance_from_token(db, token)
         if not instance_name:
             return {"ok": False, "error": "Panel no válido"}
 
@@ -4353,7 +4353,7 @@ def panel_bot_unblock_group(token: str, group_jid: str, db: Session = Depends(ge
 @app.post("/botpanel/{token}/group/{group_jid}/rename")
 async def panel_bot_rename_group(token: str, group_jid: str, request: Request, db: Session = Depends(get_db)):
     try:
-        instance_name = _bot_instance_from_token(token)
+        instance_name = _bot_instance_from_token(db, token)
         if not instance_name:
             return {"ok": False, "error": "Panel no válido"}
 
@@ -4388,7 +4388,7 @@ async def panel_bot_rename_group(token: str, group_jid: str, request: Request, d
 @app.post("/botpanel/{token}/promotion/set")
 async def panel_bot_set_promo(token: str, request: Request, db: Session = Depends(get_db)):
     try:
-        instance_name = _bot_instance_from_token(token)
+        instance_name = _bot_instance_from_token(db, token)
         if not instance_name:
             return {"ok": False, "error": "Panel no válido"}
 
@@ -4435,7 +4435,7 @@ async def panel_bot_set_promo(token: str, request: Request, db: Session = Depend
 @app.post("/botpanel/{token}/group/add")
 async def panel_bot_add_group(token: str, request: Request, db: Session = Depends(get_db)):
     try:
-        instance_name = _bot_instance_from_token(token)
+        instance_name = _bot_instance_from_token(db, token)
         if not instance_name:
             return {"ok": False, "error": "Panel no válido"}
 
@@ -4485,7 +4485,7 @@ async def panel_bot_add_group(token: str, request: Request, db: Session = Depend
 
 @app.get("/botpanel/{token}")
 def panel_bot(token: str, db: Session = Depends(get_db)):
-    instance_name = _bot_instance_from_token(token)
+    instance_name = _bot_instance_from_token(db, token)
 
     if not instance_name:
         return HTMLResponse("<h3>Panel no válido.</h3>", status_code=404)
