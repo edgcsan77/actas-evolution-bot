@@ -373,11 +373,14 @@ def panel_create_bot(
     
     _clear_panel_cache()
 
-    try:
-        url = f"{EVOLUTION_BASE_URL}/instance/create"
+    evolution_create_ok = False
+    webhook_ok = False
     
-        r = requests.post(
-            url,
+    try:
+        create_url = f"{EVOLUTION_BASE_URL}/instance/create"
+    
+        r1 = requests.post(
+            create_url,
             headers={
                 "apikey": EVOLUTION_API_KEY,
                 "Content-Type": "application/json",
@@ -390,14 +393,44 @@ def panel_create_bot(
             timeout=30,
         )
     
-        print("CREATE_EVOLUTION_INSTANCE:", r.status_code, r.text[:500], flush=True)
+        evolution_create_ok = r1.status_code in (200, 201)
+        print("CREATE_EVOLUTION_INSTANCE:", r1.status_code, r1.text[:500], flush=True)
+    
+        webhook_url = f"{EVOLUTION_BASE_URL}/webhook/set/{instance_name}"
+    
+        r2 = requests.post(
+            webhook_url,
+            headers={
+                "apikey": EVOLUTION_API_KEY,
+                "Content-Type": "application/json",
+            },
+            json={
+                "webhook": {
+                    "url": "http://187.127.248.94:8000/webhook/evolution",
+                    "enabled": True,
+                    "webhook_by_events": False,
+                    "events": [
+                        "MESSAGES_UPSERT",
+                        "MESSAGES_UPDATE",
+                        "SEND_MESSAGE",
+                        "CONNECTION_UPDATE",
+                    ],
+                }
+            },
+            timeout=30,
+        )
+    
+        webhook_ok = r2.status_code in (200, 201)
+        print("SET_EVOLUTION_WEBHOOK:", r2.status_code, r2.text[:500], flush=True)
     
     except Exception as e:
-        print("CREATE_EVOLUTION_INSTANCE_ERROR:", str(e), flush=True)
+        print("CREATE_BOT_EVOLUTION_ERROR:", str(e), flush=True)
 
     return {
         "ok": True,
-        "token": new_token
+        "token": new_token,
+        "evolution_create_ok": evolution_create_ok,
+        "webhook_ok": webhook_ok,
     }
 
 
