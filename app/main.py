@@ -370,8 +370,30 @@ def panel_create_bot(
 
     db.add(row)
     db.commit()
-
+    
     _clear_panel_cache()
+
+    try:
+        url = f"{EVOLUTION_BASE_URL}/instance/create"
+    
+        r = requests.post(
+            url,
+            headers={
+                "apikey": EVOLUTION_API_KEY,
+                "Content-Type": "application/json",
+            },
+            json={
+                "instanceName": instance_name,
+                "qrcode": True,
+                "integration": "WHATSAPP-BAILEYS",
+            },
+            timeout=30,
+        )
+    
+        print("CREATE_EVOLUTION_INSTANCE:", r.status_code, r.text[:500], flush=True)
+    
+    except Exception as e:
+        print("CREATE_EVOLUTION_INSTANCE_ERROR:", str(e), flush=True)
 
     return {
         "ok": True,
