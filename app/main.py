@@ -10977,8 +10977,17 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
         if created_any:
             actor = push_name or requester_wa_id
-            bot_name = BOT_LABELS.get(instance_name, "🚀 DOCU EXPRES")
-            
+        
+            bot_name = BOT_LABELS.get(instance_name)
+        
+            if not bot_name:
+                bot_row = (
+                    db.query(BotControl)
+                    .filter(BotControl.instance_name == instance_name)
+                    .first()
+                )
+                bot_name = bot_row.label if bot_row and bot_row.label else "🚀 DOCU EXPRES"
+        
             ack_msg = (
                 f"{bot_name}\n"
                 f"Solicitud recibida de {actor}.\n"
