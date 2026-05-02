@@ -302,6 +302,20 @@ def panel_create_bot(
 
     static_bots = set(BOT_LABELS.keys()) | set(BOT_PANEL_TOKENS.values())
 
+    hidden_static = {
+        r.instance_name
+        for r in (
+            db.query(BotControl.instance_name)
+            .filter(
+                BotControl.instance_name.in_(static_bots),
+                BotControl.is_active == False,
+            )
+            .all()
+        )
+    }
+    
+    visible_static_count = len(static_bots - hidden_static)
+    
     active_dynamic = (
         db.query(BotControl)
         .filter(
@@ -310,8 +324,8 @@ def panel_create_bot(
         )
         .count()
     )
-
-    total = len(static_bots) + active_dynamic
+    
+    total = visible_static_count + active_dynamic
 
     if total >= 12:
         return {"ok": False, "error": "MAX_12_BOTS"}
