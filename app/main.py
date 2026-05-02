@@ -237,6 +237,10 @@ def _bot_status_rows(db: Session) -> list[dict]:
                 db.query(BotControl.panel_token)
                 .filter(BotControl.instance_name == inst)
                 .scalar()
+                or next(
+                    (tok for tok, bot_inst in BOT_PANEL_TOKENS.items() if bot_inst == inst),
+                    None
+                )
             )
         })
 
