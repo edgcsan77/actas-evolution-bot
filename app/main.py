@@ -366,28 +366,12 @@ def panel_create_bot(
 
     new_token = secrets.token_hex(5)
 
-    row = BotControl(
-        instance_name=instance_name,
-        label=label,
-        panel_token=new_token,
-        limit=0,
-        used=0,
-        recharges=0,
-        is_blocked=False,
-        is_active=True,
-    )
-
-    db.add(row)
-    db.commit()
-    
-    _clear_panel_cache()
-
     evolution_create_ok = False
     webhook_ok = False
-    
+
     try:
         create_url = f"{EVOLUTION_BASE_URL}/instance/create"
-    
+
         r1 = requests.post(
             create_url,
             headers={
@@ -401,12 +385,21 @@ def panel_create_bot(
             },
             timeout=30,
         )
-    
-        evolution_create_ok = r1.status_code in (200, 201)
+
         print("CREATE_EVOLUTION_INSTANCE:", r1.status_code, r1.text[:500], flush=True)
-    
+
+        if r1.status_code not in (200, 201, 403, 409):
+            return {
+                "ok": False,
+                "error": "EVOLUTION_CREATE_FAILED",
+                "status_code": r1.status_code,
+                "response": r1.text[:500],
+            }
+
+        evolution_create_ok = True
+
         webhook_url = f"{EVOLUTION_BASE_URL}/webhook/set/{instance_name}"
-    
+
         r2 = requests.post(
             webhook_url,
             headers={
@@ -428,12 +421,38 @@ def panel_create_bot(
             },
             timeout=30,
         )
-    
-        webhook_ok = r2.status_code in (200, 201)
+
         print("SET_EVOLUTION_WEBHOOK:", r2.status_code, r2.text[:500], flush=True)
-    
+
+        if r2.status_code not in (200, 201):
+            return {
+                "ok": False,
+                "error": "WEBHOOK_SET_FAILED",
+                "status_code": r2.status_code,
+                "response": r2.text[:500],
+            }
+
+        webhook_ok = True
+
     except Exception as e:
         print("CREATE_BOT_EVOLUTION_ERROR:", str(e), flush=True)
+        return {"ok": False, "error": "EVOLUTION_EXCEPTION", "detail": str(e)}
+
+    row = BotControl(
+        instance_name=instance_name,
+        label=label,
+        panel_token=new_token,
+        limit=0,
+        used=0,
+        recharges=0,
+        is_blocked=False,
+        is_active=True,
+    )
+
+    db.add(row)
+    db.commit()
+
+    _clear_panel_cache()
 
     return {
         "ok": True,
