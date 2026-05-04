@@ -296,7 +296,7 @@ def panel_disconnect_bot(
 
         r = requests.delete(
             url,
-            headers={"apikey": EVOLUTION_API_KEY},
+            headers={"apikey": EVOLUTION_APIKEY},
             timeout=20,
         )
 
@@ -375,7 +375,7 @@ def panel_create_bot(
         r1 = requests.post(
             create_url,
             headers={
-                "apikey": EVOLUTION_API_KEY,
+                "apikey": EVOLUTION_APIKEY,
                 "Content-Type": "application/json",
             },
             json={
@@ -403,7 +403,7 @@ def panel_create_bot(
         r2 = requests.post(
             webhook_url,
             headers={
-                "apikey": EVOLUTION_API_KEY,
+                "apikey": EVOLUTION_APIKEY,
                 "Content-Type": "application/json",
             },
             json={
