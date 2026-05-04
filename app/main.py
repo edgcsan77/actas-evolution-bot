@@ -5583,6 +5583,7 @@ def panel_actas(
         <div class="box">
           <div class="head">
             <strong>Estado de bots WhatsApp</strong>
+            <span class="small">Monitorea el estado, uso y actividad de cada bot en tiempo real.</span>
           </div>
         
           <div class="table-wrap">
