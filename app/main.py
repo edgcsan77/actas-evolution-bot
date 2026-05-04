@@ -6850,45 +6850,6 @@ def panel_actas(
         </div>
         """
 
-        html += """
-        <div class="box">
-          <div class="head">
-            <strong>Resumen por bot</strong>
-            <span class="small">Solicitudes por instancia de WhatsApp.</span>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Bot</th>
-                  <th class="right">Total</th>
-                  <th class="right">HECHO</th>
-                  <th class="right">ERROR</th>
-                </tr>
-              </thead>
-              <tbody>
-        """
-    
-        if by_instance:
-            for r in by_instance:
-                html += f"""
-                <tr>
-                  <td>{_esc(bot_label(r["instance_name"]))}</td>
-                  <td class="right">{r["total"]}</td>
-                  <td class="right">{r["done"]}</td>
-                  <td class="right">{r["error"]}</td>
-                </tr>
-                """
-        else:
-            html += '<tr><td colspan="4">Sin datos.</td></tr>'
-    
-        html += """
-              </tbody>
-            </table>
-          </div>
-        </div>
-        """
-
         html += bot_status_html
 
         html += """
@@ -6914,6 +6875,14 @@ def panel_actas(
               </thead>
               <tbody>
         """
+        bot_labels_map = {}
+
+        for k, v in BOT_LABELS.items():
+            bot_labels_map[k] = v
+        
+        for b in db.query(BotControl).all():
+            bot_labels_map[b.instance_name] = b.label or b.instance_name
+
         for r in by_instance:
             inst = r["instance_name"]
             bot_used = get_bot_used(db, inst)
@@ -6929,7 +6898,7 @@ def panel_actas(
         
             html += f"""
                 <tr>
-                  <td><strong>{_esc(bot_label(inst))}</strong></td>
+                  <td><strong>{_esc(bot_labels_map.get(inst) or bot_label(inst) or inst)}</strong></td>
                   <td class="right">{r["total"]}</td>
                   <td class="right">{bot_used}</td>
                   <td class="right">{bot_limit}</td>
@@ -6984,6 +6953,51 @@ def panel_actas(
                 </tr>
             """
         
+        html += """
+              </tbody>
+            </table>
+          </div>
+        </div>
+        """
+
+        html += """
+        <div class="box">
+          <div class="head">
+            <strong>Resumen por bot</strong>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Bot</th>
+                  <th class="right">Total</th>
+                  <th class="right">HECHO</th>
+                  <th class="right">ERROR</th>
+                </tr>
+              </thead>
+              <tbody>
+        """
+        bot_labels_map = {}
+
+        for k, v in BOT_LABELS.items():
+            bot_labels_map[k] = v
+
+        for b in db.query(BotControl).all():
+            bot_labels_map[b.instance_name] = b.label or b.instance_name
+    
+        if by_instance:
+            for r in by_instance:
+                html += f"""
+                <tr>
+                  <td>{_esc(bot_labels_map.get(r["instance_name"]) or bot_label(r["instance_name"]) or r["instance_name"])}</td>
+                  <td class="right">{r["total"]}</td>
+                  <td class="right">{r["done"]}</td>
+                  <td class="right">{r["error"]}</td>
+                </tr>
+                """
+        else:
+            html += '<tr><td colspan="4">Sin datos.</td></tr>'
+    
         html += """
               </tbody>
             </table>
@@ -7104,7 +7118,10 @@ def panel_actas(
 
         html += """
         <div class="box">
-          <div class="head"><strong>Agregar grupo manualmente</strong></div>
+          <div class="head">
+            <strong>Agregar grupo manualmente</strong>
+            <span class="small">Registra un grupo nuevo indicando su ID, nombre y categoría.</span>
+          </div>
         
           <div class="filters" style="grid-template-columns: 1.2fr 1fr 220px 220px;">
             <div>
