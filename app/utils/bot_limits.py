@@ -11,7 +11,6 @@ def block_instance(instance_name: str):
     instance_name = (instance_name or "").strip()
     if not instance_name:
         return
-
     redis_conn.sadd(BLOCKED_INSTANCES_KEY, instance_name)
 
 
@@ -19,8 +18,8 @@ def unblock_instance(instance_name: str):
     instance_name = (instance_name or "").strip()
     if not instance_name:
         return
-
     redis_conn.srem(BLOCKED_INSTANCES_KEY, instance_name)
+    redis_conn.srem(BLOCKED_INSTANCES_KEY, instance_name.encode("utf-8"))
 
 
 # =========================
