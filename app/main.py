@@ -809,7 +809,12 @@ def is_instance_blocked(instance_name: str) -> bool:
     if not instance_name:
         return False
 
-    return redis_conn.sismember(BLOCKED_INSTANCES_KEY, instance_name)
+    blocked = redis_conn.sismember(BLOCKED_INSTANCES_KEY, instance_name)
+
+    if not blocked:
+        blocked = redis_conn.sismember(BLOCKED_INSTANCES_KEY, instance_name.encode("utf-8"))
+
+    return bool(blocked)
 
 
 def list_blocked_instances():
