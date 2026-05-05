@@ -8,19 +8,19 @@ BLOCKED_INSTANCES_KEY = "blocked_instances"
 
 
 def block_instance(instance_name: str):
+    instance_name = (instance_name or "").strip()
     if not instance_name:
         return
+
     redis_conn.sadd(BLOCKED_INSTANCES_KEY, instance_name)
-    print("INSTANCE_BLOCKED =", instance_name, flush=True)
-    print("BLOCKED_INSTANCES_NOW =", redis_conn.smembers(BLOCKED_INSTANCES_KEY), flush=True)
 
 
 def unblock_instance(instance_name: str):
+    instance_name = (instance_name or "").strip()
     if not instance_name:
         return
+
     redis_conn.srem(BLOCKED_INSTANCES_KEY, instance_name)
-    print("INSTANCE_UNBLOCKED =", instance_name, flush=True)
-    print("BLOCKED_INSTANCES_NOW =", redis_conn.smembers(BLOCKED_INSTANCES_KEY), flush=True)
 
 
 # =========================
