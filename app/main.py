@@ -5305,8 +5305,13 @@ def panel_actas(
             (act_type or "").strip(),
         ])
         
+        group_base_q = base_q.filter(
+            (RequestLog.instance_name == "docifybot8") |
+            (RequestLog.instance_name.is_(None))
+        )
+        
         group_rows_raw = (
-            base_q.with_entities(
+            group_base_q.with_entities(
                 RequestLog.source_group_id,
                 RequestLog.status,
                 func.count(RequestLog.id),
