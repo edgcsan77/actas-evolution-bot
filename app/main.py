@@ -9662,6 +9662,17 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             return {"status": "ignored", "event": event}
 
         print("WEBHOOK_EVENT_ACCEPTED =", repr(event), flush=True)
+
+        instance_name = (instance_name or "").strip()
+
+        if is_instance_blocked(instance_name):
+            print("IGNORED_REASON = instance_blocked_early", flush=True)
+            print("BLOCKED_INSTANCE =", instance_name, flush=True)
+            return {
+                "ok": True,
+                "ignored": "instance_blocked",
+                "instance_name": instance_name
+            }
                 
         key = data.get("key", {})
         message = data.get("message", {})
