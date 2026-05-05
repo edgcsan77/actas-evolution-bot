@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.models import AppSetting, RequestLog
 from app.queue import redis_conn
 
-BLOCKED_INSTANCES_KEY = "blocked_instances"
+BLOCKED_INSTANCES_KEY = "blocked_instances_no_response"
 
 
 def block_instance(instance_name: str):
