@@ -4569,6 +4569,52 @@ async def panel_bot_set_promo(token: str, request: Request, db: Session = Depend
         return {"ok": False, "error": str(e)}
 
 
+@app.post("/botpanel/{token}/promotion/remove")
+def botpanel_remove_promotion(
+    token: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    instance_name = _bot_instance_from_token(db, token)
+
+    if not instance_name:
+        return {"ok": False, "error": "Panel no válido"}
+
+    if not _is_child_bot(instance_name):
+        return {"ok": False, "error": "Panel no permitido"}
+
+    group_jid = (payload.get("group_jid") or "").strip()
+
+    if not group_jid:
+        return {"ok": False, "error": "Falta group_jid"}
+
+    group = (
+        db.query(AuthorizedGroup)
+        .filter(
+            AuthorizedGroup.group_jid == group_jid,
+            AuthorizedGroup.owner_instance == instance_name,
+        )
+        .first()
+    )
+
+    if not group:
+        return {"ok": False, "error": "Grupo no pertenece a este bot"}
+
+    promo = (
+        db.query(GroupPromotion)
+        .filter(GroupPromotion.group_jid == group_jid)
+        .first()
+    )
+
+    if not promo:
+        return {"ok": False, "error": "Este grupo no tiene promoción"}
+
+    db.delete(promo)
+    db.commit()
+
+    return {"ok": True}
+
+
 @app.post("/botpanel/{token}/group/add")
 async def panel_bot_add_group(token: str, request: Request, db: Session = Depends(get_db)):
     try:
@@ -4928,6 +4974,9 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                       <input id="promo_total_{_esc(g["group_jid"])}" type="number" min="10" step="1" placeholder="Total actas (mín. 10)">
                       <input id="promo_price_{_esc(g["group_jid"])}" placeholder="Precio por acta">
                       <button class="btn btn-success" onclick="assignBotPromo('{_esc(g["group_jid"])}')">Aplicar promo</button>
+                      <button class="btn btn-danger" onclick="removeBotPromo('{_esc(g["group_jid"])}')">
+                        Quitar promo
+                      </button>
                     </div>
                   </td>
 
@@ -5155,6 +5204,27 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
           const data = await res.json();
           if (data.ok) location.reload();
           else alert(data.error || "No se pudo aplicar la promoción");
+        }
+
+        async function removeBotPromo(groupJid) {
+          const ok = confirm("¿Seguro que deseas quitar la promoción de este grupo?");
+          if (!ok) return;
+        
+          const res = await fetch(`${BOT_PANEL_BASE}/promotion/remove`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              group_jid: groupJid
+            })
+          });
+        
+          const data = await res.json();
+        
+          if (data.ok) {
+            location.reload();
+          } else {
+            alert(data.error || "No se pudo quitar la promoción");
+          }
         }
       </script>
     </body>
