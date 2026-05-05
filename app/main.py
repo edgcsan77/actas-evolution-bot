@@ -805,10 +805,11 @@ def is_group_blocked(group_jid: str) -> bool:
 
 
 def is_instance_blocked(instance_name: str) -> bool:
+    instance_name = (instance_name or "").strip()
     if not instance_name:
         return False
-    blocked = redis_conn.sismember(BLOCKED_INSTANCES_KEY, instance_name)
-    return bool(blocked)
+
+    return redis_conn.sismember(BLOCKED_INSTANCES_KEY, instance_name)
 
 
 def list_blocked_instances():
@@ -5249,6 +5250,10 @@ def panel_actas(
         group_cache = _build_group_name_cache(db)
         delivery_metrics = _panel_delivery_metrics(db, time_min, time_max)
         bot_status_rows = _bot_status_rows(db)
+        bot_labels_map = {
+            b["instance_name"]: b["label"]
+            for b in bot_status_rows
+        }
 
         hidden_main_group_ids = {
             g.group_jid
@@ -6876,13 +6881,6 @@ def panel_actas(
               </thead>
               <tbody>
         """
-        bot_labels_map = {}
-
-        for k, v in BOT_LABELS.items():
-            bot_labels_map[k] = v
-        
-        for b in db.query(BotControl).all():
-            bot_labels_map[b.instance_name] = b.label or b.instance_name
 
         for r in by_instance:
             inst = r["instance_name"]
@@ -6899,7 +6897,7 @@ def panel_actas(
         
             html += f"""
                 <tr>
-                  <td><strong>{_esc(bot_labels_map.get(inst) or bot_label(inst) or inst)}</strong></td>
+                  <td><strong>{_esc(bot_labels_map.get(inst) or inst)}</strong></td>
                   <td class="right">{r["total"]}</td>
                   <td class="right">{bot_used}</td>
                   <td class="right">{bot_limit}</td>
@@ -6978,19 +6976,12 @@ def panel_actas(
               </thead>
               <tbody>
         """
-        bot_labels_map = {}
-
-        for k, v in BOT_LABELS.items():
-            bot_labels_map[k] = v
-
-        for b in db.query(BotControl).all():
-            bot_labels_map[b.instance_name] = b.label or b.instance_name
     
         if by_instance:
             for r in by_instance:
                 html += f"""
                 <tr>
-                  <td>{_esc(bot_labels_map.get(r["instance_name"]) or bot_label(r["instance_name"]) or r["instance_name"])}</td>
+                  <td>{_esc(bot_labels_map.get(r["instance_name"]) or r["instance_name"])}</td>
                   <td class="right">{r["total"]}</td>
                   <td class="right">{r["done"]}</td>
                   <td class="right">{r["error"]}</td>
