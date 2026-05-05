@@ -6883,7 +6883,7 @@ def panel_actas(
         """
 
         for r in by_instance:
-            inst = r["instance_name"]
+            inst = (r["instance_name"] or "").strip()
             bot_used = get_bot_used(db, inst)
             bot_limit = get_bot_limit(db, inst)
             bot_available = max(0, bot_limit - bot_used) if bot_limit > 0 else "∞"
