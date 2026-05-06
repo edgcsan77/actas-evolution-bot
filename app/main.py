@@ -4535,7 +4535,18 @@ async def panel_bot_set_promo(token: str, request: Request, db: Session = Depend
         total_actas = int(payload.get("total_actas") or 0)
         price_per_piece = (payload.get("price_per_piece") or "").strip()
 
-        _assert_group_owned_by_bot(db, group_jid, instance_name)
+        group = db.query(AuthorizedGroup).filter(
+            AuthorizedGroup.group_jid == group_jid
+        ).first()
+        
+        if not group:
+            return {"ok": False, "error": "Grupo no encontrado"}
+        
+        if group.owner_instance and group.owner_instance != instance_name:
+            return {"ok": False, "error": "Este grupo pertenece a otro bot"}
+        
+        if not group.owner_instance:
+            group.owner_instance = instance_name
 
         if total_actas < MIN_BOT_PROMO_ACTAS:
             return {"ok": False, "error": f"La promoción mínima es de {MIN_BOT_PROMO_ACTAS} actas"}
