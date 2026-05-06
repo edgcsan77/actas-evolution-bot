@@ -8929,7 +8929,7 @@ def _real_promo_used_count(db: Session, promo: GroupPromotion) -> int:
     if not promo or not promo.group_jid:
         return 0
 
-    start_at = promo.created_at or datetime(1970, 1, 1)
+    start_at = promo.updated_at or promo.created_at or datetime(1970, 1, 1)
 
     return (
         db.query(RequestLog)
@@ -8947,9 +8947,23 @@ def _sync_promo_used_from_logs(db: Session, promo: GroupPromotion):
         return promo
 
     real_used = _real_promo_used_count(db, promo)
+    current_used = int(promo.used_actas or 0)
+    diff = abs(int(real_used or 0) - current_used)
 
-    if int(promo.used_actas or 0) != int(real_used):
-        promo.used_actas = int(real_used)
+    # Protección: no corregir diferencias grandes automáticamente
+    if diff > 10:
+        print(
+            "[PROMO_SYNC_SKIP_BIG_DIFF]",
+            "group=", promo.group_jid,
+            "saved=", current_used,
+            "real=", real_used,
+            "diff=", diff,
+            flush=True,
+        )
+        return promo
+
+    if current_used != int(real_used or 0):
+        promo.used_actas = int(real_used or 0)
         promo.updated_at = _utc_now_naive()
         db.commit()
         _clear_panel_cache()
