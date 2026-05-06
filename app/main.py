@@ -2881,7 +2881,7 @@ def panel_group_detail(
     group_cache = _build_group_name_cache(db)
 
     promo = _get_group_promotion(db, group_jid)
-    promo = _sync_promo_used_from_logs(db, promo)
+    #promo = _sync_promo_used_from_logs(db, promo)
     promo_html = _promotion_badge_html(promo)
     group_display_name = _esc(_group_name_cached(group_jid, group_cache))
     promo_name = _esc(promo.promo_name if promo else "")
@@ -8926,48 +8926,10 @@ def _promotion_available(promo: GroupPromotion) -> int:
 
 
 def _real_promo_used_count(db: Session, promo: GroupPromotion) -> int:
-    if not promo or not promo.group_jid:
-        return 0
-
-    start_at = promo.updated_at or promo.created_at or datetime(1970, 1, 1)
-
-    return (
-        db.query(RequestLog)
-        .filter(
-            RequestLog.source_group_id == promo.group_jid,
-            RequestLog.status == "DONE",
-            RequestLog.updated_at >= start_at,
-        )
-        .count()
-    )
+    return int(promo.used_actas or 0) if promo else 0
 
 
 def _sync_promo_used_from_logs(db: Session, promo: GroupPromotion):
-    if not promo:
-        return promo
-
-    real_used = _real_promo_used_count(db, promo)
-    current_used = int(promo.used_actas or 0)
-    diff = abs(int(real_used or 0) - current_used)
-
-    # Protección: no corregir diferencias grandes automáticamente
-    if diff > 10:
-        print(
-            "[PROMO_SYNC_SKIP_BIG_DIFF]",
-            "group=", promo.group_jid,
-            "saved=", current_used,
-            "real=", real_used,
-            "diff=", diff,
-            flush=True,
-        )
-        return promo
-
-    if current_used != int(real_used or 0):
-        promo.used_actas = int(real_used or 0)
-        promo.updated_at = _utc_now_naive()
-        db.commit()
-        _clear_panel_cache()
-
     return promo
 
 
