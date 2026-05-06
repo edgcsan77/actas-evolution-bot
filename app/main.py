@@ -4607,7 +4607,7 @@ def botpanel_remove_promotion(
     )
 
     if not promo:
-        return {"ok": False, "error": "Este grupo no tiene promoción"}
+        return {"ok": True, "message": "Este grupo no tenía promoción"}
 
     db.delete(promo)
     db.commit()
@@ -4973,10 +4973,21 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                       <input id="promo_name_{_esc(g["group_jid"])}" placeholder="Nombre promo">
                       <input id="promo_total_{_esc(g["group_jid"])}" type="number" min="10" step="1" placeholder="Total actas (mín. 10)">
                       <input id="promo_price_{_esc(g["group_jid"])}" placeholder="Precio por acta">
-                      <button class="btn btn-success" onclick="assignBotPromo('{_esc(g["group_jid"])}')">Aplicar promo</button>
-                      <button class="btn btn-danger" onclick="removeBotPromo('{_esc(g["group_jid"])}')">
-                        Quitar promo
+                
+                      <button class="btn btn-success"
+                        onclick="assignBotPromo('{_esc(g["group_jid"])}')">
+                        Aplicar promo
                       </button>
+                
+                      {
+                        f"""
+                        <button class="btn btn-danger"
+                          onclick="removeBotPromo('{_esc(g["group_jid"])}')">
+                          Quitar promo
+                        </button>
+                        """
+                        if g["promo_total"] > 0 else ""
+                      }
                     </div>
                   </td>
 
