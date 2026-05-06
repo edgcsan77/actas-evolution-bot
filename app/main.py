@@ -2028,7 +2028,7 @@ def panel_apply_shared_promotion(
             row.client_key = client_key
             row.shared_key = shared_key
             row.total_actas = total_actas
-            row.used_actas = 0
+            #row.used_actas = 0
             row.price_per_piece = price_per_piece
             row.is_credit = is_credit
             row.credit_abono = credit_abono
@@ -2151,7 +2151,7 @@ def panel_add_group_to_shared_promotion(
         row.client_key = leader.client_key
         row.shared_key = leader.shared_key
         row.total_actas = leader.total_actas
-        row.used_actas = 0
+        #row.used_actas = 0
         row.price_per_piece = leader.price_per_piece
         row.is_credit = leader.is_credit
         row.credit_abono = leader.credit_abono or 0
@@ -2881,6 +2881,7 @@ def panel_group_detail(
     group_cache = _build_group_name_cache(db)
 
     promo = _get_group_promotion(db, group_jid)
+    promo = _sync_promo_used_from_logs(db, promo)
     promo_html = _promotion_badge_html(promo)
     group_display_name = _esc(_group_name_cached(group_jid, group_cache))
     promo_name = _esc(promo.promo_name if promo else "")
@@ -4552,7 +4553,7 @@ async def panel_bot_set_promo(token: str, request: Request, db: Session = Depend
         if row:
             row.promo_name = promo_name
             row.total_actas = total_actas
-            row.used_actas = 0
+            #row.used_actas = 0
             row.price_per_piece = price_per_piece
             row.is_active = True
             row.owner_instance = instance_name
@@ -8924,6 +8925,38 @@ def _promotion_available(promo: GroupPromotion) -> int:
     return max(0, (promo.total_actas or 0) - (promo.used_actas or 0))
 
 
+def _real_promo_used_count(db: Session, promo: GroupPromotion) -> int:
+    if not promo or not promo.group_jid:
+        return 0
+
+    start_at = promo.created_at or datetime(1970, 1, 1)
+
+    return (
+        db.query(RequestLog)
+        .filter(
+            RequestLog.source_group_id == promo.group_jid,
+            RequestLog.status == "DONE",
+            RequestLog.updated_at >= start_at,
+        )
+        .count()
+    )
+
+
+def _sync_promo_used_from_logs(db: Session, promo: GroupPromotion):
+    if not promo:
+        return promo
+
+    real_used = _real_promo_used_count(db, promo)
+
+    if int(promo.used_actas or 0) != int(real_used):
+        promo.used_actas = int(real_used)
+        promo.updated_at = _utc_now_naive()
+        db.commit()
+        _clear_panel_cache()
+
+    return promo
+
+
 def _promotion_badge_html(promo: GroupPromotion | None) -> str:
     if not promo:
         return '<span style="color:#6b7280;font-weight:700;">Sin promoción</span>'
@@ -9295,7 +9328,7 @@ def panel_set_group_promotion(
         row.is_active = True
         row.updated_at = _utc_now_naive()
 
-        row.used_actas = 0
+        #row.used_actas = 0
         row.warning_sent_200 = False
         row.warning_sent_100 = False
         row.warning_sent_50 = False
