@@ -2061,7 +2061,9 @@ def panel_apply_shared_promotion(
     try:
         promo_label = promo_name or "paquete promocional"
         tipo_label = "crédito" if is_credit else "pagada"
-        available = max(0, total_actas)
+        
+        used_total = max((int(r.used_actas or 0) for r in rows), default=0)
+        available = max(0, int(total_actas or 0) - used_total)
 
         _notify_client_groups_main(
             rows,
