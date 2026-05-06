@@ -4303,6 +4303,7 @@ def _promotion_summary_map(db: Session) -> dict[str, dict]:
             GroupPromotion.promo_name,
             GroupPromotion.total_actas,
             GroupPromotion.used_actas,
+            GroupPromotion.shared_group_used_actas,
             GroupPromotion.is_active,
             GroupPromotion.client_key,
             GroupPromotion.shared_key,
@@ -4330,9 +4331,22 @@ def _promotion_summary_map(db: Session) -> dict[str, dict]:
         seen.add(raw_key)
 
         total_actas = int(r.total_actas or 0)
-        used_actas = int(r.used_actas or 0)
-        available = max(0, total_actas - used_actas)
         shared_key = (r.shared_key or "").strip()
+        
+        if shared_key:
+            shared_rows = [
+                x for x in rows
+                if (x.shared_key or "").strip() == shared_key
+            ]
+        
+            used_actas = max((int(x.used_actas or 0) for x in shared_rows), default=0)
+        
+            if used_actas <= 0:
+                used_actas = sum(int(x.shared_group_used_actas or 0) for x in shared_rows)
+        else:
+            used_actas = int(r.used_actas or 0)
+        
+        available = max(0, total_actas - used_actas)
         promo_name = (r.promo_name or "").strip()
 
         if not promo_name and total_actas == 0 and used_actas == 0:
