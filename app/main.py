@@ -4542,10 +4542,7 @@ async def panel_bot_set_promo(token: str, request: Request, db: Session = Depend
         if not group:
             return {"ok": False, "error": "Grupo no encontrado"}
         
-        if group.owner_instance and group.owner_instance != instance_name:
-            return {"ok": False, "error": "Este grupo pertenece a otro bot"}
-        
-        if not group.owner_instance:
+        if group.owner_instance != instance_name:
             group.owner_instance = instance_name
 
         if total_actas < MIN_BOT_PROMO_ACTAS:
@@ -4586,44 +4583,50 @@ def botpanel_remove_promotion(
     payload: dict,
     db: Session = Depends(get_db),
 ):
-    instance_name = _bot_instance_from_token(db, token)
+    try:
+        instance_name = _bot_instance_from_token(db, token)
 
-    if not instance_name:
-        return {"ok": False, "error": "Panel no válido"}
+        if not instance_name:
+            return {"ok": False, "error": "Panel no válido"}
 
-    if not _is_child_bot(instance_name):
-        return {"ok": False, "error": "Panel no permitido"}
+        if not _is_child_bot(instance_name):
+            return {"ok": False, "error": "Panel no permitido"}
 
-    group_jid = (payload.get("group_jid") or "").strip()
+        group_jid = (payload.get("group_jid") or "").strip()
 
-    if not group_jid:
-        return {"ok": False, "error": "Falta group_jid"}
+        if not group_jid:
+            return {"ok": False, "error": "Falta group_jid"}
 
-    group = (
-        db.query(AuthorizedGroup)
-        .filter(
-            AuthorizedGroup.group_jid == group_jid,
-            AuthorizedGroup.owner_instance == instance_name,
+        group = db.query(AuthorizedGroup).filter(
+            AuthorizedGroup.group_jid == group_jid
+        ).first()
+
+        if not group:
+            return {"ok": False, "error": "Grupo no encontrado"}
+
+        if group.owner_instance != instance_name:
+            group.owner_instance = instance_name
+
+        promo = (
+            db.query(GroupPromotion)
+            .filter(GroupPromotion.group_jid == group_jid)
+            .first()
         )
-        .first()
-    )
 
-    if not group:
-        return {"ok": False, "error": "Grupo no pertenece a este bot"}
+        if not promo:
+            db.commit()
+            _clear_panel_cache()
+            return {"ok": True, "message": "Este grupo no tenía promoción"}
 
-    promo = (
-        db.query(GroupPromotion)
-        .filter(GroupPromotion.group_jid == group_jid)
-        .first()
-    )
+        db.delete(promo)
+        db.commit()
+        _clear_panel_cache()
 
-    if not promo:
-        return {"ok": True, "message": "Este grupo no tenía promoción"}
+        return {"ok": True}
 
-    db.delete(promo)
-    db.commit()
-
-    return {"ok": True}
+    except Exception as e:
+        db.rollback()
+        return {"ok": False, "error": str(e)}
 
 
 @app.post("/botpanel/{token}/group/add")
