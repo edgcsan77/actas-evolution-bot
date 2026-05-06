@@ -825,9 +825,15 @@ def _handle_group_promotion_after_done(req, db):
     leader = rows[0]
 
     total_before = int(leader.total_actas or 0)
-    used_before = int(leader.used_actas or 0)
+    if shared_key:
+        used_before = max(
+            int(leader.used_actas or 0),
+            sum(int(r.shared_group_used_actas or 0) for r in rows)
+        )
+    else:
+        used_before = int(leader.used_actas or 0)
+    
     available_before = max(0, total_before - used_before)
-
     used_after = used_before + 1
     available_after = max(0, total_before - used_after)
 
