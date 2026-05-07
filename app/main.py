@@ -2026,7 +2026,7 @@ def panel_apply_shared_promotion(
             row.client_key = client_key
             row.shared_key = shared_key
             row.total_actas = total_actas
-            #row.used_actas = 0
+            row.used_actas = 0
             row.price_per_piece = price_per_piece
             row.is_credit = is_credit
             row.credit_abono = credit_abono
@@ -4567,7 +4567,13 @@ async def panel_bot_set_promo(token: str, request: Request, db: Session = Depend
         if row:
             row.promo_name = promo_name
             row.total_actas = total_actas
-            #row.used_actas = 0
+            row.used_actas = 0
+            row.shared_group_used_actas = 0
+            row.warning_sent_200 = False
+            row.warning_sent_100 = False
+            row.warning_sent_50 = False
+            row.warning_sent_10 = False
+            row.warning_sent_0 = False
             row.price_per_piece = price_per_piece
             row.is_active = True
             row.owner_instance = instance_name
@@ -4578,9 +4584,17 @@ async def panel_bot_set_promo(token: str, request: Request, db: Session = Depend
                 promo_name=promo_name,
                 total_actas=total_actas,
                 used_actas=0,
+                shared_group_used_actas=0,
                 price_per_piece=price_per_piece,
                 is_active=True,
                 owner_instance=instance_name,
+                warning_sent_200=False,
+                warning_sent_100=False,
+                warning_sent_50=False,
+                warning_sent_10=False,
+                warning_sent_0=False,
+                created_at=_utc_now_naive(),
+                updated_at=_utc_now_naive(),
             )
             db.add(row)
 
@@ -9318,7 +9332,7 @@ def panel_set_group_promotion(
         row.is_active = True
         row.updated_at = _utc_now_naive()
 
-        #row.used_actas = 0
+        row.used_actas = 0
         row.warning_sent_200 = False
         row.warning_sent_100 = False
         row.warning_sent_50 = False
