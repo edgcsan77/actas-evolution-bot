@@ -712,9 +712,14 @@ def _bot_sales_month(db: Session, instance_name: str) -> int:
 
 def _bot_sales_history_30d(db: Session, instance_name: str):
     start_utc = _bot_month_30d_start()
+
+    mx_date = func.date(
+        func.timezone('America/Monterrey', RequestLog.created_at)
+    )
+
     rows = (
         db.query(
-            func.date(RequestLog.created_at).label("day"),
+            mx_date.label("day"),
             func.count(RequestLog.id).label("total"),
         )
         .filter(
@@ -722,10 +727,11 @@ def _bot_sales_history_30d(db: Session, instance_name: str):
             RequestLog.status == "DONE",
             RequestLog.created_at >= start_utc,
         )
-        .group_by(func.date(RequestLog.created_at))
-        .order_by(func.date(RequestLog.created_at).desc())
+        .group_by(mx_date)
+        .order_by(mx_date.desc())
         .all()
     )
+
     return rows
 
 
