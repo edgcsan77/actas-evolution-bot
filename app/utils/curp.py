@@ -228,8 +228,6 @@ def seems_like_identifier_attempt(text: str) -> bool:
     t = normalize_text(raw_clean)
 
     keywords = [
-        "CURP",
-        "CADENA",
         "IDENTIFICADOR",
         "IDENTIFICADOR ELECTRONICO",
         "CODIGO",
