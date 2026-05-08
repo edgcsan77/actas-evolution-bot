@@ -714,7 +714,10 @@ def _bot_sales_history_30d(db: Session, instance_name: str):
     start_utc = _bot_month_30d_start()
 
     mx_date = func.date(
-        func.timezone('America/Monterrey', RequestLog.created_at)
+        func.timezone(
+            'America/Monterrey',
+            func.timezone('UTC', RequestLog.created_at)
+        )
     )
 
     rows = (
