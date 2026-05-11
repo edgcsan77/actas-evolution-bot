@@ -1315,6 +1315,9 @@ def _panel_group_rows(
     
             row = db.query(AuthorizedGroup).filter_by(group_jid=gid).first()
             owner = (row.owner_instance or "").strip() if row else ""
+
+            if gid != "PRIVADO" and owner and owner != "docifybot8":
+                continue
             
             if gid != "PRIVADO" and not owner and _is_hidden_panel_group(gid, group_name):
                 continue
@@ -5493,6 +5496,9 @@ def panel_actas(
         
             row = db.query(AuthorizedGroup).filter_by(group_jid=gid).first()
             owner = (row.owner_instance or "").strip() if row else ""
+
+            if gid != "PRIVADO" and owner and owner != "docifybot8":
+                continue
             
             if gid != "PRIVADO" and not owner and _is_hidden_panel_group(gid, group_name):
                 continue
