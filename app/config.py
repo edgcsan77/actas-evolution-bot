@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     PROVIDER7_OFICIALIA: str = ""
     PROVIDER7_RFC_USUARIO: str = ""
 
+    # PROVIDER 8
+    PROVIDER8_GROUP_1: str = ""
+    PROVIDER8_GROUP_2: str = ""
+
     PROVIDER_NO_RECORD_TEXT: str = (
         "NO HAY REGISTROS DISPONIBLES|"
         "NO SE ENCONTRO EL ACTA EN SISTEMA|"
