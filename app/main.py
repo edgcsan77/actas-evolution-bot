@@ -5390,7 +5390,7 @@ def panel_actas(
             act_type=act_type or None,
         )
 
-        base_q = base_q.filter(RequestLog.instance_name == MAIN_PANEL_INSTANCE)
+        group_base_q = base_q.filter(RequestLog.instance_name == MAIN_PANEL_INSTANCE)
         
         group_cache = _build_group_name_cache(db)
         delivery_metrics = _panel_delivery_metrics(db, time_min, time_max)
@@ -5444,8 +5444,6 @@ def panel_actas(
             (status or "").strip(),
             (act_type or "").strip(),
         ])
-        
-        group_base_q = base_q
         
         group_rows_raw = (
             group_base_q.with_entities(
