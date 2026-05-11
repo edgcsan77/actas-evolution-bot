@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     # PROVIDER 6
     PROVIDER6_GROUP_1: str = ""
     PROVIDER6_GROUP_2: str = ""
+    PROVIDER6_GROUP_NACIMIENTO: str = ""
+    PROVIDER6_GROUP_ESPECIALES: str = ""
+    PROVIDER6_GROUP_FOLIADAS: str = ""
 
     # PROVIDER 7
     PROVIDER7_ACCESS_TOKEN: str = ""
