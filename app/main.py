@@ -8883,8 +8883,6 @@ def _all_provider_groups() -> set[str]:
         settings.PROVIDER2_GROUP_2,
         settings.PROVIDER5_GROUP_1,
         settings.PROVIDER5_GROUP_2,
-        settings.PROVIDER6_GROUP_1,
-        settings.PROVIDER6_GROUP_2,
         settings.PROVIDER6_GROUP_NACIMIENTO,
         settings.PROVIDER6_GROUP_ESPECIALES,
         settings.PROVIDER6_GROUP_FOLIADAS,
