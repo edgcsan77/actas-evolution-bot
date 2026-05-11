@@ -75,6 +75,7 @@ PANEL_STREAM_ENABLED = True
 EVOLUTION_BASE_URL = "http://127.0.0.1:8080"
 EVOLUTION_APIKEY = "DOCIFY_EVOLUTION_KEY_2026"
 PANEL_TOKEN = "docifymx2026"
+MAIN_PANEL_INSTANCE = "docifybot8"
 
 NO_DONE_NOTIFY_GROUPS = {
     "120363427267191472@g.us"
@@ -5389,7 +5390,7 @@ def panel_actas(
             act_type=act_type or None,
         )
 
-        base_q = base_q.filter(RequestLog.instance_name == "docifybot8")
+        base_q = base_q.filter(RequestLog.instance_name == MAIN_PANEL_INSTANCE)
         
         group_cache = _build_group_name_cache(db)
         delivery_metrics = _panel_delivery_metrics(db, time_min, time_max)
@@ -5444,10 +5445,7 @@ def panel_actas(
             (act_type or "").strip(),
         ])
         
-        group_base_q = base_q.filter(
-            (RequestLog.instance_name == "docifybot8") |
-            (RequestLog.instance_name.is_(None))
-        )
+        group_base_q = base_q
         
         group_rows_raw = (
             group_base_q.with_entities(
@@ -5473,7 +5471,7 @@ def panel_actas(
                 row = db.query(AuthorizedGroup).filter_by(group_jid=gid).first()
                 owner = (row.owner_instance or "").strip() if row else ""
                 
-                if gid != "PRIVADO" and not owner and _is_hidden_panel_group(gid, group_name):
+                if gid != "PRIVADO" and owner != MAIN_PANEL_INSTANCE:
                     continue
         
                 group_map[gid] = {
@@ -5496,11 +5494,8 @@ def panel_actas(
         
             row = db.query(AuthorizedGroup).filter_by(group_jid=gid).first()
             owner = (row.owner_instance or "").strip() if row else ""
-
-            if gid != "PRIVADO" and owner and owner != "docifybot8":
-                continue
             
-            if gid != "PRIVADO" and not owner and _is_hidden_panel_group(gid, group_name):
+            if gid != "PRIVADO" and owner not in ("", MAIN_PANEL_INSTANCE):
                 continue
         
             item = group_map.setdefault(gid, {
