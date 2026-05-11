@@ -1771,7 +1771,6 @@ def panel_recent_requests(
             status=status or None,
             act_type=act_type or None,
         )
-        .filter(RequestLog.instance_name == "docifybot8")
         .with_entities(
             RequestLog.id,
             RequestLog.curp,
