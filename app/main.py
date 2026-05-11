@@ -1767,6 +1767,7 @@ def panel_recent_requests(
             status=status or None,
             act_type=act_type or None,
         )
+        .filter(RequestLog.instance_name == "docifybot8")
         .with_entities(
             RequestLog.id,
             RequestLog.curp,
@@ -5384,6 +5385,8 @@ def panel_actas(
             status=status or None,
             act_type=act_type or None,
         )
+
+        base_q = base_q.filter(RequestLog.instance_name == "docifybot8")
         
         group_cache = _build_group_name_cache(db)
         delivery_metrics = _panel_delivery_metrics(db, time_min, time_max)
