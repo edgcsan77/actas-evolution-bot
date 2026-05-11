@@ -534,9 +534,9 @@ def _pick_provider6_group(term: str | None, act_type: str, request_id: int) -> s
 
     # 2. CADENAS -> grupo foliadas/cadena
     if is_cadena_req:
-        if not foliadas_group:
-            raise RuntimeError("NO_PROVIDER6_FOLIADAS_GROUP_CONFIGURED")
-        return foliadas_group
+        if not especiales_group:
+            raise RuntimeError("NO_PROVIDER6_ESPECIALES_GROUP_CONFIGURED")
+        return especiales_group
 
     # 3. NACIMIENTO normal -> grupo nacimiento
     if is_nacimiento:
