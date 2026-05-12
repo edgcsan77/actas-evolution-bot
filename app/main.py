@@ -1631,6 +1631,8 @@ def panel_audit_group(
         q = q.filter(RequestLog.instance_name == instance_name)
 
     rows = q.order_by(RequestLog.created_at.asc()).all()
+    
+    show_provider = (instance_name or "").strip() in ("", "docifybot8")
 
     html = f"""
     <html>
@@ -1670,7 +1672,7 @@ def panel_audit_group(
               <th>Grupo</th>
               <th>Dato</th>
               <th>Tipo</th>
-              <th>Proveedor</th>
+              {"<th>Proveedor</th>" if show_provider else ""}
               <th>Status</th>
             </tr>
           </thead>
@@ -1686,7 +1688,7 @@ def panel_audit_group(
               <td class="mono">{_esc(r.source_group_id)}</td>
               <td class="mono">{_esc(r.curp)}</td>
               <td>{_esc(r.act_type)}</td>
-              <td>{_esc(_provider_label(r.provider_name))}</td>
+              {"<td>" + _esc(_provider_label(r.provider_name)) + "</td>" if show_provider else ""}
               <td>{_esc(r.status)}</td>
             </tr>
         """
@@ -1694,7 +1696,7 @@ def panel_audit_group(
     if not rows:
         html += """
             <tr>
-              <td colspan="8">No hay solicitudes DONE en este periodo.</td>
+              <td colspan="{8 if show_provider else 7}">No hay solicitudes DONE en este periodo.</td>
             </tr>
         """
 
