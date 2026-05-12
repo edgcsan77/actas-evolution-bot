@@ -522,9 +522,8 @@ def _pick_provider6_group(term: str | None, act_type: str, request_id: int) -> s
     especiales_group = (settings.PROVIDER6_GROUP_ESPECIALES or "").strip()
     foliadas_group = (settings.PROVIDER6_GROUP_FOLIADAS or "").strip()
 
-    is_nacimiento = act_type_up.startswith("NACIMIENTO") or act_type_up.startswith("NAC")
-    is_cadena_req = is_chain(term)
     is_folio_req = _is_folio_act(act_type_up)
+    is_cadena_req = is_chain(term)
 
     # 1. FOLIADAS -> grupo foliadas
     if is_folio_req:
@@ -532,22 +531,16 @@ def _pick_provider6_group(term: str | None, act_type: str, request_id: int) -> s
             raise RuntimeError("NO_PROVIDER6_FOLIADAS_GROUP_CONFIGURED")
         return foliadas_group
 
-    # 2. CADENAS -> grupo foliadas/cadena
+    # 2. CADENAS -> grupo especiales
     if is_cadena_req:
         if not especiales_group:
             raise RuntimeError("NO_PROVIDER6_ESPECIALES_GROUP_CONFIGURED")
         return especiales_group
 
-    # 3. NACIMIENTO normal -> grupo nacimiento
-    if is_nacimiento:
-        if not nacimiento_group:
-            raise RuntimeError("NO_PROVIDER6_NACIMIENTO_GROUP_CONFIGURED")
-        return nacimiento_group
-
-    # 4. MAT / DEF / DIV normales -> grupo especiales
-    if not especiales_group:
-        raise RuntimeError("NO_PROVIDER6_ESPECIALES_GROUP_CONFIGURED")
-    return especiales_group
+    # 3. NAC / MAT / DEF / DIV -> grupo nacimiento
+    if not nacimiento_group:
+        raise RuntimeError("NO_PROVIDER6_NACIMIENTO_GROUP_CONFIGURED")
+    return nacimiento_group
 
 
 def _pick_provider_group(
