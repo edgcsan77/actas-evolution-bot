@@ -254,9 +254,17 @@ def _block_client_groups(rows: list):
 
     for row in rows:
         gid = (row.group_jid or "").strip()
+
         if gid:
             try:
                 block_group(gid)
+
+                row.is_active = False
+                row.warning_sent_0 = True
+                row.updated_at = _utc_now_naive()
+
+                print("PROMO_AUTO_BLOCK_OK =", gid, flush=True)
+
             except Exception as e:
                 print("PROMO_AUTO_BLOCK_ERROR =", gid, str(e), flush=True)
 
@@ -875,7 +883,7 @@ def _handle_group_promotion_after_done(req, db):
         extra_shared_msg_short = "Este aviso aplica para todos los grupos asociados a esta bolsa."
         extra_shared_msg_block = "Todos los grupos asociados a esta bolsa quedarán bloqueados automáticamente hasta nueva recarga.\n\n"
 
-    crossed_0 = available_after <= 0 and not bool(getattr(leader, "warning_sent_0", False))
+    crossed_0 = available_after <= 0
     crossed_10 = available_before > 10 and available_after <= 10 and not bool(getattr(leader, "warning_sent_10", False))
     crossed_50 = available_before > 50 and available_after <= 50 and not bool(getattr(leader, "warning_sent_50", False))
     crossed_100 = available_before > 100 and available_after <= 100 and not bool(getattr(leader, "warning_sent_100", False))
