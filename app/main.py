@@ -1144,7 +1144,21 @@ def _fmt_dt(dt):
 
 def _panel_period_bounds(view: str):
     view = (view or "day").strip().lower()
-
+    
+    if view == "30d":
+        now = _panel_now()
+        local_start = now - timedelta(days=29)
+        local_start = local_start.replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        local_end = now + timedelta(days=1)
+        utc_start = _panel_to_utc_naive(local_start)
+        utc_end = _panel_to_utc_naive(local_end)
+        return utc_start, utc_end, "30d"
+        
     if view == "month":
         local_start = _panel_month_start()
         local_end = _panel_month_end()
@@ -1154,22 +1168,16 @@ def _panel_period_bounds(view: str):
 
     if view == "prev_month":
         now = _panel_now()
-
         first_day_this_month = now.replace(
             day=1, hour=0, minute=0, second=0, microsecond=0
         )
-
         last_day_prev_month = first_day_this_month - timedelta(days=1)
-
         local_start = last_day_prev_month.replace(
             day=1, hour=0, minute=0, second=0, microsecond=0
         )
-
         local_end = first_day_this_month
-
         utc_start = _panel_to_utc_naive(local_start)
         utc_end = _panel_to_utc_naive(local_end)
-
         return utc_start, utc_end, "prev_month"
 
     now = _panel_now()
@@ -5129,7 +5137,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                     </a>
                     <br><br>
                     <a target="_blank"
-                       href="/panel/audit/group?token={settings.ADMIN_PANEL_TOKEN}&view=month&instance_name={instance_name}&group_jid={_esc(g['group_jid'])}"
+                       href="/panel/audit/group?token={settings.ADMIN_PANEL_TOKEN}&view=30d&instance_name={instance_name}&group_jid={_esc(g['group_jid'])}"
                        class="btn btn-success"
                        style="color:white;text-decoration:none;padding:6px 10px;font-size:12px;border-radius:10px;">
                        30 días
