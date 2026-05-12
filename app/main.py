@@ -7585,7 +7585,7 @@ def panel_actas(
                   <td>{_esc(r.act_type)}</td>
                   <td class="{status_class}">{_esc(r.status)}</td>
                   <td>{_esc(_group_name_cached(r.source_group_id, group_cache) if (r.instance_name or "docifybot8") == "docifybot8" else "OCULTO")}</td>
-                  <td>{_esc(bot_label(r.instance_name))}</td>
+                  <td>{_esc(bot_labels_map.get(r.instance_name or "docifybot8") or (r.instance_name or "docifybot8"))}</td>
                   <td>{_esc(_provider_label(r.provider_name))}</td>
                   <td>{_esc(_group_name_cached(r.provider_group_id, group_cache))}</td>
                   <td>{_esc(_fmt_dt(r.created_at))}</td>
