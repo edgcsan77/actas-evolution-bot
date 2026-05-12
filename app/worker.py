@@ -983,7 +983,9 @@ def _handle_group_promotion_after_done(req, db):
     if crossed_0:
         try:
             _block_client_groups(rows if shared_key else [current])
+            db.commit()
         except Exception as e:
+            db.rollback()
             print("PROMOTION_BLOCK_ERROR =", str(e), flush=True)
 
     if msg and notify_level:
