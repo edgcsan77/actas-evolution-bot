@@ -1610,13 +1610,15 @@ def panel_audit_group(
     request: Request,
     group_jid: str,
     view: str = "day",
+    range: str = "",
     instance_name: str = "",
     db: Session = Depends(get_db),
 ):
     if not _is_valid_admin_panel_token(request):
         return HTMLResponse("No autorizado", status_code=403)
 
-    time_min, time_max, view = _panel_period_bounds(view)
+    period_view = range or view
+    time_min, time_max, view = _panel_period_bounds(period_view)
 
     q = db.query(RequestLog).filter(
         RequestLog.source_group_id == group_jid,
@@ -5130,14 +5132,14 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
 
                   <td>
                     <a target="_blank"
-                       href="/panel/audit/group?token={settings.ADMIN_PANEL_TOKEN}&view=day&instance_name={instance_name}&group_jid={_esc(g['group_jid'])}"
+                       href="/panel/audit/group?token={settings.ADMIN_PANEL_TOKEN}&range=day&instance_name={instance_name}&group_jid={_esc(g['group_jid'])}"
                        class="btn btn-primary"
                        style="color:white;text-decoration:none;padding:6px 10px;font-size:12px;border-radius:10px;">
                        Hoy
                     </a>
                     <br><br>
                     <a target="_blank"
-                       href="/panel/audit/group?token={settings.ADMIN_PANEL_TOKEN}&view=30d&instance_name={instance_name}&group_jid={_esc(g['group_jid'])}"
+                       href="/panel/audit/group?token={settings.ADMIN_PANEL_TOKEN}&range=30d&instance_name={instance_name}&group_jid={_esc(g['group_jid'])}"
                        class="btn btn-success"
                        style="color:white;text-decoration:none;padding:6px 10px;font-size:12px;border-radius:10px;">
                        30 días
