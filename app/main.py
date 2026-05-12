@@ -1597,6 +1597,108 @@ def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str, d
     }
 
 
+@app.get("/panel/audit/group")
+def panel_audit_group(
+    request: Request,
+    group_jid: str,
+    view: str = "day",
+    instance_name: str = "",
+    db: Session = Depends(get_db),
+):
+    if not _is_valid_admin_panel_token(request):
+        return HTMLResponse("No autorizado", status_code=403)
+
+    time_min, time_max, view = _panel_period_bounds(view)
+
+    q = db.query(RequestLog).filter(
+        RequestLog.source_group_id == group_jid,
+        RequestLog.status == "DONE",
+        RequestLog.created_at >= time_min,
+        RequestLog.created_at < time_max,
+    )
+
+    if instance_name:
+        q = q.filter(RequestLog.instance_name == instance_name)
+
+    rows = q.order_by(RequestLog.created_at.asc()).all()
+
+    html = f"""
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Auditoría de conteo</title>
+      <style>
+        body {{ font-family: Arial, sans-serif; padding: 20px; background:#f6f7fb; }}
+        .box {{ background:white; padding:18px; border-radius:14px; box-shadow:0 2px 10px #0001; }}
+        table {{ width:100%; border-collapse:collapse; margin-top:15px; }}
+        th,td {{ padding:8px; border-bottom:1px solid #ddd; font-size:13px; }}
+        th {{ background:#111827; color:white; text-align:left; }}
+        .mono {{ font-family: monospace; }}
+        .ok {{ color:green; font-weight:bold; }}
+      </style>
+    </head>
+    <body>
+      <div class="box">
+        <h2>Auditoría de conteo</h2>
+        <p><b>Grupo:</b> {group_jid}</p>
+        <p><b>Bot:</b> {instance_name or "Todos"}</p>
+        <p><b>Periodo:</b> {view}</p>
+        <p><b>Zona horaria:</b> America/Monterrey</p>
+        <p><b>Total contado:</b> <span class="ok">{len(rows)}</span></p>
+
+        <p>
+          Este conteo incluye únicamente solicitudes con status <b>DONE</b>.
+          No se cuentan errores, pendientes ni solicitudes en proceso.
+        </p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Fecha MX</th>
+              <th>Bot</th>
+              <th>Grupo</th>
+              <th>Dato</th>
+              <th>Tipo</th>
+              <th>Proveedor</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+    """
+
+    for r in rows:
+        html += f"""
+            <tr>
+              <td>{r.id}</td>
+              <td>{_esc(_fmt_dt(r.created_at))}</td>
+              <td>{_esc(bot_label(r.instance_name or "docifybot8"))}</td>
+              <td class="mono">{_esc(r.source_group_id)}</td>
+              <td class="mono">{_esc(r.curp)}</td>
+              <td>{_esc(r.act_type)}</td>
+              <td>{_esc(_provider_label(r.provider_name))}</td>
+              <td>{_esc(r.status)}</td>
+            </tr>
+        """
+
+    if not rows:
+        html += """
+            <tr>
+              <td colspan="8">No hay solicitudes DONE en este periodo.</td>
+            </tr>
+        """
+
+    html += """
+          </tbody>
+        </table>
+      </div>
+    </body>
+    </html>
+    """
+
+    return HTMLResponse(html)
+
+
 def _cache_get_json(key: str):
     try:
         raw = redis_conn.get(key)
