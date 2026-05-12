@@ -5081,6 +5081,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                   <th>30 días</th>
                   <th>Promoción</th>
                   <th>Estado</th>
+                  <th>Evidencia</th>
                   <th>Renombrar</th>
                   <th>Asignar promoción</th>
                   <th>Acciones</th>
@@ -5118,6 +5119,22 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                   <td>{g["month_done"]}</td>
                   <td>{promo_text}</td>
                   <td>{status_badge}</td>
+
+                  <td>
+                    <a target="_blank"
+                       href="/panel/audit/group?token={settings.ADMIN_PANEL_TOKEN}&view=day&instance_name={instance_name}&group_jid={_esc(g['group_jid'])}"
+                       class="btn btn-primary"
+                       style="color:white;text-decoration:none;padding:6px 10px;font-size:12px;border-radius:10px;">
+                       Hoy
+                    </a>
+                    <br><br>
+                    <a target="_blank"
+                       href="/panel/audit/group?token={settings.ADMIN_PANEL_TOKEN}&view=month&instance_name={instance_name}&group_jid={_esc(g['group_jid'])}"
+                       class="btn btn-success"
+                       style="color:white;text-decoration:none;padding:6px 10px;font-size:12px;border-radius:10px;">
+                       30 días
+                    </a>
+                  </td>
 
                   <td>
                     <div style="display:flex;gap:8px;min-width:220px;">
@@ -7413,6 +7430,7 @@ def panel_actas(
                   <th>Promoción</th>
                   <th>Última actualización</th>
                   <th>Bloqueo</th>
+                  <th>Evidencia</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
@@ -7485,6 +7503,14 @@ def panel_actas(
                   <td>{promo_cell}</td>
                   <td>{_esc(_fmt_dt(r["last_update"]))}</td>
                   <td>{blocked_text}</td>
+                  <td>
+                    <a target="_blank"
+                       href="/panel/audit/group?token={settings.ADMIN_PANEL_TOKEN}&view={view}&group_jid={r['group_jid']}"
+                       class="btn btn-primary"
+                       style="color:white;text-decoration:none;padding:6px 10px;font-size:12px;border-radius:10px;">
+                       Ver evidencia
+                    </a>
+                  </td>
                   <td>{action_btn}</td>
                 </tr>
                 """
