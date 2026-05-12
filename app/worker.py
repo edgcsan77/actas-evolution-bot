@@ -875,7 +875,7 @@ def _handle_group_promotion_after_done(req, db):
         extra_shared_msg_short = "Este aviso aplica para todos los grupos asociados a esta bolsa."
         extra_shared_msg_block = "Todos los grupos asociados a esta bolsa quedarán bloqueados automáticamente hasta nueva recarga.\n\n"
 
-    crossed_0 = available_before > 0 and available_after <= 0 and not bool(getattr(leader, "warning_sent_0", False))
+    crossed_0 = available_after <= 0 and not bool(getattr(leader, "warning_sent_0", False))
     crossed_10 = available_before > 10 and available_after <= 10 and not bool(getattr(leader, "warning_sent_10", False))
     crossed_50 = available_before > 50 and available_after <= 50 and not bool(getattr(leader, "warning_sent_50", False))
     crossed_100 = available_before > 100 and available_after <= 100 and not bool(getattr(leader, "warning_sent_100", False))
