@@ -1711,6 +1711,10 @@ def panel_audit_group(
           font-weight:bold;
         }}
 
+        tbody tr:nth-child(even) {{
+          background:#fafafa;
+        }}
+
         .mono {{
           font-family: monospace;
         }}
@@ -1728,6 +1732,7 @@ def panel_audit_group(
         .weekly-row {{
           background:#dbeafe;
           font-weight:bold;
+          border-top:2px solid #93c5fd;
         }}
 
         .muted {{
