@@ -862,8 +862,20 @@ class Provider4Client:
             print("PROVIDER4_NO_RECORD_DETECTED_IN_BACKEND =", term_up, flush=True)
             raise RuntimeError(f"PROVIDER4_NO_RECORD:{term_up}")
     
-        vget_html = self.submit_vget_form(html)
-        print("PROVIDER4_VGET_HTML_PREVIEW =", vget_html[:1200], flush=True)
+        html_up = (html or "").upper()
+
+        if (
+            "ENVIADO EXITOSAMENTE" in html_up
+            or "SU TRAMITE HA SIDO ENVIADO" in html_up
+        ):
+            vget_html = html
+        
+            print("PROVIDER4_DIRECT_SUCCESS_RESPONSE_DETECTED", flush=True)
+            print("PROVIDER4_VGET_BYPASSED_SUCCESS_RESPONSE =", vget_html[:1200], flush=True)
+        
+        else:
+            vget_html = self.submit_vget_form(html)
+            print("PROVIDER4_VGET_HTML_PREVIEW =", vget_html[:1200], flush=True)
     
         max_polls = self.HISTORY_MAX_POLLS
         poll_sleep_seconds = self.HISTORY_POLL_SLEEP
