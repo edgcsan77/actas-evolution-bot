@@ -10054,12 +10054,16 @@ def _get_latest_request(
     act_type: str,
     source_chat_id: str | None,
 ):
+    day_start, day_end = _bot_day_bounds()
+
     return (
         db.query(RequestLog)
         .filter(
             RequestLog.curp == term,
             RequestLog.act_type == act_type,
             RequestLog.source_chat_id == source_chat_id,
+            RequestLog.created_at >= day_start,
+            RequestLog.created_at < day_end,
         )
         .order_by(RequestLog.created_at.desc(), RequestLog.id.desc())
         .first()
@@ -11389,12 +11393,16 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 continue
         
             # contar intentos previos de ese mismo dato/tipo/grupo
+            day_start, day_end = _bot_day_bounds()
+
             same_requests_count = (
                 db.query(RequestLog)
                 .filter(
                     RequestLog.curp == term,
                     RequestLog.act_type == act_type,
-                    RequestLog.source_chat_id == source_chat_id
+                    RequestLog.source_chat_id == source_chat_id,
+                    RequestLog.created_at >= day_start,
+                    RequestLog.created_at < day_end,
                 )
                 .count()
             )
