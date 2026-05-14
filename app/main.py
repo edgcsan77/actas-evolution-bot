@@ -10,7 +10,7 @@ import requests
 import secrets
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from collections import Counter
+from collections import Counter, defaultdict
 
 from fastapi import FastAPI, Depends, Body, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -1631,8 +1631,40 @@ def panel_audit_group(
         q = q.filter(RequestLog.instance_name == instance_name)
 
     rows = q.order_by(RequestLog.created_at.asc()).all()
-    
+
     show_provider = (instance_name or "").strip() in ("", "docifybot8")
+
+    MX_TZ = ZoneInfo("America/Monterrey")
+
+    def to_mx_date(dt):
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(MX_TZ).date()
+
+    def week_range_for(date_obj):
+        start = date_obj - timedelta(days=date_obj.weekday())  # lunes
+        end = start + timedelta(days=6)  # domingo
+        return start, end
+
+    dias_es = {
+        0: "LUNES",
+        1: "MARTES",
+        2: "MIÉRCOLES",
+        3: "JUEVES",
+        4: "VIERNES",
+        5: "SÁBADO",
+        6: "DOMINGO",
+    }
+
+    daily = defaultdict(list)
+    weekly = defaultdict(list)
+
+    for r in rows:
+        mx_date = to_mx_date(r.created_at)
+        daily[mx_date].append(r)
+
+        w_start, w_end = week_range_for(mx_date)
+        weekly[(w_start, w_end)].append(r)
 
     html = f"""
     <html>
@@ -1640,28 +1672,149 @@ def panel_audit_group(
       <meta charset="utf-8">
       <title>Auditoría de conteo</title>
       <style>
-        body {{ font-family: Arial, sans-serif; padding: 20px; background:#f6f7fb; }}
-        .box {{ background:white; padding:18px; border-radius:14px; box-shadow:0 2px 10px #0001; }}
-        table {{ width:100%; border-collapse:collapse; margin-top:15px; }}
-        th,td {{ padding:8px; border-bottom:1px solid #ddd; font-size:13px; }}
-        th {{ background:#111827; color:white; text-align:left; }}
-        .mono {{ font-family: monospace; }}
-        .ok {{ color:green; font-weight:bold; }}
+        body {{
+          font-family: Arial, sans-serif;
+          padding: 20px;
+          background:#f6f7fb;
+          color:#111827;
+        }}
+
+        .box {{
+          background:white;
+          padding:18px;
+          border-radius:14px;
+          box-shadow:0 2px 10px #0001;
+          margin-bottom:18px;
+        }}
+
+        h2 {{
+          margin-top:0;
+        }}
+
+        table {{
+          width:100%;
+          border-collapse:collapse;
+          margin-top:15px;
+          background:white;
+        }}
+
+        th,td {{
+          padding:10px 12px;
+          border-bottom:1px solid #ddd;
+          font-size:13px;
+          text-align:left;
+        }}
+
+        th {{
+          background:#071933;
+          color:white;
+          font-weight:bold;
+        }}
+
+        .mono {{
+          font-family: monospace;
+        }}
+
+        .ok {{
+          color:green;
+          font-weight:bold;
+        }}
+
+        .num {{
+          text-align:right;
+          white-space:nowrap;
+        }}
+
+        .weekly-row {{
+          background:#dbeafe;
+          font-weight:bold;
+        }}
+
+        .muted {{
+          color:#4b5563;
+          font-size:13px;
+        }}
       </style>
     </head>
     <body>
+
       <div class="box">
         <h2>Auditoría de conteo</h2>
-        <p><b>Grupo:</b> {group_jid}</p>
-        <p><b>Bot:</b> {instance_name or "Todos"}</p>
-        <p><b>Periodo:</b> {view}</p>
+        <p><b>Grupo:</b> <span class="mono">{_esc(group_jid)}</span></p>
+        <p><b>Bot:</b> {_esc(instance_name or "Todos")}</p>
+        <p><b>Periodo:</b> {_esc(view)}</p>
         <p><b>Zona horaria:</b> America/Monterrey</p>
         <p><b>Total contado:</b> <span class="ok">{len(rows)}</span></p>
 
-        <p>
+        <p class="muted">
           Este conteo incluye únicamente solicitudes con status <b>DONE</b>.
           No se cuentan errores, pendientes ni solicitudes en proceso.
         </p>
+      </div>
+
+      <div class="box">
+        <h3>Resumen diario y corte semanal</h3>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Día</th>
+              <th>Fecha</th>
+              <th class="num">Hecho</th>
+            </tr>
+          </thead>
+          <tbody>
+    """
+
+    sorted_days = sorted(daily.keys())
+
+    for idx, day in enumerate(sorted_days):
+        w_start, w_end = week_range_for(day)
+
+        count_day = len(daily[day])
+
+        html += f"""
+            <tr>
+              <td>{dias_es[day.weekday()]}</td>
+              <td>{day}</td>
+              <td class="num">{count_day}</td>
+            </tr>
+        """
+
+        is_last_day = idx == len(sorted_days) - 1
+        next_day_diff_week = False
+
+        if not is_last_day:
+            next_day = sorted_days[idx + 1]
+            next_w_start, next_w_end = week_range_for(next_day)
+            next_day_diff_week = (next_w_start, next_w_end) != (w_start, w_end)
+
+        if is_last_day or next_day_diff_week:
+            week_rows = weekly[(w_start, w_end)]
+            count_week = len(week_rows)
+            
+            html += f"""
+            <tr class="weekly-row">
+              <td>CORTE SEMANAL</td>
+              <td>{w_start} a {w_end}</td>
+              <td class="num">{count_week}</td>
+            </tr>
+            """
+
+    if not sorted_days:
+        html += """
+            <tr>
+              <td colspan="3">No hay solicitudes DONE en este periodo.</td>
+            </tr>
+        """
+
+    html += """
+          </tbody>
+        </table>
+      </div>
+
+      <div class="box">
+        <h3>Detalle de solicitudes</h3>
 
         <table>
           <thead>
@@ -1672,7 +1825,14 @@ def panel_audit_group(
               <th>Grupo</th>
               <th>Dato</th>
               <th>Tipo</th>
-              {"<th>Proveedor</th>" if show_provider else ""}
+    """
+
+    if show_provider:
+        html += """
+              <th>Proveedor</th>
+        """
+
+    html += """
               <th>Status</th>
             </tr>
           </thead>
@@ -1688,13 +1848,20 @@ def panel_audit_group(
               <td class="mono">{_esc(r.source_group_id)}</td>
               <td class="mono">{_esc(r.curp)}</td>
               <td>{_esc(r.act_type)}</td>
-              {"<td>" + _esc(_provider_label(r.provider_name)) + "</td>" if show_provider else ""}
+        """
+
+        if show_provider:
+            html += f"""
+              <td>{_esc(_provider_label(r.provider_name))}</td>
+            """
+
+        html += f"""
               <td>{_esc(r.status)}</td>
             </tr>
         """
 
     if not rows:
-        html += """
+        html += f"""
             <tr>
               <td colspan="{8 if show_provider else 7}">No hay solicitudes DONE en este periodo.</td>
             </tr>
@@ -1704,6 +1871,7 @@ def panel_audit_group(
           </tbody>
         </table>
       </div>
+
     </body>
     </html>
     """
