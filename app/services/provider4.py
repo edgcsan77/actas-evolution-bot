@@ -63,8 +63,8 @@ class Provider4Client:
         self.HID = hid or self.DEFAULT_HID
 
         self.MANUAL_PAGE_URL = f"{self.BASE_URL}/servicio/manual.php?HID={self.HID}"
-        self.MANUAL_ENDPOINT = f"{self.BASE_URL}/servicio/backend-manualCVL.php"
-        self.VGET_URL = f"{self.BASE_URL}/servicio/vGetOfi.php"
+        self.MANUAL_ENDPOINT = f"{self.BASE_URL}/servicio/vGetOfi2.php"
+        self.VGET_URL = f"{self.BASE_URL}/servicio/vGetOfi2.php"
         self.HISTORY_URL = f"{self.BASE_URL}/servicio/vHistory.php?HID={self.HID}"
     
         self.session = requests.Session()
@@ -306,14 +306,26 @@ class Provider4Client:
         cadena: str = "",
         trami_ine: bool = True,
     ) -> str:
-        params = {
-            "curp": curp,
-            "tipoa": tipoa,
-            "hidU": self.HID,
-            "incFolio": "true" if inc_folio else "false",
-            "tramiINE": "true" if trami_ine else "false",
-            "cadenaA": cadena,
+        tipo_norm = (tipoa or "nacimiento").strip().lower()
+    
+        data = {
+            "tipoActa": tipo_norm,
+            "curpID": curp or "",
+            "cadena": cadena or "",
+            "p1": "RDBjdUV4cHJS",
+            "p2": "",
+            "p3": "NDA=",
+            "p5": "",
+            "p6": "",
+            "p7": self.HID,
+            "p4": self.HID,
         }
+    
+        if trami_ine:
+            data["tramiteINE"] = "on"
+    
+        if inc_folio:
+            data["incF"] = "on"
     
         last_error = None
     
@@ -321,27 +333,39 @@ class Provider4Client:
             try:
                 self.warm()
     
-                print("PROVIDER4_REQUEST_PARAMS =", params, flush=True)
-                print(f"PROVIDER4_BACKEND_ATTEMPT_{attempt+1}_START", flush=True)
+                print("PROVIDER4_REQUEST_DATA =", data, flush=True)
+                print(f"PROVIDER4_VGETOFI2_ATTEMPT_{attempt+1}_START", flush=True)
     
-                resp = self.session.get(
-                    self.MANUAL_ENDPOINT,
-                    params=params,
+                resp = self.session.post(
+                    self.VGET_URL,
+                    data=data,
                     timeout=(15, 240),
+                    headers={
+                        "User-Agent": self.session.headers["User-Agent"],
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        "Accept-Language": "es-ES,es;q=0.9",
+                        "Referer": self.MANUAL_PAGE_URL,
+                        "Origin": self.BASE_URL,
+                        "Content-Type": "application/x-www-form-urlencoded",
+                    },
                 )
+    
                 resp.raise_for_status()
     
+                html = resp.text or ""
+    
                 print(
-                    f"PROVIDER4_BACKEND_ATTEMPT_{attempt+1}_STATUS = {resp.status_code}",
+                    f"PROVIDER4_VGETOFI2_ATTEMPT_{attempt+1}_STATUS = {resp.status_code}",
                     flush=True,
                 )
+                print("PROVIDER4_VGETOFI2_HTML_PREVIEW =", html[:1200], flush=True)
     
-                return resp.text
+                return html
     
             except requests.exceptions.RequestException as e:
                 last_error = e
                 print(
-                    f"PROVIDER4_BACKEND_ATTEMPT_{attempt+1}_ERROR = {str(e)}",
+                    f"PROVIDER4_VGETOFI2_ATTEMPT_{attempt+1}_ERROR = {str(e)}",
                     flush=True,
                 )
                 if attempt < 2:
