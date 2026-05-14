@@ -787,10 +787,27 @@ def _bot_group_stats(db: Session, instance_name: str):
     return out
 
 
-def bot_label(inst):
+def bot_label(inst, db: Session = None):
     if not inst:
         return ""
-    return BOT_LABELS.get(inst.lower(), inst)
+
+    inst = inst.strip()
+
+    static_name = BOT_LABELS.get(inst.lower())
+    if static_name:
+        return static_name
+
+    if db:
+        row = (
+            db.query(BotControl)
+            .filter(func.lower(BotControl.instance_name) == inst.lower())
+            .first()
+        )
+
+        if row and row.label:
+            return row.label
+
+    return inst
 
 
 def _provider_label(name: str) -> str:
@@ -1849,7 +1866,7 @@ def panel_audit_group(
             <tr>
               <td>{r.id}</td>
               <td>{_esc(_fmt_dt(r.created_at))}</td>
-              <td>{_esc(bot_label(r.instance_name or "docifybot8"))}</td>
+              <td>{_esc(bot_label(r.instance_name or "docifybot8", db))}</td>
               <td class="mono">{_esc(r.source_group_id)}</td>
               <td class="mono">{_esc(r.curp)}</td>
               <td>{_esc(r.act_type)}</td>
@@ -2113,7 +2130,7 @@ def panel_recent_requests(
               <td>{_esc(r.act_type)}</td>
               <td class="{status_class}">{_esc(r.status)}</td>
               <td>{_esc(_group_name_cached(r.source_group_id, group_cache) if (r.instance_name or "docifybot8") == "docifybot8" else "OCULTO")}</td>
-              <td>{_esc(bot_label(r.instance_name))}</td>
+              <td>{_esc(bot_label(r.instance_name, db))}</td>
               <td>{_esc(_provider_label(r.provider_name))}</td>
               <td>{_esc(_group_name_cached(r.provider_group_id, group_cache))}</td>
               <td>{_esc(_fmt_dt(r.created_at))}</td>
