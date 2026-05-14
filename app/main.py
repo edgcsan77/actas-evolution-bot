@@ -2105,7 +2105,6 @@ def panel_recent_requests(
             <th>Grupo cliente</th>
             <th>Bot</th>
             <th>Proveedor</th>
-            <th>Grupo proveedor</th>
             <th>Creado</th>
             <th>Actualizado</th>
             <th>Error</th>
@@ -2132,14 +2131,13 @@ def panel_recent_requests(
               <td>{_esc(_group_name_cached(r.source_group_id, group_cache) if (r.instance_name or "docifybot8") == "docifybot8" else "OCULTO")}</td>
               <td>{_esc(bot_label(r.instance_name, db))}</td>
               <td>{_esc(_provider_label(r.provider_name))}</td>
-              <td>{_esc(_group_name_cached(r.provider_group_id, group_cache))}</td>
               <td>{_esc(_fmt_dt(r.created_at))}</td>
               <td>{_esc(_fmt_dt(r.updated_at))}</td>
               <td class="small">{_esc(r.error_message)}</td>
             </tr>
             """
     else:
-        html += '<tr><td colspan="11">Sin solicitudes en este periodo.</td></tr>'
+        html += '<tr><td colspan="10">Sin solicitudes en este periodo.</td></tr>'
 
     html += """
         </tbody>
