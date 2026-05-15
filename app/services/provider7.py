@@ -133,14 +133,14 @@ def _provider7_wait_turn() -> None:
         wait_s += random.uniform(2.0, 8.0)
         time.sleep(max(1.0, wait_s))
 
-    _provider7_sleep_human(8.0, 18.0)
+    _provider7_sleep_human(2.0, 5.0)
 
     batch_count = r.incr(_PROVIDER7_BATCH_KEY)
     if batch_count == 1:
         r.expire(_PROVIDER7_BATCH_KEY, 3600)
 
     if batch_count % random.randint(4, 7) == 0:
-        _provider7_sleep_human(30.0, 90.0)
+        _provider7_sleep_human(8.0, 15.0)
 
 
 class Provider7RedisLock:
