@@ -11365,18 +11365,37 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             )
         
             # 1) si ya existe una abierta, no duplicar
+            OPEN_REQUEST_TTL_MINUTES = 15
+
             if open_existing:
                 age_sec = (_utc_now_naive() - open_existing.created_at).total_seconds()
                 age_sec = max(age_sec, 0)
             
-                dup_msg = (
-                    f"⏳ Ya existe una solicitud en proceso\n"
-                    f"Dato: {term}\n"
-                    f"Tipo: {act_type}\n\n"
-                    f"Espera un momento antes de reenviar."
-                )
+                if age_sec <= OPEN_REQUEST_TTL_MINUTES * 60:
+                    dup_msg = (
+                        f"⏳ Ya existe una solicitud en proceso\n"
+                        f"Dato: {term}\n"
+                        f"Tipo: {act_type}\n\n"
+                        f"Espera un momento antes de reenviar."
+                    )
             
-                print("DUPLICATE_OPEN_REQUEST_BLOCKED =", {
+                    print("DUPLICATE_OPEN_REQUEST_BLOCKED =", {
+                        "term": term,
+                        "act_type": act_type,
+                        "open_req_id": open_existing.id,
+                        "open_status": open_existing.status,
+                        "age_sec": round(age_sec, 2),
+                    }, flush=True)
+            
+                    if source_group_id:
+                        if should_send_extra_text(source_group_id):
+                            send_group_text(source_group_id, dup_msg, instance_name=instance_name)
+                    else:
+                        send_text(requester_wa_id, dup_msg, instance_name=instance_name)
+            
+                    continue
+            
+                print("OPEN_REQUEST_EXPIRED_RELEASING =", {
                     "term": term,
                     "act_type": act_type,
                     "open_req_id": open_existing.id,
@@ -11384,13 +11403,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     "age_sec": round(age_sec, 2),
                 }, flush=True)
             
-                if source_group_id:
-                    if should_send_extra_text(source_group_id):
-                        send_group_text(source_group_id, dup_msg, instance_name=instance_name)
-                else:
-                    send_text(requester_wa_id, dup_msg, instance_name=instance_name)
-            
-                continue
+                open_existing.status = "ERROR"
+                open_existing.error_message = "AUTO_TIMEOUT_OPEN_REQUEST_DO_NOT_REUSE"
+                open_existing.updated_at = _utc_now_naive()
+                db.commit()
         
             # contar intentos previos de ese mismo dato/tipo/grupo
             day_start, day_end = _bot_day_bounds()
@@ -11433,7 +11449,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     RequestLog.curp == term,
                     RequestLog.act_type == act_type,
                     RequestLog.source_chat_id == source_chat_id,
-                    RequestLog.status == "ERROR"
+                    RequestLog.status == "ERROR",
+                    or_(
+                        RequestLog.error_message.is_(None),
+                        RequestLog.error_message != "AUTO_TIMEOUT_OPEN_REQUEST_DO_NOT_REUSE",
+                    )
                 )
                 .order_by(RequestLog.created_at.desc())
                 .first()
