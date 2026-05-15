@@ -11393,7 +11393,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             
                 if age_sec <= OPEN_REQUEST_TTL_MINUTES * 60:
                     dup_msg = (
-                        f"⏳ Ya existe una solicitud en proceso A\n"
+                        f"⏳ Ya existe una solicitud en proceso\n"
                         f"Dato: {term}\n"
                         f"Tipo: {act_type}\n\n"
                         f"Espera un momento antes de reenviar."
@@ -11458,7 +11458,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 continue
         
             # request_key único por intento
-            request_key = f"{base_request_key}:try_{same_requests_count + 1}"
+            request_key = f"{base_request_key}:{_mx_now().strftime('%Y%m%d')}:try_{same_requests_count + 1}:{uuid.uuid4().hex[:6]}"
         
             # 2) si existe una anterior en ERROR, reutilizar SOLO la más reciente en error
             error_existing = (
@@ -11543,7 +11543,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 print("DUPLICATE_REQUEST_KEY =", request_key, flush=True)
             
                 dup_msg = (
-                    f"⏳ Ya existe una solicitud en proceso B\n"
+                    f"⏳ Ya existe una solicitud en proceso\n"
                     f"Dato: {term}\n"
                     f"Tipo: {act_type}"
                 )
