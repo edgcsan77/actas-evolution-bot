@@ -21,7 +21,7 @@ class Provider4Client:
     DEFAULT_HID = "D0cuExprR"
 
     HISTORY_MAX_POLLS = 60
-    HISTORY_POLL_SLEEP = 7
+    HISTORY_POLL_SLEEP = 3
 
     MAPA_ESTADOS_CURP = {
         "AS": "AGUASCALIENTES",
