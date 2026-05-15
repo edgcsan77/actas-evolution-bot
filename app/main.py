@@ -11365,7 +11365,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             )
         
             # 1) si ya existe una abierta, no duplicar
-            OPEN_REQUEST_TTL_MINUTES = 15
+            OPEN_REQUEST_TTL_MINUTES = 8
 
             if open_existing:
                 age_sec = (_utc_now_naive() - open_existing.created_at).total_seconds()
