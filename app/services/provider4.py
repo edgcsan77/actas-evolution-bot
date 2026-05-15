@@ -20,8 +20,8 @@ class Provider4Client:
     BASE_URL = "https://www.tramitanet.org"
     DEFAULT_HID = "D0cuExprR"
 
-    HISTORY_MAX_POLLS = 60
-    HISTORY_POLL_SLEEP = 7
+    HISTORY_MAX_POLLS = 25
+    HISTORY_POLL_SLEEP = 5
 
     MAPA_ESTADOS_CURP = {
         "AS": "AGUASCALIENTES",
@@ -339,7 +339,7 @@ class Provider4Client:
                 resp = self.session.post(
                     self.VGET_URL,
                     data=data,
-                    timeout=(15, 240),
+                    timeout=(15, 60),
                     headers={
                         "User-Agent": self.session.headers["User-Agent"],
                         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -448,7 +448,7 @@ class Provider4Client:
                     action_url,
                     data=form_data,
                     headers=headers,
-                    timeout=(15, 240),
+                    timeout=(15, 60),
                 )
                 resp.raise_for_status()
 
@@ -479,7 +479,7 @@ class Provider4Client:
 
                 resp = self.session.get(
                     self.HISTORY_URL,
-                    timeout=(15, 120),
+                    timeout=(15, 60),
                     headers={
                         "User-Agent": self.session.headers["User-Agent"],
                         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -520,7 +520,7 @@ class Provider4Client:
     
                 resp = self.session.get(
                     url,
-                    timeout=(15, 120),
+                    timeout=(15, 60),
                     headers={
                         "User-Agent": self.session.headers["User-Agent"],
                         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -745,7 +745,7 @@ class Provider4Client:
 
                 resp = self.session.get(
                     url,
-                    timeout=(15, 240),
+                    timeout=(15, 60),
                     headers={
                         "User-Agent": self.session.headers["User-Agent"],
                         "Accept": "*/*",
@@ -804,7 +804,7 @@ class Provider4Client:
     
                 resp = self.session.get(
                     url,
-                    timeout=(15, 240),
+                    timeout=(15, 60),
                     headers={
                         "User-Agent": self.session.headers["User-Agent"],
                         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -830,7 +830,7 @@ class Provider4Client:
     
                 pdf_resp = self.session.get(
                     next_url,
-                    timeout=(15, 240),
+                    timeout=(15, 60),
                     headers={
                         "User-Agent": self.session.headers["User-Agent"],
                         "Accept": "*/*",
