@@ -11354,6 +11354,14 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             # buscar si hay una abierta para este dato/tipo/grupo
             day_start, day_end = _bot_day_bounds()
 
+            print("OPEN_EXISTING_BOUNDS =", {
+                "term": term,
+                "act_type": act_type,
+                "source_chat_id": source_chat_id,
+                "day_start": str(day_start),
+                "day_end": str(day_end),
+            }, flush=True)
+
             open_existing = (
                 db.query(RequestLog)
                 .filter(
@@ -11372,12 +11380,20 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             OPEN_REQUEST_TTL_MINUTES = 8
 
             if open_existing:
+                print("OPEN_EXISTING_FOUND =", {
+                    "id": open_existing.id,
+                    "status": open_existing.status,
+                    "created_at": str(open_existing.created_at),
+                    "updated_at": str(open_existing.updated_at),
+                    "error_message": open_existing.error_message,
+                }, flush=True)
+                
                 age_sec = (_utc_now_naive() - open_existing.created_at).total_seconds()
                 age_sec = max(age_sec, 0)
             
                 if age_sec <= OPEN_REQUEST_TTL_MINUTES * 60:
                     dup_msg = (
-                        f"⏳ Ya existe una solicitud en proceso\n"
+                        f"⏳ Ya existe una solicitud en proceso A\n"
                         f"Dato: {term}\n"
                         f"Tipo: {act_type}\n\n"
                         f"Espera un momento antes de reenviar."
@@ -11527,7 +11543,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 print("DUPLICATE_REQUEST_KEY =", request_key, flush=True)
             
                 dup_msg = (
-                    f"⏳ Ya existe una solicitud en proceso\n"
+                    f"⏳ Ya existe una solicitud en proceso B\n"
                     f"Dato: {term}\n"
                     f"Tipo: {act_type}"
                 )
