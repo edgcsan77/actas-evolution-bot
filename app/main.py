@@ -11352,13 +11352,17 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             base_request_key = build_request_key(term, act_type, source_chat_id)
         
             # buscar si hay una abierta para este dato/tipo/grupo
+            day_start, day_end = _bot_day_bounds()
+
             open_existing = (
                 db.query(RequestLog)
                 .filter(
                     RequestLog.curp == term,
                     RequestLog.act_type == act_type,
                     RequestLog.source_chat_id == source_chat_id,
-                    RequestLog.status.in_(["QUEUED", "PROCESSING", "PENDING"])
+                    RequestLog.status.in_(["QUEUED", "PROCESSING", "PENDING"]),
+                    RequestLog.created_at >= day_start,
+                    RequestLog.created_at < day_end,
                 )
                 .order_by(RequestLog.created_at.desc())
                 .first()
@@ -11409,8 +11413,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 db.commit()
         
             # contar intentos previos de ese mismo dato/tipo/grupo
-            day_start, day_end = _bot_day_bounds()
-
             same_requests_count = (
                 db.query(RequestLog)
                 .filter(
