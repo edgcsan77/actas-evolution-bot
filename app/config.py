@@ -75,7 +75,7 @@ class Settings(BaseSettings):
         "NO SE ENCONTRARON REGISTROS"
     )
 
-    HISTORY_DAYS: int = 7
+    HISTORY_DAYS: int = 30
     REQUEST_TIMEOUT_MINUTES: int = 3
 
 
