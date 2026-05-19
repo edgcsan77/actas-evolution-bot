@@ -526,7 +526,8 @@ def _pick_provider1_group(term: str | None, act_type: str, request_id: int) -> s
 def _pick_provider6_group(term: str | None, act_type: str, request_id: int) -> str:
     act_type_up = (act_type or "").upper().strip()
 
-    nacimiento_group = (settings.PROVIDER6_GROUP_NACIMIENTO or "").strip()
+    nacimiento_group_1 = (settings.PROVIDER6_GROUP_1_NACIMIENTO or "").strip()
+    nacimiento_group_2 = (settings.PROVIDER6_GROUP_2_NACIMIENTO or "").strip()
     especiales_group = (settings.PROVIDER6_GROUP_ESPECIALES or "").strip()
     foliadas_group = (settings.PROVIDER6_GROUP_FOLIADAS or "").strip()
 
@@ -545,10 +546,17 @@ def _pick_provider6_group(term: str | None, act_type: str, request_id: int) -> s
             raise RuntimeError("NO_PROVIDER6_ESPECIALES_GROUP_CONFIGURED")
         return especiales_group
 
-    # 3. NAC / MAT / DEF / DIV -> grupo nacimiento
-    if not nacimiento_group:
+    # 3. NAC / MAT / DEF / DIV -> grupos nacimiento 1 y 2
+    nacimiento_groups = [
+        group
+        for group in (nacimiento_group_1, nacimiento_group_2)
+        if group
+    ]
+
+    if not nacimiento_groups:
         raise RuntimeError("NO_PROVIDER6_NACIMIENTO_GROUP_CONFIGURED")
-    return nacimiento_group
+
+    return nacimiento_groups[request_id % len(nacimiento_groups)]
 
 
 def _pick_provider_group(
