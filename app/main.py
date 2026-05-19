@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.db import Base, engine, get_db, SessionLocal
-from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion, GroupAlias, GroupCategory, BotControl
+from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion, GroupAlias, GroupCategory, BotControl, BotRechargeLog
 from app.queue import request_queue, redis_conn, broadcast_queue
 from app.worker import process_request, provider3_keepalive_job, _validate_act_type_pdf, _validate_pdf_matches_term, _notify_support_error
 from app.services.provider3 import Provider3Client
@@ -987,11 +987,7 @@ def panel_reset_instance_usage(instance_name: str, db: Session = Depends(get_db)
 
 
 @app.post("/panel/instance/{instance_name}/recharge")
-async def panel_recharge_instance(
-    instance_name: str,
-    request: Request,
-    db: Session = Depends(get_db),
-):
+async def panel_recharge_instance(instance_name: str, request: Request, db: Session = Depends(get_db)):
     try:
         payload = await request.json()
     except Exception:
@@ -1005,7 +1001,7 @@ async def panel_recharge_instance(
     if add_value <= 0:
         return {
             "ok": False,
-            "error": "La recarga debe ser mayor a 0.",
+            "error": "La recarga debe ser mayor a 0."
         }
 
     current_limit = get_bot_limit(db, instance_name)
@@ -1015,6 +1011,19 @@ async def panel_recharge_instance(
     available_after = max(new_limit - used_now, 0)
 
     set_bot_limit(db, instance_name, new_limit)
+
+    log = BotRechargeLog(
+        instance_name=instance_name,
+        amount=add_value,
+        previous_limit=current_limit,
+        new_limit=new_limit,
+        used_at_recharge=used_now,
+        available_after=available_after,
+        source="panel",
+        note=None,
+    )
+
+    db.add(log)
 
     bot = (
         db.query(BotControl)
@@ -1035,10 +1044,11 @@ async def panel_recharge_instance(
         "ok": True,
         "instance_name": instance_name,
         "amount": add_value,
+        "previous_limit": current_limit,
         "limit": new_limit,
         "used": used_now,
         "available": available_after,
-        "recharges": int(bot.recharges or 0) if bot else 0,
+        "recharges": int(bot.recharges or 0) if bot else None,
         "blocked": is_instance_blocked(instance_name),
     }
 
@@ -4797,6 +4807,16 @@ def _panel_delivery_metrics(db, time_min, time_max):
         return None
 
 
+def _bot_recharge_history(db: Session, instance_name: str, limit: int = 30):
+    return (
+        db.query(BotRechargeLog)
+        .filter(BotRechargeLog.instance_name == instance_name)
+        .order_by(BotRechargeLog.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
 def _bot_credit_stats(db: Session, instance_name: str):
     try:
         limit_value = get_bot_limit(db, instance_name)
@@ -4804,17 +4824,17 @@ def _bot_credit_stats(db: Session, instance_name: str):
 
         available = max(limit_value - used_value, 0)
 
-        bot = (
-            db.query(BotControl)
-            .filter(BotControl.instance_name == instance_name)
-            .first()
+        recharge_count = (
+            db.query(BotRechargeLog)
+            .filter(BotRechargeLog.instance_name == instance_name)
+            .count()
         )
 
         return {
             "limit": int(limit_value or 0),
             "used": int(used_value or 0),
             "available": int(available or 0),
-            "recharges": int(bot.recharges or 0) if bot else 0,
+            "recharges": int(recharge_count or 0),
         }
 
     except Exception:
@@ -5079,6 +5099,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
     history_rows = _bot_sales_history_30d(db, instance_name)
     groups = _bot_group_stats(db, instance_name)
     credits = _bot_credit_stats(db, instance_name)
+    recharge_rows = _bot_recharge_history(db, instance_name, limit=30)
 
     credits = credits or {}
     credits.setdefault("limit", 0)
@@ -5412,6 +5433,58 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
             """
     else:
         html += '<tr><td colspan="8">Este bot aún no tiene grupos asignados.</td></tr>'
+
+    html += """
+        <div class="box">
+          <div class="head">
+            <strong>Historial de recargas</strong>
+            <span class="small">Últimas 30 recargas aplicadas desde el panel principal.</span>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Recarga</th>
+                  <th>Límite anterior</th>
+                  <th>Nuevo límite</th>
+                  <th>Usadas al recargar</th>
+                  <th>Disponibles después</th>
+                  <th>Origen</th>
+                  <th>Nota</th>
+                </tr>
+              </thead>
+              <tbody>
+    """
+
+    if recharge_rows:
+        for r in recharge_rows:
+            html += f"""
+                <tr>
+                  <td>{_esc(_fmt_dt(r.created_at))}</td>
+                  <td>{int(r.amount or 0)}</td>
+                  <td>{int(r.previous_limit or 0)}</td>
+                  <td>{int(r.new_limit or 0)}</td>
+                  <td>{int(r.used_at_recharge or 0)}</td>
+                  <td>{int(r.available_after or 0)}</td>
+                  <td>{_esc(r.source or "")}</td>
+                  <td>{_esc(r.note or "")}</td>
+                </tr>
+            """
+    else:
+        html += """
+                <tr>
+                  <td colspan="8">Este bot aún no tiene historial de recargas.</td>
+                </tr>
+        """
+
+    html += """
+              </tbody>
+            </table>
+          </div>
+        </div>
+    """
 
     html += """
               </tbody>
@@ -9249,7 +9322,8 @@ def _all_provider_groups() -> set[str]:
         settings.PROVIDER2_GROUP_2,
         settings.PROVIDER5_GROUP_1,
         settings.PROVIDER5_GROUP_2,
-        settings.PROVIDER6_GROUP_NACIMIENTO,
+        settings.PROVIDER6_GROUP_1_NACIMIENTO,
+        settings.PROVIDER6_GROUP_2_NACIMIENTO,
         settings.PROVIDER6_GROUP_ESPECIALES,
         settings.PROVIDER6_GROUP_FOLIADAS,
         settings.PROVIDER8_GROUP_1,
