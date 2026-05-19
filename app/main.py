@@ -987,25 +987,58 @@ def panel_reset_instance_usage(instance_name: str, db: Session = Depends(get_db)
 
 
 @app.post("/panel/instance/{instance_name}/recharge")
-async def panel_recharge_instance(instance_name: str, request: Request, db: Session = Depends(get_db)):
+async def panel_recharge_instance(
+    instance_name: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     try:
         payload = await request.json()
     except Exception:
         payload = {}
 
-    add_value = int(payload.get("amount") or 0)
+    try:
+        add_value = int(payload.get("amount") or 0)
+    except Exception:
+        add_value = 0
+
+    if add_value <= 0:
+        return {
+            "ok": False,
+            "error": "La recarga debe ser mayor a 0.",
+        }
+
     current_limit = get_bot_limit(db, instance_name)
-    new_limit = current_limit + max(0, add_value)
+    used_now = get_bot_used(db, instance_name)
+
+    new_limit = current_limit + add_value
+    available_after = max(new_limit - used_now, 0)
 
     set_bot_limit(db, instance_name, new_limit)
+
+    bot = (
+        db.query(BotControl)
+        .filter(BotControl.instance_name == instance_name)
+        .first()
+    )
+
+    if bot:
+        bot.recharges = int(bot.recharges or 0) + 1
+        bot.updated_at = _utc_now_naive()
+
+    db.commit()
+
     unblock_instance(instance_name)
     _clear_panel_cache()
 
     return {
         "ok": True,
         "instance_name": instance_name,
+        "amount": add_value,
         "limit": new_limit,
-        "used": get_bot_used(db, instance_name),
+        "used": used_now,
+        "available": available_after,
+        "recharges": int(bot.recharges or 0) if bot else 0,
         "blocked": is_instance_blocked(instance_name),
     }
 
