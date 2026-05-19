@@ -5495,13 +5495,13 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
             html += f"""
                 <tr>
                   <td>{_esc(_fmt_dt(r.created_at))}</td>
-                  <td>{int(r.amount or 0)}</td>
+                  <td class="recharge-amount">+{int(r.amount or 0)}</td>
                   <td>{int(r.previous_limit or 0)}</td>
                   <td>{int(r.new_limit or 0)}</td>
                   <td>{int(r.used_at_recharge or 0)}</td>
                   <td>{int(r.available_after or 0)}</td>
                   <td>{_esc(r.source or "")}</td>
-                  <td>{_esc(r.note or "")}</td>
+                  <td class="recharge-note">{_esc(r.note or "")}</td>
                 </tr>
             """
     else:
