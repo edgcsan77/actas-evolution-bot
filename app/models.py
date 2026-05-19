@@ -163,3 +163,24 @@ class BotControl(Base):
 
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class BotRechargeLog(Base):
+    __tablename__ = "bot_recharge_logs"
+
+    id = Column(Integer, primary_key=True)
+
+    instance_name = Column(String(50), nullable=False, index=True)
+
+    amount = Column(Integer, nullable=False, default=0)
+
+    previous_limit = Column(Integer, nullable=False, default=0)
+    new_limit = Column(Integer, nullable=False, default=0)
+
+    used_at_recharge = Column(Integer, nullable=False, default=0)
+    available_after = Column(Integer, nullable=False, default=0)
+
+    source = Column(String(30), nullable=False, default="panel")
+    note = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, server_default=func.now(), nullable=False, index=True)
