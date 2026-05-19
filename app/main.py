@@ -4771,11 +4771,17 @@ def _bot_credit_stats(db: Session, instance_name: str):
 
         available = max(limit_value - used_value, 0)
 
+        bot = (
+            db.query(BotControl)
+            .filter(BotControl.instance_name == instance_name)
+            .first()
+        )
+
         return {
-            "limit": limit_value,
-            "used": used_value,
-            "available": available,
-            "recharges": 0
+            "limit": int(limit_value or 0),
+            "used": int(used_value or 0),
+            "available": int(available or 0),
+            "recharges": int(bot.recharges or 0) if bot else 0,
         }
 
     except Exception:
@@ -4783,7 +4789,7 @@ def _bot_credit_stats(db: Session, instance_name: str):
             "limit": 0,
             "used": 0,
             "available": 0,
-            "recharges": 0
+            "recharges": 0,
         }
 
 
