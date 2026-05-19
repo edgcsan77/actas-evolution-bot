@@ -5465,16 +5465,14 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
     """
 
     html += """
-        <div class="box recharge-box">
+        <div class="box">
           <div class="head">
-            <div>
-              <strong>Historial de recargas</strong><br>
-              <span class="small">Últimas 30 recargas aplicadas desde el panel principal.</span>
-            </div>
+            <strong>Historial de recargas</strong>
+            <span class="small">Últimas 30 recargas aplicadas desde el panel principal.</span>
           </div>
 
           <div class="table-wrap">
-            <table class="recharge-table">
+            <table>
               <thead>
                 <tr>
                   <th>Fecha</th>
@@ -5484,7 +5482,6 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                   <th>Usadas</th>
                   <th>Disponibles</th>
                   <th>Origen</th>
-                  <th>Nota</th>
                 </tr>
               </thead>
               <tbody>
@@ -5501,13 +5498,12 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                   <td>{int(r.used_at_recharge or 0)}</td>
                   <td>{int(r.available_after or 0)}</td>
                   <td>{_esc(r.source or "")}</td>
-                  <td class="recharge-note">{_esc(r.note or "")}</td>
                 </tr>
             """
     else:
         html += """
                 <tr>
-                  <td colspan="8">Este bot aún no tiene historial de recargas.</td>
+                  <td colspan="7">Este bot aún no tiene historial de recargas.</td>
                 </tr>
         """
 
