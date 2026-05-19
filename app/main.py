@@ -5217,6 +5217,29 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
           border-radius: 10px;
           box-sizing: border-box;
         }}
+        .recharge-box {{
+          border: 1px solid #dbeafe;
+        }}
+        .recharge-box .head {{
+          background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
+        }}
+        .recharge-table th {{
+          background: #1e3a8a;
+          color: white;
+          font-size: 13px;
+        }}
+        .recharge-table td {{
+          font-size: 13px;
+          white-space: nowrap;
+        }}
+        .recharge-amount {{
+          font-weight: 800;
+          color: #166534;
+        }}
+        .recharge-note {{
+          color: #6b7280;
+          font-size: 12px;
+        }}
         @media (max-width: 900px) {{
           .cards {{
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5432,25 +5455,34 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                 </tr>
             """
     else:
-        html += '<tr><td colspan="8">Este bot aún no tiene grupos asignados.</td></tr>'
+        html += '<tr><td colspan="9">Este bot aún no tiene grupos asignados.</td></tr>'
 
     html += """
-        <div class="box">
+              </tbody>
+            </table>
+          </div>
+        </div>
+    """
+
+    html += """
+        <div class="box recharge-box">
           <div class="head">
-            <strong>Historial de recargas</strong>
-            <span class="small">Últimas 30 recargas aplicadas desde el panel principal.</span>
+            <div>
+              <strong>Historial de recargas</strong><br>
+              <span class="small">Últimas 30 recargas aplicadas desde el panel principal.</span>
+            </div>
           </div>
 
           <div class="table-wrap">
-            <table>
+            <table class="recharge-table">
               <thead>
                 <tr>
                   <th>Fecha</th>
                   <th>Recarga</th>
                   <th>Límite anterior</th>
                   <th>Nuevo límite</th>
-                  <th>Usadas al recargar</th>
-                  <th>Disponibles después</th>
+                  <th>Usadas</th>
+                  <th>Disponibles</th>
                   <th>Origen</th>
                   <th>Nota</th>
                 </tr>
@@ -5478,13 +5510,6 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                   <td colspan="8">Este bot aún no tiene historial de recargas.</td>
                 </tr>
         """
-
-    html += """
-              </tbody>
-            </table>
-          </div>
-        </div>
-    """
 
     html += """
               </tbody>
