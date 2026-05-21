@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     PROVIDER3_PHPSESSID: str = ""
     PROVIDER3_KEEPALIVE_SECRET: str = ""
     PROVIDER3_TIMEOUT_LOGIN: int = 60
-    PROVIDER3_TIMEOUT_GENERATE: int = 120
+    PROVIDER3_TIMEOUT_GENERATE: int = 480
 
     # PROVIDER 5
     PROVIDER5_GROUP_1: str = ""
@@ -77,7 +77,7 @@ class Settings(BaseSettings):
     )
 
     HISTORY_DAYS: int = 30
-    REQUEST_TIMEOUT_MINUTES: int = 3
+    REQUEST_TIMEOUT_MINUTES: int = 8
 
 
 settings = Settings()
