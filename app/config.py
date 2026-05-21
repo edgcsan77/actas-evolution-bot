@@ -21,6 +21,9 @@ class Settings(BaseSettings):
 
     SOPORTE_ACTAS_GROUP: str = ""
 
+    PROVIDER_API_URL: str = ""
+    PROVIDER_API_TOKEN: str = ""
+
     # PROVIDER 1
     PROVIDER_GROUP_NACIMIENTO_1: str = ""
     PROVIDER_GROUP_NACIMIENTO_2: str = ""
