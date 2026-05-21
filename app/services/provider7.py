@@ -504,7 +504,7 @@ class Provider7Client:
         agregar_reverso_estado: bool = True,
     ) -> dict[str, Any]:
 
-        with Provider7RedisLock(_PROVIDER7_LOCK_KEY, ttl=180):
+        with Provider7RedisLock(_PROVIDER7_LOCK_KEY, ttl=settings.REQUEST_TIMEOUT_MINUTES * 60 + 120):
 
             _provider7_wait_turn()
 
