@@ -1,5 +1,6 @@
 import requests
 import base64
+import time
 from app.config import settings
 
 
@@ -26,6 +27,45 @@ def _normalize_number(number: str) -> str:
     number = number.replace(" ", "")
 
     return number
+
+
+def _post_send_media_with_retries(url: str, payload: dict, *, label: str, max_attempts: int = 3):
+    last_error = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            print(f"{label}_ATTEMPT =", attempt, flush=True)
+
+            resp = requests.post(
+                url,
+                headers=_headers(),
+                json=payload,
+                timeout=180,
+            )
+
+            print(f"{label}_STATUS =", resp.status_code, flush=True)
+            print(f"{label}_BODY =", resp.text[:1000], flush=True)
+
+            if resp.status_code in (200, 201):
+                return resp.json()
+
+            last_error = requests.HTTPError(
+                f"{resp.status_code} Server Error for url: {url} | body={resp.text[:1000]}",
+                response=resp,
+            )
+
+            # Reintentar solo errores temporales/server
+            if resp.status_code not in (408, 429, 500, 502, 503, 504):
+                raise last_error
+
+        except Exception as e:
+            last_error = e
+            print(f"{label}_ERROR_ATTEMPT_{attempt} =", str(e), flush=True)
+
+        if attempt < max_attempts:
+            time.sleep(5 * attempt)
+
+    raise last_error
 
 
 def send_text(number: str, text: str, instance_name: str = None):
@@ -206,17 +246,17 @@ def send_document_base64(number: str, media_b64: str, filename: str = "acta.pdf"
         "media": raw,
     }
 
+    print("SEND_DOCUMENT_BASE64_URL =", url, flush=True)
     print("SEND_DOCUMENT_BASE64_CAPTION =", repr(caption), flush=True)
     print("SEND_DOCUMENT_BASE64_FILENAME =", filename, flush=True)
     print("SEND_DOCUMENT_BASE64_B64_LEN =", len(raw), flush=True)
 
-    resp = requests.post(url, headers=_headers(), json=payload, timeout=60)
-
-    print("SEND_DOCUMENT_BASE64_STATUS =", resp.status_code, flush=True)
-    print("SEND_DOCUMENT_BASE64_BODY =", resp.text, flush=True)
-
-    resp.raise_for_status()
-    return resp.json()
+    return _post_send_media_with_retries(
+        url,
+        payload,
+        label="SEND_DOCUMENT_BASE64",
+        max_attempts=3,
+    )
 
 
 def send_group_document_base64(group_jid: str, media_b64: str, filename: str = "acta.pdf", caption: str = "", instance_name: str = None):
@@ -238,14 +278,14 @@ def send_group_document_base64(group_jid: str, media_b64: str, filename: str = "
         "media": raw,
     }
 
+    print("SEND_GROUP_DOCUMENT_BASE64_URL =", url, flush=True)
     print("SEND_GROUP_DOCUMENT_BASE64_CAPTION =", repr(caption), flush=True)
     print("SEND_GROUP_DOCUMENT_BASE64_FILENAME =", filename, flush=True)
     print("SEND_GROUP_DOCUMENT_BASE64_B64_LEN =", len(raw), flush=True)
 
-    resp = requests.post(url, headers=_headers(), json=payload, timeout=60)
-
-    print("SEND_GROUP_DOCUMENT_BASE64_STATUS =", resp.status_code, flush=True)
-    #print("SEND_GROUP_DOCUMENT_BASE64_BODY =", resp.text, flush=True)
-
-    resp.raise_for_status()
-    return resp.json()
+    return _post_send_media_with_retries(
+        url,
+        payload,
+        label="SEND_GROUP_DOCUMENT_BASE64",
+        max_attempts=3,
+    )
