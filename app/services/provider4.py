@@ -20,7 +20,7 @@ class Provider4Client:
     BASE_URL = "https://www.tramitanet.org"
     DEFAULT_HID = "D0cuExprR"
 
-    HISTORY_MAX_POLLS = 25
+    HISTORY_MAX_POLLS = 96
     HISTORY_POLL_SLEEP = 5
 
     MAPA_ESTADOS_CURP = {
