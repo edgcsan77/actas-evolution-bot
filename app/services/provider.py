@@ -27,7 +27,7 @@ def request_acta(curp: str, act_type: str, request_id: int) -> dict:
         settings.PROVIDER_API_URL,
         headers=headers,
         json=payload,
-        timeout=60
+        timeout=settings.REQUEST_TIMEOUT_MINUTES * 60
     )
 
     print("PROVIDER_RESPONSE_STATUS =", resp.status_code, flush=True)
