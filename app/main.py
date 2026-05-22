@@ -825,8 +825,60 @@ def is_group_blocked(group_jid: str) -> bool:
     if not group_jid:
         return False
 
-    blocked = redis_conn.sismember(BLOCKED_GROUPS_KEY, group_jid)
-    return bool(blocked)
+    group_jid = str(group_jid).strip()
+
+    # 1) Primero revisar Redis
+    try:
+        blocked = redis_conn.sismember(BLOCKED_GROUPS_KEY, group_jid)
+
+        if not blocked:
+            blocked = redis_conn.sismember(BLOCKED_GROUPS_KEY, group_jid.encode("utf-8"))
+
+        if blocked:
+            return True
+
+    except Exception as e:
+        print("IS_GROUP_BLOCKED_REDIS_ERROR =", str(e), flush=True)
+
+    # 2) Respaldo: revisar PostgreSQL por promo agotada
+    db = SessionLocal()
+    try:
+        promo = (
+            db.query(GroupPromotion)
+            .filter(GroupPromotion.group_jid == group_jid)
+            .first()
+        )
+
+        if promo:
+            total = int(promo.total_actas or 0)
+            used = int(promo.used_actas or 0)
+
+            promo_agotada = total > 0 and used >= total
+
+            if promo_agotada:
+                print("IS_GROUP_BLOCKED_DB_EXHAUSTED_PROMO =", {
+                    "group_jid": group_jid,
+                    "promo_name": promo.promo_name,
+                    "used": used,
+                    "total": total,
+                }, flush=True)
+
+                # Re-sincronizar Redis automáticamente
+                try:
+                    redis_conn.sadd(BLOCKED_GROUPS_KEY, group_jid)
+                except Exception as redis_set_exc:
+                    print("IS_GROUP_BLOCKED_REDIS_RESYNC_ERROR =", str(redis_set_exc), flush=True)
+
+                return True
+
+        return False
+
+    except Exception as e:
+        print("IS_GROUP_BLOCKED_DB_ERROR =", str(e), flush=True)
+        return False
+
+    finally:
+        db.close()
 
 
 def is_instance_blocked(instance_name: str) -> bool:
