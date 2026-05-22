@@ -5794,20 +5794,20 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
 
                   <td>
                     <a target="_blank"
-                       href="/panel/audit/group?token={settings.ADMIN_PANEL_TOKEN}&range=day&instance_name={instance_name}&group_jid={_esc(g['group_jid'])}"
+                       href="/botpanel/{_esc(token)}/audit?range=day&status=DONE&group_jid={_esc(g['group_jid'])}"
                        class="btn btn-primary"
                        style="color:white;text-decoration:none;padding:6px 10px;font-size:12px;border-radius:10px;">
                        Hoy
                     </a>
                     <br><br>
                     <a target="_blank"
-                       href="/panel/audit/group?token={settings.ADMIN_PANEL_TOKEN}&range=30d&instance_name={instance_name}&group_jid={_esc(g['group_jid'])}"
+                       href="/botpanel/{_esc(token)}/audit?range=30d&status=DONE&group_jid={_esc(g['group_jid'])}"
                        class="btn btn-success"
                        style="color:white;text-decoration:none;padding:6px 10px;font-size:12px;border-radius:10px;">
                        30 días
                     </a>
                   </td>
-
+  
                   <td>
                     <div style="display:flex;gap:8px;min-width:220px;">
                       <input id="rename_{_esc(g["group_jid"])}" placeholder="Nuevo nombre">
