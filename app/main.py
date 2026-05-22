@@ -912,7 +912,7 @@ def panel_bot_hide_group(token: str, group_jid: str, db: Session = Depends(get_d
 @app.get("/botpanel/{token}/audit", response_class=HTMLResponse)
 def botpanel_audit_all_groups(
     token: str,
-    range: str = "day",
+    period: str = "day",
     group_jid: str = "",
     status: str = "DONE",
     db: Session = Depends(get_db),
@@ -922,7 +922,10 @@ def botpanel_audit_all_groups(
     if not instance_name:
         return HTMLResponse("<h3>Panel no válido.</h3>", status_code=404)
 
-    period_view = range or "day"
+    if not _is_child_bot(instance_name):
+        return HTMLResponse("<h3>Este panel es solo para bots desde docifybot8 en adelante.</h3>", status_code=400)
+
+    period_view = period or "day"
     time_min, time_max, view = _panel_period_bounds(period_view)
 
     bot_title = _bot_title(db, instance_name)
@@ -1008,10 +1011,10 @@ def botpanel_audit_all_groups(
     group_rows.sort(key=lambda x: (-x["total"], x["group_name"] or ""))
 
     range_buttons = f"""
-        <a class="btn" href="/botpanel/{_esc(token)}/audit?range=day&status={_esc(status)}">Hoy</a>
-        <a class="btn" href="/botpanel/{_esc(token)}/audit?range=30d&status={_esc(status)}">30 días</a>
-        <a class="btn" href="/botpanel/{_esc(token)}/audit?range=month&status={_esc(status)}">Mes actual</a>
-        <a class="btn" href="/botpanel/{_esc(token)}/audit?range=prev_month&status={_esc(status)}">Mes anterior</a>
+        <a class="btn" href="/botpanel/{_esc(token)}/audit?period=day&status={_esc(status)}">Hoy</a>
+        <a class="btn" href="/botpanel/{_esc(token)}/audit?period=30d&status={_esc(status)}">30 días</a>
+        <a class="btn" href="/botpanel/{_esc(token)}/audit?period=month&status={_esc(status)}">Mes actual</a>
+        <a class="btn" href="/botpanel/{_esc(token)}/audit?period=prev_month&status={_esc(status)}">Mes anterior</a>
     """
 
     group_options = '<option value="">Todos los grupos</option>'
@@ -1130,7 +1133,7 @@ def botpanel_audit_all_groups(
           </div>
 
           <form method="get" action="/botpanel/{_esc(token)}/audit" style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-            <input type="hidden" name="range" value="{_esc(view)}">
+            <input type="hidden" name="period" value="{_esc(view)}">
             <select name="group_jid">
               {group_options}
             </select>
@@ -5715,25 +5718,25 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
           <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
             <a class="btn btn-primary"
                target="_blank"
-               href="/botpanel/{_esc(token)}/audit?range=day&status=DONE">
+               href="/botpanel/{_esc(token)}/audit?period=day&status=DONE">
                Historial hoy
             </a>
     
             <a class="btn btn-success"
                target="_blank"
-               href="/botpanel/{_esc(token)}/audit?range=30d&status=DONE">
+               href="/botpanel/{_esc(token)}/audit?period=30d&status=DONE">
                Historial 30 días
             </a>
     
             <a class="btn btn-primary"
                target="_blank"
-               href="/botpanel/{_esc(token)}/audit?range=month&status=DONE">
+               href="/botpanel/{_esc(token)}/audit?period=month&status=DONE">
                Historial mes
             </a>
     
             <a class="btn btn-secondary"
                target="_blank"
-               href="/botpanel/{_esc(token)}/audit?range=prev_month&status=DONE">
+               href="/botpanel/{_esc(token)}/audit?period=prev_month&status=DONE">
                Mes anterior
             </a>
           </div>
@@ -5794,14 +5797,14 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
 
                   <td>
                     <a target="_blank"
-                       href="/botpanel/{_esc(token)}/audit?range=day&status=DONE&group_jid={_esc(g['group_jid'])}"
+                       href="/botpanel/{_esc(token)}/audit?period=day&status=DONE&group_jid={_esc(g['group_jid'])}"
                        class="btn btn-primary"
                        style="color:white;text-decoration:none;padding:6px 10px;font-size:12px;border-radius:10px;">
                        Hoy
                     </a>
                     <br><br>
                     <a target="_blank"
-                       href="/botpanel/{_esc(token)}/audit?range=30d&status=DONE&group_jid={_esc(g['group_jid'])}"
+                       href="/botpanel/{_esc(token)}/audit?period=30d&status=DONE&group_jid={_esc(g['group_jid'])}"
                        class="btn btn-success"
                        style="color:white;text-decoration:none;padding:6px 10px;font-size:12px;border-radius:10px;">
                        30 días
