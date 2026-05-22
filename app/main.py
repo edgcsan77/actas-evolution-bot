@@ -5735,35 +5735,76 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
         </div>
 
         <div class="box">
-          <div class="head">
-            <strong>Historial del bot</strong>
-            <span class="small">Todos los grupos de este mini panel.</span>
+          <div class="head" style="align-items:flex-start;">
+            <div>
+              <strong style="font-size:18px;">Historial y evidencias</strong>
+              <div class="small" style="margin-top:4px;">
+                Consulta ventas, errores y movimientos de todos los grupos de {title}.
+              </div>
+            </div>
+            <span class="badge badge-success">Mini panel</span>
           </div>
-    
-          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
-            <a class="btn btn-primary"
-               target="_blank"
-               href="/botpanel/{_esc(token)}/audit?period=day&status=DONE">
-               Historial hoy
-            </a>
-    
-            <a class="btn btn-success"
-               target="_blank"
-               href="/botpanel/{_esc(token)}/audit?period=30d&status=DONE">
-               Historial 30 días
-            </a>
-    
-            <a class="btn btn-primary"
-               target="_blank"
-               href="/botpanel/{_esc(token)}/audit?period=month&status=DONE">
-               Historial mes
-            </a>
-    
-            <a class="btn btn-secondary"
-               target="_blank"
-               href="/botpanel/{_esc(token)}/audit?period=prev_month&status=DONE">
-               Mes anterior
-            </a>
+        
+          <div style="padding:16px;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">
+        
+              <a target="_blank"
+                 href="/botpanel/{_esc(token)}/audit?period=day&status=DONE"
+                 style="text-decoration:none;color:inherit;">
+                <div style="border:1px solid #dbeafe;background:#eff6ff;border-radius:16px;padding:16px;">
+                  <div style="font-size:13px;color:#1d4ed8;font-weight:800;">HOY</div>
+                  <div style="font-size:22px;font-weight:900;margin-top:6px;">Historial diario</div>
+                  <div class="small" style="margin-top:6px;">Ventas realizadas hoy</div>
+                </div>
+              </a>
+        
+              <a target="_blank"
+                 href="/botpanel/{_esc(token)}/audit?period=30d&status=DONE"
+                 style="text-decoration:none;color:inherit;">
+                <div style="border:1px solid #bbf7d0;background:#f0fdf4;border-radius:16px;padding:16px;">
+                  <div style="font-size:13px;color:#166534;font-weight:800;">30 DÍAS</div>
+                  <div style="font-size:22px;font-weight:900;margin-top:6px;">Último mes</div>
+                  <div class="small" style="margin-top:6px;">Ventas de todos los grupos</div>
+                </div>
+              </a>
+        
+              <a target="_blank"
+                 href="/botpanel/{_esc(token)}/audit?period=month&status=DONE"
+                 style="text-decoration:none;color:inherit;">
+                <div style="border:1px solid #e9d5ff;background:#faf5ff;border-radius:16px;padding:16px;">
+                  <div style="font-size:13px;color:#7e22ce;font-weight:800;">MES ACTUAL</div>
+                  <div style="font-size:22px;font-weight:900;margin-top:6px;">Corte mensual</div>
+                  <div class="small" style="margin-top:6px;">Movimientos del mes</div>
+                </div>
+              </a>
+        
+              <a target="_blank"
+                 href="/botpanel/{_esc(token)}/audit?period=prev_month&status=DONE"
+                 style="text-decoration:none;color:inherit;">
+                <div style="border:1px solid #fed7aa;background:#fff7ed;border-radius:16px;padding:16px;">
+                  <div style="font-size:13px;color:#c2410c;font-weight:800;">MES ANTERIOR</div>
+                  <div style="font-size:22px;font-weight:900;margin-top:6px;">Histórico</div>
+                  <div class="small" style="margin-top:6px;">Consulta el corte pasado</div>
+                </div>
+              </a>
+        
+            </div>
+        
+            <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+              <a target="_blank"
+                 class="btn btn-danger"
+                 style="text-decoration:none;color:white;"
+                 href="/botpanel/{_esc(token)}/audit?period=day&status=ERROR">
+                Ver errores de hoy
+              </a>
+        
+              <a target="_blank"
+                 class="btn btn-primary"
+                 style="text-decoration:none;color:white;"
+                 href="/botpanel/{_esc(token)}/audit?period=day&status=">
+                Ver todo hoy
+              </a>
+            </div>
           </div>
         </div>
 
