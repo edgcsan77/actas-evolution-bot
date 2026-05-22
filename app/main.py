@@ -1295,7 +1295,9 @@ def botpanel_audit_all_groups(
           <table>
             <thead>
               <tr>
-                <th>Fecha</th>
+                <th>Hora envío solicitud</th>
+                <th>Hora recibido PDF</th>
+                <th>Tiempo total</th>
                 <th>ID</th>
                 <th>Dato</th>
                 <th>Tipo</th>
@@ -1309,8 +1311,20 @@ def botpanel_audit_all_groups(
 
     if rows:
         for r in rows:
-            local_dt = _to_panel_tz(r.created_at)
-            fecha = local_dt.strftime("%Y-%m-%d %H:%M:%S") if local_dt else ""
+            local_created = _to_panel_tz(r.created_at)
+            hora_envio = local_created.strftime("%Y-%m-%d %H:%M:%S") if local_created else ""
+            
+            hora_recibido = ""
+            tiempo_total = ""
+            
+            if r.status == "DONE" and r.created_at and r.updated_at:
+                local_updated = _to_panel_tz(r.updated_at)
+                hora_recibido = local_updated.strftime("%Y-%m-%d %H:%M:%S") if local_updated else ""
+            
+                try:
+                    tiempo_total = _fmt_duration_seconds((r.updated_at - r.created_at).total_seconds())
+                except Exception:
+                    tiempo_total = ""
 
             status_class = {
                 "DONE": "status-d",
@@ -1324,7 +1338,9 @@ def botpanel_audit_all_groups(
 
             html += f"""
               <tr>
-                <td>{_esc(fecha)}</td>
+                <td>{_esc(hora_envio)}</td>
+                <td>{_esc(hora_recibido)}</td>
+                <td><strong>{_esc(tiempo_total)}</strong></td>
                 <td>{_esc(r.id)}</td>
                 <td>{_esc(r.curp)}</td>
                 <td>{_esc(r.act_type)}</td>
@@ -1339,7 +1355,7 @@ def botpanel_audit_all_groups(
     else:
         html += """
               <tr>
-                <td colspan="7">Sin movimientos en este periodo.</td>
+                <td colspan="9">Sin movimientos en este periodo.</td>
               </tr>
         """
 
@@ -1646,6 +1662,23 @@ def _fmt_dt(dt):
         return local_dt.strftime("%Y-%m-%d %H:%M:%S") if local_dt else ""
     except Exception:
         return str(dt)
+
+
+def _fmt_duration_seconds(seconds):
+    try:
+        seconds = int(max(0, seconds or 0))
+    except Exception:
+        return ""
+
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+
+    if h > 0:
+        return f"{h}h {m}m {s}s"
+    if m > 0:
+        return f"{m}m {s}s"
+    return f"{s}s"
 
 
 def _panel_period_bounds(view: str):
