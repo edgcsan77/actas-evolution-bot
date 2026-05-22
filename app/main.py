@@ -1113,6 +1113,33 @@ def botpanel_audit_all_groups(
           border:1px solid #cbd5e1;
           min-width:260px;
         }}
+        table {{
+          width: 100%;
+          border-collapse: collapse;
+          background: white;
+          table-layout: fixed;
+        }}
+        td, th {{
+          word-break: break-word;
+        }}
+        td:nth-child(1) {{
+          width: 90px;
+        }}
+        td:nth-child(2) {{
+          width: 60px;
+        }}
+        td:nth-child(3) {{
+          width: 160px;
+        }}
+        td:nth-child(4) {{
+          width: 110px;
+        }}
+        td:nth-child(5) {{
+          width: 80px;
+        }}
+        td:nth-child(6) {{
+          width: 220px;
+        }}
       </style>
     </head>
     <body>
@@ -1212,7 +1239,6 @@ def botpanel_audit_all_groups(
                 <th>Tipo</th>
                 <th>Estado</th>
                 <th>Grupo</th>
-                <th>Proveedor</th>
                 <th>Error</th>
               </tr>
             </thead>
@@ -1245,14 +1271,13 @@ def botpanel_audit_all_groups(
                   <strong>{_esc(gname)}</strong><br>
                   <span class="small">{_esc(gid)}</span>
                 </td>
-                <td>{_esc(_provider_label(r.provider_name or ""))}</td>
                 <td class="small">{_esc((r.error_message or "")[:180])}</td>
               </tr>
             """
     else:
         html += """
               <tr>
-                <td colspan="8">Sin movimientos en este periodo.</td>
+                <td colspan="7">Sin movimientos en este periodo.</td>
               </tr>
         """
 
