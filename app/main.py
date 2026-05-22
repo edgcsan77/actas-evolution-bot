@@ -909,6 +909,362 @@ def panel_bot_hide_group(token: str, group_jid: str, db: Session = Depends(get_d
         return {"ok": False, "error": str(e)}
 
 
+@app.get("/botpanel/{token}/audit", response_class=HTMLResponse)
+def botpanel_audit_all_groups(
+    token: str,
+    range: str = "day",
+    group_jid: str = "",
+    status: str = "DONE",
+    db: Session = Depends(get_db),
+):
+    instance_name = _bot_instance_from_token(db, token)
+
+    if not instance_name:
+        return HTMLResponse("<h3>Panel no válido.</h3>", status_code=404)
+
+    period_view = range or "day"
+    time_min, time_max, view = _panel_period_bounds(period_view)
+
+    bot_title = _bot_title(db, instance_name)
+    group_cache = _build_group_name_cache(db)
+
+    bot_groups = _bot_groups_for_instance(db, instance_name)
+    allowed_group_ids = [g.group_jid for g in bot_groups if g.group_jid]
+
+    if not allowed_group_ids:
+        return HTMLResponse(f"""
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>Historial - {_esc(bot_title)}</title>
+        </head>
+        <body style="font-family:Arial;padding:24px;">
+            <h2>Historial - {_esc(bot_title)}</h2>
+            <p>Este bot aún no tiene grupos asignados.</p>
+            <a href="/botpanel/{_esc(token)}">Volver al panel</a>
+        </body>
+        </html>
+        """)
+
+    q = db.query(RequestLog).filter(
+        RequestLog.instance_name == instance_name,
+        RequestLog.source_group_id.in_(allowed_group_ids),
+        RequestLog.created_at >= time_min,
+        RequestLog.created_at < time_max,
+    )
+
+    if status:
+        q = q.filter(RequestLog.status == status)
+
+    if group_jid:
+        # seguridad: solo permitir filtrar grupos que pertenecen al bot
+        if group_jid not in allowed_group_ids:
+            return HTMLResponse("<h3>Grupo no pertenece a este bot.</h3>", status_code=403)
+        q = q.filter(RequestLog.source_group_id == group_jid)
+
+    rows = (
+        q.order_by(RequestLog.created_at.desc())
+        .limit(1000)
+        .all()
+    )
+
+    totals = {
+        "total": len(rows),
+        "done": sum(1 for r in rows if r.status == "DONE"),
+        "error": sum(1 for r in rows if r.status == "ERROR"),
+        "queued": sum(1 for r in rows if r.status == "QUEUED"),
+        "processing": sum(1 for r in rows if r.status == "PROCESSING"),
+    }
+
+    by_group = {}
+
+    for r in rows:
+        gid = r.source_group_id or "PRIVADO"
+
+        if gid not in by_group:
+            by_group[gid] = {
+                "group_jid": gid,
+                "group_name": _group_name_cached(gid, group_cache),
+                "total": 0,
+                "done": 0,
+                "error": 0,
+                "queued": 0,
+                "processing": 0,
+            }
+
+        item = by_group[gid]
+        item["total"] += 1
+
+        if r.status == "DONE":
+            item["done"] += 1
+        elif r.status == "ERROR":
+            item["error"] += 1
+        elif r.status == "QUEUED":
+            item["queued"] += 1
+        elif r.status == "PROCESSING":
+            item["processing"] += 1
+
+    group_rows = list(by_group.values())
+    group_rows.sort(key=lambda x: (-x["total"], x["group_name"] or ""))
+
+    range_buttons = f"""
+        <a class="btn" href="/botpanel/{_esc(token)}/audit?range=day&status={_esc(status)}">Hoy</a>
+        <a class="btn" href="/botpanel/{_esc(token)}/audit?range=30d&status={_esc(status)}">30 días</a>
+        <a class="btn" href="/botpanel/{_esc(token)}/audit?range=month&status={_esc(status)}">Mes actual</a>
+        <a class="btn" href="/botpanel/{_esc(token)}/audit?range=prev_month&status={_esc(status)}">Mes anterior</a>
+    """
+
+    group_options = '<option value="">Todos los grupos</option>'
+    for g in bot_groups:
+        selected = "selected" if group_jid == g.group_jid else ""
+        group_options += (
+            f'<option value="{_esc(g.group_jid)}" {selected}>'
+            f'{_esc(_get_bot_group_name(db, g.group_jid))}</option>'
+        )
+
+    html = f"""
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Historial - {_esc(bot_title)}</title>
+      <style>
+        body {{
+          font-family: Arial, sans-serif;
+          background:#f4f6f8;
+          padding:24px;
+          color:#111827;
+        }}
+        .wrap {{
+          max-width: 1250px;
+          margin: 0 auto;
+        }}
+        .box {{
+          background:white;
+          border-radius:16px;
+          padding:18px;
+          margin-bottom:18px;
+          box-shadow:0 8px 24px rgba(15,23,42,.08);
+        }}
+        .head {{
+          display:flex;
+          justify-content:space-between;
+          align-items:center;
+          gap:12px;
+          flex-wrap:wrap;
+        }}
+        .btn {{
+          display:inline-block;
+          padding:8px 12px;
+          border-radius:10px;
+          text-decoration:none;
+          background:#2563eb;
+          color:white;
+          font-size:13px;
+          margin:3px;
+        }}
+        .btn-secondary {{
+          background:#64748b;
+        }}
+        .stats {{
+          display:grid;
+          grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+          gap:12px;
+          margin-top:14px;
+        }}
+        .stat {{
+          background:#f8fafc;
+          border:1px solid #e5e7eb;
+          border-radius:14px;
+          padding:12px;
+        }}
+        .stat strong {{
+          display:block;
+          font-size:24px;
+        }}
+        table {{
+          width:100%;
+          border-collapse:collapse;
+          background:white;
+        }}
+        th, td {{
+          padding:10px;
+          border-bottom:1px solid #e5e7eb;
+          font-size:13px;
+          vertical-align:top;
+        }}
+        th {{
+          text-align:left;
+          background:#f8fafc;
+        }}
+        .small {{
+          font-size:12px;
+          color:#64748b;
+        }}
+        .status-d {{ color:#15803d;font-weight:bold; }}
+        .status-e {{ color:#b91c1c;font-weight:bold; }}
+        .status-q {{ color:#92400e;font-weight:bold; }}
+        .status-p {{ color:#1d4ed8;font-weight:bold; }}
+        select {{
+          padding:8px;
+          border-radius:10px;
+          border:1px solid #cbd5e1;
+          min-width:260px;
+        }}
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="box">
+          <div class="head">
+            <div>
+              <h2>Historial de {_esc(bot_title)}</h2>
+              <div class="small">Instancia: {_esc(instance_name)} | Periodo: {_esc(view)}</div>
+            </div>
+            <div>
+              <a class="btn btn-secondary" href="/botpanel/{_esc(token)}">Volver al mini panel</a>
+            </div>
+          </div>
+
+          <div style="margin-top:14px;">
+            {range_buttons}
+          </div>
+
+          <form method="get" action="/botpanel/{_esc(token)}/audit" style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+            <input type="hidden" name="range" value="{_esc(view)}">
+            <select name="group_jid">
+              {group_options}
+            </select>
+
+            <select name="status">
+              <option value="DONE" {"selected" if status == "DONE" else ""}>Solo vendidas / DONE</option>
+              <option value="" {"selected" if status == "" else ""}>Todas</option>
+              <option value="ERROR" {"selected" if status == "ERROR" else ""}>Errores</option>
+              <option value="PROCESSING" {"selected" if status == "PROCESSING" else ""}>Procesando</option>
+              <option value="QUEUED" {"selected" if status == "QUEUED" else ""}>En cola</option>
+            </select>
+
+            <button class="btn" type="submit" style="border:0;cursor:pointer;">Filtrar</button>
+          </form>
+
+          <div class="stats">
+            <div class="stat"><span>Total</span><strong>{totals["total"]}</strong></div>
+            <div class="stat"><span>DONE</span><strong>{totals["done"]}</strong></div>
+            <div class="stat"><span>ERROR</span><strong>{totals["error"]}</strong></div>
+            <div class="stat"><span>PROCESSING</span><strong>{totals["processing"]}</strong></div>
+            <div class="stat"><span>QUEUED</span><strong>{totals["queued"]}</strong></div>
+          </div>
+        </div>
+
+        <div class="box">
+          <h3>Resumen por grupo</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Grupo</th>
+                <th>Total</th>
+                <th>DONE</th>
+                <th>ERROR</th>
+                <th>PROCESSING</th>
+                <th>QUEUED</th>
+              </tr>
+            </thead>
+            <tbody>
+    """
+
+    if group_rows:
+        for g in group_rows:
+            html += f"""
+              <tr>
+                <td>
+                  <strong>{_esc(g["group_name"])}</strong><br>
+                  <span class="small">{_esc(g["group_jid"])}</span>
+                </td>
+                <td>{g["total"]}</td>
+                <td>{g["done"]}</td>
+                <td>{g["error"]}</td>
+                <td>{g["processing"]}</td>
+                <td>{g["queued"]}</td>
+              </tr>
+            """
+    else:
+        html += """
+              <tr>
+                <td colspan="6">Sin movimientos en este periodo.</td>
+              </tr>
+        """
+
+    html += """
+            </tbody>
+          </table>
+        </div>
+
+        <div class="box">
+          <h3>Movimientos</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>ID</th>
+                <th>Dato</th>
+                <th>Tipo</th>
+                <th>Estado</th>
+                <th>Grupo</th>
+                <th>Proveedor</th>
+                <th>Error</th>
+              </tr>
+            </thead>
+            <tbody>
+    """
+
+    if rows:
+        for r in rows:
+            local_dt = _to_panel_tz(r.created_at)
+            fecha = local_dt.strftime("%Y-%m-%d %H:%M:%S") if local_dt else ""
+
+            status_class = {
+                "DONE": "status-d",
+                "ERROR": "status-e",
+                "QUEUED": "status-q",
+                "PROCESSING": "status-p",
+            }.get(r.status, "")
+
+            gid = r.source_group_id or ""
+            gname = _group_name_cached(gid, group_cache) if gid else "PRIVADO"
+
+            html += f"""
+              <tr>
+                <td>{_esc(fecha)}</td>
+                <td>{_esc(r.id)}</td>
+                <td>{_esc(r.curp)}</td>
+                <td>{_esc(r.act_type)}</td>
+                <td class="{status_class}">{_esc(r.status)}</td>
+                <td>
+                  <strong>{_esc(gname)}</strong><br>
+                  <span class="small">{_esc(gid)}</span>
+                </td>
+                <td>{_esc(_provider_label(r.provider_name or ""))}</td>
+                <td class="small">{_esc((r.error_message or "")[:180])}</td>
+              </tr>
+            """
+    else:
+        html += """
+              <tr>
+                <td colspan="8">Sin movimientos en este periodo.</td>
+              </tr>
+        """
+
+    html += """
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </body>
+    </html>
+    """
+
+    return HTMLResponse(content=html)
+
+
 @app.get("/panel/instances")
 def panel_instances(db: Session = Depends(get_db)):
     rows = (
@@ -5347,6 +5703,39 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
               id="botBroadcastProgress"
               style="display:none;margin-top:12px;padding:12px;border-radius:12px;background:#f8fafc;border:1px solid #e5e7eb;font-size:13px;"
             ></div>
+          </div>
+        </div>
+
+        <div class="box">
+          <div class="head">
+            <strong>Historial del bot</strong>
+            <span class="small">Todos los grupos de este mini panel.</span>
+          </div>
+    
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+            <a class="btn btn-primary"
+               target="_blank"
+               href="/botpanel/{_esc(token)}/audit?range=day&status=DONE">
+               Historial hoy
+            </a>
+    
+            <a class="btn btn-success"
+               target="_blank"
+               href="/botpanel/{_esc(token)}/audit?range=30d&status=DONE">
+               Historial 30 días
+            </a>
+    
+            <a class="btn btn-primary"
+               target="_blank"
+               href="/botpanel/{_esc(token)}/audit?range=month&status=DONE">
+               Historial mes
+            </a>
+    
+            <a class="btn btn-secondary"
+               target="_blank"
+               href="/botpanel/{_esc(token)}/audit?range=prev_month&status=DONE">
+               Mes anterior
+            </a>
           </div>
         </div>
 
