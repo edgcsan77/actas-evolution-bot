@@ -967,7 +967,6 @@ def botpanel_audit_all_groups(
 
     rows = (
         q.order_by(RequestLog.created_at.desc())
-        .limit(1000)
         .all()
     )
 
@@ -5788,22 +5787,6 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                 </div>
               </a>
         
-            </div>
-        
-            <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
-              <a target="_blank"
-                 class="btn btn-danger"
-                 style="text-decoration:none;color:white;"
-                 href="/botpanel/{_esc(token)}/audit?period=day&status=ERROR">
-                Ver errores de hoy
-              </a>
-        
-              <a target="_blank"
-                 class="btn btn-primary"
-                 style="text-decoration:none;color:white;"
-                 href="/botpanel/{_esc(token)}/audit?period=day&status=">
-                Ver todo hoy
-              </a>
             </div>
           </div>
         </div>
