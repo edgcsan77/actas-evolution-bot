@@ -827,7 +827,7 @@ def is_group_blocked(group_jid: str) -> bool:
 
     group_jid = str(group_jid).strip()
 
-    # 1) Primero revisar Redis
+    # 1) Revisar Redis primero
     try:
         blocked = redis_conn.sismember(BLOCKED_GROUPS_KEY, group_jid)
 
@@ -840,7 +840,7 @@ def is_group_blocked(group_jid: str) -> bool:
     except Exception as e:
         print("IS_GROUP_BLOCKED_REDIS_ERROR =", str(e), flush=True)
 
-    # 2) Respaldo: revisar PostgreSQL por promo agotada
+    # 2) Respaldo: revisar PostgreSQL si la promo ya está agotada
     db = SessionLocal()
     try:
         promo = (
@@ -849,27 +849,38 @@ def is_group_blocked(group_jid: str) -> bool:
             .first()
         )
 
-        if promo:
-            total = int(promo.total_actas or 0)
-            used = int(promo.used_actas or 0)
+        if not promo:
+            return False
 
-            promo_agotada = total > 0 and used >= total
+        total = int(promo.total_actas or 0)
+        used = int(promo.used_actas or 0)
 
-            if promo_agotada:
-                print("IS_GROUP_BLOCKED_DB_EXHAUSTED_PROMO =", {
-                    "group_jid": group_jid,
-                    "promo_name": promo.promo_name,
-                    "used": used,
-                    "total": total,
-                }, flush=True)
+        shared_limit = int(promo.shared_group_limit_actas or 0)
+        shared_used = int(promo.shared_group_used_actas or 0)
 
-                # Re-sincronizar Redis automáticamente
-                try:
-                    redis_conn.sadd(BLOCKED_GROUPS_KEY, group_jid)
-                except Exception as redis_set_exc:
-                    print("IS_GROUP_BLOCKED_REDIS_RESYNC_ERROR =", str(redis_set_exc), flush=True)
+        promo_agotada = (
+            (total > 0 and used >= total)
+            or
+            (shared_limit > 0 and shared_used >= shared_limit)
+        )
 
-                return True
+        if promo_agotada:
+            print("IS_GROUP_BLOCKED_DB_EXHAUSTED_PROMO =", {
+                "group_jid": group_jid,
+                "promo_name": promo.promo_name,
+                "used": used,
+                "total": total,
+                "shared_used": shared_used,
+                "shared_limit": shared_limit,
+            }, flush=True)
+
+            # Re-sincronizar Redis automáticamente
+            try:
+                redis_conn.sadd(BLOCKED_GROUPS_KEY, group_jid)
+            except Exception as redis_set_exc:
+                print("IS_GROUP_BLOCKED_REDIS_RESYNC_ERROR =", str(redis_set_exc), flush=True)
+
+            return True
 
         return False
 
