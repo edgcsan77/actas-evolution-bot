@@ -11677,14 +11677,22 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 t_encode = time.perf_counter()
                 safe_media_b64 = base64.b64encode(pdf_bytes).decode()
                 print("T_BASE64_REENCODE_FINAL =", round(time.perf_counter() - t_encode, 3), flush=True)
-
-                strong_pdf_dedupe_key = f"provider_pdf_done:{open_req.id}"
-                already_sent_strong = redis_conn.set(strong_pdf_dedupe_key, "1", ex=3600, nx=True)
                 
-                if not already_sent_strong:
-                    print("PROVIDER_PDF_DUPLICATE_STRONG_IGNORED =", strong_pdf_dedupe_key, flush=True)
-                    return {"ok": True, "ignored": "provider_pdf_duplicate_strong"}
-
+                # Dedupe fuerte:
+                # 1) provider_pdf_done = solo si ya se entregó correctamente.
+                # 2) provider_pdf_sending = candado temporal mientras se está entregando.
+                done_key = f"provider_pdf_done:{open_req.id}"
+                if redis_conn.get(done_key):
+                    print("PROVIDER_PDF_ALREADY_DONE_IGNORED =", done_key, flush=True)
+                    return {"ok": True, "ignored": "provider_pdf_already_done"}
+                
+                sending_key = f"provider_pdf_sending:{open_req.id}"
+                already_processing = redis_conn.set(sending_key, "1", ex=300, nx=True)
+                
+                if not already_processing:
+                    print("PROVIDER_PDF_DUPLICATE_SENDING_IGNORED =", sending_key, flush=True)
+                    return {"ok": True, "ignored": "provider_pdf_duplicate_sending"}
+                
                 match_term = filename_id or provider_id or open_req.curp or "NO_TERM"
                 pdf_dedupe_key = f"provider_pdf:{open_req.id}:{source_chat_id}:{match_term}:{filename or 'nofile'}"
                 
@@ -11740,6 +11748,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         print("PDF_DEDUPE_DELETE_AFTER_DELIVERY_FAILED_ERROR =", str(redis_del_exc), flush=True)
                 
                     try:
+                        redis_conn.delete(sending_key)
+                    except Exception as redis_del_exc:
+                        print("PDF_SENDING_DELETE_AFTER_DELIVERY_FAILED_ERROR =", str(redis_del_exc), flush=True)
+                
+                    try:
                         _notify_support_error(
                             open_req,
                             "DELIVERY_FAILED",
@@ -11754,6 +11767,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 open_req.error_message = None
                 open_req.updated_at = _utc_now_naive()
                 db.commit()
+                
+                try:
+                    redis_conn.set(done_key, "1", ex=3600)
+                    redis_conn.delete(sending_key)
+                except Exception as redis_done_exc:
+                    print("PDF_DONE_MARK_REDIS_ERROR =", str(redis_done_exc), flush=True)
 
                 try:
                     if open_req.instance_name:
