@@ -2935,6 +2935,158 @@ def panel_apply_shared_promotion(
     }
 
 
+@app.post("/panel/promotions/edit")
+def panel_edit_promotion(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    group_jid = (payload.get("group_jid") or "").strip()
+
+    if not group_jid:
+        return {"ok": False, "error": "GROUP_JID_REQUIRED"}
+
+    row = (
+        db.query(GroupPromotion)
+        .filter(GroupPromotion.group_jid == group_jid)
+        .first()
+    )
+
+    if not row:
+        return {"ok": False, "error": "PROMOTION_NOT_FOUND"}
+
+    promo_name = (payload.get("promo_name") or "").strip()
+    price_per_piece = (payload.get("price_per_piece") or "").strip()
+
+    # OJO:
+    # Aquí NO tocamos used_actas ni shared_group_used_actas.
+    # Esta ruta es solo para editar datos de la promo.
+    if promo_name:
+        row.promo_name = promo_name
+
+    if "total_actas" in payload:
+        try:
+            total_actas = int(payload.get("total_actas") or 0)
+        except Exception:
+            total_actas = 0
+
+        if total_actas <= 0:
+            return {"ok": False, "error": "TOTAL_ACTAS_INVALID"}
+
+        used_now = int(row.used_actas or 0)
+
+        if total_actas < used_now:
+            return {
+                "ok": False,
+                "error": "TOTAL_ACTAS_LESS_THAN_USED",
+                "used_actas": used_now,
+                "total_actas": total_actas,
+            }
+
+        row.total_actas = total_actas
+
+    if price_per_piece:
+        row.price_per_piece = price_per_piece
+
+    if "is_credit" in payload:
+        row.is_credit = bool(payload.get("is_credit") or False)
+
+    if "credit_abono" in payload:
+        row.credit_abono = int(payload.get("credit_abono") or 0)
+
+    if "credit_debe" in payload:
+        row.credit_debe = int(payload.get("credit_debe") or 0)
+
+    if "shared_group_limit_actas" in payload:
+        limit_value = int(payload.get("shared_group_limit_actas") or 0)
+        row.shared_group_limit_actas = limit_value if limit_value > 0 else None
+
+    row.is_active = bool(payload.get("is_active", row.is_active))
+    row.updated_at = _utc_now_naive()
+
+    db.commit()
+    _clear_panel_cache()
+
+    return {
+        "ok": True,
+        "message": "Promoción editada sin reiniciar consumos",
+        "group_jid": row.group_jid,
+        "promo_name": row.promo_name,
+        "total_actas": int(row.total_actas or 0),
+        "used_actas": int(row.used_actas or 0),
+        "available": max(0, int(row.total_actas or 0) - int(row.used_actas or 0)),
+        "shared_group_limit_actas": row.shared_group_limit_actas,
+        "shared_group_used_actas": int(row.shared_group_used_actas or 0),
+        "is_active": bool(row.is_active),
+    }
+
+
+@app.post("/panel/promotions/recharge")
+def panel_recharge_promotion(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    group_jid = (payload.get("group_jid") or "").strip()
+
+    try:
+        add_actas = int(payload.get("add_actas") or 0)
+    except Exception:
+        add_actas = 0
+
+    if not group_jid:
+        return {"ok": False, "error": "GROUP_JID_REQUIRED"}
+
+    if add_actas <= 0:
+        return {"ok": False, "error": "ADD_ACTAS_INVALID"}
+
+    row = (
+        db.query(GroupPromotion)
+        .filter(GroupPromotion.group_jid == group_jid)
+        .first()
+    )
+
+    if not row:
+        return {"ok": False, "error": "PROMOTION_NOT_FOUND"}
+
+    # OJO:
+    # Recarga = sumar al total.
+    # NO tocamos used_actas.
+    previous_total = int(row.total_actas or 0)
+    row.total_actas = previous_total + add_actas
+
+    # Si estaba agotada, la reactivamos y liberamos avisos.
+    row.is_active = True
+    row.warning_sent_0 = False
+    row.warning_sent_10 = False
+    row.warning_sent_50 = False
+    row.warning_sent_100 = False
+    row.warning_sent_200 = False
+    row.updated_at = _utc_now_naive()
+
+    db.commit()
+
+    try:
+        unblock_group(group_jid)
+    except Exception as unblock_exc:
+        print("PROMO_RECHARGE_UNBLOCK_ERROR =", str(unblock_exc), flush=True)
+
+    _clear_panel_cache()
+
+    used_now = int(row.used_actas or 0)
+    available = max(0, int(row.total_actas or 0) - used_now)
+
+    return {
+        "ok": True,
+        "message": "Promoción recargada sin reiniciar consumos",
+        "group_jid": row.group_jid,
+        "previous_total": previous_total,
+        "added": add_actas,
+        "total_actas": int(row.total_actas or 0),
+        "used_actas": used_now,
+        "available": available,
+        "is_active": bool(row.is_active),
+    }
+
+
 @app.post("/panel/promotions/add-group")
 def panel_add_group_to_shared_promotion(
     payload: dict = Body(...),
