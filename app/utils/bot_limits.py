@@ -63,6 +63,10 @@ def _bot_used_key(instance_name: str) -> str:
     return f"bot_used:{instance_name}"
 
 
+def _bot_used_offset_key(instance_name: str) -> str:
+    return f"bot_used_offset:{instance_name}"
+
+
 # =========================
 # GETTERS
 # =========================
@@ -74,8 +78,12 @@ def get_bot_limit(db: Session, instance_name: str) -> int:
 
 
 def get_bot_used(db: Session, instance_name: str) -> int:
+    instance_name = (instance_name or "").strip()
+    if not instance_name:
+        return 0
+
     try:
-        return (
+        total_done = (
             db.query(RequestLog)
             .filter(
                 RequestLog.instance_name == instance_name,
@@ -83,6 +91,11 @@ def get_bot_used(db: Session, instance_name: str) -> int:
             )
             .count()
         )
+
+        offset = int(_app_setting_get(db, _bot_used_offset_key(instance_name), "0") or "0")
+
+        return max(0, int(total_done or 0) - offset)
+
     except Exception:
         return 0
 
@@ -99,10 +112,33 @@ def set_bot_limit(db: Session, instance_name: str, limit_value: int):
 
 
 def set_bot_used(db: Session, instance_name: str, used_value: int):
+    instance_name = (instance_name or "").strip()
+    if not instance_name:
+        return
+
+    used_value = max(0, int(used_value or 0))
+
+    if used_value == 0:
+        total_done = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.instance_name == instance_name,
+                RequestLog.status == "DONE",
+            )
+            .count()
+        )
+
+        _app_setting_set(
+            db,
+            _bot_used_offset_key(instance_name),
+            str(int(total_done or 0)),
+        )
+        return
+
     _app_setting_set(
         db,
         _bot_used_key(instance_name),
-        str(max(0, int(used_value))),
+        str(used_value),
     )
 
 
