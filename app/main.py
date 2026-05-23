@@ -1440,11 +1440,17 @@ async def panel_set_instance_limit(instance_name: str, request: Request, db: Ses
 def panel_reset_instance_usage(instance_name: str, db: Session = Depends(get_db)):
     set_bot_used(db, instance_name, 0)
     _clear_panel_cache()
+
+    used_now = get_bot_used(db, instance_name)
+    limit_value = get_bot_limit(db, instance_name)
+
     return {
         "ok": True,
         "instance_name": instance_name,
-        "used": 0,
-        "limit": get_bot_limit(db, instance_name),
+        "used": used_now,
+        "limit": limit_value,
+        "available": max(0, limit_value - used_now) if limit_value > 0 else None,
+        "blocked": is_instance_blocked(instance_name),
     }
 
 
@@ -12086,11 +12092,18 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 error_existing.provider_name = None
                 error_existing.provider_group_id = None
                 error_existing.provider_message = None
+                
+                now_utc = _utc_now_naive()
+
                 error_existing.provider_media_url = None
                 error_existing.pdf_url = None
-                error_existing.expires_at = _utc_now_naive() + timedelta(days=settings.HISTORY_DAYS)
+                
+                error_existing.created_at = now_utc
+                error_existing.updated_at = now_utc
+                error_existing.expires_at = now_utc + timedelta(days=settings.HISTORY_DAYS)
+                
                 db.commit()
-        
+                
                 request_queue.enqueue(process_request, error_existing.id)
                 created_any = True
         
