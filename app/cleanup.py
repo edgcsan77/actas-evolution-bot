@@ -42,14 +42,18 @@ def cleanup_expired_and_mark_pending():
         print("CLEANUP_DELETED_EXPIRED =", deleted_count, flush=True)
 
         # 2) marcar PROCESSING vencidos como ERROR
-        limit = now - timedelta(minutes=settings.REQUEST_TIMEOUT_MINUTES)
+        timeout_minutes = int(getattr(settings, "PROCESSING_TIMEOUT_MINUTES", 45) or 45)
+        limit = now - timedelta(minutes=timeout_minutes)
+
+        whatsapp_providers = ["PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6", "PROVIDER8"]
 
         rows = (
             db.query(RequestLog)
             .filter(
                 RequestLog.status == "PROCESSING",
                 RequestLog.updated_at.is_not(None),
-                RequestLog.updated_at <= limit
+                RequestLog.updated_at <= limit,
+                RequestLog.provider_name.in_(whatsapp_providers),
             )
             .all()
         )
@@ -64,7 +68,7 @@ def cleanup_expired_and_mark_pending():
             r.updated_at = now
             r.error_message = (
                 f"Timeout automático a los "
-                f"{settings.REQUEST_TIMEOUT_MINUTES} minutos"
+                f"{timeout_minutes} minutos"
             )
             changed_ids.append(r.id)
 
