@@ -153,8 +153,6 @@ def increment_bot_used_and_maybe_block(
     used = get_bot_used(db, instance_name)
     limit_value = get_bot_limit(db, instance_name)
 
-    set_bot_used(db, instance_name, used)
-
     blocked_now = False
     if limit_value > 0 and used >= limit_value:
         block_instance(instance_name)
