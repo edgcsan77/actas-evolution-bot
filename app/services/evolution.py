@@ -68,6 +68,45 @@ def _post_send_media_with_retries(url: str, payload: dict, *, label: str, max_at
     raise last_error
 
 
+def _post_send_text_with_retries(url: str, payload: dict, *, label: str, max_attempts: int = 3):
+    last_error = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            print(f"{label}_ATTEMPT =", attempt, flush=True)
+
+            resp = requests.post(
+                url,
+                headers=_headers(),
+                json=payload,
+                timeout=30,
+            )
+
+            print(f"{label}_STATUS =", resp.status_code, flush=True)
+            print(f"{label}_BODY =", resp.text[:1000], flush=True)
+
+            if resp.status_code in (200, 201):
+                return resp.json()
+
+            last_error = requests.HTTPError(
+                f"{resp.status_code} Server Error for url: {url} | body={resp.text[:1000]}",
+                response=resp,
+            )
+
+            # Solo reintentar errores temporales.
+            if resp.status_code not in (408, 429, 500, 502, 503, 504):
+                raise last_error
+
+        except Exception as e:
+            last_error = e
+            print(f"{label}_ERROR_ATTEMPT_{attempt} =", str(e), flush=True)
+
+        if attempt < max_attempts:
+            time.sleep(2 * attempt)
+
+    raise last_error
+
+
 def send_text(number: str, text: str, instance_name: str = None):
     instance = instance_name or settings.EVOLUTION_INSTANCE
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendText/{instance}"
@@ -83,13 +122,12 @@ def send_text(number: str, text: str, instance_name: str = None):
     print("SEND_TEXT_URL =", url, flush=True)
     print("SEND_TEXT_PAYLOAD =", payload, flush=True)
 
-    resp = requests.post(url, headers=_headers(), json=payload, timeout=30)
-
-    print("SEND_TEXT_STATUS =", resp.status_code, flush=True)
-    print("SEND_TEXT_BODY =", resp.text, flush=True)
-
-    resp.raise_for_status()
-    return resp.json()
+    return _post_send_text_with_retries(
+        url,
+        payload,
+        label="SEND_TEXT",
+        max_attempts=3,
+    )
 
 
 def send_document(number: str, pdf_url: str, filename: str = "acta.pdf", caption: str = "", instance_name: str = None):
@@ -126,21 +164,21 @@ def send_document(number: str, pdf_url: str, filename: str = "acta.pdf", caption
 def send_group_text(group_jid: str, text: str, instance_name: str = None):
     instance = instance_name or settings.EVOLUTION_INSTANCE
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendText/{instance}"
-    
+
     payload = {
         "number": _normalize_number(group_jid),
-        "text": (text or "").strip()
+        "text": (text or "").strip(),
     }
-
-    resp = requests.post(url, headers=_headers(), json=payload, timeout=30)
 
     print("SEND_GROUP_TEXT_URL =", url, flush=True)
     print("SEND_GROUP_TEXT_PAYLOAD =", payload, flush=True)
-    print("SEND_GROUP_TEXT_STATUS =", resp.status_code, flush=True)
-    print("SEND_GROUP_TEXT_BODY =", resp.text, flush=True)
 
-    resp.raise_for_status()
-    return resp.json()
+    return _post_send_text_with_retries(
+        url,
+        payload,
+        label="SEND_GROUP_TEXT",
+        max_attempts=3,
+    )
 
 
 def send_group_document(group_jid: str, pdf_url: str, filename: str = "acta.pdf", caption: str = "", instance_name: str = None):
