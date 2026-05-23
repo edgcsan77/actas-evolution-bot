@@ -81,7 +81,7 @@ class Settings(BaseSettings):
 
     HISTORY_DAYS: int = 30
     REQUEST_TIMEOUT_MINUTES: int = 8
-    PROCESSING_TIMEOUT_MINUTES: int = 45
+    PROCESSING_HARD_TIMEOUT_MINUTES: int = 45
 
 
 settings = Settings()
