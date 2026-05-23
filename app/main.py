@@ -1864,7 +1864,7 @@ def _panel_group_rows(
             gid = gid or "PRIVADO"
             group_name = _group_name_cached(gid, group_cache)
     
-            if gid in hidden_main_group_ids:
+            if gid in HIDDEN_PANEL_GROUPS:
                 continue
     
             row = db.query(AuthorizedGroup).filter_by(group_jid=gid).first()
@@ -1876,7 +1876,7 @@ def _panel_group_rows(
             if gid != "PRIVADO" and not owner and _is_hidden_panel_group(gid, group_name):
                 continue
     
-            group_map[gid] = {
+            data[gid] = {
                 "group_jid": gid,
                 "group_name": group_name,
                 "total": 0,
@@ -11699,6 +11699,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 already_sent = redis_conn.set(pdf_dedupe_key, "1", ex=3600, nx=True)
                 if not already_sent:
                     print("PROVIDER_PDF_DUPLICATE_IGNORED =", pdf_dedupe_key, flush=True)
+
+                    try:
+                        redis_conn.delete(sending_key)
+                    except Exception as redis_del_exc:
+                        print("PDF_SENDING_DELETE_AFTER_DUPLICATE_ERROR =", str(redis_del_exc), flush=True)
+
                     return {"ok": True, "ignored": "provider_pdf_duplicate"}
                 
                 open_req.pdf_url = None
