@@ -85,11 +85,21 @@ def cleanup_expired_and_mark_pending():
                     f"Reenviar nuevamente en unos minutos"
                 )
 
+                instance = r.instance_name or settings.EVOLUTION_INSTANCE
+
                 if r.source_group_id:
                     if should_notify_failure(r.source_group_id):
-                        send_group_text(r.source_group_id, msg)
+                        send_group_text(
+                            r.source_group_id,
+                            msg,
+                            instance_name=instance,
+                        )
                 else:
-                    send_text(r.requester_wa_id, msg)
+                    send_text(
+                        r.requester_wa_id,
+                        msg,
+                        instance_name=instance,
+                    )
 
                 print("CLEANUP_SENT_TIMEOUT_MSG =", r.id, flush=True)
 
