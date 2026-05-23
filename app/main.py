@@ -11678,6 +11678,13 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 safe_media_b64 = base64.b64encode(pdf_bytes).decode()
                 print("T_BASE64_REENCODE_FINAL =", round(time.perf_counter() - t_encode, 3), flush=True)
 
+                strong_pdf_dedupe_key = f"provider_pdf_done:{open_req.id}"
+                already_sent_strong = redis_conn.set(strong_pdf_dedupe_key, "1", ex=3600, nx=True)
+                
+                if not already_sent_strong:
+                    print("PROVIDER_PDF_DUPLICATE_STRONG_IGNORED =", strong_pdf_dedupe_key, flush=True)
+                    return {"ok": True, "ignored": "provider_pdf_duplicate_strong"}
+
                 match_term = filename_id or provider_id or open_req.curp or "NO_TERM"
                 pdf_dedupe_key = f"provider_pdf:{open_req.id}:{source_chat_id}:{match_term}:{filename or 'nofile'}"
                 
