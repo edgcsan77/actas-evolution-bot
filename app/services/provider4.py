@@ -127,31 +127,22 @@ class Provider4Client:
     
         return unique
     
-    def _pdf_matches_expected(self, pdf_bytes: bytes, expected_curp: str, tipoa: str) -> bool:
+    def _pdf_matches_expected(
+        self,
+        pdf_bytes: bytes,
+        expected_curp: str,
+        tipoa: str,
+        is_chain: bool = False,
+    ) -> bool:
         text = self._extract_pdf_visible_text(pdf_bytes)
         if not text or len(text.strip()) < 30:
             print("PROVIDER4_VALIDATE_TEXT_TOO_SHORT = TRUE", flush=True)
             return False
     
-        expected = self._normalize_alnum(expected_curp)
-        found_curps = self._find_curps_in_text(text)
-    
-        print("PROVIDER4_VALIDATE_EXPECTED_CURP =", expected, flush=True)
-        print("PROVIDER4_VALIDATE_FOUND_CURPS =", found_curps, flush=True)
-        print("PROVIDER4_VALIDATE_TIPOA =", tipoa, flush=True)
-    
-        # Si se detectan CURPs visibles, la esperada debe aparecer.
-        # Ya NO rechazar solo porque existan varias.
-        if found_curps:
-            if expected not in found_curps:
-                return False
-    
-            if len(found_curps) > 1:
-                print("PROVIDER4_VALIDATE_MULTIPLE_CURPS_ALLOWED = TRUE", flush=True)
-    
         text_up = text.upper()
         tipoa_up = (tipoa or "").strip().lower()
     
+        # Validar tipo de acta
         if tipoa_up == "nacimiento" and "ACTA DE NACIMIENTO" not in text_up:
             return False
         if tipoa_up == "matrimonio" and "ACTA DE MATRIMONIO" not in text_up:
@@ -160,6 +151,26 @@ class Provider4Client:
             return False
         if tipoa_up == "divorcio" and "ACTA DE DIVORCIO" not in text_up:
             return False
+    
+        # Si viene por cadena, no podemos exigir que expected_curp sea una CURP,
+        # porque expected_curp en realidad será la cadena.
+        if is_chain:
+            print("PROVIDER4_VALIDATE_CHAIN_MODE = TRUE", flush=True)
+            return True
+    
+        expected = self._normalize_alnum(expected_curp)
+        found_curps = self._find_curps_in_text(text)
+    
+        print("PROVIDER4_VALIDATE_EXPECTED_CURP =", expected, flush=True)
+        print("PROVIDER4_VALIDATE_FOUND_CURPS =", found_curps, flush=True)
+        print("PROVIDER4_VALIDATE_TIPOA =", tipoa, flush=True)
+    
+        if found_curps:
+            if expected not in found_curps:
+                return False
+    
+            if len(found_curps) > 1:
+                print("PROVIDER4_VALIDATE_MULTIPLE_CURPS_ALLOWED = TRUE", flush=True)
     
         return True
 
@@ -170,6 +181,7 @@ class Provider4Client:
         term: str,
         tipoa: str,
         inc_folio: bool,
+        is_chain: bool = False,
         use_folio_downloader: bool = False,
         max_attempts: int = 4,
         sleep_seconds: int = 4,
@@ -191,7 +203,11 @@ class Provider4Client:
                 time.sleep(5)
                 pdf_bytes = self._download_foliated_pdf(url) if use_folio_downloader else self.download_pdf_bytes(url)
     
-            pdf_bytes = self._repair_pdf_if_needed(pdf_bytes, term, inc_folio)
+            if not is_chain:
+                pdf_bytes = self._repair_pdf_if_needed(pdf_bytes, term, inc_folio)
+            else:
+                if not self._pdf_has_two_pages(pdf_bytes):
+                    print("PROVIDER4_CHAIN_PDF_INCOMPLETE_NO_REPAIR =", term, flush=True)
     
             if not self._pdf_has_two_pages(pdf_bytes):
                 print("PROVIDER4_FINAL_PDF_STILL_ONE_PAGE_RETRY =", term, flush=True)
@@ -200,7 +216,7 @@ class Provider4Client:
                     continue
                 raise RuntimeError(f"PROVIDER4_FINAL_PDF_INCOMPLETE:{term}")
     
-            if self._pdf_matches_expected(pdf_bytes, term, tipoa):
+            if self._pdf_matches_expected(pdf_bytes, term, tipoa, is_chain=is_chain):
                 print(f"PROVIDER4_VALIDATE_DOWNLOAD_OK_ATTEMPT_{attempt+1} = {term}", flush=True)
                 return pdf_bytes
     
@@ -958,6 +974,7 @@ class Provider4Client:
                             term=term,
                             tipoa=tipoa,
                             inc_folio=inc_folio,
+                            is_chain=is_chain,
                             use_folio_downloader=False,
                             max_attempts=4,
                             sleep_seconds=4,
@@ -986,6 +1003,7 @@ class Provider4Client:
                             term=term,
                             tipoa=tipoa,
                             inc_folio=inc_folio,
+                            is_chain=is_chain,
                             use_folio_downloader=False,
                             max_attempts=4,
                             sleep_seconds=4,
@@ -1044,6 +1062,7 @@ class Provider4Client:
                             term=term,
                             tipoa=tipoa,
                             inc_folio=inc_folio,
+                            is_chain=is_chain,
                             use_folio_downloader=False,
                             max_attempts=4,
                             sleep_seconds=4,
@@ -1058,6 +1077,7 @@ class Provider4Client:
                             term=term,
                             tipoa=tipoa,
                             inc_folio=inc_folio,
+                            is_chain=is_chain,
                             use_folio_downloader=False,
                             max_attempts=4,
                             sleep_seconds=4,
