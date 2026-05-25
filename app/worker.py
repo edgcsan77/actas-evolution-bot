@@ -1120,6 +1120,26 @@ def _find_curps_in_text(text: str) -> list[str]:
     return unique
 
 
+def _validate_pdf_contains_electronic_id_or_code(pdf_bytes: bytes, value: str) -> bool:
+    expected = _normalize_alnum(value)
+    if not expected:
+        return True
+
+    text = _extract_pdf_visible_text(pdf_bytes)
+    if not text or len(text.strip()) < 30:
+        print("PROVIDER_VALIDATE_ELECTRONIC_ID_TEXT_TOO_SHORT", flush=True)
+        return False
+
+    normalized_text = _normalize_alnum(text)
+
+    found = expected in normalized_text
+
+    print("PROVIDER_VALIDATE_EXPECTED_ELECTRONIC_ID_OR_CODE =", expected, flush=True)
+    print("PROVIDER_VALIDATE_ELECTRONIC_ID_OR_CODE_FOUND =", found, flush=True)
+
+    return found
+
+
 def _validate_pdf_matches_term(pdf_bytes: bytes, term: str, act_type: str | None = None) -> bool:
     expected = _normalize_alnum(term)
     if not expected:
@@ -1510,22 +1530,23 @@ def process_request(request_id: int):
 
                 pdf_bytes = provider4_result["pdf_bytes"]
 
-                chain_mode = is_chain(req.curp) or bool(re.fullmatch(r"\d{15,25}", (req.curp or "").strip()))
+                term = (req.curp or "").strip()
+                chain_mode = is_chain(term) or bool(re.fullmatch(r"\d{15,25}", term))
                 
-                print("PROVIDER4_WORKER_TERM =", req.curp, flush=True)
+                print("PROVIDER4_WORKER_TERM =", term, flush=True)
                 print("PROVIDER4_WORKER_CHAIN_MODE =", chain_mode, flush=True)
                 
                 if not _validate_act_type_pdf(pdf_bytes, req.act_type):
                     raise RuntimeError("PROVIDER4_WRONG_ACT_TYPE")
                 
-                # Si viene por CADENA, NO validar contra CURP.
-                # La cadena no aparece como CURP visible dentro del PDF.
                 if chain_mode:
-                    print("PROVIDER4_SKIP_CURP_VALIDATION_FOR_CHAIN =", req.curp, flush=True)
+                    if not _validate_pdf_contains_electronic_id_or_code(pdf_bytes, term):
+                        print("PROVIDER4_VALIDATE_FAIL_REQ_ELECTRONIC_ID_OR_CODE =", term, flush=True)
+                        raise RuntimeError(f"PROVIDER4_WRONG_ELECTRONIC_ID_OR_CODE_IN_PDF:{term}")
                 else:
-                    if not _validate_pdf_matches_term(pdf_bytes, req.curp, req.act_type):
-                        print("PROVIDER4_VALIDATE_FAIL_REQ_CURP =", req.curp, flush=True)
-                        raise RuntimeError(f"PROVIDER4_WRONG_CURP_IN_PDF:{req.curp}")
+                    if not _validate_pdf_matches_term(pdf_bytes, term, req.act_type):
+                        print("PROVIDER4_VALIDATE_FAIL_REQ_CURP =", term, flush=True)
+                        raise RuntimeError(f"PROVIDER4_WRONG_CURP_IN_PDF:{term}")
         
             except Exception as p4_exc:
                 p4_err = str(p4_exc)
@@ -1534,6 +1555,7 @@ def process_request(request_id: int):
             
                 if (
                     p4_err.startswith("PROVIDER4_WRONG_CURP_IN_PDF")
+                    or p4_err.startswith("PROVIDER4_WRONG_ELECTRONIC_ID_OR_CODE_IN_PDF")
                     or p4_err.startswith("PROVIDER4_WRONG_ACT_TYPE")
                 ):
                     msg = (
@@ -1572,6 +1594,7 @@ def process_request(request_id: int):
                     or p4_err.startswith("PROVIDER4_FOLIO_DOWNLOAD_FAILED:")
                     or p4_err.startswith("PROVIDER4_WRONG_ACT_TYPE")
                     or p4_err.startswith("PROVIDER4_WRONG_CURP_IN_PDF")
+                    or p4_err.startswith("PROVIDER4_WRONG_ELECTRONIC_ID_OR_CODE_IN_PDF")
                     or "Read timed out" in p4_err
                 )
             
