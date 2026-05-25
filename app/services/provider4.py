@@ -13,6 +13,7 @@ from app.services.provider7 import (
     _enmarcar_pdf_frente,
     _unir_pdfs_bytes,
     _resolver_reverso_por_estado,
+    _estado_desde_cadena,
 )
 
 
@@ -209,8 +210,9 @@ class Provider4Client:
                 repair_as_folio = inc_folio and not use_folio_downloader
                 pdf_bytes = self._repair_pdf_if_needed(pdf_bytes, term, repair_as_folio)
             else:
-                if not self._pdf_has_two_pages(pdf_bytes):
-                    print("PROVIDER4_CHAIN_PDF_INCOMPLETE_NO_REPAIR =", term, flush=True)
+                # Para cadena, Lázaro puede devolver solo frente.
+                # El estado se obtiene de la cadena y se agrega reverso de Provider7/assets/estados.
+                pdf_bytes = self._repair_chain_pdf_if_needed(pdf_bytes, term)
     
             if not self._pdf_has_two_pages(pdf_bytes):
                 print("PROVIDER4_FINAL_PDF_STILL_ONE_PAGE_RETRY =", term, flush=True)
@@ -311,6 +313,43 @@ class Provider4Client:
             raise RuntimeError(f"PROVIDER4_REPAIRED_STILL_INCOMPLETE:{term}")
     
         print(f"PROVIDER4_PDF_PAGE_COUNT = {self._pdf_num_pages(repaired_pdf)}", flush=True)
+        return repaired_pdf
+
+    def _repair_chain_pdf_if_needed(self, pdf_bytes: bytes, term: str) -> bytes:
+        if self._pdf_has_two_pages(pdf_bytes):
+            print("PROVIDER4_CHAIN_PDF_ALREADY_COMPLETE = TRUE", flush=True)
+            return pdf_bytes
+    
+        print("PROVIDER4_CHAIN_PDF_ONE_PAGE_OR_INCOMPLETE = TRUE", flush=True)
+        print("PROVIDER4_CHAIN_REPAIR_ADD_REAR_FRAME = TRUE", flush=True)
+    
+        try:
+            estado = _estado_desde_cadena(term)
+        except Exception as e:
+            print("PROVIDER4_CHAIN_STATE_ERROR =", str(e), flush=True)
+            raise RuntimeError(f"PROVIDER4_CHAIN_CANNOT_REPAIR_NO_STATE:{term}")
+    
+        if not estado or estado == "DESCONOCIDO":
+            print("PROVIDER4_CHAIN_STATE_UNKNOWN =", term, flush=True)
+            raise RuntimeError(f"PROVIDER4_CHAIN_CANNOT_REPAIR_NO_STATE:{term}")
+    
+        base_dir = Path(__file__).resolve().parent.parent
+        estados_dir = base_dir / "assets" / "estados"
+    
+        try:
+            reverso_path = _resolver_reverso_por_estado(estado, estados_dir)
+            repaired_pdf = _unir_pdfs_bytes(pdf_bytes, reverso_path)
+        except Exception as e:
+            print("PROVIDER4_CHAIN_REAR_JOIN_FAILED =", str(e), flush=True)
+            raise RuntimeError(f"PROVIDER4_CHAIN_REAR_JOIN_FAILED:{term}")
+    
+        if not self._pdf_has_two_pages(repaired_pdf):
+            print("PROVIDER4_CHAIN_REPAIRED_STILL_INCOMPLETE =", term, flush=True)
+            raise RuntimeError(f"PROVIDER4_CHAIN_REPAIRED_STILL_INCOMPLETE:{term}")
+    
+        print("PROVIDER4_CHAIN_REPAIRED_ESTADO =", estado, flush=True)
+        print(f"PROVIDER4_CHAIN_REPAIRED_PAGE_COUNT = {self._pdf_num_pages(repaired_pdf)}", flush=True)
+    
         return repaired_pdf
 
     def warm(self) -> None:
