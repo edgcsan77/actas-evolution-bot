@@ -709,6 +709,28 @@ class Provider4Client:
             return True
     
         return False
+
+    def _detect_no_result_loose(self, history_html: str, term: str) -> bool:
+        term_up = (term or "").strip().upper()
+        if not history_html or not term_up:
+            return False
+    
+        rows = re.findall(
+            r"<tr\b[^>]*>.*?</tr>",
+            history_html or "",
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+    
+        for row_html in rows:
+            row_text = unescape(re.sub(r"<[^>]+>", " ", row_html))
+            row_text = re.sub(r"\s+", " ", row_text).strip().upper()
+    
+            if term_up in row_text and "NO_LOCALIZADO" in row_text:
+                print("PROVIDER4_NO_RECORD_DETECTED_LOOSE =", term_up, flush=True)
+                print("PROVIDER4_NO_RECORD_LOOSE_ROW_TEXT =", row_text[:500], flush=True)
+                return True
+    
+        return False
     
     def _extract_pdf_link(self, history_html: str, term: str, tipoa: str | None = None) -> str | None:
         row_html = self._history_row_for_term(history_html, term, tipoa)
@@ -941,7 +963,7 @@ class Provider4Client:
                 flush=True,
             )
     
-            if self._detect_no_result(history_html, term, tipoa):
+            if self._detect_no_result(history_html, term, tipoa) or self._detect_no_result_loose(history_html, term):
                 raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
     
             row_html = self._history_row_for_term(history_html, term, tipoa)
@@ -1031,7 +1053,7 @@ class Provider4Client:
     
         final_history_html = self.get_history_html()
 
-        if self._detect_no_result(final_history_html, term, tipoa):
+        if self._detect_no_result(final_history_html, term, tipoa) or self._detect_no_result_loose(final_history_html, term):
             raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
         
         if not history_confirmed:
@@ -1047,6 +1069,9 @@ class Provider4Client:
         
         for extra_attempt in range(extra_link_polls):
             history_html = self.get_history_html()
+
+            if self._detect_no_result(history_html, term, tipoa) or self._detect_no_result_loose(history_html, term):
+                raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
         
             row_html = self._history_row_for_term(history_html, term, tipoa)
             if row_html:
