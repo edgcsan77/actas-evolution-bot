@@ -1509,13 +1509,23 @@ def process_request(request_id: int):
                 provider4_result = _process_provider4(req, db)
 
                 pdf_bytes = provider4_result["pdf_bytes"]
+
+                chain_mode = is_chain(req.curp) or bool(re.fullmatch(r"\d{15,25}", (req.curp or "").strip()))
+                
+                print("PROVIDER4_WORKER_TERM =", req.curp, flush=True)
+                print("PROVIDER4_WORKER_CHAIN_MODE =", chain_mode, flush=True)
                 
                 if not _validate_act_type_pdf(pdf_bytes, req.act_type):
                     raise RuntimeError("PROVIDER4_WRONG_ACT_TYPE")
                 
-                if not _validate_pdf_matches_term(pdf_bytes, req.curp, req.act_type):
-                    print("PROVIDER4_VALIDATE_FAIL_REQ_CURP =", req.curp, flush=True)
-                    raise RuntimeError(f"PROVIDER4_WRONG_CURP_IN_PDF:{req.curp}")
+                # Si viene por CADENA, NO validar contra CURP.
+                # La cadena no aparece como CURP visible dentro del PDF.
+                if chain_mode:
+                    print("PROVIDER4_SKIP_CURP_VALIDATION_FOR_CHAIN =", req.curp, flush=True)
+                else:
+                    if not _validate_pdf_matches_term(pdf_bytes, req.curp, req.act_type):
+                        print("PROVIDER4_VALIDATE_FAIL_REQ_CURP =", req.curp, flush=True)
+                        raise RuntimeError(f"PROVIDER4_WRONG_CURP_IN_PDF:{req.curp}")
         
             except Exception as p4_exc:
                 p4_err = str(p4_exc)
