@@ -204,7 +204,10 @@ class Provider4Client:
                 pdf_bytes = self._download_foliated_pdf(url) if use_folio_downloader else self.download_pdf_bytes(url)
     
             if not is_chain:
-                pdf_bytes = self._repair_pdf_if_needed(pdf_bytes, term, inc_folio)
+                # Si viene de addFol.php, el folio ya lo puso Lázaro.
+                # No pasamos inc_folio=True al reparador para evitar folio doble/encimado.
+                repair_as_folio = inc_folio and not use_folio_downloader
+                pdf_bytes = self._repair_pdf_if_needed(pdf_bytes, term, repair_as_folio)
             else:
                 if not self._pdf_has_two_pages(pdf_bytes):
                     print("PROVIDER4_CHAIN_PDF_INCOMPLETE_NO_REPAIR =", term, flush=True)
@@ -750,18 +753,10 @@ class Provider4Client:
         if not row_html:
             return None
     
-        # Prioridad real: d.php = PDF final correcto
-        m = re.search(
-            r'href="(\./d\.php\?f=[^"]+)"',
-            row_html,
-            flags=re.IGNORECASE,
-        )
-        if m:
-            link = urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
-            print("PROVIDER4_EXTRACTED_FOLIO_LINK =", link, flush=True)
-            return link
+        print("PROVIDER4_FOLIO_ROW_HTML_PREVIEW =", row_html[:1200], flush=True)
     
-        # Respaldo: addFol.php
+        # Para foliada queremos SOLO el link addFol.php.
+        # d.php lo maneja _extract_pdf_link().
         m = re.search(
             r'href="(\./ActasN/addFol\.php\?[^"]+)"',
             row_html,
@@ -769,9 +764,10 @@ class Provider4Client:
         )
         if m:
             link = urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
-            print("PROVIDER4_EXTRACTED_FOLIO_LINK =", link, flush=True)
+            print("PROVIDER4_EXTRACTED_ADD_FOL_LINK =", link, flush=True)
             return link
     
+        print("PROVIDER4_ADD_FOL_LINK_NOT_FOUND =", term, flush=True)
         return None
 
     def download_pdf_bytes(self, url: str) -> bytes:
@@ -906,13 +902,13 @@ class Provider4Client:
             html = self.consultar_por_cadena(
                 cadena=term,
                 tipoa=tipoa,
-                inc_folio=inc_folio,
+                inc_folio=False,
             )
         else:
             html = self.consultar_por_curp(
                 curp=term,
                 tipoa=tipoa,
-                inc_folio=inc_folio,
+                inc_folio=False,
             )
     
         print("PROVIDER4_BACKEND_HTML_PREVIEW =", html[:1200], flush=True)
@@ -983,13 +979,21 @@ class Provider4Client:
                 if inc_folio:
                     dphp_link = self._extract_pdf_link(history_html, term, tipoa)
                     folio_link = self._extract_folio_link(history_html, term, tipoa)
-                
+                    
+                    print("PROVIDER4_INC_FOLIO_MODE = TRUE", flush=True)
+                    print("PROVIDER4_INC_FOLIO_TERM =", term, flush=True)
+                    print("PROVIDER4_INC_FOLIO_TIPOA =", tipoa, flush=True)
                     print("PROVIDER4_INC_FOLIO_DPHP_LINK =", dphp_link, flush=True)
-                    print("PROVIDER4_INC_FOLIO_FOLIO_LINK =", folio_link, flush=True)
-                
-                    final_link = dphp_link or folio_link
+                    print("PROVIDER4_INC_FOLIO_ADD_FOL_LINK =", folio_link, flush=True)
+                    
+                    # Si el cliente pidió foliada, priorizar addFol.php.
+                    # Si no existe, usar d.php como respaldo.
+                    final_link = folio_link or dphp_link
+                    final_link_source = "ADDFOL" if folio_link else ("DPHP" if dphp_link else "NONE")
+                    
+                    print("PROVIDER4_FINAL_FOLIO_LINK_SOURCE =", final_link_source, flush=True)
                     print("PROVIDER4_FINAL_FOLIO_LINK =", final_link, flush=True)
-                
+                    
                     if final_link:
                         pdf_bytes = self._download_and_validate_with_retries(
                             url=final_link,
@@ -997,7 +1001,7 @@ class Provider4Client:
                             tipoa=tipoa,
                             inc_folio=inc_folio,
                             is_chain=is_chain,
-                            use_folio_downloader=False,
+                            use_folio_downloader=(final_link_source == "ADDFOL"),
                             max_attempts=4,
                             sleep_seconds=4,
                         )
@@ -1078,8 +1082,16 @@ class Provider4Client:
                 if inc_folio:
                     dphp_link = self._extract_pdf_link(history_html, term, tipoa)
                     folio_link = self._extract_folio_link(history_html, term, tipoa)
-                    final_link = dphp_link or folio_link
-        
+                    
+                    final_link = folio_link or dphp_link
+                    final_link_source = "ADDFOL" if folio_link else ("DPHP" if dphp_link else "NONE")
+                    
+                    print("PROVIDER4_LATE_INC_FOLIO_MODE = TRUE", flush=True)
+                    print("PROVIDER4_LATE_INC_FOLIO_DPHP_LINK =", dphp_link, flush=True)
+                    print("PROVIDER4_LATE_INC_FOLIO_ADD_FOL_LINK =", folio_link, flush=True)
+                    print("PROVIDER4_LATE_FINAL_FOLIO_LINK_SOURCE =", final_link_source, flush=True)
+                    print("PROVIDER4_LATE_FINAL_FOLIO_LINK =", final_link, flush=True)
+                    
                     if final_link:
                         print(f"PROVIDER4_LATE_FOLIO_LINK_FOUND_ATTEMPT_{extra_attempt+1} = {final_link}", flush=True)
                         pdf_bytes = self._download_and_validate_with_retries(
@@ -1088,7 +1100,7 @@ class Provider4Client:
                             tipoa=tipoa,
                             inc_folio=inc_folio,
                             is_chain=is_chain,
-                            use_folio_downloader=False,
+                            use_folio_downloader=(final_link_source == "ADDFOL"),
                             max_attempts=4,
                             sleep_seconds=4,
                         )
