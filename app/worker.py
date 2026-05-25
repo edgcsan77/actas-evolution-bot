@@ -107,9 +107,6 @@ def _is_provider4_eligible(term: str | None, act_type: str | None) -> bool:
     term = (term or "").strip()
     act_type_up = (act_type or "").upper().strip()
 
-    if "FOLI" in act_type_up:
-        return False
-
     if _is_curp_term(term):
         return True
 
