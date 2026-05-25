@@ -107,15 +107,13 @@ def _is_provider4_eligible(term: str | None, act_type: str | None) -> bool:
     term = (term or "").strip()
     act_type_up = (act_type or "").upper().strip()
 
-    # Provider4 NO lo mandamos a foliadas por seguridad
     if "FOLI" in act_type_up:
         return False
 
-    # Provider4 ahora acepta CURP normal o CADENA
     if _is_curp_term(term):
         return True
 
-    if is_chain(term):
+    if is_chain(term) or bool(re.fullmatch(r"\d{15,25}", term)):
         return True
 
     return False
@@ -766,7 +764,10 @@ def _process_provider3(req, db):
 def _process_provider4(req, db):
 
     term = (req.curp or "").strip()
-    chain_mode = is_chain(term)
+    chain_mode = is_chain(term) or bool(re.fullmatch(r"\d{15,25}", term))
+
+    print("PROVIDER4_PROCESS_TERM =", term, flush=True)
+    print("PROVIDER4_PROCESS_CHAIN_MODE =", chain_mode, flush=True)
 
     if not _is_curp_term(term) and not chain_mode:
         raise RuntimeError("PROVIDER4_NOT_CURP_OR_CHAIN")
