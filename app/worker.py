@@ -104,18 +104,21 @@ def _is_curp_term(value: str | None) -> bool:
 
 
 def _is_provider4_eligible(term: str | None, act_type: str | None) -> bool:
-    if not _is_curp_term(term):
-        return False
-
+    term = (term or "").strip()
     act_type_up = (act_type or "").upper().strip()
 
+    # Provider4 NO lo mandamos a foliadas por seguridad
     if "FOLI" in act_type_up:
         return False
 
-    if is_chain(term):
-        return False
+    # Provider4 ahora acepta CURP normal o CADENA
+    if _is_curp_term(term):
+        return True
 
-    return True
+    if is_chain(term):
+        return True
+
+    return False
 
 
 def _group_individual_limit_reached(row: GroupPromotion | None) -> bool:
@@ -762,8 +765,11 @@ def _process_provider3(req, db):
 
 def _process_provider4(req, db):
 
-    if not _is_curp_term(req.curp):
-        raise RuntimeError("PROVIDER4_NOT_CURP")
+    term = (req.curp or "").strip()
+    chain_mode = is_chain(term)
+
+    if not _is_curp_term(term) and not chain_mode:
+        raise RuntimeError("PROVIDER4_NOT_CURP_OR_CHAIN")
 
     if PROVIDER4_TEST_GROUPS and req.source_group_id not in PROVIDER4_TEST_GROUPS:
         raise RuntimeError("PROVIDER4_NOT_ALLOWED_GROUP")
@@ -782,10 +788,10 @@ def _process_provider4(req, db):
     inc_folio = "FOLIO" in (req.act_type or "").upper().strip()
 
     pdf_bytes = client.process_and_download(
-        term=req.curp,
+        term=term,
         tipoa=tipoa,
         inc_folio=inc_folio,
-        is_chain=False,
+        is_chain=chain_mode,
     )
 
     return {
