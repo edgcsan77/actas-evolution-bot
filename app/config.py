@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     PROVIDER8_GROUP_1: str = ""
     PROVIDER8_GROUP_2: str = ""
 
+    # PROVIDER 9
+    PROVIDER9_GROUP_1: str = ""
+    PROVIDER9_GROUP_2: str = ""
+
     PROVIDER_NO_RECORD_TEXT: str = (
         "NO HAY REGISTROS DISPONIBLES|"
         "NO SE ENCONTRO EL ACTA EN SISTEMA|"
