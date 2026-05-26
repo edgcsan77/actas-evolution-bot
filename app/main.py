@@ -11319,6 +11319,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     "NB",
                     "VERI",
                     "VERIFICAR",
+                    "NO SÉ ENCUENTRA EN EL SISTEMA",
+                    "NO SE ENCUENTRA EN EL SISTEMA",
                 }
 
                 is_negative_text = any(
