@@ -9804,7 +9804,7 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
             tiempo = f"{total_seconds:.2f} segundos"
 
         if req.source_group_id not in NO_TIME_CAPTION_GROUPS:
-            caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
+            caption_text = f"⏱️ Tiempo total: {tiempo}"
 
     print("PDF_DELIVER_INSTANCE =", instance, flush=True)
     print("PDF_CAPTION =", caption_text, flush=True)
