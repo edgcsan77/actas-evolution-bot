@@ -535,6 +535,7 @@ PROVIDER_LABELS = {
     "PROVIDER6": "ACTAS ESCALANTE",
     "PROVIDER7": "MESINO SID",
     "PROVIDER8": "ANGEL",
+    "PROVIDER9": "EMILIANO",
 }
 
 
@@ -6477,6 +6478,7 @@ def panel_provider_weight(payload: dict, db: Session = Depends(get_db)):
         "PROVIDER6",
         "PROVIDER7",
         "PROVIDER8",
+        "PROVIDER9",
     }:
         return {"ok": False, "error": "Proveedor inválido"}
 
@@ -7866,6 +7868,25 @@ def panel_actas(
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER8','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER8','off')">Desactivar</button>
+                      </div>
+                    </div>
+
+                    <div class="provider-card">
+                      <div class="provider-name">EMILIANO</div>
+                      <div style="margin:6px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
+                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
+                          <div style="display:flex;align-items:center;gap:6px;">
+                            <input id="weight_PROVIDER9" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER9', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <span style="font-size:12px;opacity:.7;">nivel</span>
+                          </div>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER9')">Aplicar</button>
+                        </div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
+                      </div>
+                      <div class="provider-actions">
+                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER9','on')">Activar</button>
+                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER9','off')">Desactivar</button>
                       </div>
                     </div>
             
@@ -9616,6 +9637,7 @@ def startup():
         _get_or_create_provider(db, "PROVIDER6", False)
         _get_or_create_provider(db, "PROVIDER7", False)
         _get_or_create_provider(db, "PROVIDER8", False)
+        _get_or_create_provider(db, "PROVIDER9", False)
     
         current = _get_app_setting(db, "PROVIDER3_PHPSESSID", "")
         if not current and settings.PROVIDER3_PHPSESSID:
@@ -10044,6 +10066,8 @@ def _all_provider_groups() -> set[str]:
         settings.PROVIDER6_GROUP_FOLIADAS,
         settings.PROVIDER8_GROUP_1,
         settings.PROVIDER8_GROUP_2,
+        settings.PROVIDER9_GROUP_1,
+        settings.PROVIDER9_GROUP_2,
     }
     return {v.strip() for v in vals if v and v.strip()}
 
@@ -10201,6 +10225,7 @@ def _providers_status_text(db: Session) -> str:
     p6 = _get_or_create_provider(db, "PROVIDER6", False)
     p7 = _get_or_create_provider(db, "PROVIDER7", False)
     p8 = _get_or_create_provider(db, "PROVIDER8", False)
+    p9 = _get_or_create_provider(db, "PROVIDER9", False)
 
     s1 = "ON" if p1.is_enabled else "OFF"
     s2 = "ON" if p2.is_enabled else "OFF"
@@ -10210,6 +10235,7 @@ def _providers_status_text(db: Session) -> str:
     s6 = "ON" if p6.is_enabled else "OFF"
     s7 = "ON" if p7.is_enabled else "OFF"
     s8 = "ON" if p8.is_enabled else "OFF"
+    s9 = "ON" if p9.is_enabled else "OFF"
 
     provider1_extra = ""
     provider2_extra = ""
@@ -10219,6 +10245,7 @@ def _providers_status_text(db: Session) -> str:
     provider6_extra = ""
     provider7_extra = ""
     provider8_extra = ""
+    provider9_extra = ""
 
     local_start = _panel_month_start()
     local_end = _panel_month_end()
@@ -10340,6 +10367,21 @@ def _providers_status_text(db: Session) -> str:
     except Exception as e:
         provider8_extra = f" | ERROR DB: {str(e)}"
 
+    try:
+        provider9_total = (
+            db.query(func.count(RequestLog.id))
+            .filter(
+                RequestLog.provider_name == "PROVIDER9",
+                RequestLog.status == "DONE",
+                RequestLog.created_at >= utc_start,
+                RequestLog.created_at < utc_end,
+            )
+            .scalar()
+        ) or 0
+        provider9_extra = f" | CURP y CADENA hechas: {provider9_total}"
+    except Exception as e:
+        provider9_extra = f" | ERROR DB: {str(e)}"
+
     text = (
         f"ADMIN DIGITAL:     {s1}{provider1_extra}\n"
         f"ACTAS DEL SURESTE: {s2}{provider2_extra}\n"
@@ -10347,7 +10389,8 @@ def _providers_status_text(db: Session) -> str:
         f"LAZARO WEB:        {s4}{provider4_extra}\n"
         f"LUIS SID:          {s5}{provider5_extra}\n"
         f"ACTAS ESCALANTE:   {s6}{provider6_extra}\n"
-        f"ANGEL:             {s8}{provider8_extra}"
+        f"ANGEL:             {s8}{provider8_extra}\n"
+        f"EMILIANO:          {s9}{provider9_extra}"
     )
 
     return text
@@ -11291,7 +11334,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             RequestLog.provider_group_id == source_chat_id,
                             RequestLog.provider_message_id == quoted_msg_id,
                             RequestLog.status == "PROCESSING",
-                            RequestLog.provider_name.in_(["PROVIDER5", "PROVIDER6", "PROVIDER8"]),
+                            RequestLog.provider_name.in_(["PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9"]),
                         )
                         .order_by(RequestLog.created_at.desc())
                         .first()
@@ -11334,7 +11377,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             RequestLog.provider_group_id == source_chat_id,
                             RequestLog.curp == provider_id,
                             RequestLog.status == "PROCESSING",
-                            RequestLog.provider_name.in_(["PROVIDER5", "PROVIDER6", "PROVIDER8"]),
+                            RequestLog.provider_name.in_(["PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9"]),
                         )
                         .order_by(RequestLog.created_at.desc())
                         .first()
