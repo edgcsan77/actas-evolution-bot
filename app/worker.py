@@ -55,6 +55,31 @@ def _mx_now():
     return datetime.now(ZoneInfo("America/Monterrey"))
 
 
+def _fmt_seconds(seconds: float) -> str:
+    seconds = max(0.0, float(seconds or 0))
+
+    if seconds >= 60:
+        minutes = int(seconds // 60)
+        rest = seconds % 60
+        return f"{minutes} min {rest:.2f} segundos"
+
+    return f"{seconds:.2f} segundos"
+
+
+def _request_total_seconds(req, fallback_started_ts: float | None = None) -> float:
+    now_utc = _utc_now_naive()
+
+    created_at = getattr(req, "created_at", None)
+
+    if created_at:
+        return max(0.0, (now_utc - created_at).total_seconds())
+
+    if fallback_started_ts is not None:
+        return max(0.0, time.perf_counter() - fallback_started_ts)
+
+    return 0.0
+
+
 CURP_RE = re.compile(
     r"^[A-Z][AEIOUX][A-Z]{2}\d{6}[HM][A-Z]{5}[A-Z0-9]\d$",
     re.IGNORECASE
@@ -156,16 +181,8 @@ def _fallback_to_provider3_web(req, db, process_started_ts):
     pdf_bytes = provider3_result["pdf_bytes"]
     safe_media_b64 = base64.b64encode(pdf_bytes).decode()
 
-    total_seconds = max(0.0, time.perf_counter() - process_started_ts)
-
-    if total_seconds >= 60:
-        minutes = int(total_seconds // 60)
-        seconds = total_seconds % 60
-        tiempo = f"{minutes} min {seconds:.2f} segundos"
-    else:
-        tiempo = f"{total_seconds:.2f} segundos"
-
-    caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
+    total_seconds = _request_total_seconds(req, process_started_ts)
+    caption_text = f"⏱️ Tiempo total: {_fmt_seconds(total_seconds)}"
 
     filename = (
         f"{req.curp}_FOLIO.pdf"
@@ -1419,18 +1436,11 @@ def process_request(request_id: int):
             pdf_bytes = provider3_result["pdf_bytes"]
             safe_media_b64 = base64.b64encode(pdf_bytes).decode()
         
-            total_seconds = max(0.0, time.perf_counter() - process_started_ts)
-        
-            if total_seconds >= 60:
-                minutes = int(total_seconds // 60)
-                seconds = total_seconds % 60
-                tiempo = f"{minutes} min {seconds:.2f} segundos"
-            else:
-                tiempo = f"{total_seconds:.2f} segundos"
-        
+            total_seconds = _request_total_seconds(req, process_started_ts)
+
             caption_text = ""
             if req.source_group_id not in NO_TIME_CAPTION_GROUPS:
-                caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
+                caption_text = f"⏱️ Tiempo total: {_fmt_seconds(total_seconds)}"
         
             print("PROVIDER3_CAPTION =", caption_text, flush=True)
         
@@ -1634,18 +1644,11 @@ def process_request(request_id: int):
         
             safe_media_b64 = base64.b64encode(pdf_bytes).decode()
         
-            total_seconds = max(0.0, time.perf_counter() - process_started_ts)
-        
-            if total_seconds >= 60:
-                minutes = int(total_seconds // 60)
-                seconds = total_seconds % 60
-                tiempo = f"{minutes} min {seconds:.2f} segundos"
-            else:
-                tiempo = f"{total_seconds:.2f} segundos"
-        
+            total_seconds = _request_total_seconds(req, process_started_ts)
+
             caption_text = ""
             if req.source_group_id not in NO_TIME_CAPTION_GROUPS:
-                caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
+                caption_text = f"⏱️ Tiempo total: {_fmt_seconds(total_seconds)}"
         
             print("PROVIDER4_CAPTION =", caption_text, flush=True)
         
@@ -1795,16 +1798,8 @@ def process_request(request_id: int):
             pdf_bytes = provider7_result["pdf_bytes"]
             safe_media_b64 = base64.b64encode(pdf_bytes).decode()
         
-            total_seconds = max(0.0, time.perf_counter() - process_started_ts)
-        
-            if total_seconds >= 60:
-                minutes = int(total_seconds // 60)
-                seconds = total_seconds % 60
-                tiempo = f"{minutes} min {seconds:.2f} segundos"
-            else:
-                tiempo = f"{total_seconds:.2f} segundos"
-        
-            caption_text = f"⏱️ Tiempo de proceso: {tiempo}"
+            total_seconds = _request_total_seconds(req, process_started_ts)
+            caption_text = f"⏱️ Tiempo total: {_fmt_seconds(total_seconds)}"
         
             filename = (
                 f"{req.curp}_FOLIO.pdf"
