@@ -1543,8 +1543,11 @@ def process_request(request_id: int):
                 print("PROVIDER4_WORKER_TERM =", term, flush=True)
                 print("PROVIDER4_WORKER_CHAIN_MODE =", chain_mode, flush=True)
                 
-                if not _validate_act_type_pdf(pdf_bytes, req.act_type):
-                    raise RuntimeError("PROVIDER4_WRONG_ACT_TYPE")
+                # Para cadena NO se valida tipo de acta.
+                # La cadena ya identifica el acta; puede ser NAC/MAT/DEF/DIV aunque req.act_type diga NACIMIENTO.
+                if not chain_mode:
+                    if not _validate_act_type_pdf(pdf_bytes, req.act_type):
+                        raise RuntimeError("PROVIDER4_WRONG_ACT_TYPE")
                 
                 if chain_mode:
                     if not _validate_pdf_contains_electronic_id_or_code(pdf_bytes, term):
