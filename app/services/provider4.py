@@ -141,9 +141,26 @@ class Provider4Client:
             return False
     
         text_up = text.upper()
+
+        # Si viene por cadena, NO validamos tipo de acta.
+        # La cadena ya identifica el acta y puede ser nacimiento, matrimonio, defunción o divorcio.
+        if is_chain:
+            print("PROVIDER4_VALIDATE_CHAIN_MODE = TRUE", flush=True)
+
+            expected_chain = self._normalize_alnum(expected_curp)
+            normalized_text = self._normalize_alnum(text_up)
+
+            if expected_chain and expected_chain in normalized_text:
+                print("PROVIDER4_VALIDATE_CHAIN_FOUND_IN_PDF = TRUE", flush=True)
+                return True
+
+            # A veces pypdf no extrae bien la cadena/código; no fallamos por tipo.
+            print("PROVIDER4_VALIDATE_CHAIN_NOT_FOUND_BUT_TYPE_SKIPPED = TRUE", flush=True)
+            return True
+
         tipoa_up = (tipoa or "").strip().lower()
     
-        # Validar tipo de acta
+        # Validar tipo de acta solo para CURP
         if tipoa_up == "nacimiento" and "ACTA DE NACIMIENTO" not in text_up:
             return False
         if tipoa_up == "matrimonio" and "ACTA DE MATRIMONIO" not in text_up:
@@ -152,12 +169,6 @@ class Provider4Client:
             return False
         if tipoa_up == "divorcio" and "ACTA DE DIVORCIO" not in text_up:
             return False
-    
-        # Si viene por cadena, no podemos exigir que expected_curp sea una CURP,
-        # porque expected_curp en realidad será la cadena.
-        if is_chain:
-            print("PROVIDER4_VALIDATE_CHAIN_MODE = TRUE", flush=True)
-            return True
     
         expected = self._normalize_alnum(expected_curp)
         found_curps = self._find_curps_in_text(text)
@@ -976,6 +987,8 @@ class Provider4Client:
     
         max_polls = self.HISTORY_MAX_POLLS
         poll_sleep_seconds = self.HISTORY_POLL_SLEEP
+
+        history_tipoa = None if is_chain else tipoa
     
         # Solo intento rápido, NO entrega final sin confirmación de history
         #early_direct_pdf_bytes = None
@@ -998,10 +1011,10 @@ class Provider4Client:
                 flush=True,
             )
     
-            if self._detect_no_result(history_html, term, tipoa) or self._detect_no_result_loose(history_html, term):
+            if self._detect_no_result(history_html, term, history_tipoa) or self._detect_no_result_loose(history_html, term):
                 raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
     
-            row_html = self._history_row_for_term(history_html, term, tipoa)
+            row_html = self._history_row_for_term(history_html, term, history_tipoa)
     
             if row_html:
                 history_confirmed = True
@@ -1016,8 +1029,8 @@ class Provider4Client:
                 )
     
                 if inc_folio:
-                    dphp_link = self._extract_pdf_link(history_html, term, tipoa)
-                    folio_link = self._extract_folio_link(history_html, term, tipoa)
+                    dphp_link = self._extract_pdf_link(history_html, term, history_tipoa)
+                    folio_link = self._extract_folio_link(history_html, term, history_tipoa)
                     
                     print("PROVIDER4_INC_FOLIO_MODE = TRUE", flush=True)
                     print("PROVIDER4_INC_FOLIO_TERM =", term, flush=True)
@@ -1060,7 +1073,7 @@ class Provider4Client:
                     #    return early_direct_pdf_bytes
     
                 else:
-                    link = self._extract_pdf_link(history_html, term, tipoa)
+                    link = self._extract_pdf_link(history_html, term, history_tipoa)
                     if link:
                         print("PROVIDER4_FINAL_DOWNLOAD_LINK =", link, flush=True)
                         pdf_bytes = self._download_and_validate_with_retries(
@@ -1096,7 +1109,7 @@ class Provider4Client:
     
         final_history_html = self.get_history_html()
 
-        if self._detect_no_result(final_history_html, term, tipoa) or self._detect_no_result_loose(final_history_html, term):
+        if self._detect_no_result(final_history_html, term, history_tipoa) or self._detect_no_result_loose(final_history_html, term):
             raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
         
         if not history_confirmed:
@@ -1113,14 +1126,14 @@ class Provider4Client:
         for extra_attempt in range(extra_link_polls):
             history_html = self.get_history_html()
 
-            if self._detect_no_result(history_html, term, tipoa) or self._detect_no_result_loose(history_html, term):
+            if self._detect_no_result(history_html, term, history_tipoa) or self._detect_no_result_loose(history_html, term):
                 raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
         
-            row_html = self._history_row_for_term(history_html, term, tipoa)
+            row_html = self._history_row_for_term(history_html, term, history_tipoa)
             if row_html:
                 if inc_folio:
-                    dphp_link = self._extract_pdf_link(history_html, term, tipoa)
-                    folio_link = self._extract_folio_link(history_html, term, tipoa)
+                    dphp_link = self._extract_pdf_link(history_html, term, history_tipoa)
+                    folio_link = self._extract_folio_link(history_html, term, history_tipoa)
                     
                     final_link = folio_link or dphp_link
                     final_link_source = "ADDFOL" if folio_link else ("DPHP" if dphp_link else "NONE")
@@ -1145,7 +1158,7 @@ class Provider4Client:
                         )
                         return pdf_bytes
                 else:
-                    link = self._extract_pdf_link(history_html, term, tipoa)
+                    link = self._extract_pdf_link(history_html, term, history_tipoa)
                     if link:
                         print(f"PROVIDER4_LATE_PDF_LINK_FOUND_ATTEMPT_{extra_attempt+1} = {link}", flush=True)
                         pdf_bytes = self._download_and_validate_with_retries(
