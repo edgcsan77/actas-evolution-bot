@@ -530,12 +530,13 @@ PROVIDER_LABELS = {
     "PROVIDER1": "ADMIN DIGITAL",
     "PROVIDER2": "ACTAS DEL SURESTE",
     "PROVIDER3": "AUSTRAM WEB",
-    "PROVIDER4": "LAZARO WEB",
+    "PROVIDER4": "LAZARO WEB 1",
     "PROVIDER5": "LUIS SID",
     "PROVIDER6": "ACTAS ESCALANTE",
     "PROVIDER7": "MESINO SID",
     "PROVIDER8": "ANGEL",
     "PROVIDER9": "EMILIANO",
+    "PROVIDER10": "LAZARO WEB 2",
 }
 
 
@@ -7795,7 +7796,7 @@ def panel_actas(
                     </div>
             
                     <div class="provider-card">
-                      <div class="provider-name">LAZARO WEB</div>
+                      <div class="provider-name">LAZARO WEB 1</div>
                       <div style="margin:6px 0;">
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
@@ -7887,6 +7888,26 @@ def panel_actas(
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER9','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER9','off')">Desactivar</button>
+                      </div>
+                    </div>
+
+                    <div class="provider-card">
+                      <div class="provider-name">LAZARO WEB 2</div>
+                      <div style="margin:6px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
+                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
+                          <div style="display:flex;align-items:center;gap:6px;">
+                            <input id="weight_PROVIDER10" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER10', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <span style="font-size:12px;opacity:.7;">nivel</span>
+                          </div>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER10')">Aplicar</button>
+                        </div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
+                      </div>
+                      <div class="provider-actions">
+                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER10','on')">Activar</button>
+                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER10','off')">Desactivar</button>
+                        <button class="btn btn-warning" onclick="refreshHID10()">Actualizar HID</button>
                       </div>
                     </div>
             
@@ -8689,7 +8710,7 @@ def panel_actas(
         }}
 
         async function refreshHID() {{
-          const hid = prompt("Pega el nuevo HID");
+          const hid = prompt("Pega el nuevo HID de LAZARO WEB 1");
           if (!hid) return;
         
           try {{
@@ -8706,7 +8727,35 @@ def panel_actas(
             const data = await res.json();
         
             if (data.ok) {{
-              alert("HID actualizado");
+              alert("HID de LAZARO WEB 1 actualizado");
+              location.reload();
+            }} else {{
+              alert(data.error || "Error actualizando HID");
+            }}
+          }} catch (e) {{
+            alert("No se pudo conectar con el servidor");
+          }}
+        }}
+
+        async function refreshHID10() {{
+          const hid = prompt("Pega el nuevo HID de LAZARO WEB 2", "D0cuExprRServ2");
+          if (!hid) return;
+        
+          try {{
+            const res = await fetch("/panel/provider10/hid", {{
+              method: "POST",
+              headers: {{
+                "Content-Type": "application/json"
+              }},
+              body: JSON.stringify({{
+                hid: hid
+              }})
+            }});
+        
+            const data = await res.json();
+        
+            if (data.ok) {{
+              alert("HID de LAZARO WEB 2 actualizado");
               location.reload();
             }} else {{
               alert(data.error || "Error actualizando HID");
@@ -9638,6 +9687,7 @@ def startup():
         _get_or_create_provider(db, "PROVIDER7", False)
         _get_or_create_provider(db, "PROVIDER8", False)
         _get_or_create_provider(db, "PROVIDER9", False)
+        _get_or_create_provider(db, "PROVIDER10", False)
     
         current = _get_app_setting(db, "PROVIDER3_PHPSESSID", "")
         if not current and settings.PROVIDER3_PHPSESSID:
@@ -9673,6 +9723,41 @@ def update_provider4_hid(payload: dict, db: Session = Depends(get_db)):
         db.commit()
 
         print("PROVIDER4_HID_UPDATED =", new_hid, flush=True)
+
+        return {"ok": True}
+
+    except Exception as e:
+        db.rollback()
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/panel/provider10/hid")
+def update_provider10_hid(payload: dict, db: Session = Depends(get_db)):
+    try:
+        new_hid = (payload.get("hid") or "").strip()
+
+        if not new_hid:
+            return {"ok": False, "error": "HID vacío"}
+
+        setting = (
+            db.query(ProviderSetting)
+            .filter(ProviderSetting.provider_name == "PROVIDER10_HID")
+            .first()
+        )
+
+        if not setting:
+            setting = ProviderSetting(
+                provider_name="PROVIDER10_HID",
+                is_enabled=True,
+                value=new_hid,
+            )
+            db.add(setting)
+        else:
+            setting.value = new_hid
+
+        db.commit()
+
+        print("PROVIDER10_HID_UPDATED =", new_hid, flush=True)
 
         return {"ok": True}
 
@@ -10414,7 +10499,7 @@ def _providers_status_text(db: Session) -> str:
         f"ADMIN DIGITAL:     {s1}{provider1_extra}\n"
         f"ACTAS DEL SURESTE: {s2}{provider2_extra}\n"
         f"AUSTRAM WEB:       {s3}{provider3_extra}\n"
-        f"LAZARO WEB:        {s4}{provider4_extra}\n"
+        f"LAZARO WEB 1:        {s4}{provider4_extra}\n"
         f"LUIS SID:          {s5}{provider5_extra}\n"
         f"ACTAS ESCALANTE:   {s6}{provider6_extra}\n"
         f"ANGEL:             {s8}{provider8_extra}\n"
