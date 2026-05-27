@@ -70,6 +70,7 @@ def _provider_from_mode(mode: str | None) -> str | None:
         "PROVIDER7",
         "PROVIDER8",
         "PROVIDER9",
+        "PROVIDER10",
     }:
         return provider_name
 
@@ -85,6 +86,12 @@ def _request_is_no_accounting(req, db) -> bool:
         and mode_provider
         and (getattr(req, "provider_name", "") or "").strip().upper() == mode_provider
     )
+
+
+def _current_mode_is_personal(db, instance_name: str | None) -> bool:
+    mode = _bot_provider_mode(db, instance_name)
+    return _is_personal_provider_mode(mode)
+
 
 NO_FAIL_NOTIFY_GROUPS = {
     "120363427267191472@g.us"
@@ -275,24 +282,7 @@ def _fallback_to_provider3_web(req, db, process_started_ts):
     req.updated_at = _utc_now_naive()
     db.commit()
     
-    try:
-        if req.instance_name:
-            used, limit_value, blocked_now = increment_bot_used_and_maybe_block(
-                db,
-                req.instance_name
-            )
-            print("BOT_USED_AFTER_DONE =", used, flush=True)
-            print("BOT_LIMIT =", limit_value, flush=True)
-            print("BOT_BLOCKED_NOW =", blocked_now, flush=True)
-        else:
-            print("BOT_INSTANCE_MISSING_FOR_REQ =", req.id, flush=True)
-    except Exception as bot_limit_exc:
-        print("BOT_LIMIT_UPDATE_ERROR =", str(bot_limit_exc), flush=True)
-    
-    try:
-        _handle_group_promotion_after_done(req, db)
-    except Exception as promo_exc:
-        print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
+    _after_done_accounting(req, db)
 
 
 def _promo_client_key(group_jid: str | None, promo_name: str | None = None, client_key: str | None = None) -> str:
@@ -1346,6 +1336,23 @@ def _validate_act_type_pdf(pdf_bytes: bytes, act_type: str | None) -> bool:
     return False
 
 
+def _after_done_accounting(req, db):
+    if _request_is_no_accounting(req, db):
+        print(
+            "PRIVATE_PROVIDER_SKIP_ACCOUNTING_WORKER =",
+            {
+                "req_id": req.id,
+                "instance_name": req.instance_name,
+                "provider_name": req.provider_name,
+                "source_group_id": req.source_group_id,
+            },
+            flush=True,
+        )
+        return
+
+    _after_done_accounting(req, db)
+
+
 NO_TIME_CAPTION_GROUPS = {
     "120363408668441985@g.us",
     "120363421166637606@g.us",
@@ -1627,22 +1634,7 @@ def process_request(request_id: int):
             req.updated_at = _utc_now_naive()
             db.commit()
 
-            try:
-                if req.instance_name:
-                    used, limit_value, blocked_now = increment_bot_used_and_maybe_block(
-                        db,
-                        req.instance_name
-                    )
-                    print("BOT_USED_AFTER_DONE =", used, flush=True)
-                    print("BOT_LIMIT =", limit_value, flush=True)
-                    print("BOT_BLOCKED_NOW =", blocked_now, flush=True)
-            except Exception as bot_limit_exc:
-                print("BOT_LIMIT_UPDATE_ERROR =", str(bot_limit_exc), flush=True)
-        
-            try:
-                _handle_group_promotion_after_done(req, db)
-            except Exception as promo_exc:
-                print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
+            _after_done_accounting(req, db)
         
             return
 
@@ -1834,22 +1826,7 @@ def process_request(request_id: int):
             req.updated_at = _utc_now_naive()
             db.commit()
 
-            try:
-                if req.instance_name:
-                    used, limit_value, blocked_now = increment_bot_used_and_maybe_block(
-                        db,
-                        req.instance_name
-                    )
-                    print("BOT_USED_AFTER_DONE =", used, flush=True)
-                    print("BOT_LIMIT =", limit_value, flush=True)
-                    print("BOT_BLOCKED_NOW =", blocked_now, flush=True)
-            except Exception as bot_limit_exc:
-                print("BOT_LIMIT_UPDATE_ERROR =", str(bot_limit_exc), flush=True)
-        
-            try:
-                _handle_group_promotion_after_done(req, db)
-            except Exception as promo_exc:
-                print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
+            _after_done_accounting(req, db)
         
             return
 
@@ -1957,22 +1934,7 @@ def process_request(request_id: int):
             req.updated_at = _utc_now_naive()
             db.commit()
 
-            try:
-                if req.instance_name:
-                    used, limit_value, blocked_now = increment_bot_used_and_maybe_block(
-                        db,
-                        req.instance_name
-                    )
-                    print("BOT_USED_AFTER_DONE =", used, flush=True)
-                    print("BOT_LIMIT =", limit_value, flush=True)
-                    print("BOT_BLOCKED_NOW =", blocked_now, flush=True)
-            except Exception as bot_limit_exc:
-                print("BOT_LIMIT_UPDATE_ERROR =", str(bot_limit_exc), flush=True)
-        
-            try:
-                _handle_group_promotion_after_done(req, db)
-            except Exception as promo_exc:
-                print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
+            _after_done_accounting(req, db)
         
             return
 
