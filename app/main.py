@@ -5885,6 +5885,9 @@ def botpanel_get_provider_mode(token: str, db: Session = Depends(get_db)):
     if not instance_name:
         return {"ok": False, "error": "Panel no válido"}
 
+    if instance_name != "docifybot8maya":
+        return {"ok": False, "error": "Este ajuste solo está disponible para Gestoría Maya"}
+
     mode = _bot_provider_mode(db, instance_name)
 
     return {
@@ -5902,6 +5905,9 @@ async def botpanel_set_provider_mode(token: str, request: Request, db: Session =
         instance_name = _bot_instance_from_token(db, token)
         if not instance_name:
             return {"ok": False, "error": "Panel no válido"}
+
+        if instance_name != "docifybot8maya":
+            return {"ok": False, "error": "Este ajuste solo está disponible para Gestoría Maya"}
 
         payload = await request.json()
         mode = (payload.get("mode") or "GLOBAL_POOL").strip().upper()
@@ -5929,6 +5935,9 @@ def botpanel_provider_mode_ui(token: str, db: Session = Depends(get_db)):
 
     if not instance_name:
         return HTMLResponse("<h3>Panel no válido.</h3>", status_code=404)
+
+    if instance_name != "docifybot8maya":
+        return HTMLResponse("<h3>Este ajuste solo está disponible para Gestoría Maya.</h3>", status_code=403)
 
     mode = _bot_provider_mode(db, instance_name)
     label = BOT_PROVIDER_OPTIONS.get(mode, mode)
@@ -10027,6 +10036,7 @@ def startup():
         _get_or_create_provider(db, "PROVIDER8", False)
         _get_or_create_provider(db, "PROVIDER9", False)
         _get_or_create_provider(db, "PROVIDER10", False)
+        _get_or_create_provider(db, "MAYAPROVIDER", False)
     
         current = _get_app_setting(db, "PROVIDER3_PHPSESSID", "")
         if not current and settings.PROVIDER3_PHPSESSID:
