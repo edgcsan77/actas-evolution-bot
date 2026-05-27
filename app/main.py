@@ -94,7 +94,7 @@ BOT_PROVIDER_OPTIONS = {
     "GLOBAL:PROVIDER8": "Global · ANGEL",
     "GLOBAL:PROVIDER9": "Global · EMILIANO",
     "GLOBAL:PROVIDER10": "Global · LAZARO WEB 2",
-    "PERSONAL:PROVIDER9": "Privado · Proveedor personal",
+    "PERSONAL:MAYAPROVIDER": "Privado · Proveedor personal",
 }
 
 
@@ -306,11 +306,16 @@ def _bot_status_rows(db: Session) -> list[dict]:
         if bc and bc.is_active is False:
             continue
 
-        total = (
+        q_total = (
             db.query(RequestLog)
             .filter(RequestLog.instance_name == inst)
-            .count()
         )
+        
+        personal_provider = _personal_provider_filter_for_instance(db, inst)
+        if personal_provider:
+            q_total = q_total.filter(RequestLog.provider_name != personal_provider)
+        
+        total = q_total.count()
 
         used = get_bot_used(db, inst)
         limit_value = get_bot_limit(db, inst)
@@ -5926,16 +5931,6 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
     groups = _bot_group_stats(db, instance_name)
     credits = _bot_credit_stats(db, instance_name)
     recharge_rows = _bot_recharge_history(db, instance_name, limit=30)
-
-    provider_mode = _bot_provider_mode(db, instance_name)
-    provider_mode_label = BOT_PROVIDER_OPTIONS.get(provider_mode, provider_mode)
-    
-    provider_mode_options_html = ""
-    for mode_value, mode_label in BOT_PROVIDER_OPTIONS.items():
-        selected = "selected" if mode_value == provider_mode else ""
-        provider_mode_options_html += (
-            f'<option value="{_esc(mode_value)}" {selected}>{_esc(mode_label)}</option>'
-        )
 
     credits = credits or {}
     credits.setdefault("limit", 0)
@@ -12153,29 +12148,41 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 except Exception as redis_done_exc:
                     print("PDF_DONE_MARK_REDIS_ERROR =", str(redis_done_exc), flush=True)
 
-                try:
-                    if open_req.instance_name:
-                        used, limit_value, blocked_now = increment_bot_used_and_maybe_block(
-                            db,
-                            open_req.instance_name
-                        )
-                        print("BOT_USED_AFTER_DONE =", used, flush=True)
-                        print("BOT_LIMIT =", limit_value, flush=True)
-                        print("BOT_BLOCKED_NOW =", blocked_now, flush=True)
-                    else:
-                        print("BOT_INSTANCE_MISSING_FOR_REQ =", open_req.id, flush=True)
+                if _request_is_no_accounting_main(db, open_req):
+                    print(
+                        "PRIVATE_PROVIDER_SKIP_ACCOUNTING_MAIN_RELAY =",
+                        {
+                            "req_id": open_req.id,
+                            "instance_name": open_req.instance_name,
+                            "provider_name": open_req.provider_name,
+                            "source_group_id": open_req.source_group_id,
+                        },
+                        flush=True,
+                    )
+                else:
+                    try:
+                        if open_req.instance_name:
+                            used, limit_value, blocked_now = increment_bot_used_and_maybe_block(
+                                db,
+                                open_req.instance_name
+                            )
+                            print("BOT_USED_AFTER_DONE =", used, flush=True)
+                            print("BOT_LIMIT =", limit_value, flush=True)
+                            print("BOT_BLOCKED_NOW =", blocked_now, flush=True)
+                        else:
+                            print("BOT_INSTANCE_MISSING_FOR_REQ =", open_req.id, flush=True)
                 
-                except Exception as bot_limit_exc:
-                    print("BOT_LIMIT_UPDATE_ERROR =", str(bot_limit_exc), flush=True)
-
-                t3 = time.perf_counter()
-                try:
-                     from app.worker import _handle_group_promotion_after_done
-                     _handle_group_promotion_after_done(open_req, db)
-                except Exception as promo_exc:
-                     print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
-                finally:
-                     print("T_PROMO =", round(time.perf_counter() - t3, 3), flush=True)
+                    except Exception as bot_limit_exc:
+                        print("BOT_LIMIT_UPDATE_ERROR =", str(bot_limit_exc), flush=True)
+                
+                    t3 = time.perf_counter()
+                    try:
+                         from app.worker import _handle_group_promotion_after_done
+                         _handle_group_promotion_after_done(open_req, db)
+                    except Exception as promo_exc:
+                         print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
+                    finally:
+                         print("T_PROMO =", round(time.perf_counter() - t3, 3), flush=True)
 
                 total_relay_s = round(time.perf_counter() - t0, 3)
                 open_req.t_total_provider1_relay = total_relay_s
