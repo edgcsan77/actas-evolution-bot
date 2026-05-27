@@ -747,13 +747,20 @@ def _bot_groups_for_instance(db: Session, instance_name: str):
         )
     }
 
-    rows = (
+    q = (
         db.query(RequestLog.source_group_id)
         .filter(
             RequestLog.instance_name == instance_name,
             RequestLog.source_group_id.isnot(None),
         )
-        .distinct()
+    )
+    
+    personal_provider = _personal_provider_filter_for_instance(db, instance_name)
+    if personal_provider:
+        q = q.filter(RequestLog.provider_name != personal_provider)
+    
+    rows = (
+        q.distinct()
         .all()
     )
 
@@ -5912,6 +5919,143 @@ async def botpanel_set_provider_mode(token: str, request: Request, db: Session =
     except Exception as e:
         db.rollback()
         return {"ok": False, "error": str(e)}
+
+
+@app.get("/botpanel/{token}/provider-mode-ui", response_class=HTMLResponse)
+def botpanel_provider_mode_ui(token: str, db: Session = Depends(get_db)):
+    instance_name = _bot_instance_from_token(db, token)
+
+    if not instance_name:
+        return HTMLResponse("<h3>Panel no válido.</h3>", status_code=404)
+
+    mode = _bot_provider_mode(db, instance_name)
+    label = BOT_PROVIDER_OPTIONS.get(mode, mode)
+    title = _bot_title(db, instance_name)
+
+    options_html = ""
+    for value, text in BOT_PROVIDER_OPTIONS.items():
+        selected = "selected" if value == mode else ""
+        options_html += f'<option value="{_esc(value)}" {selected}>{_esc(text)}</option>'
+
+    html = f"""
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>Modo de proveedor - {_esc(title)}</title>
+      <style>
+        body {{
+          font-family: Arial, sans-serif;
+          background:#f4f6f8;
+          margin:0;
+          padding:24px;
+          color:#111827;
+        }}
+        .box {{
+          max-width:560px;
+          margin:40px auto;
+          background:white;
+          border-radius:18px;
+          padding:22px;
+          box-shadow:0 10px 28px rgba(15,23,42,.12);
+        }}
+        h2 {{
+          margin:0 0 8px 0;
+        }}
+        .muted {{
+          color:#64748b;
+          font-size:14px;
+          margin-bottom:18px;
+        }}
+        .current {{
+          background:#f8fafc;
+          border:1px solid #e5e7eb;
+          border-radius:14px;
+          padding:12px;
+          margin:14px 0;
+        }}
+        select {{
+          width:100%;
+          padding:12px;
+          border-radius:12px;
+          border:1px solid #cbd5e1;
+          font-size:15px;
+          margin-top:8px;
+        }}
+        button {{
+          width:100%;
+          margin-top:14px;
+          padding:12px;
+          border:0;
+          border-radius:12px;
+          background:#2563eb;
+          color:white;
+          font-size:15px;
+          font-weight:bold;
+          cursor:pointer;
+        }}
+        .help {{
+          margin-top:16px;
+          font-size:13px;
+          color:#64748b;
+          line-height:1.45;
+        }}
+      </style>
+    </head>
+    <body>
+      <div class="box">
+        <h2>Modo de proveedor</h2>
+        <div class="muted">{_esc(title)} · {_esc(instance_name)}</div>
+
+        <div class="current">
+          <strong>Modo actual:</strong><br>
+          {_esc(label)}
+        </div>
+
+        <label>Seleccionar modo:</label>
+        <select id="providerModeSelect">
+          {options_html}
+        </select>
+
+        <button onclick="saveProviderMode()">Guardar modo</button>
+
+        <div class="help">
+          <strong>Global:</strong> usa proveedores del sistema principal y sí cuenta.<br>
+          <strong>Privado:</strong> usa proveedor personal y no cuenta en panel, promociones ni límite.
+        </div>
+      </div>
+
+      <script>
+      async function saveProviderMode() {{
+        const select = document.getElementById("providerModeSelect");
+        const mode = select.value;
+
+        if (!confirm("¿Guardar este modo de proveedor?")) {{
+          return;
+        }}
+
+        const res = await fetch("/botpanel/{_esc(token)}/provider-mode", {{
+          method: "POST",
+          headers: {{"Content-Type": "application/json"}},
+          body: JSON.stringify({{mode}})
+        }});
+
+        const data = await res.json();
+
+        if (!data.ok) {{
+          alert(data.error || "No se pudo guardar el modo.");
+          return;
+        }}
+
+        alert("Modo actualizado: " + data.label);
+        location.reload();
+      }}
+      </script>
+    </body>
+    </html>
+    """
+
+    return HTMLResponse(html)
 
 
 @app.get("/botpanel/{token}")
