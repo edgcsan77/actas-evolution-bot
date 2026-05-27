@@ -818,23 +818,36 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
         .filter(ProviderSetting.provider_name == hid_key)
         .first()
     )
-    
-    hid = setting.value if setting and setting.value else None
+
+    default_hid = "D0cuExprRServ2" if provider_name == "PROVIDER10" else None
+    hid = setting.value if setting and setting.value else default_hid
 
     print(f"{provider_name}_HID_KEY =", hid_key, flush=True)
     print(f"{provider_name}_HID_USING =", hid, flush=True)
-    
+
     client = Provider4Client(hid=hid)
 
     tipoa = _provider4_tipo_acta(req.act_type)
     inc_folio = "FOLIO" in (req.act_type or "").upper().strip()
 
-    pdf_bytes = client.process_and_download(
-        term=term,
-        tipoa=tipoa,
-        inc_folio=inc_folio,
-        is_chain=chain_mode,
-    )
+    try:
+        pdf_bytes = client.process_and_download(
+            term=term,
+            tipoa=tipoa,
+            inc_folio=inc_folio,
+            is_chain=chain_mode,
+        )
+
+    except Exception as e:
+        err = str(e)
+
+        # Provider4Client internamente todavía puede lanzar errores PROVIDER4_*.
+        # Si quien está procesando es PROVIDER10, normalizamos el prefijo
+        # para que el fallback y los logs lo reconozcan como PROVIDER10.
+        if provider_name != "PROVIDER4" and err.startswith("PROVIDER4_"):
+            err = f"{provider_name}_{err[len('PROVIDER4_'):]}"
+
+        raise RuntimeError(err) from e
 
     return {
         "pdf_bytes": pdf_bytes,
