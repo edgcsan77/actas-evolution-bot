@@ -11794,6 +11794,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     "VERIFICAR",
                     "NO SÉ ENCUENTRA EN EL SISTEMA",
                     "NO SE ENCUENTRA EN EL SISTEMA",
+                    "NO LOCALIZADO EN LA BASE DE DATOS NACIONAL DE REGISTRO CIVIL",
+                    "NO LOCALIZADA EN LA BASE DE DATOS NACIONAL DE REGISTRO CIVIL",
+                    "NO LOCALIZADO EN BASE DE DATOS NACIONAL DE REGISTRO CIVIL",
+                    "NO LOCALIZADA EN BASE DE DATOS NACIONAL DE REGISTRO CIVIL",
                 }
 
                 is_negative_text = any(
@@ -11809,15 +11813,16 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             RequestLog.provider_group_id == source_chat_id,
                             RequestLog.provider_message_id == quoted_msg_id,
                             RequestLog.status == "PROCESSING",
-                            RequestLog.provider_name.in_(["PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9"]),
+                            RequestLog.provider_name.in_(["PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9", "MAYAPROVIDER"]),
                         )
                         .order_by(RequestLog.created_at.desc())
                         .first()
                     )
 
                     if open_req:
-                        print("PROVIDER5_SIN_MATCHED_REQ_ID =", open_req.id, flush=True)
-                        print("PROVIDER5_SIN_MATCHED_CURP =", open_req.curp, flush=True)
+                        print("PROVIDER_NEGATIVE_MATCHED_REQ_ID =", open_req.id, flush=True)
+                        print("PROVIDER_NEGATIVE_MATCHED_PROVIDER =", open_req.provider_name, flush=True)
+                        print("PROVIDER_NEGATIVE_MATCHED_CURP =", open_req.curp, flush=True)
 
                         open_req.status = "ERROR"
                         open_req.error_message = "SIN REGISTRO"
@@ -11840,7 +11845,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         except Exception as notify_exc:
                             print("PROVIDER5_SIN_NOTIFY_ERROR =", str(notify_exc), flush=True)
 
-                        return {"ok": True, "provider_result": "provider5_sin_matched_by_reply_id"}
+                        return {"ok": True, "provider_result": "provider_negative_matched_by_reply_id"}
 
                     print("PROVIDER5_SIN_WITHOUT_MATCH =", quoted_msg_id, flush=True)
 
@@ -11852,7 +11857,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             RequestLog.provider_group_id == source_chat_id,
                             RequestLog.curp == provider_id,
                             RequestLog.status == "PROCESSING",
-                            RequestLog.provider_name.in_(["PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9"]),
+                            RequestLog.provider_name.in_(["PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9", "MAYAPROVIDER"]),
                         )
                         .order_by(RequestLog.created_at.desc())
                         .first()
