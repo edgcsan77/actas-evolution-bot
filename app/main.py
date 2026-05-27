@@ -83,18 +83,8 @@ DEFAULT_BOT_PROVIDER_MODE = {
 }
 
 BOT_PROVIDER_OPTIONS = {
-    "GLOBAL_POOL": "Global automático",
-    "GLOBAL:PROVIDER1": "Global · ADMIN DIGITAL",
-    "GLOBAL:PROVIDER2": "Global · ACTAS DEL SURESTE",
-    "GLOBAL:PROVIDER3": "Global · AUSTRAM WEB",
-    "GLOBAL:PROVIDER4": "Global · LAZARO WEB 1",
-    "GLOBAL:PROVIDER5": "Global · LUIS SID",
-    "GLOBAL:PROVIDER6": "Global · ACTAS ESCALANTE",
-    "GLOBAL:PROVIDER7": "Global · MESINO SID",
-    "GLOBAL:PROVIDER8": "Global · ANGEL",
-    "GLOBAL:PROVIDER9": "Global · EMILIANO",
-    "GLOBAL:PROVIDER10": "Global · LAZARO WEB 2",
-    "PERSONAL:MAYAPROVIDER": "Privado · Proveedor personal",
+    "GLOBAL_POOL": "Global · proveedores de Mesino",
+    "PERSONAL:MAYAPROVIDER": "Privado · proveedor personal",
 }
 
 
