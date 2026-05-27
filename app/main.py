@@ -144,21 +144,26 @@ def _provider_from_mode(mode: str | None) -> str | None:
 
 
 def _request_is_no_accounting_main(db: Session, req) -> bool:
-    mode = _bot_provider_mode(db, getattr(req, "instance_name", None))
-    mode_provider = _provider_from_mode(mode)
+    instance_name = getattr(req, "instance_name", None)
+    provider_name = (getattr(req, "provider_name", "") or "").strip().upper()
 
-    return (
-        _is_personal_provider_mode(mode)
-        and mode_provider
-        and (getattr(req, "provider_name", "") or "").strip().upper() == mode_provider
+    personal_provider = _personal_provider_filter_for_instance(db, instance_name)
+
+    return bool(
+        personal_provider
+        and provider_name == personal_provider
     )
 
 
 def _personal_provider_filter_for_instance(db: Session, instance_name: str):
-    mode = _bot_provider_mode(db, instance_name)
-    if not _is_personal_provider_mode(mode):
-        return None
-    return _provider_from_mode(mode)
+    inst = _norm_instance(instance_name)
+
+    # Las solicitudes hechas con MAYAPROVIDER son privadas SIEMPRE,
+    # aunque después el bot vuelva a modo GLOBAL_POOL.
+    if inst == "docifybot8maya":
+        return "MAYAPROVIDER"
+
+    return None
 
 NO_DONE_NOTIFY_GROUPS = {
     "120363427267191472@g.us"
@@ -756,9 +761,7 @@ def _bot_groups_for_instance(db: Session, instance_name: str):
         )
     )
     
-    personal_provider = _personal_provider_filter_for_instance(db, instance_name)
-    if personal_provider:
-        q = q.filter(RequestLog.provider_name != personal_provider)
+    q = _exclude_private_provider_query(q, db, instance_name)
     
     rows = (
         q.distinct()
@@ -804,9 +807,7 @@ def _bot_sales_today(db: Session, instance_name: str) -> int:
         )
     )
 
-    personal_provider = _personal_provider_filter_for_instance(db, instance_name)
-    if personal_provider:
-        q = q.filter(RequestLog.provider_name != personal_provider)
+    q = _exclude_private_provider_query(q, db, instance_name)
 
     return q.count()
 
@@ -823,9 +824,7 @@ def _bot_sales_month(db: Session, instance_name: str) -> int:
         )
     )
 
-    personal_provider = _personal_provider_filter_for_instance(db, instance_name)
-    if personal_provider:
-        q = q.filter(RequestLog.provider_name != personal_provider)
+    q = _exclude_private_provider_query(q, db, instance_name)
 
     return q.count()
 
@@ -852,9 +851,7 @@ def _bot_sales_history_30d(db: Session, instance_name: str):
         )
     )
     
-    personal_provider = _personal_provider_filter_for_instance(db, instance_name)
-    if personal_provider:
-        q = q.filter(RequestLog.provider_name != personal_provider)
+    q = _exclude_private_provider_query(q, db, instance_name)
     
     rows = (
         q.group_by(mx_date)
@@ -884,9 +881,7 @@ def _bot_group_stats(db: Session, instance_name: str):
             )
         )
         
-        personal_provider = _personal_provider_filter_for_instance(db, instance_name)
-        if personal_provider:
-            q_today = q_today.filter(RequestLog.provider_name != personal_provider)
+        q_today = _exclude_private_provider_query(q_today, db, instance_name)
         
         today_done = q_today.count()
 
@@ -900,8 +895,7 @@ def _bot_group_stats(db: Session, instance_name: str):
             )
         )
         
-        if personal_provider:
-            q_month = q_month.filter(RequestLog.provider_name != personal_provider)
+        q_month = _exclude_private_provider_query(q_month, db, instance_name)
         
         month_done = q_month.count()
 
@@ -1154,10 +1148,7 @@ def botpanel_audit_all_groups(
         RequestLog.created_at < time_max,
     )
 
-    personal_provider = _personal_provider_filter_for_instance(db, instance_name)
-
-    if personal_provider:
-        q = q.filter(RequestLog.provider_name != personal_provider)
+    q = _exclude_private_provider_query(q, db, instance_name)
 
     if status:
         q = q.filter(RequestLog.status == status)
