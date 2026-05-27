@@ -9897,6 +9897,19 @@ def _pdf_matches_req_type(pdf_bytes: bytes, req: RequestLog) -> bool:
         return False
 
 
+def _provider_pdf_match_status_filter():
+    recent_limit = _utc_now_naive() - timedelta(minutes=10)
+
+    return or_(
+        RequestLog.status == "PROCESSING",
+        (
+            (RequestLog.status == "ERROR")
+            & (RequestLog.error_message.ilike("%Timeout automático%"))
+            & (RequestLog.updated_at >= recent_limit)
+        ),
+    )
+
+
 def _pick_matching_processing_req_for_pdf(
     db: Session,
     lookup_id: str | None,
@@ -9905,16 +9918,20 @@ def _pick_matching_processing_req_for_pdf(
     pdf_bytes: bytes,
 ):
     candidates = []
+    status_filter = _provider_pdf_match_status_filter()
 
     if lookup_id:
         candidates = (
             db.query(RequestLog)
             .filter(
                 RequestLog.curp == lookup_id,
-                RequestLog.status == "PROCESSING",
+                status_filter,
                 RequestLog.provider_group_id == source_chat_id,
             )
-            .order_by(RequestLog.created_at.asc())
+            .order_by(
+                case((RequestLog.status == "PROCESSING", 0), else_=1),
+                RequestLog.created_at.asc(),
+            )
             .all()
         )
 
@@ -9923,9 +9940,12 @@ def _pick_matching_processing_req_for_pdf(
             db.query(RequestLog)
             .filter(
                 RequestLog.provider_message_id == quoted_msg_id,
-                RequestLog.status == "PROCESSING",
+                status_filter,
             )
-            .order_by(RequestLog.created_at.desc())
+            .order_by(
+                case((RequestLog.status == "PROCESSING", 0), else_=1),
+                RequestLog.created_at.desc(),
+            )
             .all()
         )
 
@@ -9934,9 +9954,12 @@ def _pick_matching_processing_req_for_pdf(
             db.query(RequestLog)
             .filter(
                 RequestLog.curp == lookup_id,
-                RequestLog.status == "PROCESSING",
+                status_filter,
             )
-            .order_by(RequestLog.created_at.asc())
+            .order_by(
+                case((RequestLog.status == "PROCESSING", 0), else_=1),
+                RequestLog.created_at.asc(),
+            )
             .all()
         )
 
@@ -9945,9 +9968,12 @@ def _pick_matching_processing_req_for_pdf(
             "id": r.id,
             "curp": r.curp,
             "act_type": r.act_type,
+            "status": r.status,
+            "error_message": r.error_message,
             "provider_group_id": r.provider_group_id,
             "source_group_id": r.source_group_id,
             "instance_name": r.instance_name,
+            "provider_name": r.provider_name,
         }
         for r in candidates
     ], flush=True)
@@ -9958,6 +9984,7 @@ def _pick_matching_processing_req_for_pdf(
             print("PROVIDER_PDF_SMART_TYPE_MATCH =", {
                 "matched_req_id": r.id,
                 "matched_act_type": r.act_type,
+                "matched_status": r.status,
             }, flush=True)
             return r
 
@@ -9966,6 +9993,7 @@ def _pick_matching_processing_req_for_pdf(
         print("PROVIDER_PDF_SINGLE_CANDIDATE_NO_TYPE_MATCH =", {
             "matched_req_id": candidates[0].id,
             "matched_act_type": candidates[0].act_type,
+            "matched_status": candidates[0].status,
         }, flush=True)
         return candidates[0]
 
@@ -11598,9 +11626,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             db.query(RequestLog)
                             .filter(
                                 RequestLog.curp == lookup_id,
-                                RequestLog.status.in_(["PROCESSING"]),
+                                _provider_pdf_match_status_filter(),
                             )
-                            .order_by(RequestLog.created_at.desc())
+                            .order_by(
+                                case((RequestLog.status == "PROCESSING", 0), else_=1),
+                                RequestLog.created_at.desc(),
+                            )
                             .first()
                         )
                 
@@ -11609,13 +11640,13 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             db.query(RequestLog)
                             .filter(
                                 RequestLog.curp == lookup_id,
-                                RequestLog.status == "PROCESSING",
+                                _provider_pdf_match_status_filter(),
                             )
                             .count()
                         )
-                    
+                
                         print("PROVIDER_PDF_LAST_RESORT_ACTIVE_COUNT =", active_count, flush=True)
-                    
+                
                         if active_count == 1:
                             print("PROVIDER_PDF_LAST_RESORT_MATCH =", fallback_req.id, flush=True)
                             open_req = fallback_req
@@ -11624,7 +11655,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                                 "lookup_id": lookup_id,
                                 "active_count": active_count,
                             }, flush=True)
-                            return {"ok": True, "ignored": "ambiguous_multiple_processing_requests"}
+                            return {"ok": True, "ignored": "ambiguous_multiple_processing_or_recent_timeout_requests"}
                     else:
                         return {"ok": True, "ignored": "provider_pdf_without_safe_match"}
 
