@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     PROVIDER9_GROUP_1: str = ""
     PROVIDER9_GROUP_2: str = ""
 
+    # PROVIDER 11
+    MAYAPROVIDER_GROUP_1: str = ""
+    MAYAPROVIDER_GROUP_2: str = ""
+
     PROVIDER_NO_RECORD_TEXT: str = (
         "NO HAY REGISTROS DISPONIBLES|"
         "NO SE ENCONTRO EL ACTA EN SISTEMA|"
