@@ -772,6 +772,18 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
     raise RuntimeError("UNKNOWN_PROVIDER")
 
 
+def _provider_sender_instance(provider_name: str, req) -> str:
+    provider_name = (provider_name or "").strip().upper()
+
+    # Solo el proveedor privado MAYAPROVIDER se manda desde la instancia del bot cliente.
+    # Ejemplo: docifybot8maya.
+    if provider_name == "MAYAPROVIDER":
+        return req.instance_name or settings.EVOLUTION_INSTANCE
+
+    # Todos los proveedores globales se quedan como ya estaban.
+    return settings.EVOLUTION_PROVIDER_INSTANCE
+
+
 def _provider3_flags(act_type: str) -> dict:
     act_type = (act_type or "").upper().strip()
 
@@ -1483,7 +1495,11 @@ def process_request(request_id: int):
         
             for attempt in range(3):
                 try:
-                    resp_json = send_group_text(provider_group_id, text_to_provider, settings.EVOLUTION_PROVIDER_INSTANCE)
+                    sender_instance = _provider_sender_instance(provider_name, req)
+                    print("PROVIDER_SENDER_INSTANCE =", sender_instance, flush=True)
+                    
+                    resp_json = send_group_text(provider_group_id, text_to_provider, sender_instance)
+                    
                     send_ok = True
             
                     provider_sent_msg_id = (
