@@ -1350,7 +1350,25 @@ def _after_done_accounting(req, db):
         )
         return
 
-    _after_done_accounting(req, db)
+    try:
+        if req.instance_name:
+            used, limit_value, blocked_now = increment_bot_used_and_maybe_block(
+                db,
+                req.instance_name
+            )
+            print("BOT_USED_AFTER_DONE =", used, flush=True)
+            print("BOT_LIMIT =", limit_value, flush=True)
+            print("BOT_BLOCKED_NOW =", blocked_now, flush=True)
+        else:
+            print("BOT_INSTANCE_MISSING_FOR_REQ =", req.id, flush=True)
+
+    except Exception as bot_limit_exc:
+        print("BOT_LIMIT_UPDATE_ERROR =", str(bot_limit_exc), flush=True)
+
+    try:
+        _handle_group_promotion_after_done(req, db)
+    except Exception as promo_exc:
+        print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
 
 
 NO_TIME_CAPTION_GROUPS = {
