@@ -27,6 +27,65 @@ from pypdf import PdfReader
 PROVIDER4_TEST_GROUPS = set()
 PROVIDER7_TEST_GROUPS = set()
 
+BOT_PROVIDER_MODE_KEY_PREFIX = "BOT_PROVIDER_MODE:"
+DEFAULT_BOT_PROVIDER_MODE = {
+    "docifybot8maya": "GLOBAL_POOL",
+}
+
+
+def _norm_instance(instance_name: str | None) -> str:
+    return (instance_name or "").strip().lower()
+
+
+def _bot_provider_mode(db, instance_name: str | None) -> str:
+    inst = _norm_instance(instance_name)
+    if not inst:
+        return "GLOBAL_POOL"
+
+    default = DEFAULT_BOT_PROVIDER_MODE.get(inst, "GLOBAL_POOL")
+    mode = _get_app_setting(db, f"{BOT_PROVIDER_MODE_KEY_PREFIX}{inst}", default)
+    return (mode or default or "GLOBAL_POOL").strip().upper()
+
+
+def _is_personal_provider_mode(mode: str | None) -> bool:
+    return (mode or "").strip().upper().startswith("PERSONAL:")
+
+
+def _provider_from_mode(mode: str | None) -> str | None:
+    mode = (mode or "").strip().upper()
+
+    if ":" not in mode:
+        return None
+
+    prefix, provider_name = mode.split(":", 1)
+    provider_name = provider_name.strip().upper()
+
+    if provider_name in {
+        "PROVIDER1",
+        "PROVIDER2",
+        "PROVIDER3",
+        "PROVIDER4",
+        "PROVIDER5",
+        "PROVIDER6",
+        "PROVIDER7",
+        "PROVIDER8",
+        "PROVIDER9",
+    }:
+        return provider_name
+
+    return None
+
+
+def _request_is_no_accounting(req, db) -> bool:
+    mode = _bot_provider_mode(db, getattr(req, "instance_name", None))
+    mode_provider = _provider_from_mode(mode)
+
+    return (
+        _is_personal_provider_mode(mode)
+        and mode_provider
+        and (getattr(req, "provider_name", "") or "").strip().upper() == mode_provider
+    )
+
 NO_FAIL_NOTIFY_GROUPS = {
     "120363427267191472@g.us"
 }
@@ -445,7 +504,24 @@ def _pick_provider_name(
     source_group_id: str | None = None,
     term: str | None = None,
     act_type: str | None = None,
+    instance_name: str | None = None,
 ) -> str:
+    mode = _bot_provider_mode(db, instance_name)
+    forced_provider = _provider_from_mode(mode)
+
+    print("BOT_PROVIDER_MODE =", instance_name, mode, flush=True)
+
+    # PERSONAL:PROVIDER9 => fuerza proveedor personal y NO cuenta
+    # GLOBAL:PROVIDER4  => fuerza proveedor global y SÍ cuenta
+    if forced_provider:
+        print("BOT_PROVIDER_FORCED =", forced_provider, flush=True)
+
+        if forced_provider == "PROVIDER4" and not _is_provider4_eligible(term, act_type):
+            raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
+
+        return forced_provider
+
+    # GLOBAL_POOL => usa el pool normal del panel principal y SÍ cuenta
     enabled = sorted(_enabled_providers(db))
 
     print("PICK_PROVIDER_ENABLED =", enabled, flush=True)
@@ -1342,6 +1418,7 @@ def process_request(request_id: int):
             req.source_group_id,
             req.curp,
             req.act_type,
+            req.instance_name,
         )
         provider_group_id = _pick_provider_group(provider_name, req.curp, req.act_type, req.id)
         text_to_provider = _build_provider_message(provider_name, req.curp, req.act_type)
