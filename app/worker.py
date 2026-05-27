@@ -1376,7 +1376,7 @@ def process_request(request_id: int):
         req.updated_at = _utc_now_naive()
         db.commit()
 
-        if req.source_group_id:
+        if req.source_group_id and not _current_mode_is_personal(db, req.instance_name):
             promo_row = (
                 db.query(GroupPromotion)
                 .filter(
@@ -1749,6 +1749,11 @@ def process_request(request_id: int):
                         {"req_id": req.id, "elapsed": p4_elapsed, "err": p4_err},
                         flush=True,
                     )
+                    
+                    if _current_mode_is_personal(db, req.instance_name):
+                        print("PERSONAL_MODE_NO_GLOBAL_FALLBACK =", req.id, flush=True)
+                        raise
+                        
                     _fallback_to_provider3_web(req, db, process_started_ts)
                     return
             
