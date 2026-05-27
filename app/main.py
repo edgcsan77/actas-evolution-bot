@@ -5919,7 +5919,7 @@ async def botpanel_set_provider_mode(token: str, request: Request, db: Session =
         return {"ok": False, "error": str(e)}
 
 
-@app.get("/botpanel/{token}/provider-mode-ui", response_class=HTMLResponse)
+@app.get("/botpanel/{token}/maya/proveedores", response_class=HTMLResponse)
 def botpanel_provider_mode_ui(token: str, db: Session = Depends(get_db)):
     instance_name = _bot_instance_from_token(db, token)
 
