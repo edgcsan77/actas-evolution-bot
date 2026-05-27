@@ -370,6 +370,7 @@ def _enabled_providers(db) -> list[str]:
     p7 = _get_or_create_provider(db, "PROVIDER7", False)
     p8 = _get_or_create_provider(db, "PROVIDER8", False)
     p9 = _get_or_create_provider(db, "PROVIDER9", False)
+    p10 = _get_or_create_provider(db, "PROVIDER10", False)
 
     enabled = []
     if p1.is_enabled:
@@ -390,6 +391,8 @@ def _enabled_providers(db) -> list[str]:
         enabled.append("PROVIDER8")
     if p9.is_enabled:
         enabled.append("PROVIDER9")
+    if p10.is_enabled:
+        enabled.append("PROVIDER10")
 
     return enabled
 
@@ -462,10 +465,10 @@ def _pick_provider_name(
         print("FORZANDO PROVIDER7 =", source_group_id, flush=True)
         return "PROVIDER7"
 
-    # PROVIDER4 solo si es elegible
+    # PROVIDER4 y PROVIDER10 solo si son elegibles para backend tipo Lázaro
     if not _is_provider4_eligible(term, act_type):
-        enabled = [p for p in enabled if p != "PROVIDER4"]
-        print("PROVIDER4_REMOVED_NOT_ELIGIBLE =", enabled, flush=True)
+        enabled = [p for p in enabled if p not in ("PROVIDER4", "PROVIDER10")]
+        print("PROVIDER4_PROVIDER10_REMOVED_NOT_ELIGIBLE =", enabled, flush=True)
 
         if not enabled:
             raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
@@ -616,7 +619,7 @@ def _pick_provider_group(
     if provider_name == "PROVIDER3":
         return None
 
-    if provider_name == "PROVIDER4":
+    if provider_name in ("PROVIDER4", "PROVIDER10"):
         return None
 
     if provider_name == "PROVIDER5":
@@ -677,7 +680,7 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
     if provider_name == "PROVIDER3":
         return None
 
-    if provider_name == "PROVIDER4":
+    if provider_name in ("PROVIDER4", "PROVIDER10"):
         return None
 
     if provider_name == "PROVIDER7":
@@ -791,27 +794,35 @@ def _process_provider3(req, db):
     }
 
 
-def _process_provider4(req, db):
+def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
+
+    provider_name = (provider_name or "PROVIDER4").strip().upper()
 
     term = (req.curp or "").strip()
     chain_mode = is_chain(term) or bool(re.fullmatch(r"\d{15,25}", term))
 
-    print("PROVIDER4_PROCESS_TERM =", term, flush=True)
-    print("PROVIDER4_PROCESS_CHAIN_MODE =", chain_mode, flush=True)
+    print(f"{provider_name}_PROCESS_TERM =", term, flush=True)
+    print(f"{provider_name}_PROCESS_CHAIN_MODE =", chain_mode, flush=True)
 
     if not _is_curp_term(term) and not chain_mode:
-        raise RuntimeError("PROVIDER4_NOT_CURP_OR_CHAIN")
+        raise RuntimeError(f"{provider_name}_NOT_CURP_OR_CHAIN")
 
-    if PROVIDER4_TEST_GROUPS and req.source_group_id not in PROVIDER4_TEST_GROUPS:
+    # La restricción de grupos test solo aplica al Provider4 original.
+    if provider_name == "PROVIDER4" and PROVIDER4_TEST_GROUPS and req.source_group_id not in PROVIDER4_TEST_GROUPS:
         raise RuntimeError("PROVIDER4_NOT_ALLOWED_GROUP")
+
+    hid_key = f"{provider_name}_HID"
 
     setting = (
         db.query(ProviderSetting)
-        .filter(ProviderSetting.provider_name == "PROVIDER4_HID")
+        .filter(ProviderSetting.provider_name == hid_key)
         .first()
     )
     
     hid = setting.value if setting and setting.value else None
+
+    print(f"{provider_name}_HID_KEY =", hid_key, flush=True)
+    print(f"{provider_name}_HID_USING =", hid, flush=True)
     
     client = Provider4Client(hid=hid)
 
@@ -1545,34 +1556,34 @@ def process_request(request_id: int):
         
             return
 
-        if provider_name == "PROVIDER4":
+        if provider_name in ("PROVIDER4", "PROVIDER10"):
             provider4_started_ts = time.perf_counter()
         
             try:
-                provider4_result = _process_provider4(req, db)
+                provider4_result = _process_provider4(req, db, provider_name=provider_name)
 
                 pdf_bytes = provider4_result["pdf_bytes"]
 
                 term = (req.curp or "").strip()
                 chain_mode = is_chain(term) or bool(re.fullmatch(r"\d{15,25}", term))
                 
-                print("PROVIDER4_WORKER_TERM =", term, flush=True)
-                print("PROVIDER4_WORKER_CHAIN_MODE =", chain_mode, flush=True)
+                print(f"{provider_name}_WORKER_TERM =", term, flush=True)
+                print(f"{provider_name}_WORKER_CHAIN_MODE =", chain_mode, flush=True)
                 
                 # Para cadena NO se valida tipo de acta.
                 # La cadena ya identifica el acta; puede ser NAC/MAT/DEF/DIV aunque req.act_type diga NACIMIENTO.
                 if not chain_mode:
                     if not _validate_act_type_pdf(pdf_bytes, req.act_type):
-                        raise RuntimeError("PROVIDER4_WRONG_ACT_TYPE")
+                        raise RuntimeError(f"{provider_name}_WRONG_ACT_TYPE")
                 
                 if chain_mode:
                     if not _validate_pdf_contains_electronic_id_or_code(pdf_bytes, term):
-                        print("PROVIDER4_VALIDATE_FAIL_REQ_ELECTRONIC_ID_OR_CODE =", term, flush=True)
-                        raise RuntimeError(f"PROVIDER4_WRONG_ELECTRONIC_ID_OR_CODE_IN_PDF:{term}")
+                        print(f"{provider_name}_VALIDATE_FAIL_REQ_ELECTRONIC_ID_OR_CODE =", term, flush=True)
+                        raise RuntimeError(f"{provider_name}_WRONG_ELECTRONIC_ID_OR_CODE_IN_PDF:{term}")
                 else:
                     if not _validate_pdf_matches_term(pdf_bytes, term, req.act_type):
-                        print("PROVIDER4_VALIDATE_FAIL_REQ_CURP =", term, flush=True)
-                        raise RuntimeError(f"PROVIDER4_WRONG_CURP_IN_PDF:{term}")
+                        print(f"{provider_name}_VALIDATE_FAIL_REQ_CURP =", term, flush=True)
+                        raise RuntimeError(f"{provider_name}_WRONG_CURP_IN_PDF:{term}")
         
             except Exception as p4_exc:
                 p4_err = str(p4_exc)
@@ -1580,9 +1591,9 @@ def process_request(request_id: int):
                 enabled = _enabled_providers(db)
             
                 if (
-                    p4_err.startswith("PROVIDER4_WRONG_CURP_IN_PDF")
-                    or p4_err.startswith("PROVIDER4_WRONG_ELECTRONIC_ID_OR_CODE_IN_PDF")
-                    or p4_err.startswith("PROVIDER4_WRONG_ACT_TYPE")
+                    p4_err.startswith(f"{provider_name}_WRONG_CURP_IN_PDF")
+                    or p4_err.startswith(f"{provider_name}_WRONG_ELECTRONIC_ID_OR_CODE_IN_PDF")
+                    or p4_err.startswith(f"{provider_name}_WRONG_ACT_TYPE")
                 ):
                     msg = (
                         f"⚠️ Solicitud sin éxito en Registro Civil\n"
@@ -1605,27 +1616,27 @@ def process_request(request_id: int):
                     req.updated_at = _utc_now_naive()
                     db.commit()
             
-                    _notify_support_error(req, p4_err, "PDF cruzado o tipo incorrecto devuelto por Provider4")
+                    _notify_support_error(req, p4_err, f"PDF cruzado o tipo incorrecto devuelto por {provider_name}")
                     return
             
                 fallback_errors = (
-                    p4_err.startswith("PROVIDER4_BACKEND_FAILED:")
-                    or p4_err.startswith("PROVIDER4_VGET_FAILED:")
-                    or p4_err.startswith("PROVIDER4_HISTORY_FAILED:")
-                    or p4_err.startswith("PROVIDER4_HISTORY_NOT_CONFIRMED_PDF:")
-                    or p4_err.startswith("PROVIDER4_HISTORY_NOT_CONFIRMED_FOLIO:")
-                    or p4_err.startswith("PROVIDER4_NO_PDF_LINK_FOR:")
-                    or p4_err.startswith("PROVIDER4_NO_FOLIO_LINK_FOR:")
-                    or p4_err.startswith("PROVIDER4_DOWNLOAD_FAILED:")
-                    or p4_err.startswith("PROVIDER4_FOLIO_DOWNLOAD_FAILED:")
-                    or p4_err.startswith("PROVIDER4_WRONG_ACT_TYPE")
-                    or p4_err.startswith("PROVIDER4_WRONG_CURP_IN_PDF")
-                    or p4_err.startswith("PROVIDER4_WRONG_ELECTRONIC_ID_OR_CODE_IN_PDF")
+                    p4_err.startswith(f"{provider_name}_BACKEND_FAILED:")
+                    or p4_err.startswith(f"{provider_name}_VGET_FAILED:")
+                    or p4_err.startswith(f"{provider_name}_HISTORY_FAILED:")
+                    or p4_err.startswith(f"{provider_name}_HISTORY_NOT_CONFIRMED_PDF:")
+                    or p4_err.startswith(f"{provider_name}_HISTORY_NOT_CONFIRMED_FOLIO:")
+                    or p4_err.startswith(f"{provider_name}_NO_PDF_LINK_FOR:")
+                    or p4_err.startswith(f"{provider_name}_NO_FOLIO_LINK_FOR:")
+                    or p4_err.startswith(f"{provider_name}_DOWNLOAD_FAILED:")
+                    or p4_err.startswith(f"{provider_name}_FOLIO_DOWNLOAD_FAILED:")
+                    or p4_err.startswith(f"{provider_name}_WRONG_ACT_TYPE")
+                    or p4_err.startswith(f"{provider_name}_WRONG_CURP_IN_PDF")
+                    or p4_err.startswith(f"{provider_name}_WRONG_ELECTRONIC_ID_OR_CODE_IN_PDF")
                     or "Read timed out" in p4_err
                 )
             
                 should_fallback = (
-                    p4_err.startswith("PROVIDER4_NO_FORM_ACTION")
+                    p4_err.startswith(f"{provider_name}_NO_FORM_ACTION")
                     or (fallback_errors and p4_elapsed >= 90)
                 )
             
@@ -1646,13 +1657,13 @@ def process_request(request_id: int):
                             send_text(req.requester_wa_id, msg, instance)
             
                         req.status = "ERROR"
-                        req.error_message = f"PROVIDER4_FALLBACK_NO_PROVIDER3:{p4_err}"
+                        req.error_message = f"{provider_name}_FALLBACK_NO_PROVIDER3:{p4_err}"
                         req.updated_at = _utc_now_naive()
                         db.commit()
                         return
             
                     print(
-                        "PROVIDER4_FALLBACK_TO_PROVIDER3 =",
+                        f"{provider_name}_FALLBACK_TO_PROVIDER3 =",
                         {"req_id": req.id, "elapsed": p4_elapsed, "err": p4_err},
                         flush=True,
                     )
@@ -1669,12 +1680,12 @@ def process_request(request_id: int):
             if req.source_group_id not in NO_TIME_CAPTION_GROUPS:
                 caption_text = f"⏱️ Tiempo total: {_fmt_seconds(total_seconds)}"
         
-            print("PROVIDER4_CAPTION =", caption_text, flush=True)
+            print(f"{provider_name}_CAPTION =", caption_text, flush=True)
         
-            delivery_key = f"provider4_delivery:{req.id}:{req.curp}:{req.source_group_id or req.requester_wa_id}"
+            delivery_key = f"{provider_name.lower()}_delivery:{req.id}:{req.curp}:{req.source_group_id or req.requester_wa_id}"
         
             if redis_conn.exists(delivery_key):
-                print("PROVIDER4_DUPLICATE_DELIVERY_IGNORED =", delivery_key, flush=True)
+                print(f"{provider_name}_DUPLICATE_DELIVERY_IGNORED =", delivery_key, flush=True)
                 return
         
             send_ok = False
@@ -1689,7 +1700,7 @@ def process_request(request_id: int):
 
             print("REQ_INSTANCE_NAME =", req.instance_name, flush=True)
             print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
-            print("PROVIDER4_SEND_INSTANCE =", instance, flush=True)
+            print(f"{provider_name}_SEND_INSTANCE =", instance, flush=True)
         
             for attempt in range(3):
                 try:
@@ -1711,22 +1722,22 @@ def process_request(request_id: int):
                         )
         
                     send_ok = True
-                    print(f"PROVIDER4_SEND_OK_ATTEMPT_{attempt+1} =", req.id, flush=True)
-                    print("PROVIDER4_SEND_INSTANCE =", instance, flush=True)
+                    print(f"{provider_name}_SEND_OK_ATTEMPT_{attempt+1} =", req.id, flush=True)
+                    print(f"{provider_name}_SEND_INSTANCE =", instance, flush=True)
                     break
         
                 except Exception as e:
-                    print(f"PROVIDER4_SEND_ATTEMPT_{attempt+1}_ERROR =", str(e), flush=True)
+                    print(f"{provider_name}_SEND_ATTEMPT_{attempt+1}_ERROR =", str(e), flush=True)
                     if attempt == 2:
                         raise
                     time.sleep(2)
         
             if not send_ok:
-                raise RuntimeError("PROVIDER4_PDF_SEND_FAILED")
+                raise RuntimeError(f"{provider_name}_PDF_SEND_FAILED")
         
             redis_conn.set(delivery_key, "1", ex=3600)
         
-            req.provider_media_url = "BASE64_PROVIDER4"
+            req.provider_media_url = f"BASE64_{provider_name}"
             req.pdf_url = None
             req.status = "DONE"
             req.error_message = None
@@ -1957,6 +1968,7 @@ def process_request(request_id: int):
             if (
                 err.startswith("PROVIDER3_NO_RECORD")
                 or err.startswith("PROVIDER4_NO_RECORD")
+                or err.startswith("PROVIDER10_NO_RECORD")
             ):
                 req.status = "ERROR"
                 req.error_message = err
