@@ -9898,7 +9898,7 @@ def _pdf_matches_req_type(pdf_bytes: bytes, req: RequestLog) -> bool:
 
 
 def _provider_pdf_match_status_filter():
-    recent_limit = _utc_now_naive() - timedelta(minutes=10)
+    recent_limit = _utc_now_naive() - timedelta(minutes=5)
 
     return or_(
         RequestLog.status == "PROCESSING",
