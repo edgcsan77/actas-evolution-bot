@@ -10517,7 +10517,7 @@ def _providers_status_text(db: Session) -> str:
         f"LUIS SID:          {s5}{provider5_extra}\n"
         f"ACTAS ESCALANTE:   {s6}{provider6_extra}\n"
         f"ANGEL:             {s8}{provider8_extra}\n"
-        f"EMILIANO:          {s9}{provider9_extra}"
+        f"EMILIANO:          {s9}{provider9_extra}\n"
         f"LAZARO WEB 2:      {s10}{provider10_extra}"
     )
 
