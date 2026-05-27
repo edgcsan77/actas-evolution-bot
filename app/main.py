@@ -729,6 +729,15 @@ def _get_bot_group_name(db: Session, group_jid: str) -> str:
     return _group_name(group_jid)
 
 
+def _exclude_private_provider_query(q, db: Session, instance_name: str):
+    personal_provider = _personal_provider_filter_for_instance(db, instance_name)
+
+    if personal_provider:
+        q = q.filter(RequestLog.provider_name != personal_provider)
+
+    return q
+    
+
 def _bot_groups_for_instance(db: Session, instance_name: str):
     hidden_group_ids = {
         g.group_jid
@@ -5919,7 +5928,7 @@ async def botpanel_set_provider_mode(token: str, request: Request, db: Session =
         return {"ok": False, "error": str(e)}
 
 
-@app.get("/botpanel/{token}/maya/proveedores", response_class=HTMLResponse)
+@app.get("/botpanel/{token}/provider-mode-ui", response_class=HTMLResponse)
 def botpanel_provider_mode_ui(token: str, db: Session = Depends(get_db)):
     instance_name = _bot_instance_from_token(db, token)
 
@@ -6057,6 +6066,11 @@ def botpanel_provider_mode_ui(token: str, db: Session = Depends(get_db)):
     """
 
     return HTMLResponse(html)
+
+
+@app.get("/gestoria-maya/proveedores", response_class=HTMLResponse)
+def maya_provider_mode_ui(db: Session = Depends(get_db)):
+    return botpanel_provider_mode_ui("as5613f4se", db)
 
 
 @app.get("/botpanel/{token}")
