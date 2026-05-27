@@ -71,6 +71,7 @@ def _provider_from_mode(mode: str | None) -> str | None:
         "PROVIDER8",
         "PROVIDER9",
         "PROVIDER10",
+        "MAYAPROVIDER",
     }:
         return provider_name
 
@@ -420,6 +421,7 @@ def _enabled_providers(db) -> list[str]:
     p8 = _get_or_create_provider(db, "PROVIDER8", False)
     p9 = _get_or_create_provider(db, "PROVIDER9", False)
     p10 = _get_or_create_provider(db, "PROVIDER10", False)
+    p11 = _get_or_create_provider(db, "MAYAPROVIDER", False)
 
     enabled = []
     if p1.is_enabled:
@@ -442,6 +444,8 @@ def _enabled_providers(db) -> list[str]:
         enabled.append("PROVIDER9")
     if p10.is_enabled:
         enabled.append("PROVIDER10")
+    if p11.is_enabled:
+        enabled.append("MAYAPROVIDER")
 
     return enabled
 
@@ -733,11 +737,24 @@ def _pick_provider_group(
         idx = (request_id - 1) % len(provider9_groups)
         return provider9_groups[idx]
 
+    if provider_name == "MAYAPROVIDER":
+        provider11_groups = [
+            settings.MAYAPROVIDER_GROUP_1,
+            settings.MAYAPROVIDER_GROUP_2,
+        ]
+        provider11_groups = [g for g in provider11_groups if g]
+    
+        if not provider11_groups:
+            raise RuntimeError("MAYAPROVIDER_GROUPS_NOT_CONFIGURED")
+    
+        idx = (request_id - 1) % len(provider11_groups)
+        return provider11_groups[idx]
+
     raise RuntimeError("UNKNOWN_PROVIDER")
 
 
 def _build_provider_message(provider_name: str, term: str, act_type: str) -> str | None:
-    if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9"):
+    if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9", "MAYAPROVIDER"):
         if is_chain(term):
             return f"{term}"
         provider_type = provider_label_for_type(act_type)
@@ -1458,7 +1475,7 @@ def process_request(request_id: int):
         print("WORKER_PROVIDER_GROUP_ID =", provider_group_id, flush=True)
         print("WORKER_TEXT_TO_PROVIDER =", text_to_provider, flush=True)
 
-        if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9"):
+        if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9", "MAYAPROVIDER"):
             print("PROVIDER_SEND_TO_PROVIDER =", req.id, time.time(), flush=True)
         
             send_ok = False
