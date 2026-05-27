@@ -77,6 +77,98 @@ EVOLUTION_APIKEY = "DOCIFY_EVOLUTION_KEY_2026"
 PANEL_TOKEN = "docifymx2026"
 MAIN_PANEL_INSTANCE = "docifybot8"
 
+BOT_PROVIDER_MODE_KEY_PREFIX = "BOT_PROVIDER_MODE:"
+DEFAULT_BOT_PROVIDER_MODE = {
+    "docifybot8maya": "GLOBAL_POOL",
+}
+
+BOT_PROVIDER_OPTIONS = {
+    "GLOBAL_POOL": "Global automático",
+    "GLOBAL:PROVIDER1": "Global · ADMIN DIGITAL",
+    "GLOBAL:PROVIDER2": "Global · ACTAS DEL SURESTE",
+    "GLOBAL:PROVIDER3": "Global · AUSTRAM WEB",
+    "GLOBAL:PROVIDER4": "Global · LAZARO WEB 1",
+    "GLOBAL:PROVIDER5": "Global · LUIS SID",
+    "GLOBAL:PROVIDER6": "Global · ACTAS ESCALANTE",
+    "GLOBAL:PROVIDER7": "Global · MESINO SID",
+    "GLOBAL:PROVIDER8": "Global · ANGEL",
+    "GLOBAL:PROVIDER9": "Global · EMILIANO",
+    "GLOBAL:PROVIDER10": "Global · LAZARO WEB 2",
+    "PERSONAL:PROVIDER9": "Privado · Proveedor personal",
+}
+
+
+def _norm_instance(instance_name: str | None) -> str:
+    return (instance_name or "").strip().lower()
+
+
+def _bot_provider_mode(db: Session, instance_name: str | None) -> str:
+    inst = _norm_instance(instance_name)
+    if not inst:
+        return "GLOBAL_POOL"
+
+    default = DEFAULT_BOT_PROVIDER_MODE.get(inst, "GLOBAL_POOL")
+    mode = _get_app_setting(db, f"{BOT_PROVIDER_MODE_KEY_PREFIX}{inst}", default)
+    return (mode or default or "GLOBAL_POOL").strip().upper()
+
+
+def _set_bot_provider_mode(db: Session, instance_name: str, mode: str):
+    inst = _norm_instance(instance_name)
+    mode = (mode or "GLOBAL_POOL").strip().upper()
+
+    if mode not in BOT_PROVIDER_OPTIONS:
+        raise ValueError("Modo de proveedor inválido")
+
+    return _set_app_setting(db, f"{BOT_PROVIDER_MODE_KEY_PREFIX}{inst}", mode)
+
+
+def _is_personal_provider_mode(mode: str | None) -> bool:
+    return (mode or "").strip().upper().startswith("PERSONAL:")
+
+
+def _provider_from_mode(mode: str | None) -> str | None:
+    mode = (mode or "").strip().upper()
+
+    if ":" not in mode:
+        return None
+
+    _, provider_name = mode.split(":", 1)
+    provider_name = provider_name.strip().upper()
+
+    if provider_name in {
+        "PROVIDER1",
+        "PROVIDER2",
+        "PROVIDER3",
+        "PROVIDER4",
+        "PROVIDER5",
+        "PROVIDER6",
+        "PROVIDER7",
+        "PROVIDER8",
+        "PROVIDER9",
+        "PROVIDER10",
+    }:
+        return provider_name
+
+    return None
+
+
+def _request_is_no_accounting_main(db: Session, req) -> bool:
+    mode = _bot_provider_mode(db, getattr(req, "instance_name", None))
+    mode_provider = _provider_from_mode(mode)
+
+    return (
+        _is_personal_provider_mode(mode)
+        and mode_provider
+        and (getattr(req, "provider_name", "") or "").strip().upper() == mode_provider
+    )
+
+
+def _personal_provider_filter_for_instance(db: Session, instance_name: str):
+    mode = _bot_provider_mode(db, instance_name)
+    if not _is_personal_provider_mode(mode):
+        return None
+    return _provider_from_mode(mode)
+
 NO_DONE_NOTIFY_GROUPS = {
     "120363427267191472@g.us"
 }
@@ -688,7 +780,8 @@ def _bot_month_30d_start():
 
 def _bot_sales_today(db: Session, instance_name: str) -> int:
     start_utc, end_utc = _bot_day_bounds()
-    return (
+
+    q = (
         db.query(RequestLog)
         .filter(
             RequestLog.instance_name == instance_name,
@@ -696,21 +789,32 @@ def _bot_sales_today(db: Session, instance_name: str) -> int:
             RequestLog.created_at >= start_utc,
             RequestLog.created_at < end_utc,
         )
-        .count()
     )
+
+    personal_provider = _personal_provider_filter_for_instance(db, instance_name)
+    if personal_provider:
+        q = q.filter(RequestLog.provider_name != personal_provider)
+
+    return q.count()
 
 
 def _bot_sales_month(db: Session, instance_name: str) -> int:
     start_utc = _bot_month_30d_start()
-    return (
+
+    q = (
         db.query(RequestLog)
         .filter(
             RequestLog.instance_name == instance_name,
             RequestLog.status == "DONE",
             RequestLog.created_at >= start_utc,
         )
-        .count()
     )
+
+    personal_provider = _personal_provider_filter_for_instance(db, instance_name)
+    if personal_provider:
+        q = q.filter(RequestLog.provider_name != personal_provider)
+
+    return q.count()
 
 
 def _bot_sales_history_30d(db: Session, instance_name: str):
@@ -723,7 +827,7 @@ def _bot_sales_history_30d(db: Session, instance_name: str):
         )
     )
 
-    rows = (
+    q = (
         db.query(
             mx_date.label("day"),
             func.count(RequestLog.id).label("total"),
@@ -733,7 +837,14 @@ def _bot_sales_history_30d(db: Session, instance_name: str):
             RequestLog.status == "DONE",
             RequestLog.created_at >= start_utc,
         )
-        .group_by(mx_date)
+    )
+    
+    personal_provider = _personal_provider_filter_for_instance(db, instance_name)
+    if personal_provider:
+        q = q.filter(RequestLog.provider_name != personal_provider)
+    
+    rows = (
+        q.group_by(mx_date)
         .order_by(mx_date.desc())
         .all()
     )
@@ -749,7 +860,7 @@ def _bot_group_stats(db: Session, instance_name: str):
     out = []
 
     for g in groups:
-        today_done = (
+        q_today = (
             db.query(RequestLog)
             .filter(
                 RequestLog.instance_name == instance_name,
@@ -758,10 +869,15 @@ def _bot_group_stats(db: Session, instance_name: str):
                 RequestLog.created_at >= start_day,
                 RequestLog.created_at < end_day,
             )
-            .count()
         )
+        
+        personal_provider = _personal_provider_filter_for_instance(db, instance_name)
+        if personal_provider:
+            q_today = q_today.filter(RequestLog.provider_name != personal_provider)
+        
+        today_done = q_today.count()
 
-        month_done = (
+        q_month = (
             db.query(RequestLog)
             .filter(
                 RequestLog.instance_name == instance_name,
@@ -769,8 +885,12 @@ def _bot_group_stats(db: Session, instance_name: str):
                 RequestLog.status == "DONE",
                 RequestLog.created_at >= start_30d,
             )
-            .count()
         )
+        
+        if personal_provider:
+            q_month = q_month.filter(RequestLog.provider_name != personal_provider)
+        
+        month_done = q_month.count()
 
         promo = db.query(GroupPromotion).filter_by(group_jid=g.group_jid).first()
 
@@ -1020,6 +1140,11 @@ def botpanel_audit_all_groups(
         RequestLog.created_at >= time_min,
         RequestLog.created_at < time_max,
     )
+
+    personal_provider = _personal_provider_filter_for_instance(db, instance_name)
+
+    if personal_provider:
+        q = q.filter(RequestLog.provider_name != personal_provider)
 
     if status:
         q = q.filter(RequestLog.status == status)
@@ -1751,6 +1876,16 @@ def _query_requests_for_panel(
         RequestLog.created_at < time_max,
         ~RequestLog.source_group_id.in_(HIDDEN_PANEL_GROUPS),
     )
+
+    maya_personal_provider = _personal_provider_filter_for_instance(db, "docifybot8maya")
+
+    if maya_personal_provider:
+        q = q.filter(
+            ~(
+                (RequestLog.instance_name == "docifybot8maya")
+                & (RequestLog.provider_name == maya_personal_provider)
+            )
+        )
 
     if group_jid:
         val = group_jid.strip()
@@ -5397,23 +5532,31 @@ def _panel_cache_key(
 
 def _panel_delivery_metrics(db, time_min, time_max):
     try:
-        rows = (
-            db.query(
-                RequestLog.provider_processing_time,
-                RequestLog.provider_to_webhook_lag_s,
-                RequestLog.t_total_provider1_relay,
-                RequestLog.total_delivery_time,
-            )
-            .filter(
-                RequestLog.created_at >= time_min,
-                RequestLog.created_at < time_max,
-                RequestLog.provider_processing_time.isnot(None),
-                RequestLog.provider_to_webhook_lag_s.isnot(None),
-                RequestLog.t_total_provider1_relay.isnot(None),
-                RequestLog.total_delivery_time.isnot(None),
-            )
-            .all()
+        maya_personal_provider = _personal_provider_filter_for_instance(db, "docifybot8maya")
+    
+        q = db.query(
+            RequestLog.provider_processing_time,
+            RequestLog.provider_to_webhook_lag_s,
+            RequestLog.t_total_provider1_relay,
+            RequestLog.total_delivery_time,
+        ).filter(
+            RequestLog.created_at >= time_min,
+            RequestLog.created_at < time_max,
+            RequestLog.provider_processing_time.isnot(None),
+            RequestLog.provider_to_webhook_lag_s.isnot(None),
+            RequestLog.t_total_provider1_relay.isnot(None),
+            RequestLog.total_delivery_time.isnot(None),
         )
+
+        if maya_personal_provider:
+            q = q.filter(
+                ~(
+                    (RequestLog.instance_name == "docifybot8maya")
+                    & (RequestLog.provider_name == maya_personal_provider)
+                )
+            )
+
+        rows = q.all()
 
         if not rows:
             return None
@@ -5722,6 +5865,50 @@ async def panel_bot_add_group(token: str, request: Request, db: Session = Depend
         return {"ok": False, "error": str(e)}
 
 
+@app.get("/botpanel/{token}/provider-mode")
+def botpanel_get_provider_mode(token: str, db: Session = Depends(get_db)):
+    instance_name = _bot_instance_from_token(db, token)
+    if not instance_name:
+        return {"ok": False, "error": "Panel no válido"}
+
+    mode = _bot_provider_mode(db, instance_name)
+
+    return {
+        "ok": True,
+        "instance_name": instance_name,
+        "mode": mode,
+        "label": BOT_PROVIDER_OPTIONS.get(mode, mode),
+        "options": BOT_PROVIDER_OPTIONS,
+    }
+
+
+@app.post("/botpanel/{token}/provider-mode")
+async def botpanel_set_provider_mode(token: str, request: Request, db: Session = Depends(get_db)):
+    try:
+        instance_name = _bot_instance_from_token(db, token)
+        if not instance_name:
+            return {"ok": False, "error": "Panel no válido"}
+
+        payload = await request.json()
+        mode = (payload.get("mode") or "GLOBAL_POOL").strip().upper()
+
+        _set_bot_provider_mode(db, instance_name, mode)
+
+        _clear_panel_cache()
+        _clear_group_name_cache()
+
+        return {
+            "ok": True,
+            "instance_name": instance_name,
+            "mode": mode,
+            "label": BOT_PROVIDER_OPTIONS.get(mode, mode),
+        }
+
+    except Exception as e:
+        db.rollback()
+        return {"ok": False, "error": str(e)}
+
+
 @app.get("/botpanel/{token}")
 def panel_bot(token: str, db: Session = Depends(get_db)):
     instance_name = _bot_instance_from_token(db, token)
@@ -5739,6 +5926,16 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
     groups = _bot_group_stats(db, instance_name)
     credits = _bot_credit_stats(db, instance_name)
     recharge_rows = _bot_recharge_history(db, instance_name, limit=30)
+
+    provider_mode = _bot_provider_mode(db, instance_name)
+    provider_mode_label = BOT_PROVIDER_OPTIONS.get(provider_mode, provider_mode)
+    
+    provider_mode_options_html = ""
+    for mode_value, mode_label in BOT_PROVIDER_OPTIONS.items():
+        selected = "selected" if mode_value == provider_mode else ""
+        provider_mode_options_html += (
+            f'<option value="{_esc(mode_value)}" {selected}>{_esc(mode_label)}</option>'
+        )
 
     credits = credits or {}
     credits.setdefault("limit", 0)
