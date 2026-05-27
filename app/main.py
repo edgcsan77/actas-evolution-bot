@@ -146,6 +146,7 @@ def _provider_from_mode(mode: str | None) -> str | None:
         "PROVIDER8",
         "PROVIDER9",
         "PROVIDER10",
+        "MAYAPROVIDER",
     }:
         return provider_name
 
@@ -634,6 +635,7 @@ PROVIDER_LABELS = {
     "PROVIDER8": "ANGEL",
     "PROVIDER9": "EMILIANO",
     "PROVIDER10": "LAZARO WEB 2",
+    "MAYAPROVIDER": "PROVEEDOR DE MAYA",
 }
 
 
@@ -10518,6 +10520,8 @@ def _all_provider_groups() -> set[str]:
         settings.PROVIDER8_GROUP_2,
         settings.PROVIDER9_GROUP_1,
         settings.PROVIDER9_GROUP_2,
+        settings.MAYAPROVIDER_GROUP_1,
+        settings.MAYAPROVIDER_GROUP_2,
     }
     return {v.strip() for v in vals if v and v.strip()}
 
