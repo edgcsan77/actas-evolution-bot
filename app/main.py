@@ -6480,6 +6480,7 @@ def panel_provider_weight(payload: dict, db: Session = Depends(get_db)):
         "PROVIDER7",
         "PROVIDER8",
         "PROVIDER9",
+        "PROVIDER10",
     }:
         return {"ok": False, "error": "Proveedor inválido"}
 
@@ -10339,6 +10340,7 @@ def _providers_status_text(db: Session) -> str:
     p7 = _get_or_create_provider(db, "PROVIDER7", False)
     p8 = _get_or_create_provider(db, "PROVIDER8", False)
     p9 = _get_or_create_provider(db, "PROVIDER9", False)
+    p10 = _get_or_create_provider(db, "PROVIDER10", False)
 
     s1 = "ON" if p1.is_enabled else "OFF"
     s2 = "ON" if p2.is_enabled else "OFF"
@@ -10349,6 +10351,7 @@ def _providers_status_text(db: Session) -> str:
     s7 = "ON" if p7.is_enabled else "OFF"
     s8 = "ON" if p8.is_enabled else "OFF"
     s9 = "ON" if p9.is_enabled else "OFF"
+    s10 = "ON" if p10.is_enabled else "OFF"
 
     provider1_extra = ""
     provider2_extra = ""
@@ -10359,6 +10362,7 @@ def _providers_status_text(db: Session) -> str:
     provider7_extra = ""
     provider8_extra = ""
     provider9_extra = ""
+    provider10_extra = ""
 
     local_start = _panel_month_start()
     local_end = _panel_month_end()
@@ -10399,6 +10403,7 @@ def _providers_status_text(db: Session) -> str:
 
     p3_cached = cached.get("provider3", {})
     p4_cached = cached.get("provider4", {})
+    p10_cached = cached.get("provider10", {})
 
     if p3.is_enabled:
         if p3_cached.get("error"):
@@ -10495,15 +10500,25 @@ def _providers_status_text(db: Session) -> str:
     except Exception as e:
         provider9_extra = f" | ERROR DB: {str(e)}"
 
+    if p10.is_enabled:
+        if p10_cached.get("error"):
+            provider10_extra = f" | ERROR: {p10_cached.get('error')}"
+        else:
+            total_done = p10_cached.get("total")
+            provider10_extra = (
+                f" | CURP hechas: {total_done if total_done is not None else 'N/D'}"
+            )
+
     text = (
         f"ADMIN DIGITAL:     {s1}{provider1_extra}\n"
         f"ACTAS DEL SURESTE: {s2}{provider2_extra}\n"
         f"AUSTRAM WEB:       {s3}{provider3_extra}\n"
-        f"LAZARO WEB 1:        {s4}{provider4_extra}\n"
+        f"LAZARO WEB 1:      {s4}{provider4_extra}\n"
         f"LUIS SID:          {s5}{provider5_extra}\n"
         f"ACTAS ESCALANTE:   {s6}{provider6_extra}\n"
         f"ANGEL:             {s8}{provider8_extra}\n"
         f"EMILIANO:          {s9}{provider9_extra}"
+        f"LAZARO WEB 2:      {s10}{provider10_extra}"
     )
 
     return text
