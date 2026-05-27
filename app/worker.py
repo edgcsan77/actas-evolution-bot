@@ -505,8 +505,8 @@ def _pick_provider_name(
 
     print("BOT_PROVIDER_MODE =", instance_name, mode, flush=True)
 
-    # PERSONAL:PROVIDER9 => fuerza proveedor personal y NO cuenta
-    # GLOBAL:PROVIDER4  => fuerza proveedor global y SÍ cuenta
+    # PERSONAL:MAYAPROVIDER => fuerza proveedor personal y NO cuenta
+    # GLOBAL:PROVIDERX      => fuerza proveedor global y SÍ cuenta
     if forced_provider:
         print("BOT_PROVIDER_FORCED =", forced_provider, flush=True)
 
