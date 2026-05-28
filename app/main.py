@@ -741,39 +741,28 @@ def _exclude_private_provider_query(q, db: Session, instance_name: str):
         q = q.filter(RequestLog.provider_name != personal_provider)
 
     return q
-    
 
-def _bot_groups_for_instance(db: Session, instance_name: str):
-    hidden_group_ids = {
-        g.group_jid
-        for g in (
-            db.query(AuthorizedGroup.group_jid)
-            .filter(AuthorizedGroup.is_hidden == True)
-            .all()
-        )
-    }
 
-    q = (
-        db.query(RequestLog.source_group_id)
-        .filter(
-            RequestLog.instance_name == instance_name,
-            RequestLog.source_group_id.isnot(None),
-        )
-    )
-    
-    q = _exclude_private_provider_query(q, db, instance_name)
-    
+def _owned_group_ids_for_instance(db: Session, instance_name: str) -> list[str]:
+    inst = (instance_name or "").strip()
+
     rows = (
-        q.distinct()
+        db.query(AuthorizedGroup.group_jid)
+        .filter(
+            AuthorizedGroup.owner_instance == inst,
+            AuthorizedGroup.is_hidden == False,
+        )
         .all()
     )
 
+    return [gid for (gid,) in rows if gid]
+
+
+def _bot_groups_for_instance(db: Session, instance_name: str):
+    owned_group_ids = _owned_group_ids_for_instance(db, instance_name)
+
     groups = []
-    for (group_jid,) in rows:
-        if not group_jid:
-            continue
-        if group_jid in hidden_group_ids:
-            continue
+    for group_jid in owned_group_ids:
         groups.append(SimpleNamespace(group_jid=group_jid))
 
     groups.sort(key=lambda x: (_get_bot_group_name(db, x.group_jid) or "").lower())
@@ -796,11 +785,16 @@ def _bot_month_30d_start():
 
 def _bot_sales_today(db: Session, instance_name: str) -> int:
     start_utc, end_utc = _bot_day_bounds()
+    owned_group_ids = _owned_group_ids_for_instance(db, instance_name)
+
+    if not owned_group_ids:
+        return 0
 
     q = (
         db.query(RequestLog)
         .filter(
             RequestLog.instance_name == instance_name,
+            RequestLog.source_group_id.in_(owned_group_ids),
             RequestLog.status == "DONE",
             RequestLog.created_at >= start_utc,
             RequestLog.created_at < end_utc,
@@ -814,11 +808,16 @@ def _bot_sales_today(db: Session, instance_name: str) -> int:
 
 def _bot_sales_month(db: Session, instance_name: str) -> int:
     start_utc = _bot_month_30d_start()
+    owned_group_ids = _owned_group_ids_for_instance(db, instance_name)
+
+    if not owned_group_ids:
+        return 0
 
     q = (
         db.query(RequestLog)
         .filter(
             RequestLog.instance_name == instance_name,
+            RequestLog.source_group_id.in_(owned_group_ids),
             RequestLog.status == "DONE",
             RequestLog.created_at >= start_utc,
         )
@@ -831,6 +830,10 @@ def _bot_sales_month(db: Session, instance_name: str) -> int:
 
 def _bot_sales_history_30d(db: Session, instance_name: str):
     start_utc = _bot_month_30d_start()
+    owned_group_ids = _owned_group_ids_for_instance(db, instance_name)
+
+    if not owned_group_ids:
+        return []
 
     mx_date = func.date(
         func.timezone(
@@ -846,13 +849,14 @@ def _bot_sales_history_30d(db: Session, instance_name: str):
         )
         .filter(
             RequestLog.instance_name == instance_name,
+            RequestLog.source_group_id.in_(owned_group_ids),
             RequestLog.status == "DONE",
             RequestLog.created_at >= start_utc,
         )
     )
-    
+
     q = _exclude_private_provider_query(q, db, instance_name)
-    
+
     rows = (
         q.group_by(mx_date)
         .order_by(mx_date.desc())
