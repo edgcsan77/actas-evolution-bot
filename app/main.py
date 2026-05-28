@@ -313,7 +313,24 @@ def _bot_status_rows(db: Session) -> list[dict]:
         
         total = q_total.count()
 
-        used = get_bot_used(db, inst)
+        personal_provider = _personal_provider_filter_for_instance(db, inst)
+
+        if personal_provider:
+            used = (
+                db.query(RequestLog)
+                .filter(
+                    RequestLog.instance_name == inst,
+                    RequestLog.status == "DONE",
+                    or_(
+                        RequestLog.provider_name != personal_provider,
+                        RequestLog.provider_name == None,
+                    ),
+                )
+                .count()
+            )
+        else:
+            used = get_bot_used(db, inst)
+        
         limit_value = get_bot_limit(db, inst)
         blocked = is_instance_blocked(inst)
         ev = _evolution_instance_state(inst)
@@ -5628,7 +5645,21 @@ def _bot_recharge_history(db: Session, instance_name: str, limit: int = 30):
 def _bot_credit_stats(db: Session, instance_name: str):
     try:
         limit_value = get_bot_limit(db, instance_name)
-        used_value = get_bot_used(db, instance_name)
+
+        personal_provider = _personal_provider_filter_for_instance(db, instance_name)
+        
+        if personal_provider:
+            used_value = (
+                db.query(RequestLog)
+                .filter(
+                    RequestLog.instance_name == instance_name,
+                    RequestLog.status == "DONE",
+                    RequestLog.provider_name != personal_provider,
+                )
+                .count()
+            )
+        else:
+            used_value = get_bot_used(db, instance_name)
 
         available = max(limit_value - used_value, 0)
 
