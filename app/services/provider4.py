@@ -205,6 +205,17 @@ class Provider4Client:
                 pdf_bytes = self._download_foliated_pdf(url)
             else:
                 pdf_bytes = self.download_pdf_bytes(url)
+            
+            try:
+                self._assert_pdf_readable(pdf_bytes, term)
+            except Exception as e:
+                print("PROVIDER4_DOWNLOADED_PDF_BAD_RETRY =", str(e), flush=True)
+            
+                if attempt < max_attempts - 1:
+                    time.sleep(sleep_seconds)
+                    continue
+            
+                raise
     
             for retry_complete in range(8):
                 if self._pdf_has_two_pages(pdf_bytes):
@@ -213,7 +224,13 @@ class Provider4Client:
     
                 print("PROVIDER4_PDF_NOT_COMPLETE_RETRY_DOWNLOAD =", retry_complete + 1, flush=True)
                 time.sleep(5)
+                
                 pdf_bytes = self._download_foliated_pdf(url) if use_folio_downloader else self.download_pdf_bytes(url)
+                try:
+                    self._assert_pdf_readable(pdf_bytes, term)
+                except Exception as e:
+                    print("PROVIDER4_REDOWNLOADED_PDF_BAD =", str(e), flush=True)
+                    break
     
             if not is_chain:
                 # Si viene de addFol.php, el folio ya lo puso Lázaro.
@@ -252,6 +269,24 @@ class Provider4Client:
             return self._pdf_num_pages(pdf_bytes) >= 2
         except Exception:
             return False
+
+    def _assert_pdf_readable(self, pdf_bytes: bytes, term: str = "") -> None:
+        try:
+            reader = PdfReader(BytesIO(pdf_bytes))
+            pages = len(reader.pages)
+    
+            if pages < 1:
+                raise RuntimeError("PDF_WITHOUT_PAGES")
+    
+            # Fuerza lectura real de la primera página
+            try:
+                _ = reader.pages[0].mediabox
+            except Exception:
+                pass
+    
+        except Exception as e:
+            print("PROVIDER4_PDF_NOT_READABLE =", term, str(e), flush=True)
+            raise RuntimeError(f"PROVIDER4_PDF_NOT_READABLE:{term}:{str(e)[:300]}")
 
     def _estado_desde_curp(self, curp: str) -> str:
         curp = (curp or "").strip().upper()
