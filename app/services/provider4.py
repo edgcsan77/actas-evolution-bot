@@ -292,8 +292,10 @@ class Provider4Client:
                 folio=inc_folio,
             )
         except Exception as e:
-            print("PROVIDER7_FRAME_FAILED_NO_SEND =", str(e), flush=True)
-            raise RuntimeError(f"PROVIDER7_FRAME_FAILED:{term}")
+            print("PROVIDER7_FRAME_FAILED_USING_ORIGINAL_FRONT =", str(e), flush=True)
+        
+            # Fallback: no se enmarca el frente, pero sí se agrega reverso local
+            framed_pdf = original_pdf_bytes
     
         if estado == "NACIDO_EN_EL_EXTRANJERO":
             print("PROVIDER4_FOREIGN_FORCE_MEXICO_BACK =", term, flush=True)
