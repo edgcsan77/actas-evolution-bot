@@ -444,7 +444,7 @@ def panel_create_bot(
     
     total = visible_static_count + active_dynamic
 
-    if total >= 14:
+    if total >= 15:
         return {"ok": False, "error": "MAX_14_BOTS"}
 
     exists_static = instance_name in BOT_LABELS or instance_name in BOT_PANEL_TOKENS.values()
@@ -725,6 +725,24 @@ def _assert_group_owned_by_bot(db: Session, group_jid: str, instance_name: str):
     if (row.owner_instance or "").strip() != (instance_name or "").strip():
         raise ValueError("Este grupo no pertenece a este bot")
     return row
+
+
+def _should_ignore_group_for_instance(db: Session, group_jid: str | None, instance_name: str | None) -> tuple[bool, str]:
+    if not group_jid:
+        return False, ""
+
+    row = db.query(AuthorizedGroup).filter_by(group_jid=group_jid).first()
+
+    if not row:
+        return True, "unauthorized_group"
+
+    owner = (row.owner_instance or "").strip()
+    current_instance = (instance_name or "").strip()
+
+    if owner and current_instance and owner != current_instance:
+        return True, "group_owner_mismatch"
+
+    return False, ""
 
 
 def _get_bot_group_name(db: Session, group_jid: str) -> str:
@@ -11602,7 +11620,29 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         provider_groups = _all_provider_groups()
         is_provider_message = source_chat_id in provider_groups
         is_admin_command = text_upper.startswith("/")
-
+        
+        if is_group and not is_provider_message and not is_admin_command:
+            ignore_group, ignore_reason = _should_ignore_group_for_instance(
+                db,
+                source_group_id,
+                instance_name,
+            )
+        
+            if ignore_group:
+                print("IGNORED_GROUP_AUTH_EARLY =", {
+                    "reason": ignore_reason,
+                    "source_group_id": source_group_id,
+                    "instance_name": instance_name,
+                    "text": text_body[:120],
+                }, flush=True)
+        
+                return {
+                    "ok": True,
+                    "ignored": ignore_reason,
+                    "source_group_id": source_group_id,
+                    "instance_name": instance_name,
+                }
+        
         if is_group and not is_provider_message:
             try:
                 _ensure_group_owner(db, source_group_id, instance_name)
