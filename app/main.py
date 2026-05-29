@@ -12709,7 +12709,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 last.status = "QUEUED"
                 last.updated_at = _utc_now_naive()
                 db.commit()
-                request_queue.enqueue(process_request, last.id)
+                _enqueue_process_request(last, "requeue_last")
                 _reply_to_origin(source_group_id, requester_wa_id, f"🔁 Reintentando folio {last.id}")
 
             return {"ok": True}
@@ -12930,7 +12930,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 
                 db.commit()
                 
-                request_queue.enqueue(process_request, error_existing.id)
+                _enqueue_process_request(error_existing, "requeue_error_existing")
                 created_any = True
         
                 print("REQUEUED_EXISTING_REQUEST_ID =", error_existing.id, flush=True)
@@ -12995,7 +12995,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 db.commit()
                 db.refresh(row)
                     
-            request_queue.enqueue(process_request, row.id)
+            _enqueue_process_request(row, "manual_requeue")
             created_any = True
         
             print("ENQUEUED_REQUEST_ID =", row.id, flush=True)
