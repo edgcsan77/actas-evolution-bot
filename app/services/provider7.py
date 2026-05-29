@@ -20,7 +20,7 @@ _PROVIDER7_COOLDOWN_KEY = "provider7:sid:cooldown_until"
 _PROVIDER7_BATCH_KEY = "provider7:sid:batch_count"
 
 import requests
-from pypdf import PdfReader, PdfWriter
+from pypdf import PdfReader, PdfWriter, Transformation
 
 from app.config import settings
 from app.services.provider_sid_oaxaca import SidOaxacaClient
@@ -293,47 +293,88 @@ def _resolver_reverso_por_estado(estado: str, estados_dir: Path) -> Path:
 
 
 def _enmarcar_pdf_frente(pdf_bytes: bytes, filename: str, timeout: int = 120, folio: bool = False) -> bytes:
-    url = (getattr(settings, "PROVIDER7_FRAME_URL", "") or DEFAULT_FRAME_URL).strip()
 
-    files = {
-        "pdf_file": (filename, pdf_bytes, "application/pdf"),
-    }
-    
-    data = {
-        "front_frame": "on",
-    }
+    base_dir = Path(__file__).resolve().parent.parent
+    marco_path = base_dir / "assets" / "MARCO-ACTA-DE-NACIMIENTO.pdf"
 
-    if folio:
-        data["folio"] = "on"
-    
-    headers = {
-        "Accept": "*/*",
-        "Origin": "https://enmarcadonew-production.up.railway.app",
-        "Referer": "https://enmarcadonew-production.up.railway.app/",
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/147.0.0.0 Safari/537.36"
-        ),
-    }
+    if not marco_path.exists():
+        raise RuntimeError(f"LOCAL_FRAME_NOT_FOUND:{marco_path}")
 
-    resp = requests.post(
-        url,
-        files=files,
-        data=data,
-        headers=headers,
-        timeout=timeout,
-    )
+    try:
+        src_reader = PdfReader(io.BytesIO(pdf_bytes))
+        if len(src_reader.pages) < 1:
+            raise RuntimeError("SOURCE_PDF_WITHOUT_PAGES")
 
-    if resp.status_code != 200:
-        raise RuntimeError(
-            f"PROVIDER7_FRAME_HTTP_{resp.status_code}: {resp.text[:300]}"
+        marco_reader = PdfReader(str(marco_path))
+        if len(marco_reader.pages) < 1:
+            raise RuntimeError("FRAME_PDF_WITHOUT_PAGES")
+
+        # Página del marco como fondo
+        frame_page = marco_reader.pages[0]
+
+        # Solo usamos la primera página del acta.
+        # Si Lázaro trae 2 páginas, ignoramos su reverso y luego pegamos nuestro reverso local.
+        src_page = src_reader.pages[0]
+
+        fw = float(frame_page.mediabox.width)
+        fh = float(frame_page.mediabox.height)
+        sw = float(src_page.mediabox.width)
+        sh = float(src_page.mediabox.height)
+
+        # Ajustes del área interior del marco.
+        # Si quieres que el acta salga más grande/chica, ajusta estos valores.
+        margin_left = 32
+        margin_right = 32
+        margin_top = 72
+        margin_bottom = 36
+
+        target_w = fw - margin_left - margin_right
+        target_h = fh - margin_top - margin_bottom
+
+        scale = min(target_w / sw, target_h / sh)
+
+        tx = margin_left + ((target_w - (sw * scale)) / 2)
+        ty = margin_bottom + ((target_h - (sh * scale)) / 2)
+
+        src_page.add_transformation(
+            Transformation()
+            .scale(scale)
+            .translate(tx, ty)
         )
 
-    if not resp.content.startswith(b"%PDF"):
-        raise RuntimeError("PROVIDER7_FRAME_INVALID_PDF")
+        # Marco primero, acta encima, dejando visible el borde.
+        frame_page.merge_page(src_page)
 
-    return resp.content
+        writer = PdfWriter()
+        writer.add_page(frame_page)
+
+        out = io.BytesIO()
+        writer.write(out)
+
+        framed = out.getvalue()
+
+        if not framed.startswith(b"%PDF"):
+            raise RuntimeError("LOCAL_FRAME_INVALID_OUTPUT")
+
+        print(
+            "LOCAL_FRAME_OK =",
+            {
+                "filename": filename,
+                "folio": folio,
+                "frame": str(marco_path),
+                "scale": round(scale, 4),
+                "tx": round(tx, 2),
+                "ty": round(ty, 2),
+                "src_pages": len(src_reader.pages),
+            },
+            flush=True,
+        )
+
+        return framed
+
+    except Exception as e:
+        print("LOCAL_FRAME_FAILED =", str(e), flush=True)
+        raise RuntimeError(f"LOCAL_FRAME_FAILED:{filename}:{str(e)[:300]}")
 
 
 def procesar_pdf_externo_provider8(
