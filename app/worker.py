@@ -15,7 +15,8 @@ from app.utils.curp import provider_label_for_type, is_chain
 from app.services.provider3 import Provider3Client, decode_pdf_base64
 from app.services.provider4 import Provider4Client
 from app.services.provider7 import Provider7Client
-from app.queue import redis_conn
+from rq import get_current_job
+from app.queue import redis_conn, slow_request_queue
 from app.provider_status_cache import refresh_providers_status
 from app.utils.bot_limits import increment_bot_used_and_maybe_block
 
@@ -26,6 +27,23 @@ from pypdf import PdfReader
 
 PROVIDER4_TEST_GROUPS = set()
 PROVIDER7_TEST_GROUPS = set()
+
+SLOW_PROVIDER_QUEUE_NAME = "actas_slow"
+SLOW_PROVIDERS = {"PROVIDER4", "PROVIDER10"}
+
+
+def _current_queue_name() -> str:
+    try:
+        job = get_current_job(connection=redis_conn)
+        return (getattr(job, "origin", "") or "").strip()
+    except Exception as e:
+        print("CURRENT_QUEUE_NAME_ERROR =", str(e), flush=True)
+        return ""
+
+
+def _should_reroute_to_slow(provider_name: str | None) -> bool:
+    return (provider_name or "").strip().upper() in SLOW_PROVIDERS
+    
 
 BOT_PROVIDER_MODE_KEY_PREFIX = "BOT_PROVIDER_MODE:"
 DEFAULT_BOT_PROVIDER_MODE = {
@@ -1486,6 +1504,39 @@ def process_request(request_id: int):
         print("WORKER_PROVIDER_NAME =", provider_name, flush=True)
         print("WORKER_PROVIDER_GROUP_ID =", provider_group_id, flush=True)
         print("WORKER_TEXT_TO_PROVIDER =", text_to_provider, flush=True)
+
+        current_queue = _current_queue_name()
+
+        print(
+            "WORKER_CURRENT_QUEUE =",
+            {
+                "request_id": req.id,
+                "provider_name": provider_name,
+                "queue": current_queue,
+            },
+            flush=True,
+        )
+
+        if _should_reroute_to_slow(provider_name) and current_queue != SLOW_PROVIDER_QUEUE_NAME:
+            req.status = "QUEUED"
+            req.updated_at = _utc_now_naive()
+            db.commit()
+
+            job = slow_request_queue.enqueue(process_request, req.id)
+
+            print(
+                "REQUEST_REROUTED_TO_SLOW_QUEUE =",
+                {
+                    "request_id": req.id,
+                    "provider_name": provider_name,
+                    "from_queue": current_queue,
+                    "to_queue": SLOW_PROVIDER_QUEUE_NAME,
+                    "job_id": job.id,
+                },
+                flush=True,
+            )
+
+            return
 
         if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9", "MAYAPROVIDER"):
             print("PROVIDER_SEND_TO_PROVIDER =", req.id, time.time(), flush=True)
