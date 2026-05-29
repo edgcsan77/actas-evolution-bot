@@ -306,6 +306,105 @@ def _solo_primera_pagina_pdf(pdf_bytes: bytes) -> bytes:
     return out.getvalue()
 
 
+def _solo_pagina_pdf(pdf_bytes: bytes, page_index: int) -> bytes:
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+
+    if len(reader.pages) <= page_index:
+        raise RuntimeError(f"SOURCE_PDF_WITHOUT_PAGE_INDEX:{page_index}")
+
+    writer = PdfWriter()
+    writer.add_page(reader.pages[page_index])
+
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+def _unir_pdfs_bytes_raw(pdf1_bytes: bytes, pdf2_bytes: bytes) -> bytes:
+    writer = PdfWriter()
+
+    reader1 = PdfReader(io.BytesIO(pdf1_bytes))
+    for page in reader1.pages:
+        writer.add_page(page)
+
+    reader2 = PdfReader(io.BytesIO(pdf2_bytes))
+    for page in reader2.pages:
+        writer.add_page(page)
+
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+def _pdf_page_has_visible_content(pdf_bytes: bytes, page_index: int = 1) -> bool:
+    """
+    Detecta si una página tiene contenido visible.
+    Sirve para saber si la página 2 de Provider4 es reverso real o hoja blanca.
+    Requiere PyMuPDF / fitz.
+    """
+    try:
+        import fitz
+
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+
+        if len(doc) <= page_index:
+            print("PDF_PAGE_CONTENT_CHECK_NO_PAGE =", page_index, flush=True)
+            return False
+
+        page = doc[page_index]
+
+        text = (page.get_text("text") or "").strip()
+        text_len = len(text)
+
+        pix = page.get_pixmap(matrix=fitz.Matrix(0.25, 0.25), alpha=False)
+
+        w = pix.width
+        h = pix.height
+        n = pix.n
+        data = pix.samples
+
+        non_white = 0
+        total = 0
+
+        for y in range(0, h, 2):
+            for x in range(0, w, 2):
+                idx = (y * w + x) * n
+
+                r = data[idx]
+                g = data[idx + 1]
+                b = data[idx + 2]
+
+                total += 1
+
+                # No blanco / no casi blanco
+                if r < 245 or g < 245 or b < 245:
+                    non_white += 1
+
+        ratio = non_white / max(total, 1)
+
+        has_content = (
+            text_len >= 25
+            or ratio >= 0.015
+        )
+
+        print(
+            "PDF_PAGE_CONTENT_CHECK =",
+            {
+                "page_index": page_index,
+                "text_len": text_len,
+                "non_white_ratio": round(ratio, 4),
+                "has_content": bool(has_content),
+            },
+            flush=True,
+        )
+
+        return bool(has_content)
+
+    except Exception as e:
+        print("PDF_PAGE_CONTENT_CHECK_FAILED =", repr(e), flush=True)
+        return False
+
+
 def _pdf_front_has_green_frame(pdf_bytes: bytes) -> bool:
     """
     Detecta si la página 1 ya trae marco verde.
