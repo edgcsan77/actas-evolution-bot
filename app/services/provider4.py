@@ -380,7 +380,90 @@ class Provider4Client:
         estado_curp = self._estado_desde_curp(curp)
         print("PROVIDER4_REAR_STATE_FROM_CURP_FALLBACK =", estado_curp, flush=True)
         return estado_curp
+
+    def _estado_desde_pdf_o_cadena(self, pdf_bytes: bytes, cadena: str) -> str:
+        """
+        Para reverso local en modo cadena, preferimos la Entidad de Registro visible en el PDF.
+        Si no se puede detectar, caemos al estado derivado de la cadena.
+        """
+        try:
+            text = self._extract_pdf_visible_text(pdf_bytes)
+            text = re.sub(r"\s+", " ", (text or "").upper()).strip()
     
+            estados = [
+                "AGUASCALIENTES",
+                "BAJA CALIFORNIA SUR",
+                "BAJA CALIFORNIA",
+                "CAMPECHE",
+                "COAHUILA",
+                "COLIMA",
+                "CHIAPAS",
+                "CHIHUAHUA",
+                "CIUDAD DE MEXICO",
+                "CIUDAD DE MÉXICO",
+                "DURANGO",
+                "GUANAJUATO",
+                "GUERRERO",
+                "HIDALGO",
+                "JALISCO",
+                "MEXICO",
+                "MÉXICO",
+                "MICHOACAN",
+                "MICHOACÁN",
+                "MORELOS",
+                "NAYARIT",
+                "NUEVO LEON",
+                "NUEVO LEÓN",
+                "OAXACA",
+                "PUEBLA",
+                "QUERETARO",
+                "QUERÉTARO",
+                "QUINTANA ROO",
+                "SAN LUIS POTOSI",
+                "SAN LUIS POTOSÍ",
+                "SINALOA",
+                "SONORA",
+                "TABASCO",
+                "TAMAULIPAS",
+                "TLAXCALA",
+                "VERACRUZ",
+                "YUCATAN",
+                "YUCATÁN",
+                "ZACATECAS",
+            ]
+    
+            m = re.search(
+                r"ENTIDAD\s+DE\s+REGISTRO\s+([A-ZÁÉÍÓÚÑ ]{3,45})",
+                text,
+                flags=re.IGNORECASE,
+            )
+    
+            if m:
+                chunk = m.group(1).upper()
+                for estado in estados:
+                    if estado in chunk:
+                        estado_norm = (
+                            estado.replace("Á", "A")
+                            .replace("É", "E")
+                            .replace("Í", "I")
+                            .replace("Ó", "O")
+                            .replace("Ú", "U")
+                            .replace("Ñ", "N")
+                            .replace(" ", "_")
+                        )
+                        print("PROVIDER4_CHAIN_REAR_STATE_FROM_PDF =", estado_norm, flush=True)
+                        return estado_norm
+    
+        except Exception as e:
+            print("PROVIDER4_CHAIN_REAR_STATE_FROM_PDF_FAILED =", str(e), flush=True)
+    
+        estado_cadena = _estado_desde_cadena(cadena)
+    
+        if not estado_cadena or estado_cadena == "DESCONOCIDO":
+            raise RuntimeError(f"PROVIDER4_CHAIN_CANNOT_REPAIR_NO_STATE:{cadena}")
+    
+        print("PROVIDER4_CHAIN_REAR_STATE_FROM_CHAIN_FALLBACK =", estado_cadena, flush=True)
+        return estado_cadena
     
     def _pdf_rear_matches_estado(self, pdf_bytes: bytes, estado: str) -> bool:
         """
@@ -557,13 +640,27 @@ class Provider4Client:
         original_pdf_bytes = pdf_bytes
         original_pages = self._pdf_num_pages(original_pdf_bytes)
     
-        if original_pages >= 2:
-            print("PROVIDER4_CHAIN_PDF_HAS_2_OR_MORE_PAGES = TRUE", flush=True)
-        else:
-            print("PROVIDER4_CHAIN_PDF_ONE_PAGE_OR_INCOMPLETE = TRUE", flush=True)
+        front_has_frame = False
+        rear_has_content = False
     
         try:
-            estado = _estado_desde_cadena(term)
+            front_has_frame = _pdf_front_has_green_frame(original_pdf_bytes)
+        except Exception as e:
+            print("PROVIDER4_CHAIN_FRONT_FRAME_CHECK_FAILED =", str(e), flush=True)
+            front_has_frame = False
+    
+        if original_pages >= 2:
+            try:
+                rear_has_content = _pdf_page_has_visible_content(
+                    original_pdf_bytes,
+                    page_index=1,
+                )
+            except Exception as e:
+                print("PROVIDER4_CHAIN_REAR_CONTENT_CHECK_FAILED =", str(e), flush=True)
+                rear_has_content = False
+    
+        try:
+            estado = self._estado_desde_pdf_o_cadena(original_pdf_bytes, term)
         except Exception as e:
             print("PROVIDER4_CHAIN_STATE_ERROR =", str(e), flush=True)
             raise RuntimeError(f"PROVIDER4_CHAIN_CANNOT_REPAIR_NO_STATE:{term}")
@@ -572,9 +669,43 @@ class Provider4Client:
             print("PROVIDER4_CHAIN_STATE_UNKNOWN =", term, flush=True)
             raise RuntimeError(f"PROVIDER4_CHAIN_CANNOT_REPAIR_NO_STATE:{term}")
     
+        rear_matches_estado = False
+    
+        if original_pages >= 2 and rear_has_content:
+            rear_matches_estado = self._pdf_rear_matches_estado(
+                original_pdf_bytes,
+                estado,
+            )
+    
+        print(
+            "PROVIDER4_CHAIN_ORIGINAL_PDF_CHECK =",
+            {
+                "pages": original_pages,
+                "front_has_frame": front_has_frame,
+                "rear_has_content": rear_has_content,
+                "estado": estado,
+                "rear_matches_estado": rear_matches_estado,
+            },
+            flush=True,
+        )
+    
+        # Si History/Provider4 ya entregó cadena completa y reverso correcto,
+        # se respeta completo.
+        if original_pages >= 2 and front_has_frame and rear_has_content and rear_matches_estado:
+            print("PROVIDER4_CHAIN_ORIGINAL_PDF_COMPLETE_KEEP_AS_IS = TRUE", flush=True)
+            return original_pdf_bytes
+    
+        if original_pages >= 2:
+            print("PROVIDER4_CHAIN_PDF_NEEDS_REPAIR_DESPITE_2_PAGES = TRUE", flush=True)
+        else:
+            print("PROVIDER4_CHAIN_PDF_ONE_PAGE_OR_INCOMPLETE = TRUE", flush=True)
+    
         base_dir = Path(__file__).resolve().parent.parent
         estados_dir = base_dir / "assets" / "estados"
     
+        # Frente:
+        # Si ya trae marco, _enmarcar_pdf_frente devuelve solo página 1 original.
+        # Si no trae marco, aplica marco local.
         try:
             framed_front = _enmarcar_pdf_frente(
                 original_pdf_bytes,
@@ -585,17 +716,13 @@ class Provider4Client:
             print("PROVIDER4_CHAIN_LOCAL_FRAME_FAILED_NO_SEND =", str(e), flush=True)
             raise RuntimeError(f"PROVIDER4_CHAIN_LOCAL_FRAME_FAILED:{term}:{str(e)[:300]}")
     
-        use_provider4_rear = False
-    
-        if original_pages >= 2:
-            try:
-                use_provider4_rear = _pdf_page_has_visible_content(
-                    original_pdf_bytes,
-                    page_index=1,
-                )
-            except Exception as e:
-                print("PROVIDER4_CHAIN_REAR_CONTENT_CHECK_FAILED =", str(e), flush=True)
-                use_provider4_rear = False
+        # Reverso:
+        # Solo respetar reverso Provider4 si tiene contenido Y coincide con la entidad.
+        use_provider4_rear = (
+            original_pages >= 2
+            and rear_has_content
+            and rear_matches_estado
+        )
     
         if use_provider4_rear:
             print("PROVIDER4_CHAIN_USING_ORIGINAL_REAR_PAGE = TRUE", flush=True)
@@ -611,8 +738,14 @@ class Provider4Client:
             print("PROVIDER4_CHAIN_USING_LOCAL_REAR_PAGE = TRUE", flush=True)
     
             try:
-                reverso_path = _resolver_reverso_por_estado(estado, estados_dir)
+                if estado == "NACIDO_EN_EL_EXTRANJERO":
+                    print("PROVIDER4_CHAIN_FOREIGN_FORCE_MEXICO_BACK =", term, flush=True)
+                    reverso_path = _resolver_reverso_por_estado("MEXICO", estados_dir)
+                else:
+                    reverso_path = _resolver_reverso_por_estado(estado, estados_dir)
+    
                 repaired_pdf = _unir_pdfs_bytes(framed_front, reverso_path)
+    
             except Exception as e:
                 print("PROVIDER4_CHAIN_LOCAL_REAR_JOIN_FAILED =", str(e), flush=True)
                 raise RuntimeError(f"PROVIDER4_CHAIN_LOCAL_REAR_JOIN_FAILED:{term}")
