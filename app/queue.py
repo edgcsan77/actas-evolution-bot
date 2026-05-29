@@ -10,14 +10,22 @@ redis_conn = Redis.from_url(
     retry_on_timeout=True,
 )
 
+REQUEST_TIMEOUT = max(900, int(settings.REQUEST_TIMEOUT_MINUTES) * 60 + 180)
+
 request_queue = Queue(
     "actas",
     connection=redis_conn,
-    default_timeout=max(900, int(settings.REQUEST_TIMEOUT_MINUTES) * 60 + 180)
+    default_timeout=REQUEST_TIMEOUT,
+)
+
+slow_request_queue = Queue(
+    "actas_slow",
+    connection=redis_conn,
+    default_timeout=REQUEST_TIMEOUT,
 )
 
 broadcast_queue = Queue(
     "broadcast",
     connection=redis_conn,
-    default_timeout=1800
+    default_timeout=1800,
 )
