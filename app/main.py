@@ -20,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.db import Base, engine, get_db, SessionLocal
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion, GroupAlias, GroupCategory, BotControl, BotRechargeLog
-from app.queue import request_queue, redis_conn, broadcast_queue
+from app.queue import request_queue, slow_request_queue, redis_conn, broadcast_queue
 from app.worker import process_request, provider3_keepalive_job, _validate_act_type_pdf, _validate_pdf_matches_term, _notify_support_error
 from app.services.provider3 import Provider3Client
 from app.services.provider4 import Provider4Client
@@ -183,6 +183,36 @@ def should_send_extra_text(group_id: str | None) -> bool:
     if not group_id:
         return True
     return group_id not in NO_EXTRA_TEXT_GROUPS
+
+
+SLOW_REQUEST_PROVIDERS = {"PROVIDER4", "PROVIDER10"}
+
+
+def _enqueue_process_request(req, reason: str = ""):
+    provider = (getattr(req, "provider_name", None) or "").strip().upper()
+
+    if provider in SLOW_REQUEST_PROVIDERS:
+        queue_name = "actas_slow"
+        queue = slow_request_queue
+    else:
+        queue_name = "actas"
+        queue = request_queue
+
+    job = queue.enqueue(process_request, req.id)
+
+    print(
+        "REQUEST_ENQUEUED_QUEUE =",
+        {
+            "request_id": req.id,
+            "provider_name": provider,
+            "queue": queue_name,
+            "reason": reason,
+            "job_id": job.id,
+        },
+        flush=True,
+    )
+
+    return job
 
 
 def _evolution_headers():
