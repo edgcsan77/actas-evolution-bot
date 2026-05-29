@@ -323,10 +323,10 @@ def _enmarcar_pdf_frente(pdf_bytes: bytes, filename: str, timeout: int = 120, fo
 
         # Ajustes del área interior del marco.
         # Si quieres que el acta salga más grande/chica, ajusta estos valores.
-        margin_left = 32
-        margin_right = 32
-        margin_top = 72
-        margin_bottom = 36
+        margin_left = 58
+        margin_right = 58
+        margin_top = 130
+        margin_bottom = 70
 
         target_w = fw - margin_left - margin_right
         target_h = fh - margin_top - margin_bottom
