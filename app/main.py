@@ -8306,12 +8306,6 @@ def panel_actas(
                         <button class="btn btn-warning" onclick="refreshHID10()">Actualizar HID</button>
                       </div>
                     </div>
-            
-                  </div>
-            
-                  <div class="status-panel">
-                    <strong>Estado actual</strong><br><br>
-                    {provider_states}
                   </div>
                 </div>
         
@@ -8357,6 +8351,11 @@ def panel_actas(
                         <button class="btn btn-success" onclick="sendFreeBroadcast()">Enviar mensaje libre</button>
                         <button class="btn btn-light" onclick="clearBroadcast()">Limpiar</button>
                       </div>
+                    </div>
+
+                    <div class="status-panel">
+                      <strong>Estado actual</strong><br><br>
+                      {provider_states}
                     </div>
                   </div>
                 </div>
