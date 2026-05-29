@@ -292,6 +292,94 @@ def _resolver_reverso_por_estado(estado: str, estados_dir: Path) -> Path:
     )
 
 
+def _solo_primera_pagina_pdf(pdf_bytes: bytes) -> bytes:
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+
+    if len(reader.pages) < 1:
+        raise RuntimeError("SOURCE_PDF_WITHOUT_PAGES")
+
+    writer = PdfWriter()
+    writer.add_page(reader.pages[0])
+
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+def _pdf_front_has_green_frame(pdf_bytes: bytes) -> bool:
+    """
+    Detecta visualmente si la página 1 ya trae marco verde.
+    Requiere PyMuPDF: pip install pymupdf
+    """
+    try:
+        import fitz
+
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+
+        if len(doc) < 1:
+            return False
+
+        page = doc[0]
+        pix = page.get_pixmap(matrix=fitz.Matrix(0.25, 0.25), alpha=False)
+
+        w = pix.width
+        h = pix.height
+        n = pix.n
+        data = pix.samples
+
+        border = max(4, int(min(w, h) * 0.08))
+
+        total = 0
+        green = 0
+
+        # Muestreo ligero de bordes
+        for y in range(0, h, 2):
+            for x in range(0, w, 2):
+                inside_center = (
+                    border < x < w - border
+                    and border < y < h - border
+                )
+
+                if inside_center:
+                    continue
+
+                idx = (y * w + x) * n
+
+                r = data[idx]
+                g = data[idx + 1]
+                b = data[idx + 2]
+
+                total += 1
+
+                # Verde tipo marco oficial
+                if (
+                    g >= 55
+                    and r <= 150
+                    and b <= 150
+                    and g > r + 8
+                    and g > b + 8
+                ):
+                    green += 1
+
+        ratio = green / max(total, 1)
+
+        print(
+            "LOCAL_FRAME_GREEN_DETECT =",
+            {
+                "green": green,
+                "total": total,
+                "ratio": round(ratio, 4),
+            },
+            flush=True,
+        )
+
+        return ratio >= 0.03
+
+    except Exception as e:
+        print("LOCAL_FRAME_GREEN_DETECT_FAILED =", str(e), flush=True)
+        return False
+
+
 def _enmarcar_pdf_frente(pdf_bytes: bytes, filename: str, timeout: int = 120, folio: bool = False) -> bytes:
 
     base_dir = Path(__file__).resolve().parent.parent
@@ -299,6 +387,10 @@ def _enmarcar_pdf_frente(pdf_bytes: bytes, filename: str, timeout: int = 120, fo
 
     if not marco_path.exists():
         raise RuntimeError(f"LOCAL_FRAME_NOT_FOUND:{marco_path}")
+
+    if _pdf_front_has_green_frame(pdf_bytes):
+        print("LOCAL_FRAME_SKIPPED_SOURCE_ALREADY_HAS_GREEN_FRAME =", filename, flush=True)
+        return _solo_primera_pagina_pdf(pdf_bytes)
 
     try:
         src_reader = PdfReader(io.BytesIO(pdf_bytes))
