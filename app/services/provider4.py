@@ -17,6 +17,7 @@ from app.services.provider7 import (
     _estado_desde_cadena,
     _solo_pagina_pdf,
     _pdf_page_has_visible_content,
+    _pdf_front_has_green_frame,
 )
 
 
@@ -304,29 +305,203 @@ class Provider4Client:
 
         return estado
 
+    def _estado_desde_pdf_o_curp(self, pdf_bytes: bytes, curp: str) -> str:
+        """
+        Para reverso local, preferimos la Entidad de Registro visible en el PDF.
+        Si no se puede detectar, caemos al estado del CURP.
+        """
+        text = self._extract_pdf_visible_text(pdf_bytes)
+        text = re.sub(r"\s+", " ", (text or "").upper()).strip()
+    
+        estados = [
+            "AGUASCALIENTES",
+            "BAJA CALIFORNIA SUR",
+            "BAJA CALIFORNIA",
+            "CAMPECHE",
+            "COAHUILA",
+            "COLIMA",
+            "CHIAPAS",
+            "CHIHUAHUA",
+            "CIUDAD DE MEXICO",
+            "CIUDAD DE MÉXICO",
+            "DURANGO",
+            "GUANAJUATO",
+            "GUERRERO",
+            "HIDALGO",
+            "JALISCO",
+            "MEXICO",
+            "MÉXICO",
+            "MICHOACAN",
+            "MICHOACÁN",
+            "MORELOS",
+            "NAYARIT",
+            "NUEVO LEON",
+            "NUEVO LEÓN",
+            "OAXACA",
+            "PUEBLA",
+            "QUERETARO",
+            "QUERÉTARO",
+            "QUINTANA ROO",
+            "SAN LUIS POTOSI",
+            "SAN LUIS POTOSÍ",
+            "SINALOA",
+            "SONORA",
+            "TABASCO",
+            "TAMAULIPAS",
+            "TLAXCALA",
+            "VERACRUZ",
+            "YUCATAN",
+            "YUCATÁN",
+            "ZACATECAS",
+        ]
+    
+        m = re.search(
+            r"ENTIDAD\s+DE\s+REGISTRO\s+([A-ZÁÉÍÓÚÑ ]{3,45})",
+            text,
+            flags=re.IGNORECASE,
+        )
+    
+        if m:
+            chunk = m.group(1).upper()
+            for estado in estados:
+                if estado in chunk:
+                    estado_norm = (
+                        estado.replace("Á", "A")
+                        .replace("É", "E")
+                        .replace("Í", "I")
+                        .replace("Ó", "O")
+                        .replace("Ú", "U")
+                        .replace("Ñ", "N")
+                        .replace(" ", "_")
+                    )
+                    print("PROVIDER4_REAR_STATE_FROM_PDF =", estado_norm, flush=True)
+                    return estado_norm
+    
+        estado_curp = self._estado_desde_curp(curp)
+        print("PROVIDER4_REAR_STATE_FROM_CURP_FALLBACK =", estado_curp, flush=True)
+        return estado_curp
+    
+    
+    def _pdf_rear_matches_estado(self, pdf_bytes: bytes, estado: str) -> bool:
+        """
+        Valida si la página 2 corresponde al estado esperado.
+        Evita aceptar reversos con contenido pero de otro estado.
+        """
+        try:
+            reader = PdfReader(BytesIO(pdf_bytes))
+    
+            if len(reader.pages) < 2:
+                print("PROVIDER4_REAR_STATE_MATCH_NO_PAGE_2 = TRUE", flush=True)
+                return False
+    
+            try:
+                text = reader.pages[1].extract_text() or ""
+            except Exception:
+                text = ""
+    
+            text = re.sub(r"\s+", " ", text.upper()).strip()
+    
+            expected = (estado or "").upper().replace("_", " ").strip()
+    
+            aliases = {
+                "MEXICO": ["MEXICO", "MÉXICO", "ESTADO DE MEXICO", "ESTADO DE MÉXICO"],
+                "CIUDAD DE MEXICO": ["CIUDAD DE MEXICO", "CIUDAD DE MÉXICO", "CDMX"],
+                "NUEVO LEON": ["NUEVO LEON", "NUEVO LEÓN"],
+                "SAN LUIS POTOSI": ["SAN LUIS POTOSI", "SAN LUIS POTOSÍ"],
+                "QUERETARO": ["QUERETARO", "QUERÉTARO"],
+                "MICHOACAN": ["MICHOACAN", "MICHOACÁN"],
+                "YUCATAN": ["YUCATAN", "YUCATÁN"],
+                "QUINTANA ROO": ["QUINTANA ROO"],
+                "CHIAPAS": ["CHIAPAS"],
+            }
+    
+            candidates = aliases.get(expected, [expected])
+            match = any(c in text for c in candidates)
+    
+            print(
+                "PROVIDER4_REAR_STATE_MATCH =",
+                {
+                    "expected": expected,
+                    "candidates": candidates,
+                    "rear_text_preview": text[:120],
+                    "match": bool(match),
+                },
+                flush=True,
+            )
+    
+            return bool(match)
+    
+        except Exception as e:
+            print("PROVIDER4_REAR_STATE_MATCH_FAILED =", str(e), flush=True)
+            return False
+
     def _repair_pdf_if_needed(self, pdf_bytes: bytes, term: str, inc_folio: bool) -> bytes:
         original_pdf_bytes = pdf_bytes
         original_pages = self._pdf_num_pages(original_pdf_bytes)
     
+        front_has_frame = False
+        rear_has_content = False
+    
+        try:
+            front_has_frame = _pdf_front_has_green_frame(original_pdf_bytes)
+        except Exception as e:
+            print("PROVIDER4_FRONT_FRAME_CHECK_FAILED =", str(e), flush=True)
+            front_has_frame = False
+    
         if original_pages >= 2:
-            print("PROVIDER4_PDF_HAS_2_OR_MORE_PAGES = TRUE", flush=True)
+            try:
+                rear_has_content = _pdf_page_has_visible_content(
+                    original_pdf_bytes,
+                    page_index=1,
+                )
+            except Exception as e:
+                print("PROVIDER4_REAR_CONTENT_CHECK_FAILED =", str(e), flush=True)
+                rear_has_content = False
+    
+        try:
+            estado = self._estado_desde_pdf_o_curp(original_pdf_bytes, term)
+        except Exception as e:
+            print("PROVIDER4_STATE_FOR_REAR_CHECK_FAILED =", str(e), flush=True)
+            estado = self._estado_desde_curp(term)
+    
+        rear_matches_estado = False
+    
+        if original_pages >= 2 and rear_has_content:
+            rear_matches_estado = self._pdf_rear_matches_estado(
+                original_pdf_bytes,
+                estado,
+            )
+    
+        print(
+            "PROVIDER4_ORIGINAL_PDF_CHECK =",
+            {
+                "pages": original_pages,
+                "front_has_frame": front_has_frame,
+                "rear_has_content": rear_has_content,
+                "estado": estado,
+                "rear_matches_estado": rear_matches_estado,
+            },
+            flush=True,
+        )
+    
+        # Si History ya entregó PDF completo Y el reverso corresponde al estado,
+        # se respeta completo.
+        if original_pages >= 2 and front_has_frame and rear_has_content and rear_matches_estado:
+            print("PROVIDER4_ORIGINAL_PDF_COMPLETE_KEEP_AS_IS = TRUE", flush=True)
+            return original_pdf_bytes
+    
+        if original_pages >= 2:
+            print("PROVIDER4_PDF_NEEDS_REPAIR_DESPITE_2_PAGES = TRUE", flush=True)
         else:
             print("PROVIDER4_PDF_ONE_PAGE_OR_INCOMPLETE = TRUE", flush=True)
             print("PROVIDER4_PDF_INCOMPLETE_REPAIRING = TRUE", flush=True)
     
-        try:
-            estado = self._estado_desde_curp(term)
-        except Exception as e:
-            print("PROVIDER4_REPAIR_SKIP_STATE_ERROR_NO_SEND =", str(e), flush=True)
-            raise RuntimeError(f"PROVIDER4_CANNOT_REPAIR_NO_STATE:{term}")
-    
         base_dir = Path(__file__).resolve().parent.parent
         estados_dir = base_dir / "assets" / "estados"
     
-        # 1) Frente:
-        # _enmarcar_pdf_frente ya hace:
-        # - si página 1 ya trae marco: devuelve solo página 1 original
-        # - si página 1 no trae marco: pone marco local y devuelve solo página 1
+        # Frente:
+        # Si ya trae marco, _enmarcar_pdf_frente devuelve solo página 1 original.
+        # Si no trae marco, aplica marco local.
         try:
             framed_front = _enmarcar_pdf_frente(
                 original_pdf_bytes,
@@ -337,20 +512,13 @@ class Provider4Client:
             print("LOCAL_FRAME_FAILED_NO_SEND =", str(e), flush=True)
             raise RuntimeError(f"LOCAL_FRAME_FAILED:{term}:{str(e)[:300]}")
     
-        # 2) Reverso:
-        # Si Provider4 trae página 2 con contenido real, respetarla.
-        # Si no trae página 2 o viene blanca, usar reverso local.
-        use_provider4_rear = False
-    
-        if original_pages >= 2:
-            try:
-                use_provider4_rear = _pdf_page_has_visible_content(
-                    original_pdf_bytes,
-                    page_index=1,
-                )
-            except Exception as e:
-                print("PROVIDER4_REAR_CONTENT_CHECK_FAILED =", str(e), flush=True)
-                use_provider4_rear = False
+        # Reverso:
+        # Solo se respeta el reverso de Provider4 si tiene contenido Y coincide con la entidad del acta.
+        use_provider4_rear = (
+            original_pages >= 2
+            and rear_has_content
+            and rear_matches_estado
+        )
     
         if use_provider4_rear:
             print("PROVIDER4_USING_ORIGINAL_REAR_PAGE = TRUE", flush=True)
