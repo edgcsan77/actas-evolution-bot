@@ -12,8 +12,11 @@ from pathlib import Path
 from app.services.provider7 import (
     _enmarcar_pdf_frente,
     _unir_pdfs_bytes,
+    _unir_pdfs_bytes_raw,
     _resolver_reverso_por_estado,
     _estado_desde_cadena,
+    _solo_pagina_pdf,
+    _pdf_page_has_visible_content,
 )
 
 
@@ -302,13 +305,14 @@ class Provider4Client:
         return estado
 
     def _repair_pdf_if_needed(self, pdf_bytes: bytes, term: str, inc_folio: bool) -> bytes:
-        if self._pdf_has_two_pages(pdf_bytes):
-            print("PROVIDER4_PDF_ALREADY_COMPLETE_BUT_FORCE_LOCAL_FRAME = TRUE", flush=True)
+        original_pdf_bytes = pdf_bytes
+        original_pages = self._pdf_num_pages(original_pdf_bytes)
+    
+        if original_pages >= 2:
+            print("PROVIDER4_PDF_HAS_2_OR_MORE_PAGES = TRUE", flush=True)
         else:
             print("PROVIDER4_PDF_ONE_PAGE_OR_INCOMPLETE = TRUE", flush=True)
             print("PROVIDER4_PDF_INCOMPLETE_REPAIRING = TRUE", flush=True)
-    
-        original_pdf_bytes = pdf_bytes
     
         try:
             estado = self._estado_desde_curp(term)
@@ -319,8 +323,12 @@ class Provider4Client:
         base_dir = Path(__file__).resolve().parent.parent
         estados_dir = base_dir / "assets" / "estados"
     
+        # 1) Frente:
+        # _enmarcar_pdf_frente ya hace:
+        # - si página 1 ya trae marco: devuelve solo página 1 original
+        # - si página 1 no trae marco: pone marco local y devuelve solo página 1
         try:
-            framed_pdf = _enmarcar_pdf_frente(
+            framed_front = _enmarcar_pdf_frente(
                 original_pdf_bytes,
                 f"{term}.pdf",
                 folio=inc_folio,
@@ -329,29 +337,46 @@ class Provider4Client:
             print("LOCAL_FRAME_FAILED_NO_SEND =", str(e), flush=True)
             raise RuntimeError(f"LOCAL_FRAME_FAILED:{term}:{str(e)[:300]}")
     
-        if estado == "NACIDO_EN_EL_EXTRANJERO":
-            print("PROVIDER4_FOREIGN_FORCE_MEXICO_BACK =", term, flush=True)
+        # 2) Reverso:
+        # Si Provider4 trae página 2 con contenido real, respetarla.
+        # Si no trae página 2 o viene blanca, usar reverso local.
+        use_provider4_rear = False
+    
+        if original_pages >= 2:
+            try:
+                use_provider4_rear = _pdf_page_has_visible_content(
+                    original_pdf_bytes,
+                    page_index=1,
+                )
+            except Exception as e:
+                print("PROVIDER4_REAR_CONTENT_CHECK_FAILED =", str(e), flush=True)
+                use_provider4_rear = False
+    
+        if use_provider4_rear:
+            print("PROVIDER4_USING_ORIGINAL_REAR_PAGE = TRUE", flush=True)
     
             try:
-                reverso_path = _resolver_reverso_por_estado("MEXICO", estados_dir)
-                repaired_pdf = _unir_pdfs_bytes(framed_pdf, reverso_path)
+                original_rear = _solo_pagina_pdf(original_pdf_bytes, 1)
+                repaired_pdf = _unir_pdfs_bytes_raw(framed_front, original_rear)
             except Exception as e:
-                print("PROVIDER4_FOREIGN_MEXICO_REAR_JOIN_FAILED =", str(e), flush=True)
-                raise RuntimeError(f"PROVIDER4_FOREIGN_MEXICO_REAR_JOIN_FAILED:{term}")
+                print("PROVIDER4_ORIGINAL_REAR_JOIN_FAILED =", str(e), flush=True)
+                raise RuntimeError(f"PROVIDER4_ORIGINAL_REAR_JOIN_FAILED:{term}")
     
-            if not self._pdf_has_two_pages(repaired_pdf):
-                print("PROVIDER4_FOREIGN_MEXICO_REPAIRED_STILL_INCOMPLETE =", term, flush=True)
-                raise RuntimeError(f"PROVIDER4_FOREIGN_MEXICO_REPAIRED_STILL_INCOMPLETE:{term}")
+        else:
+            print("PROVIDER4_USING_LOCAL_REAR_PAGE = TRUE", flush=True)
     
-            print(f"PROVIDER4_FOREIGN_MEXICO_PDF_PAGE_COUNT = {self._pdf_num_pages(repaired_pdf)}", flush=True)
-            return repaired_pdf
+            try:
+                if estado == "NACIDO_EN_EL_EXTRANJERO":
+                    print("PROVIDER4_FOREIGN_FORCE_MEXICO_BACK =", term, flush=True)
+                    reverso_path = _resolver_reverso_por_estado("MEXICO", estados_dir)
+                else:
+                    reverso_path = _resolver_reverso_por_estado(estado, estados_dir)
     
-        try:
-            reverso_path = _resolver_reverso_por_estado(estado, estados_dir)
-            repaired_pdf = _unir_pdfs_bytes(framed_pdf, reverso_path)
-        except Exception as e:
-            print("PROVIDER4_REAR_JOIN_FAILED_NO_SEND =", str(e), flush=True)
-            raise RuntimeError(f"PROVIDER4_REAR_JOIN_FAILED:{term}")
+                repaired_pdf = _unir_pdfs_bytes(framed_front, reverso_path)
+    
+            except Exception as e:
+                print("PROVIDER4_LOCAL_REAR_JOIN_FAILED =", str(e), flush=True)
+                raise RuntimeError(f"PROVIDER4_LOCAL_REAR_JOIN_FAILED:{term}")
     
         if not self._pdf_has_two_pages(repaired_pdf):
             print("PROVIDER4_REPAIRED_STILL_INCOMPLETE_NO_SEND =", term, flush=True)
@@ -361,8 +386,11 @@ class Provider4Client:
         return repaired_pdf
 
     def _repair_chain_pdf_if_needed(self, pdf_bytes: bytes, term: str) -> bytes:
-        if self._pdf_has_two_pages(pdf_bytes):
-            print("PROVIDER4_CHAIN_PDF_ALREADY_COMPLETE_BUT_FORCE_LOCAL_FRAME = TRUE", flush=True)
+        original_pdf_bytes = pdf_bytes
+        original_pages = self._pdf_num_pages(original_pdf_bytes)
+    
+        if original_pages >= 2:
+            print("PROVIDER4_CHAIN_PDF_HAS_2_OR_MORE_PAGES = TRUE", flush=True)
         else:
             print("PROVIDER4_CHAIN_PDF_ONE_PAGE_OR_INCOMPLETE = TRUE", flush=True)
     
@@ -380,8 +408,8 @@ class Provider4Client:
         estados_dir = base_dir / "assets" / "estados"
     
         try:
-            framed_pdf = _enmarcar_pdf_frente(
-                pdf_bytes,
+            framed_front = _enmarcar_pdf_frente(
+                original_pdf_bytes,
                 f"{term}.pdf",
                 folio=False,
             )
@@ -389,12 +417,37 @@ class Provider4Client:
             print("PROVIDER4_CHAIN_LOCAL_FRAME_FAILED_NO_SEND =", str(e), flush=True)
             raise RuntimeError(f"PROVIDER4_CHAIN_LOCAL_FRAME_FAILED:{term}:{str(e)[:300]}")
     
-        try:
-            reverso_path = _resolver_reverso_por_estado(estado, estados_dir)
-            repaired_pdf = _unir_pdfs_bytes(framed_pdf, reverso_path)
-        except Exception as e:
-            print("PROVIDER4_CHAIN_REAR_JOIN_FAILED =", str(e), flush=True)
-            raise RuntimeError(f"PROVIDER4_CHAIN_REAR_JOIN_FAILED:{term}")
+        use_provider4_rear = False
+    
+        if original_pages >= 2:
+            try:
+                use_provider4_rear = _pdf_page_has_visible_content(
+                    original_pdf_bytes,
+                    page_index=1,
+                )
+            except Exception as e:
+                print("PROVIDER4_CHAIN_REAR_CONTENT_CHECK_FAILED =", str(e), flush=True)
+                use_provider4_rear = False
+    
+        if use_provider4_rear:
+            print("PROVIDER4_CHAIN_USING_ORIGINAL_REAR_PAGE = TRUE", flush=True)
+    
+            try:
+                original_rear = _solo_pagina_pdf(original_pdf_bytes, 1)
+                repaired_pdf = _unir_pdfs_bytes_raw(framed_front, original_rear)
+            except Exception as e:
+                print("PROVIDER4_CHAIN_ORIGINAL_REAR_JOIN_FAILED =", str(e), flush=True)
+                raise RuntimeError(f"PROVIDER4_CHAIN_ORIGINAL_REAR_JOIN_FAILED:{term}")
+    
+        else:
+            print("PROVIDER4_CHAIN_USING_LOCAL_REAR_PAGE = TRUE", flush=True)
+    
+            try:
+                reverso_path = _resolver_reverso_por_estado(estado, estados_dir)
+                repaired_pdf = _unir_pdfs_bytes(framed_front, reverso_path)
+            except Exception as e:
+                print("PROVIDER4_CHAIN_LOCAL_REAR_JOIN_FAILED =", str(e), flush=True)
+                raise RuntimeError(f"PROVIDER4_CHAIN_LOCAL_REAR_JOIN_FAILED:{term}")
     
         if not self._pdf_has_two_pages(repaired_pdf):
             print("PROVIDER4_CHAIN_REPAIRED_STILL_INCOMPLETE =", term, flush=True)
