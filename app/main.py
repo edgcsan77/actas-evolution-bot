@@ -11557,6 +11557,15 @@ def is_bot_generated_text(text: str | None) -> bool:
 @app.post("/webhook/evolution")
 async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
     try:
+        webhook_t0 = time.perf_counter()
+        print(
+            "WEBHOOK_TIMING_START =",
+            {
+                "ts": time.time(),
+            },
+            flush=True,
+        )
+
         #print("WEBHOOK PAYLOAD =", payload, flush=True)
         event = payload.get("event", "")
         data = payload.get("data", {})
@@ -12997,6 +13006,17 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     
             _enqueue_process_request(row, "manual_requeue")
             created_any = True
+
+            print(
+                "WEBHOOK_TIMING_AFTER_ENQUEUE =",
+                {
+                    "request_id": row.id,
+                    "term": row.curp,
+                    "act_type": row.act_type,
+                    "elapsed": round(time.perf_counter() - webhook_t0, 3),
+                },
+                flush=True,
+            )
         
             print("ENQUEUED_REQUEST_ID =", row.id, flush=True)
             print("ENQUEUED_TERM =", row.curp, flush=True)
@@ -13021,15 +13041,48 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 f"Solicitud recibida de {actor}.\n"
                 f"Esto puede tardar unos segundos..."
             )
+
+            ack_t0 = time.perf_counter()
+
+            print(
+                "WEBHOOK_TIMING_ACK_START =",
+                {
+                    "source_group_id": source_group_id,
+                    "requester_wa_id": requester_wa_id,
+                    "instance_name": instance_name,
+                    "elapsed_before_ack": round(ack_t0 - webhook_t0, 3),
+                },
+                flush=True,
+            )
         
             if source_group_id:
                 send_group_text(source_group_id, ack_msg, instance_name=instance_name)
             else:
                 send_text(requester_wa_id, ack_msg, instance_name=instance_name)
+
+            print(
+                "WEBHOOK_TIMING_ACK_DONE =",
+                {
+                    "ack_send_seconds": round(time.perf_counter() - ack_t0, 3),
+                    "total_webhook_seconds": round(time.perf_counter() - webhook_t0, 3),
+                },
+                flush=True,
+            )
+            
         else:
             print("IGNORED_REASON = nothing_created", flush=True)
-        
+
+        print(
+            "WEBHOOK_TIMING_RETURN_OK =",
+            {
+                "total_webhook_seconds": round(time.perf_counter() - webhook_t0, 3),
+            },
+            flush=True,
+        )
+
         return {"ok": True}
+
+        
 
     except Exception as e:
         print("WEBHOOK ERROR:", str(e), payload)
