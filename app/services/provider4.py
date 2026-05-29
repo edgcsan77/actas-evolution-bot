@@ -303,11 +303,10 @@ class Provider4Client:
 
     def _repair_pdf_if_needed(self, pdf_bytes: bytes, term: str, inc_folio: bool) -> bytes:
         if self._pdf_has_two_pages(pdf_bytes):
-            print("PROVIDER4_PDF_ALREADY_COMPLETE = TRUE", flush=True)
-            return pdf_bytes
-    
-        print("PROVIDER4_PDF_ONE_PAGE_OR_INCOMPLETE = TRUE", flush=True)
-        print("PROVIDER4_PDF_INCOMPLETE_REPAIRING = TRUE", flush=True)
+            print("PROVIDER4_PDF_ALREADY_COMPLETE_BUT_FORCE_LOCAL_FRAME = TRUE", flush=True)
+        else:
+            print("PROVIDER4_PDF_ONE_PAGE_OR_INCOMPLETE = TRUE", flush=True)
+            print("PROVIDER4_PDF_INCOMPLETE_REPAIRING = TRUE", flush=True)
     
         original_pdf_bytes = pdf_bytes
     
@@ -327,25 +326,23 @@ class Provider4Client:
                 folio=inc_folio,
             )
         except Exception as e:
-            print("PROVIDER7_FRAME_FAILED_USING_ORIGINAL_FRONT =", str(e), flush=True)
-        
-            # Fallback: no se enmarca el frente, pero sí se agrega reverso local
-            framed_pdf = original_pdf_bytes
+            print("LOCAL_FRAME_FAILED_NO_SEND =", str(e), flush=True)
+            raise RuntimeError(f"LOCAL_FRAME_FAILED:{term}:{str(e)[:300]}")
     
         if estado == "NACIDO_EN_EL_EXTRANJERO":
             print("PROVIDER4_FOREIGN_FORCE_MEXICO_BACK =", term, flush=True)
-        
+    
             try:
                 reverso_path = _resolver_reverso_por_estado("MEXICO", estados_dir)
                 repaired_pdf = _unir_pdfs_bytes(framed_pdf, reverso_path)
             except Exception as e:
                 print("PROVIDER4_FOREIGN_MEXICO_REAR_JOIN_FAILED =", str(e), flush=True)
                 raise RuntimeError(f"PROVIDER4_FOREIGN_MEXICO_REAR_JOIN_FAILED:{term}")
-        
+    
             if not self._pdf_has_two_pages(repaired_pdf):
                 print("PROVIDER4_FOREIGN_MEXICO_REPAIRED_STILL_INCOMPLETE =", term, flush=True)
                 raise RuntimeError(f"PROVIDER4_FOREIGN_MEXICO_REPAIRED_STILL_INCOMPLETE:{term}")
-        
+    
             print(f"PROVIDER4_FOREIGN_MEXICO_PDF_PAGE_COUNT = {self._pdf_num_pages(repaired_pdf)}", flush=True)
             return repaired_pdf
     
@@ -365,11 +362,9 @@ class Provider4Client:
 
     def _repair_chain_pdf_if_needed(self, pdf_bytes: bytes, term: str) -> bytes:
         if self._pdf_has_two_pages(pdf_bytes):
-            print("PROVIDER4_CHAIN_PDF_ALREADY_COMPLETE = TRUE", flush=True)
-            return pdf_bytes
-    
-        print("PROVIDER4_CHAIN_PDF_ONE_PAGE_OR_INCOMPLETE = TRUE", flush=True)
-        print("PROVIDER4_CHAIN_REPAIR_ADD_REAR_FRAME = TRUE", flush=True)
+            print("PROVIDER4_CHAIN_PDF_ALREADY_COMPLETE_BUT_FORCE_LOCAL_FRAME = TRUE", flush=True)
+        else:
+            print("PROVIDER4_CHAIN_PDF_ONE_PAGE_OR_INCOMPLETE = TRUE", flush=True)
     
         try:
             estado = _estado_desde_cadena(term)
@@ -385,8 +380,18 @@ class Provider4Client:
         estados_dir = base_dir / "assets" / "estados"
     
         try:
+            framed_pdf = _enmarcar_pdf_frente(
+                pdf_bytes,
+                f"{term}.pdf",
+                folio=False,
+            )
+        except Exception as e:
+            print("PROVIDER4_CHAIN_LOCAL_FRAME_FAILED_NO_SEND =", str(e), flush=True)
+            raise RuntimeError(f"PROVIDER4_CHAIN_LOCAL_FRAME_FAILED:{term}:{str(e)[:300]}")
+    
+        try:
             reverso_path = _resolver_reverso_por_estado(estado, estados_dir)
-            repaired_pdf = _unir_pdfs_bytes(pdf_bytes, reverso_path)
+            repaired_pdf = _unir_pdfs_bytes(framed_pdf, reverso_path)
         except Exception as e:
             print("PROVIDER4_CHAIN_REAR_JOIN_FAILED =", str(e), flush=True)
             raise RuntimeError(f"PROVIDER4_CHAIN_REAR_JOIN_FAILED:{term}")
