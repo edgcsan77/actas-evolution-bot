@@ -308,8 +308,9 @@ def _solo_primera_pagina_pdf(pdf_bytes: bytes) -> bytes:
 
 def _pdf_front_has_green_frame(pdf_bytes: bytes) -> bool:
     """
-    Detecta visualmente si la página 1 ya trae marco verde.
-    Requiere PyMuPDF: pip install pymupdf
+    Detecta si la página 1 ya trae marco verde.
+    No solo revisa el borde exterior, porque algunos PDFs de Lázaro
+    traen el marco verde metido/insetado dentro de la página.
     """
     try:
         import fitz
@@ -320,60 +321,82 @@ def _pdf_front_has_green_frame(pdf_bytes: bytes) -> bool:
             return False
 
         page = doc[0]
-        pix = page.get_pixmap(matrix=fitz.Matrix(0.25, 0.25), alpha=False)
+        pix = page.get_pixmap(matrix=fitz.Matrix(0.35, 0.35), alpha=False)
 
         w = pix.width
         h = pix.height
         n = pix.n
         data = pix.samples
 
-        border = max(4, int(min(w, h) * 0.08))
+        total_all = 0
+        green_all = 0
 
-        total = 0
-        green = 0
+        total_top = 0
+        green_top = 0
 
-        # Muestreo ligero de bordes
+        total_left_right = 0
+        green_left_right = 0
+
+        # Zonas donde suele venir el marco original:
+        # - parte superior completa
+        # - laterales izquierdo/derecho
+        top_limit = int(h * 0.22)
+        side_width = int(w * 0.18)
+
         for y in range(0, h, 2):
             for x in range(0, w, 2):
-                inside_center = (
-                    border < x < w - border
-                    and border < y < h - border
-                )
-
-                if inside_center:
-                    continue
-
                 idx = (y * w + x) * n
 
                 r = data[idx]
                 g = data[idx + 1]
                 b = data[idx + 2]
 
-                total += 1
+                # Verde oscuro del marco.
+                # Evita contar el watermark verde muy claro.
+                is_dark_green = (
+                    45 <= g <= 150
+                    and r <= 130
+                    and b <= 130
+                    and g > r + 10
+                    and g > b + 10
+                )
 
-                # Verde tipo marco oficial
-                if (
-                    g >= 55
-                    and r <= 150
-                    and b <= 150
-                    and g > r + 8
-                    and g > b + 8
-                ):
-                    green += 1
+                total_all += 1
+                if is_dark_green:
+                    green_all += 1
 
-        ratio = green / max(total, 1)
+                if y <= top_limit:
+                    total_top += 1
+                    if is_dark_green:
+                        green_top += 1
+
+                if x <= side_width or x >= w - side_width:
+                    total_left_right += 1
+                    if is_dark_green:
+                        green_left_right += 1
+
+        ratio_all = green_all / max(total_all, 1)
+        ratio_top = green_top / max(total_top, 1)
+        ratio_sides = green_left_right / max(total_left_right, 1)
 
         print(
             "LOCAL_FRAME_GREEN_DETECT =",
             {
-                "green": green,
-                "total": total,
-                "ratio": round(ratio, 4),
+                "green_all": green_all,
+                "total_all": total_all,
+                "ratio_all": round(ratio_all, 4),
+                "ratio_top": round(ratio_top, 4),
+                "ratio_sides": round(ratio_sides, 4),
             },
             flush=True,
         )
 
-        return ratio >= 0.03
+        # Si ya trae marco, suele haber bastante verde oscuro arriba/laterales.
+        return (
+            ratio_all >= 0.012
+            or ratio_top >= 0.018
+            or ratio_sides >= 0.015
+        )
 
     except Exception as e:
         print("LOCAL_FRAME_GREEN_DETECT_FAILED =", str(e), flush=True)
