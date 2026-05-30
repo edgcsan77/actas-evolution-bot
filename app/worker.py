@@ -29,7 +29,7 @@ PROVIDER4_TEST_GROUPS = set()
 PROVIDER7_TEST_GROUPS = set()
 
 SLOW_PROVIDER_QUEUE_NAME = "actas_slow"
-SLOW_PROVIDERS = {"PROVIDER4", "PROVIDER10"}
+SLOW_PROVIDERS = {"PROVIDER4", "PROVIDER10", "PROVIDER11"}
 
 
 def _current_queue_name() -> str:
@@ -89,6 +89,7 @@ def _provider_from_mode(mode: str | None) -> str | None:
         "PROVIDER8",
         "PROVIDER9",
         "PROVIDER10",
+        "PROVIDER11",
         "MAYAPROVIDER",
     }:
         return provider_name
@@ -439,7 +440,8 @@ def _enabled_providers(db) -> list[str]:
     p8 = _get_or_create_provider(db, "PROVIDER8", False)
     p9 = _get_or_create_provider(db, "PROVIDER9", False)
     p10 = _get_or_create_provider(db, "PROVIDER10", False)
-    p11 = _get_or_create_provider(db, "MAYAPROVIDER", False)
+    p11 = _get_or_create_provider(db, "PROVIDER11", False)
+    p12 = _get_or_create_provider(db, "MAYAPROVIDER", False)
 
     enabled = []
     if p1.is_enabled:
@@ -463,6 +465,8 @@ def _enabled_providers(db) -> list[str]:
     if p10.is_enabled:
         enabled.append("PROVIDER10")
     if p11.is_enabled:
+        enabled.append("PROVIDER11")
+    if p12.is_enabled:
         enabled.append("MAYAPROVIDER")
 
     return enabled
@@ -553,10 +557,10 @@ def _pick_provider_name(
         print("FORZANDO PROVIDER7 =", source_group_id, flush=True)
         return "PROVIDER7"
 
-    # PROVIDER4 y PROVIDER10 solo si son elegibles para backend tipo Lázaro
+    # PROVIDER4, PROVIDER10 y PROVIDER11 solo si son elegibles para backend tipo Lázaro
     if not _is_provider4_eligible(term, act_type):
-        enabled = [p for p in enabled if p not in ("PROVIDER4", "PROVIDER10")]
-        print("PROVIDER4_PROVIDER10_REMOVED_NOT_ELIGIBLE =", enabled, flush=True)
+        enabled = [p for p in enabled if p not in ("PROVIDER4", "PROVIDER10", "PROVIDER11")]
+        print("PROVIDER4_PROVIDER10_PROVIDER11_REMOVED_NOT_ELIGIBLE =", enabled, flush=True)
 
         if not enabled:
             raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
@@ -707,7 +711,7 @@ def _pick_provider_group(
     if provider_name == "PROVIDER3":
         return None
 
-    if provider_name in ("PROVIDER4", "PROVIDER10"):
+    if provider_name in ("PROVIDER4", "PROVIDER10", "PROVIDER11"):
         return None
 
     if provider_name == "PROVIDER5":
@@ -781,7 +785,7 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
     if provider_name == "PROVIDER3":
         return None
 
-    if provider_name in ("PROVIDER4", "PROVIDER10"):
+    if provider_name in ("PROVIDER4", "PROVIDER10", "PROVIDER11"):
         return None
 
     if provider_name == "PROVIDER7":
@@ -1740,7 +1744,7 @@ def process_request(request_id: int):
         
             return
 
-        if provider_name in ("PROVIDER4", "PROVIDER10"):
+        if provider_name in ("PROVIDER4", "PROVIDER10", "PROVIDER11"):
             provider4_started_ts = time.perf_counter()
         
             try:
@@ -2128,6 +2132,7 @@ def process_request(request_id: int):
                 err.startswith("PROVIDER3_NO_RECORD")
                 or err.startswith("PROVIDER4_NO_RECORD")
                 or err.startswith("PROVIDER10_NO_RECORD")
+                or err.startswith("PROVIDER11_NO_RECORD")
             ):
                 req.status = "ERROR"
                 req.error_message = err
