@@ -10921,6 +10921,7 @@ def _providers_status_text(db: Session) -> str:
     p3_cached = cached.get("provider3", {})
     p4_cached = cached.get("provider4", {})
     p10_cached = cached.get("provider10", {})
+    p11_cached = cached.get("provider11", {})
 
     if p3.is_enabled:
         if p3_cached.get("error"):
