@@ -1834,13 +1834,81 @@ def process_request(request_id: int):
                 )
             
                 if should_fallback:
+                    if _current_mode_is_personal(db, req.instance_name):
+                        print("PERSONAL_MODE_NO_GLOBAL_FALLBACK =", req.id, flush=True)
+                        raise
+                
+                    whatsapp_fallbacks = [
+                        p for p in enabled
+                        if p in {
+                            "PROVIDER1",
+                            "PROVIDER2",
+                            "PROVIDER5",
+                            "PROVIDER6",
+                            "PROVIDER8",
+                            "PROVIDER9",
+                        }
+                        and p != provider_name
+                    ]
+                
+                    if whatsapp_fallbacks:
+                        fallback_provider = _pick_provider_by_weight(db, whatsapp_fallbacks) or whatsapp_fallbacks[0]
+                
+                        req.provider_name = fallback_provider
+                        req.provider_group_id = _pick_provider_group(
+                            fallback_provider,
+                            req.curp,
+                            req.act_type,
+                            req.id,
+                        )
+                        req.provider_message = _build_provider_message(
+                            fallback_provider,
+                            req.curp,
+                            req.act_type,
+                        )
+                        req.status = "PROCESSING"
+                        req.error_message = f"{provider_name}_FAILED_FALLBACK_TO_{fallback_provider}:{p4_err[:500]}"
+                        req.updated_at = _utc_now_naive()
+                        db.commit()
+                
+                        print(
+                            "LAZARO_FAILED_FALLBACK_TO_WHATSAPP =",
+                            {
+                                "req_id": req.id,
+                                "failed_provider": provider_name,
+                                "fallback_provider": fallback_provider,
+                                "provider_group_id": req.provider_group_id,
+                                "provider_message": req.provider_message,
+                                "elapsed": round(p4_elapsed, 2),
+                                "err": p4_err[:300],
+                            },
+                            flush=True,
+                        )
+                
+                        send_group_text(
+                            req.provider_group_id,
+                            req.provider_message,
+                            _provider_sender_instance(fallback_provider, req),
+                        )
+                
+                        print(
+                            "LAZARO_FALLBACK_SENT_TO_WHATSAPP_PROVIDER =",
+                            {
+                                "req_id": req.id,
+                                "fallback_provider": fallback_provider,
+                            },
+                            flush=True,
+                        )
+                
+                        return
+                
                     if "PROVIDER3" not in enabled:
                         msg = (
                             "⚠️ *Proveedor temporalmente no disponible*\n\n"
                             "La búsqueda no pudo completarse correctamente en este momento.\n\n"
                             "Intenta nuevamente más tarde."
                         )
-
+                
                         instance = req.instance_name or "docifybot8"
                         if req.source_group_id:
                             if should_send_extra_text(req.source_group_id):
@@ -1848,9 +1916,9 @@ def process_request(request_id: int):
                         else:
                             from app.services.evolution import send_text
                             send_text(req.requester_wa_id, msg, instance)
-            
+                
                         req.status = "ERROR"
-                        req.error_message = f"{provider_name}_FALLBACK_NO_PROVIDER3:{p4_err}"
+                        req.error_message = f"{provider_name}_FALLBACK_NO_PROVIDER_AVAILABLE:{p4_err}"
                         req.updated_at = _utc_now_naive()
                         db.commit()
                         return
