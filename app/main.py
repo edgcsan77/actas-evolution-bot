@@ -136,6 +136,7 @@ def _provider_from_mode(mode: str | None) -> str | None:
         "PROVIDER8",
         "PROVIDER9",
         "PROVIDER10",
+        "PROVIDER11",
         "MAYAPROVIDER",
     }:
         return provider_name
@@ -185,7 +186,7 @@ def should_send_extra_text(group_id: str | None) -> bool:
     return group_id not in NO_EXTRA_TEXT_GROUPS
 
 
-SLOW_REQUEST_PROVIDERS = {"PROVIDER4", "PROVIDER10"}
+SLOW_REQUEST_PROVIDERS = {"PROVIDER4", "PROVIDER10", "PROVIDER11"}
 
 
 def _enqueue_process_request(req, reason: str = ""):
@@ -677,6 +678,7 @@ PROVIDER_LABELS = {
     "PROVIDER8": "ANGEL",
     "PROVIDER9": "EMILIANO",
     "PROVIDER10": "LAZARO WEB 2",
+    "PROVIDER11": "LAZARO WEB 3",
     "MAYAPROVIDER": "PROVEEDOR DE MAYA",
 }
 
@@ -6906,6 +6908,7 @@ def panel_provider_weight(payload: dict, db: Session = Depends(get_db)):
         "PROVIDER8",
         "PROVIDER9",
         "PROVIDER10",
+        "PROVIDER11",
     }:
         return {"ok": False, "error": "Proveedor inválido"}
 
@@ -8336,6 +8339,26 @@ def panel_actas(
                         <button class="btn btn-warning" onclick="refreshHID10()">Actualizar HID</button>
                       </div>
                     </div>
+
+                    <div class="provider-card">
+                      <div class="provider-name">LAZARO WEB 3</div>
+                      <div style="margin:6px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
+                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
+                          <div style="display:flex;align-items:center;gap:6px;">
+                            <input id="weight_PROVIDER11" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER11', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <span style="font-size:12px;opacity:.7;">nivel</span>
+                          </div>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER11')">Aplicar</button>
+                        </div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
+                      </div>
+                      <div class="provider-actions">
+                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER11','on')">Activar</button>
+                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER11','off')">Desactivar</button>
+                        <button class="btn btn-warning" onclick="refreshHID11()">Actualizar HID</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
         
@@ -9181,6 +9204,34 @@ def panel_actas(
         
             if (data.ok) {{
               alert("HID de LAZARO WEB 2 actualizado");
+              location.reload();
+            }} else {{
+              alert(data.error || "Error actualizando HID");
+            }}
+          }} catch (e) {{
+            alert("No se pudo conectar con el servidor");
+          }}
+        }}
+
+        async function refreshHID11() {{
+          const hid = prompt("Pega el nuevo HID de LAZARO WEB 3", "D0cuExprRServ3");
+          if (!hid) return;
+        
+          try {{
+            const res = await fetch("/panel/provider11/hid", {{
+              method: "POST",
+              headers: {{
+                "Content-Type": "application/json"
+              }},
+              body: JSON.stringify({{
+                hid: hid
+              }})
+            }});
+        
+            const data = await res.json();
+        
+            if (data.ok) {{
+              alert("HID de LAZARO WEB 3 actualizado");
               location.reload();
             }} else {{
               alert(data.error || "Error actualizando HID");
@@ -10113,6 +10164,7 @@ def startup():
         _get_or_create_provider(db, "PROVIDER8", False)
         _get_or_create_provider(db, "PROVIDER9", False)
         _get_or_create_provider(db, "PROVIDER10", False)
+        _get_or_create_provider(db, "PROVIDER11", False)
         _get_or_create_provider(db, "MAYAPROVIDER", False)
     
         current = _get_app_setting(db, "PROVIDER3_PHPSESSID", "")
@@ -10184,6 +10236,41 @@ def update_provider10_hid(payload: dict, db: Session = Depends(get_db)):
         db.commit()
 
         print("PROVIDER10_HID_UPDATED =", new_hid, flush=True)
+
+        return {"ok": True}
+
+    except Exception as e:
+        db.rollback()
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/panel/provider11/hid")
+def update_provider11_hid(payload: dict, db: Session = Depends(get_db)):
+    try:
+        new_hid = (payload.get("hid") or "").strip()
+
+        if not new_hid:
+            return {"ok": False, "error": "HID vacío"}
+
+        setting = (
+            db.query(ProviderSetting)
+            .filter(ProviderSetting.provider_name == "PROVIDER11_HID")
+            .first()
+        )
+
+        if not setting:
+            setting = ProviderSetting(
+                provider_name="PROVIDER11_HID",
+                is_enabled=True,
+                value=new_hid,
+            )
+            db.add(setting)
+        else:
+            setting.value = new_hid
+
+        db.commit()
+
+        print("PROVIDER11_HID_UPDATED =", new_hid, flush=True)
 
         return {"ok": True}
 
@@ -10768,6 +10855,7 @@ def _providers_status_text(db: Session) -> str:
     p8 = _get_or_create_provider(db, "PROVIDER8", False)
     p9 = _get_or_create_provider(db, "PROVIDER9", False)
     p10 = _get_or_create_provider(db, "PROVIDER10", False)
+    p11 = _get_or_create_provider(db, "PROVIDER11", False)
 
     s1 = "ON" if p1.is_enabled else "OFF"
     s2 = "ON" if p2.is_enabled else "OFF"
@@ -10779,6 +10867,7 @@ def _providers_status_text(db: Session) -> str:
     s8 = "ON" if p8.is_enabled else "OFF"
     s9 = "ON" if p9.is_enabled else "OFF"
     s10 = "ON" if p10.is_enabled else "OFF"
+    s11 = "ON" if p11.is_enabled else "OFF"
 
     provider1_extra = ""
     provider2_extra = ""
@@ -10790,6 +10879,7 @@ def _providers_status_text(db: Session) -> str:
     provider8_extra = ""
     provider9_extra = ""
     provider10_extra = ""
+    provider11_extra = ""
 
     local_start = _panel_month_start()
     local_end = _panel_month_end()
@@ -10936,6 +11026,15 @@ def _providers_status_text(db: Session) -> str:
                 f" | CURP hechas: {total_done if total_done is not None else 'N/D'}"
             )
 
+    if p11.is_enabled:
+        if p11_cached.get("error"):
+            provider11_extra = f" | ERROR: {p11_cached.get('error')}"
+        else:
+            total_done = p11_cached.get("total")
+            provider11_extra = (
+                f" | CURP hechas: {total_done if total_done is not None else 'N/D'}"
+            )
+
     text = (
         f"ADMIN DIGITAL:     {s1}{provider1_extra}\n"
         f"ACTAS DEL SURESTE: {s2}{provider2_extra}\n"
@@ -10946,6 +11045,7 @@ def _providers_status_text(db: Session) -> str:
         f"ANGEL:             {s8}{provider8_extra}\n"
         f"EMILIANO:          {s9}{provider9_extra}\n"
         f"LAZARO WEB 2:      {s10}{provider10_extra}"
+        f"LAZARO WEB 3:      {s11}{provider11_extra}"
     )
 
     return text
