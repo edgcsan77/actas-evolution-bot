@@ -41,6 +41,16 @@ def refresh_providers_status():
             "total": None,
             "error": None,
             "updated_at": None
+        },
+        "provider10": {
+            "total": None,
+            "error": None,
+            "updated_at": None
+        },
+        "provider11": {
+            "total": None,
+            "error": None,
+            "updated_at": None
         }
     }
 
@@ -77,26 +87,65 @@ def refresh_providers_status():
 
     try:
         now = datetime.now(ZoneInfo("America/Monterrey"))
-
+    
         month_map = {
             1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr",
             5: "May", 6: "Jun", 7: "Jul", 8: "Aug",
             9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec",
         }
-        
+    
         fecha_param = f"{now.day:02d}/{month_map[now.month]}/{now.year}"
-        
-        client4 = Provider4Client()
-        today_count = client4.get_done_count_for_date(fecha_param)
-        
-        result["provider4"]["total"] = today_count
-        result["provider4"]["period"] = "today"
-
+    
+        lazaro_providers = {
+            "provider4": {
+                "label": "PROVIDER4",
+                "hid_key": "PROVIDER4_HID",
+                "default_hid": None,
+            },
+            "provider10": {
+                "label": "PROVIDER10",
+                "hid_key": "PROVIDER10_HID",
+                "default_hid": "D0cuExprRServ2",
+            },
+            "provider11": {
+                "label": "PROVIDER11",
+                "hid_key": "PROVIDER11_HID",
+                "default_hid": "D0cuExprRServ3",
+            },
+        }
+    
+        for cache_name, cfg in lazaro_providers.items():
+            try:
+                hid = _get_app_setting(db, cfg["hid_key"], cfg["default_hid"] or "")
+    
+                # Si por error guardaron URL completa, extrae solo el HID.
+                if "HID=" in hid:
+                    hid = hid.split("HID=", 1)[1].split("&", 1)[0].strip()
+    
+                if hid:
+                    client = Provider4Client(hid=hid)
+                else:
+                    client = Provider4Client()
+    
+                today_count = client.get_done_count_for_date(fecha_param)
+    
+                result[cache_name]["total"] = today_count
+                result[cache_name]["period"] = "today"
+                result[cache_name]["hid"] = hid
+                result[cache_name]["error"] = None
+    
+            except Exception as e:
+                result[cache_name]["error"] = str(e)
+                print(f"{cfg['label']}_STATUS_ERROR =", str(e), flush=True)
+    
+            result[cache_name]["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
     except Exception as e:
-        result["provider4"]["error"] = str(e)
-        print("PROVIDER4_STATUS_ERROR =", str(e), flush=True)
-
-    result["provider4"]["updated_at"] = datetime.now(timezone.utc).isoformat()
+        for cache_name in ("provider4", "provider10", "provider11"):
+            result[cache_name]["error"] = str(e)
+            result[cache_name]["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+        print("LAZARO_STATUS_ERROR =", str(e), flush=True)
 
     _cache_set_json(CACHE_KEY, result, ttl=CACHE_TTL)
 
