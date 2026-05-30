@@ -1276,6 +1276,7 @@ def botpanel_audit_all_groups(
 
     range_buttons = f"""
         <a class="btn" href="/botpanel/{_esc(token)}/audit?period=day&status={_esc(status)}">Hoy</a>
+        <a class="btn" href="/botpanel/{_esc(token)}/audit?period=week&status={_esc(status)}">Semana actual</a>
         <a class="btn" href="/botpanel/{_esc(token)}/audit?period=30d&status={_esc(status)}">30 días</a>
         <a class="btn" href="/botpanel/{_esc(token)}/audit?period=month&status={_esc(status)}">Mes actual</a>
         <a class="btn" href="/botpanel/{_esc(token)}/audit?period=prev_month&status={_esc(status)}">Mes anterior</a>
@@ -1892,6 +1893,22 @@ def _fmt_duration_seconds(seconds):
 def _panel_period_bounds(view: str):
     view = (view or "day").strip().lower()
     
+    if view == "week":
+        now = _panel_now()
+        local_start = now - timedelta(days=now.weekday())
+        local_start = local_start.replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        local_end = local_start + timedelta(days=7)
+
+        utc_start = _panel_to_utc_naive(local_start)
+        utc_end = _panel_to_utc_naive(local_end)
+
+        return utc_start, utc_end, "week"
+        
     if view == "30d":
         now = _panel_now()
         local_start = now - timedelta(days=29)
@@ -8155,6 +8172,7 @@ def panel_actas(
         
               <div class="toolbar">
                 <a href="/panel?token=docifymx2026&view=day&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'day' else ''}">Hoy</a>
+                <a href="/panel?token=docifymx2026&view=week&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'week' else ''}">Semana actual</a>
                 <a href="/panel?token=docifymx2026&view=month&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'month' else ''}">Mes actual</a>
                 <a href="/panel?token=docifymx2026&view=prev_month&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'prev_month' else ''}">Mes anterior</a>
                 <a href="/panel/promotions/report" class="tool-link" target="_blank">Promociones</a>
