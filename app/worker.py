@@ -936,7 +936,12 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
         .first()
     )
 
-    default_hid = "D0cuExprRServ2" if provider_name == "PROVIDER10" else None
+    default_hid_map = {
+        "PROVIDER10": "D0cuExprRServ2",
+        "PROVIDER11": "D0cuExprRServ3",
+    }
+    
+    default_hid = default_hid_map.get(provider_name)
     hid = setting.value if setting and setting.value else default_hid
 
     print(f"{provider_name}_HID_KEY =", hid_key, flush=True)
