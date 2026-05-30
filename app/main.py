@@ -10193,10 +10193,13 @@ def update_provider4_hid(payload: dict, db: Session = Depends(get_db)):
                 provider_name="PROVIDER4_HID",
                 is_enabled=True,
                 value=new_hid,
+                created_at=_utc_now_naive(),
+                updated_at=_utc_now_naive(),
             )
             db.add(setting)
         else:
             setting.value = new_hid
+            setting.updated_at = _utc_now_naive()
 
         db.commit()
 
@@ -10228,10 +10231,13 @@ def update_provider10_hid(payload: dict, db: Session = Depends(get_db)):
                 provider_name="PROVIDER10_HID",
                 is_enabled=True,
                 value=new_hid,
+                created_at=_utc_now_naive(),
+                updated_at=_utc_now_naive(),
             )
             db.add(setting)
         else:
             setting.value = new_hid
+            setting.updated_at = _utc_now_naive()
 
         db.commit()
 
@@ -10263,10 +10269,13 @@ def update_provider11_hid(payload: dict, db: Session = Depends(get_db)):
                 provider_name="PROVIDER11_HID",
                 is_enabled=True,
                 value=new_hid,
+                created_at=_utc_now_naive(),
+                updated_at=_utc_now_naive(),
             )
             db.add(setting)
         else:
             setting.value = new_hid
+            setting.updated_at = _utc_now_naive()
 
         db.commit()
 
