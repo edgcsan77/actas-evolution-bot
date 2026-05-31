@@ -5998,9 +5998,26 @@ def botpanel_remove_promotion(
 
         db.delete(promo)
         db.commit()
+        
+        try:
+            send_group_text(
+                group_jid,
+                (
+                    "⚠️ *Promoción retirada*\n\n"
+                    "La promoción de este grupo fue retirada correctamente.\n"
+                    "Para continuar con paquete promocional, contacta al administrador."
+                ),
+                instance_name=instance_name,
+            )
+        except Exception as notify_exc:
+            print("BOT_PROMOTION_REMOVE_NOTIFY_ERROR =", str(notify_exc), flush=True)
+        
         _clear_panel_cache()
 
-        return {"ok": True}
+        return {
+            "ok": True,
+            "message": "Promoción quitada correctamente"
+        }
 
     except Exception as e:
         db.rollback()
@@ -7064,6 +7081,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
           const data = await res.json();
         
           if (data.ok) {
+            alert(data.message || "Promoción quitada correctamente.");
             location.reload();
           } else {
             alert(data.error || "No se pudo quitar la promoción");
