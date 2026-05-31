@@ -2309,13 +2309,15 @@ def _panel_daily_group_rows(rows: list[RequestLog], db: Session) -> list[dict]:
 def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str, db: Session) -> dict:
     days = {}
 
-    now_local = _panel_now()
     view = (view or "day").strip().lower()
 
-    if view == "month":
-        local_start = _panel_month_start(now_local)
-        local_end = _panel_month_end(now_local)
-    else:
+    time_min, time_max, view = _panel_period_bounds(view)
+    
+    local_start = _to_panel_tz(time_min)
+    local_end = _to_panel_tz(time_max)
+    
+    if not local_start or not local_end:
+        now_local = _panel_now()
         local_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
         local_end = local_start + timedelta(days=1)
 
