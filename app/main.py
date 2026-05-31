@@ -10977,89 +10977,6 @@ def _promotion_available(promo: GroupPromotion) -> int:
     return max(0, (promo.total_actas or 0) - (promo.used_actas or 0))
 
 
-def _notify_bot_promo_balance_after_done(
-    db: Session,
-    group_jid: str | None,
-    instance_name: str | None = None,
-):
-    if not group_jid:
-        return
-
-    promo = _get_group_promotion(db, group_jid)
-
-    if not promo or not promo.is_active:
-        return
-
-    total = int(promo.total_actas or 0)
-    used = int(promo.used_actas or 0)
-
-    if total <= 0:
-        return
-
-    available = max(0, total - used)
-
-    group_limit = int(promo.shared_group_limit_actas or 0)
-    group_used = int(promo.shared_group_used_actas or 0)
-
-    if group_limit > 0:
-        available = min(available, max(0, group_limit - group_used))
-
-    promo_label = (promo.promo_name or "paquete promocional").strip()
-
-    def _send_once(level: int, message: str) -> bool:
-        key = f"promo_notify:{group_jid}:{level}"
-        try:
-            first = redis_conn.set(key, "1", ex=86400 * 30, nx=True)
-            if not first:
-                return False
-        except Exception:
-            pass
-
-        send_group_text(group_jid, message, instance_name=instance_name)
-        return True
-
-    try:
-        if available <= 0 and not bool(promo.warning_sent_0):
-            promo.warning_sent_0 = True
-            promo.is_active = False
-            promo.updated_at = _utc_now_naive()
-
-            block_group(group_jid)
-
-            _send_once(
-                0,
-                (
-                    f"⚠️ *Paquete agotado*\n\n"
-                    f"Tu *{promo_label}* ha sido consumido por completo.\n"
-                    f"El grupo queda pausado automáticamente hasta nueva recarga.\n\n"
-                    f"Contacta al administrador para continuar."
-                ),
-            )
-
-            db.commit()
-            return
-
-        if available <= 10 and not bool(promo.warning_sent_10):
-            promo.warning_sent_10 = True
-            promo.updated_at = _utc_now_naive()
-
-            _send_once(
-                10,
-                (
-                    f"⚠️ *Saldo bajo*\n\n"
-                    f"A tu *{promo_label}* le quedan *{available} actas disponibles*.\n"
-                    f"Te recomendamos solicitar una recarga antes de que se agote."
-                ),
-            )
-
-            db.commit()
-            return
-
-    except Exception as e:
-        db.rollback()
-        print("BOT_PROMO_BALANCE_NOTIFY_ERROR =", str(e), flush=True)
-
-
 def _real_promo_used_count(db: Session, promo: GroupPromotion) -> int:
     return int(promo.used_actas or 0) if promo else 0
 
@@ -12840,12 +12757,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     try:
                          from app.worker import _handle_group_promotion_after_done
                          _handle_group_promotion_after_done(open_req, db)
-
-                         _notify_bot_promo_balance_after_done(
-                             db,
-                             open_req.source_group_id,
-                             open_req.instance_name,
-                         )
                     except Exception as promo_exc:
                          print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
                     finally:
