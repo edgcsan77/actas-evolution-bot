@@ -5764,6 +5764,48 @@ def panel_bot_unblock_group(token: str, group_jid: str, db: Session = Depends(ge
         return {"ok": False, "error": str(e)}
 
 
+@app.post("/botpanel/{token}/bot/block")
+def botpanel_block_bot(token: str, db: Session = Depends(get_db)):
+    try:
+        instance_name = _bot_instance_from_token(db, token)
+        if not instance_name:
+            return {"ok": False, "error": "Panel no válido"}
+
+        block_instance(instance_name)
+        _clear_panel_cache()
+
+        return {
+            "ok": True,
+            "instance_name": instance_name,
+            "blocked": True,
+            "message": "Bot apagado correctamente",
+        }
+
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/botpanel/{token}/bot/unblock")
+def botpanel_unblock_bot(token: str, db: Session = Depends(get_db)):
+    try:
+        instance_name = _bot_instance_from_token(db, token)
+        if not instance_name:
+            return {"ok": False, "error": "Panel no válido"}
+
+        unblock_instance(instance_name)
+        _clear_panel_cache()
+
+        return {
+            "ok": True,
+            "instance_name": instance_name,
+            "blocked": False,
+            "message": "Bot prendido correctamente",
+        }
+
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @app.post("/botpanel/{token}/group/{group_jid}/rename")
 async def panel_bot_rename_group(token: str, group_jid: str, request: Request, db: Session = Depends(get_db)):
     try:
@@ -5860,9 +5902,54 @@ async def panel_bot_set_promo(token: str, request: Request, db: Session = Depend
             )
             db.add(row)
 
+        available = max(0, int(total_actas or 0) - int(row.used_actas or 0))
+
         db.commit()
+
+        try:
+            redis_conn.delete(f"promo_notify:{group_jid}:0")
+            redis_conn.delete(f"promo_notify:{group_jid}:10")
+            redis_conn.delete(f"promo_notify:{group_jid}:50")
+            redis_conn.delete(f"promo_notify:{group_jid}:100")
+            redis_conn.delete(f"promo_notify:{group_jid}:200")
+            redis_conn.delete(f"blocked_group_notify:{group_jid}")
+        except Exception as e:
+            print("BOT_PROMO_NOTIFY_KEYS_CLEAR_ERROR =", str(e), flush=True)
+
+        try:
+            unblock_group(group_jid)
+        except Exception as unblock_exc:
+            print("BOT_PROMO_AUTO_UNBLOCK_ERROR =", str(unblock_exc), flush=True)
+
+        try:
+            promo_label = promo_name or "paquete promocional"
+
+            send_group_text(
+                group_jid,
+                (
+                    f"✅ *Promoción activada*\n\n"
+                    f"Tu *{promo_label}* ya fue activada correctamente.\n"
+                    f"Cuentas con *{available} actas disponibles*.\n\n"
+                    f"Cuando el paquete se agote, el grupo será pausado automáticamente.\n"
+                    f"Gracias por tu preferencia."
+                ),
+                instance_name=instance_name,
+            )
+
+        except Exception as notify_exc:
+            print("BOT_PROMOTION_ACTIVATION_NOTIFY_ERROR =", str(notify_exc), flush=True)
+
         _clear_panel_cache()
-        return {"ok": True}
+
+        return {
+            "ok": True,
+            "message": "Promoción activada y notificada al grupo",
+            "group_jid": group_jid,
+            "promo_name": promo_name,
+            "total_actas": total_actas,
+            "used_actas": int(row.used_actas or 0),
+            "available": available,
+        }
     except Exception as e:
         db.rollback()
         return {"ok": False, "error": str(e)}
@@ -6195,6 +6282,14 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
     blocked_groups = sum(1 for g in groups if g["blocked"])
     active_promos = sum(1 for g in groups if g["promo_active"])
 
+    bot_blocked = is_instance_blocked(instance_name)
+    bot_status_label = "APAGADO" if bot_blocked else "PRENDIDO"
+    bot_status_badge = (
+        '<span class="badge badge-danger">BOT APAGADO</span>'
+        if bot_blocked else
+        '<span class="badge badge-success">BOT PRENDIDO</span>'
+    )
+
     html = f"""
     <html>
     <head>
@@ -6362,6 +6457,13 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
             <div class="label">Promociones activas</div>
             <div class="value">{active_promos}</div>
           </div>
+          <div class="card">
+            <div class="label">Estado del bot</div>
+            <div class="value" style="font-size:20px;">{bot_status_label}</div>
+            <div style="margin-top:10px;">
+              {bot_status_badge}
+            </div>
+          </div>
         </div>
 
         <div class="cards">
@@ -6383,6 +6485,25 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
           <div class="card">
             <div class="label">Recargas realizadas</div>
             <div class="value">{credits['recharges']}</div>
+          </div>
+        </div>
+
+        <div class="box">
+          <div class="head">
+            <strong>Control del bot</strong>
+            <span class="small">Apaga o prende temporalmente este bot sin cerrar sesión de WhatsApp.</span>
+          </div>
+
+          <div style="padding:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+            <div>
+              Estado actual: {bot_status_badge}
+            </div>
+
+            {
+              '<button class="btn btn-success" onclick="unblockMiniBot()">Prender bot</button>'
+              if bot_blocked else
+              '<button class="btn btn-danger" onclick="blockMiniBot()">Apagar bot</button>'
+            }
           </div>
         </div>
 
@@ -6496,6 +6617,16 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
             <strong>Grupos del bot</strong>
             <span class="small">Bloquea, renombra y asigna promociones (mínimo 10 actas).</span>
           </div>
+
+          <div style="padding:14px 16px;border-bottom:1px solid #e5e7eb;background:#f8fafc;">
+            <input
+              id="botGroupSearch"
+              placeholder="Buscar grupo por nombre o ID..."
+              oninput="filterBotGroups()"
+              style="max-width:420px;"
+            >
+          </div>
+
           <div class="table-wrap">
             <table>
               <thead>
@@ -6533,8 +6664,10 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                 f'<button class="btn btn-light" onclick="hideBotGroup(\'{_esc(g["group_jid"])}\')">Ocultar</button>'
             )
 
+            search_text = f'{g["group_name"]} {g["group_jid"]}'.lower()
+
             html += f"""
-                <tr>
+                <tr class="bot-group-row" data-search="{_esc(search_text)}">
                   <td>
                     <strong>{_esc(g["group_name"])}</strong><br>
                     <span class="small">{_esc(g["group_jid"])}</span>
@@ -6690,6 +6823,52 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
 
       <script>
         const BOT_PANEL_BASE = window.location.pathname;
+
+        function filterBotGroups() {
+          const q = (document.getElementById("botGroupSearch")?.value || "").trim().toLowerCase();
+          const rows = document.querySelectorAll(".bot-group-row");
+
+          rows.forEach(row => {
+            const text = (row.dataset.search || "").toLowerCase();
+            row.style.display = (!q || text.includes(q)) ? "" : "none";
+          });
+        }
+
+        async function blockMiniBot() {
+          const ok = confirm("¿Apagar este bot? Mientras esté apagado no responderá solicitudes.");
+          if (!ok) return;
+
+          const res = await fetch(`${BOT_PANEL_BASE}/bot/block`, {
+            method: "POST"
+          });
+
+          const data = await res.json();
+
+          if (data.ok) {
+            alert("Bot apagado correctamente.");
+            location.reload();
+          } else {
+            alert(data.error || "No se pudo apagar el bot.");
+          }
+        }
+
+        async function unblockMiniBot() {
+          const ok = confirm("¿Prender este bot nuevamente?");
+          if (!ok) return;
+
+          const res = await fetch(`${BOT_PANEL_BASE}/bot/unblock`, {
+            method: "POST"
+          });
+
+          const data = await res.json();
+
+          if (data.ok) {
+            alert("Bot prendido correctamente.");
+            location.reload();
+          } else {
+            alert(data.error || "No se pudo prender el bot.");
+          }
+        }
 
         async function blockBotGroup(groupJid) {
           const res = await fetch(`${BOT_PANEL_BASE}/group/${encodeURIComponent(groupJid)}/block`, { method: "POST" });
@@ -10798,6 +10977,89 @@ def _promotion_available(promo: GroupPromotion) -> int:
     return max(0, (promo.total_actas or 0) - (promo.used_actas or 0))
 
 
+def _notify_bot_promo_balance_after_done(
+    db: Session,
+    group_jid: str | None,
+    instance_name: str | None = None,
+):
+    if not group_jid:
+        return
+
+    promo = _get_group_promotion(db, group_jid)
+
+    if not promo or not promo.is_active:
+        return
+
+    total = int(promo.total_actas or 0)
+    used = int(promo.used_actas or 0)
+
+    if total <= 0:
+        return
+
+    available = max(0, total - used)
+
+    group_limit = int(promo.shared_group_limit_actas or 0)
+    group_used = int(promo.shared_group_used_actas or 0)
+
+    if group_limit > 0:
+        available = min(available, max(0, group_limit - group_used))
+
+    promo_label = (promo.promo_name or "paquete promocional").strip()
+
+    def _send_once(level: int, message: str) -> bool:
+        key = f"promo_notify:{group_jid}:{level}"
+        try:
+            first = redis_conn.set(key, "1", ex=86400 * 30, nx=True)
+            if not first:
+                return False
+        except Exception:
+            pass
+
+        send_group_text(group_jid, message, instance_name=instance_name)
+        return True
+
+    try:
+        if available <= 0 and not bool(promo.warning_sent_0):
+            promo.warning_sent_0 = True
+            promo.is_active = False
+            promo.updated_at = _utc_now_naive()
+
+            block_group(group_jid)
+
+            _send_once(
+                0,
+                (
+                    f"⚠️ *Paquete agotado*\n\n"
+                    f"Tu *{promo_label}* ha sido consumido por completo.\n"
+                    f"El grupo queda pausado automáticamente hasta nueva recarga.\n\n"
+                    f"Contacta al administrador para continuar."
+                ),
+            )
+
+            db.commit()
+            return
+
+        if available <= 10 and not bool(promo.warning_sent_10):
+            promo.warning_sent_10 = True
+            promo.updated_at = _utc_now_naive()
+
+            _send_once(
+                10,
+                (
+                    f"⚠️ *Saldo bajo*\n\n"
+                    f"A tu *{promo_label}* le quedan *{available} actas disponibles*.\n"
+                    f"Te recomendamos solicitar una recarga antes de que se agote."
+                ),
+            )
+
+            db.commit()
+            return
+
+    except Exception as e:
+        db.rollback()
+        print("BOT_PROMO_BALANCE_NOTIFY_ERROR =", str(e), flush=True)
+
+
 def _real_promo_used_count(db: Session, promo: GroupPromotion) -> int:
     return int(promo.used_actas or 0) if promo else 0
 
@@ -12578,6 +12840,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     try:
                          from app.worker import _handle_group_promotion_after_done
                          _handle_group_promotion_after_done(open_req, db)
+
+                         _notify_bot_promo_balance_after_done(
+                             db,
+                             open_req.source_group_id,
+                             open_req.instance_name,
+                         )
                     except Exception as promo_exc:
                          print("PROMOTION_UPDATE_ERROR =", str(promo_exc), flush=True)
                     finally:
