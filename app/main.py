@@ -7041,8 +7041,12 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
           });
 
           const data = await res.json();
-          if (data.ok) location.reload();
-          else alert(data.error || "No se pudo aplicar la promoción");
+          if (data.ok) {
+            alert(data.message || "Promoción activada y mensaje enviado al grupo.");
+            location.reload();
+          } else {
+            alert(data.error || "No se pudo aplicar la promoción");
+          }
         }
 
         async function removeBotPromo(groupJid) {
