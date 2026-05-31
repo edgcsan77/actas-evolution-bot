@@ -1276,7 +1276,7 @@ def botpanel_audit_all_groups(
 
     range_buttons = f"""
         <a class="btn" href="/botpanel/{_esc(token)}/audit?period=day&status={_esc(status)}">Hoy</a>
-        <a class="btn" href="/botpanel/{_esc(token)}/audit?period=week&status={_esc(status)}">Semana actual</a>
+        <a class="btn" href="/botpanel/{_esc(token)}/audit?period=week&status={_esc(status)}">Semana actual (lun-dom)</a>
         <a class="btn" href="/botpanel/{_esc(token)}/audit?period=30d&status={_esc(status)}">30 días</a>
         <a class="btn" href="/botpanel/{_esc(token)}/audit?period=month&status={_esc(status)}">Mes actual</a>
         <a class="btn" href="/botpanel/{_esc(token)}/audit?period=prev_month&status={_esc(status)}">Mes anterior</a>
