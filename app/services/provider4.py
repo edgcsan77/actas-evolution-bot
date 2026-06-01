@@ -1310,6 +1310,48 @@ class Provider4Client:
         print("PROVIDER4_EXTRACT_PDF_LINK_NOT_FOUND =", term_up, flush=True)
         return None
 
+    def _find_pdf_link_in_any_lazaro_history(
+        self,
+        term: str,
+        tipoa: str | None = None,
+    ) -> str | None:
+        current_hid = self.HID
+    
+        hids = [
+            "D0cuExprR",
+            "D0cuExprRServ2",
+            "D0cuExprRServ3",
+        ]
+    
+        # Primero probar el HID actual, luego los demás.
+        ordered_hids = [current_hid] + [h for h in hids if h != current_hid]
+    
+        for hid in ordered_hids:
+            try:
+                temp_client = self if hid == current_hid else Provider4Client(hid=hid)
+    
+                print("PROVIDER4_CROSS_HISTORY_CHECK_HID =", hid, flush=True)
+    
+                history_html = temp_client.get_history_html()
+    
+                link = temp_client._extract_pdf_link(history_html, term, tipoa)
+    
+                if link:
+                    print("PROVIDER4_CROSS_HISTORY_LINK_FOUND_HID =", hid, flush=True)
+                    print("PROVIDER4_CROSS_HISTORY_LINK_FOUND =", link, flush=True)
+                    return link
+    
+            except Exception as e:
+                print(
+                    "PROVIDER4_CROSS_HISTORY_CHECK_ERROR =",
+                    hid,
+                    str(e),
+                    flush=True,
+                )
+    
+        print("PROVIDER4_CROSS_HISTORY_LINK_NOT_FOUND =", term, flush=True)
+        return None
+
     def _extract_folio_link(self, history_html: str, term: str, tipoa: str | None = None) -> str | None:
         row_html = self._history_row_for_term(history_html, term, tipoa)
         if not row_html:
@@ -1636,7 +1678,26 @@ class Provider4Client:
                     #if early_direct_pdf_bytes:
                     #    print("PROVIDER4_USING_CONFIRMED_EARLY_DIRECT_PDF = TRUE", flush=True)
                     #    return early_direct_pdf_bytes
-    
+
+            # Fallback cruzado: a veces Lázaro registra el PDF en otro Web/HID.
+            if not inc_folio:
+                cross_link = self._find_pdf_link_in_any_lazaro_history(term, history_tipoa)
+                if cross_link:
+                    history_confirmed = True
+                    print("PROVIDER4_CROSS_HISTORY_FINAL_DOWNLOAD_LINK =", cross_link, flush=True)
+            
+                    pdf_bytes = self._download_and_validate_with_retries(
+                        url=cross_link,
+                        term=term,
+                        tipoa=tipoa,
+                        inc_folio=inc_folio,
+                        is_chain=is_chain,
+                        use_folio_downloader=False,
+                        max_attempts=4,
+                        sleep_seconds=4,
+                    )
+                    return pdf_bytes
+            
             print(
                 f"PROVIDER4_HISTORY_LINK_NOT_READY_ATTEMPT_{poll_attempt+1} = {term}",
                 flush=True,
