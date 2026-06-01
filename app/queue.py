@@ -10,7 +10,7 @@ redis_conn = Redis.from_url(
     retry_on_timeout=True,
 )
 
-REQUEST_TIMEOUT = max(900, int(settings.REQUEST_TIMEOUT_MINUTES) * 60 + 180)
+REQUEST_TIMEOUT = int(settings.REQUEST_TIMEOUT_MINUTES) * 60 + 180
 
 request_queue = Queue(
     "actas",
