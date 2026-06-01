@@ -832,6 +832,8 @@ class Provider4Client:
                 looks_useful = (
                     "ENVIADO" in html_up
                     or "NO_LOCALIZADO" in html_up
+                    or "TRAMITEEXISTENTE" in html_up
+                    or "TRÁMITEEXISTENTE" in html_up
                     or "<FORM" in html_up
                     or "ACTION" in html_up
                 )
@@ -1463,6 +1465,8 @@ class Provider4Client:
             or "SU TRAMITE HA SIDO ENVIADO" in html_up
             or "ENVIADO CON EXITO" in html_up
             or "ENVIADO CON ÉXITO" in html_up
+            or "TRAMITEEXISTENTE" in html_up
+            or "TRÁMITEEXISTENTE" in html_up
         ):
             vget_html = html
         
