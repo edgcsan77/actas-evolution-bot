@@ -555,9 +555,6 @@ def panel_create_bot(
                     "webhook_by_events": False,
                     "events": [
                         "MESSAGES_UPSERT",
-                        "MESSAGES_UPDATE",
-                        "SEND_MESSAGE",
-                        "CONNECTION_UPDATE",
                     ],
                 }
             },
@@ -13386,10 +13383,36 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 flush=True,
             )
         
-            if source_group_id:
-                send_group_text(source_group_id, ack_msg, instance_name=instance_name)
-            else:
-                send_text(requester_wa_id, ack_msg, instance_name=instance_name)
+            try:
+                if source_group_id:
+                    broadcast_queue.enqueue(
+                        send_group_text,
+                        source_group_id,
+                        ack_msg,
+                        instance_name=instance_name,
+                        job_timeout=60,
+                    )
+                else:
+                    broadcast_queue.enqueue(
+                        send_text,
+                        requester_wa_id,
+                        ack_msg,
+                        instance_name=instance_name,
+                        job_timeout=60,
+                    )
+            
+                print(
+                    "WEBHOOK_ACK_ENQUEUED =",
+                    {
+                        "source_group_id": source_group_id,
+                        "requester_wa_id": requester_wa_id,
+                        "instance_name": instance_name,
+                    },
+                    flush=True,
+                )
+            
+            except Exception as ack_enqueue_exc:
+                print("WEBHOOK_ACK_ENQUEUE_ERROR =", str(ack_enqueue_exc), flush=True)
 
             print(
                 "WEBHOOK_TIMING_ACK_DONE =",
