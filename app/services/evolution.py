@@ -79,7 +79,7 @@ def _post_send_text_with_retries(url: str, payload: dict, *, label: str, max_att
                 url,
                 headers=_headers(),
                 json=payload,
-                timeout=30,
+                timeout=10,
             )
 
             print(f"{label}_STATUS =", resp.status_code, flush=True)
