@@ -1,5 +1,8 @@
 import os
 import base64
+import secrets
+import uuid
+from decimal import Decimal
 import time
 import random
 import asyncio
@@ -12,16 +15,16 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from collections import Counter, defaultdict
 
-from fastapi import FastAPI, Depends, Body, Request, BackgroundTasks
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, Depends, Body, Request, BackgroundTasks, Header, HTTPException
+from fastapi.responses import HTMLResponse, StreamingResponse, Response
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.db import Base, engine, get_db, SessionLocal
-from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion, GroupAlias, GroupCategory, BotControl, BotRechargeLog
+from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion, GroupAlias, GroupCategory, BotControl, BotRechargeLog, ApiClient, ApiCreditLog
 from app.queue import request_queue, slow_request_queue, redis_conn, broadcast_queue, ack_queue
-from app.worker import process_request, provider3_keepalive_job, _validate_act_type_pdf, _validate_pdf_matches_term, _notify_support_error
+from app.worker import process_request, provider3_keepalive_job, _validate_act_type_pdf, _validate_pdf_matches_term, _notify_support_error, _handle_api_charge_after_done
 from app.services.provider3 import Provider3Client
 from app.services.provider4 import Provider4Client
 from app.services.provider7 import Provider7Client
@@ -10581,6 +10584,474 @@ def test_provider3_session(
         }
         
 
+
+
+# =========================
+# API EXTERNA ACTAS
+# =========================
+
+def _money(value) -> float:
+    try:
+        return float(value or 0)
+    except Exception:
+        return 0.0
+
+
+def _bearer_token(authorization: str | None) -> str:
+    raw = (authorization or "").strip()
+    if raw.lower().startswith("bearer "):
+        return raw.split(" ", 1)[1].strip()
+    return raw
+
+
+def _get_api_client_or_401(db: Session, authorization: str | None) -> ApiClient:
+    token = _bearer_token(authorization)
+
+    if not token:
+        raise HTTPException(status_code=401, detail="MISSING_API_KEY")
+
+    client = (
+        db.query(ApiClient)
+        .filter(
+            ApiClient.api_key == token,
+            ApiClient.is_active == True,
+        )
+        .first()
+    )
+
+    if not client:
+        raise HTTPException(status_code=401, detail="INVALID_API_KEY")
+
+    return client
+
+
+def _api_pending_reserved_amount(db: Session, client: ApiClient) -> Decimal:
+    price = Decimal(str(client.price_per_done or 5))
+
+    pending_count = (
+        db.query(RequestLog)
+        .filter(
+            RequestLog.api_client_id == client.id,
+            RequestLog.status.in_(["QUEUED", "PROCESSING"]),
+            RequestLog.api_charged == False,
+        )
+        .count()
+    )
+
+    return price * Decimal(pending_count)
+
+
+def _ensure_api_panel_group(db: Session, client: ApiClient):
+    if not client.count_in_panel:
+        return
+
+    if not client.panel_group_jid:
+        client.panel_group_jid = f"api_cliente_{client.id}"
+        db.commit()
+        db.refresh(client)
+
+    row = (
+        db.query(AuthorizedGroup)
+        .filter(AuthorizedGroup.group_jid == client.panel_group_jid)
+        .first()
+    )
+
+    if not row:
+        row = AuthorizedGroup(
+            group_jid=client.panel_group_jid,
+            group_name=f"API - {client.name}",
+            owner_instance=client.panel_instance_name or "docifybot8",
+            is_hidden=False,
+            hidden_in_main=False,
+        )
+        db.add(row)
+    else:
+        row.owner_instance = client.panel_instance_name or "docifybot8"
+        row.is_hidden = False
+        row.hidden_in_main = False
+
+    alias = (
+        db.query(GroupAlias)
+        .filter(GroupAlias.group_jid == client.panel_group_jid)
+        .first()
+    )
+
+    if not alias:
+        alias = GroupAlias(
+            group_jid=client.panel_group_jid,
+            custom_name=f"API - {client.name}",
+            owner_instance=client.panel_instance_name or "docifybot8",
+            is_hidden=False,
+            hidden_in_main=False,
+        )
+        db.add(alias)
+    else:
+        alias.custom_name = f"API - {client.name}"
+        alias.owner_instance = client.panel_instance_name or "docifybot8"
+        alias.is_hidden = False
+        alias.hidden_in_main = False
+
+    db.commit()
+
+
+@app.get("/api/v1/balance")
+def api_v1_balance(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    client = _get_api_client_or_401(db, authorization)
+    reserved = _api_pending_reserved_amount(db, client)
+    available = Decimal(str(client.credit_balance or 0)) - reserved
+
+    return {
+        "ok": True,
+        "client": client.name,
+        "balance": _money(client.credit_balance),
+        "reserved": _money(reserved),
+        "available": _money(available),
+        "price_per_done": _money(client.price_per_done),
+        "currency": "MXN",
+    }
+
+
+@app.post("/api/v1/actas")
+def api_v1_create_acta(
+    payload: dict = Body(...),
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    client = _get_api_client_or_401(db, authorization)
+
+    term = (payload.get("term") or payload.get("curp") or "").strip().upper()
+    act_type = (payload.get("act_type") or payload.get("tipo") or "NACIMIENTO").strip().upper()
+    external_id = (payload.get("external_id") or "").strip()
+
+    if not term:
+        return {"ok": False, "error": "MISSING_TERM"}
+
+    price = Decimal(str(client.price_per_done or 5))
+    reserved = _api_pending_reserved_amount(db, client)
+    available = Decimal(str(client.credit_balance or 0)) - reserved
+
+    if available < price:
+        return {
+            "ok": False,
+            "error": "INSUFFICIENT_BALANCE",
+            "balance": _money(client.credit_balance),
+            "reserved": _money(reserved),
+            "available": _money(available),
+            "price_per_done": _money(price),
+        }
+
+    if external_id:
+        existing = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.api_client_id == client.id,
+                RequestLog.api_external_id == external_id,
+            )
+            .order_by(RequestLog.created_at.desc())
+            .first()
+        )
+
+        if existing:
+            return {
+                "ok": True,
+                "request_id": existing.id,
+                "external_id": existing.api_external_id,
+                "status": existing.status,
+                "duplicated": True,
+            }
+
+    _ensure_api_panel_group(db, client)
+
+    source_group_id = client.panel_group_jid if client.count_in_panel else None
+    source_chat_id = source_group_id or f"api_cliente_{client.id}"
+
+    request_key = (
+        f"api:{client.id}:{external_id}"
+        if external_id
+        else f"api:{client.id}:{uuid.uuid4().hex}"
+    )
+
+    now = _utc_now_naive()
+
+    row = RequestLog(
+        request_key=request_key,
+        curp=term,
+        act_type=act_type,
+        requester_wa_id=f"api:{client.id}",
+        requester_name=client.name,
+        source_chat_id=source_chat_id,
+        source_group_id=source_group_id,
+        instance_name=client.panel_instance_name or "docifybot8",
+        evolution_message_id=None,
+        status="QUEUED",
+        created_at=now,
+        updated_at=now,
+        expires_at=now + timedelta(days=settings.HISTORY_DAYS),
+        api_client_id=client.id,
+        api_external_id=external_id or None,
+        api_charged=False,
+        api_price=price,
+        api_count_in_panel=bool(client.count_in_panel),
+    )
+
+    db.add(row)
+
+    try:
+        db.commit()
+        db.refresh(row)
+    except Exception as e:
+        db.rollback()
+        return {"ok": False, "error": f"CREATE_REQUEST_FAILED:{str(e)[:200]}"}
+
+    _enqueue_process_request(row, "api_v1_create_acta")
+
+    return {
+        "ok": True,
+        "request_id": row.id,
+        "external_id": row.api_external_id,
+        "status": row.status,
+        "price_if_done": _money(price),
+        "message": "Solicitud recibida",
+    }
+
+
+@app.get("/api/v1/actas/{request_id}")
+def api_v1_get_acta(
+    request_id: int,
+    request: Request,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    client = _get_api_client_or_401(db, authorization)
+
+    row = (
+        db.query(RequestLog)
+        .filter(
+            RequestLog.id == request_id,
+            RequestLog.api_client_id == client.id,
+        )
+        .first()
+    )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="REQUEST_NOT_FOUND")
+
+    data = {
+        "ok": True,
+        "request_id": row.id,
+        "external_id": row.api_external_id,
+        "term": row.curp,
+        "act_type": row.act_type,
+        "status": row.status,
+        "charged": bool(row.api_charged),
+        "charged_amount": _money(row.api_price if row.api_charged else 0),
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+    if row.status == "DONE" and row.api_result_base64:
+        data["pdf_url"] = str(request.base_url).rstrip("/") + f"/api/v1/actas/{row.id}/pdf"
+
+    if row.status == "ERROR":
+        data["error"] = row.error_message or "ERROR"
+
+    db.refresh(client)
+    data["balance"] = _money(client.credit_balance)
+
+    return data
+
+
+@app.get("/api/v1/actas/{request_id}/pdf")
+def api_v1_get_acta_pdf(
+    request_id: int,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    client = _get_api_client_or_401(db, authorization)
+
+    row = (
+        db.query(RequestLog)
+        .filter(
+            RequestLog.id == request_id,
+            RequestLog.api_client_id == client.id,
+        )
+        .first()
+    )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="REQUEST_NOT_FOUND")
+
+    if row.status != "DONE":
+        raise HTTPException(status_code=409, detail=f"REQUEST_NOT_DONE:{row.status}")
+
+    if not row.api_result_base64:
+        raise HTTPException(status_code=404, detail="PDF_NOT_AVAILABLE")
+
+    raw = row.api_result_base64.strip()
+    if raw.startswith("data:"):
+        raw = raw.split(",", 1)[1]
+
+    try:
+        pdf_bytes = base64.b64decode(raw)
+    except Exception:
+        raise HTTPException(status_code=500, detail="INVALID_PDF_BASE64")
+
+    filename = row.api_result_filename or f"{row.curp}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        },
+    )
+
+
+@app.get("/api/v1/actas")
+def api_v1_list_actas(
+    limit: int = 50,
+    offset: int = 0,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    client = _get_api_client_or_401(db, authorization)
+
+    limit = max(1, min(int(limit or 50), 200))
+    offset = max(0, int(offset or 0))
+
+    rows = (
+        db.query(RequestLog)
+        .filter(RequestLog.api_client_id == client.id)
+        .order_by(RequestLog.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    return {
+        "ok": True,
+        "items": [
+            {
+                "request_id": r.id,
+                "external_id": r.api_external_id,
+                "term": r.curp,
+                "act_type": r.act_type,
+                "status": r.status,
+                "charged": bool(r.api_charged),
+                "charged_amount": _money(r.api_price if r.api_charged else 0),
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            }
+            for r in rows
+        ],
+    }
+
+
+@app.post("/api/admin/clients")
+def api_admin_create_client(
+    payload: dict = Body(...),
+    token: str = "",
+    db: Session = Depends(get_db),
+):
+    if token != PANEL_TOKEN:
+        return {"ok": False, "error": "UNAUTHORIZED"}
+
+    name = (payload.get("name") or "").strip()
+    credit = Decimal(str(payload.get("credit_balance") or 0))
+    price = Decimal(str(payload.get("price_per_done") or 5))
+    panel_instance = (payload.get("panel_instance_name") or "docifybot8").strip()
+    panel_group_jid = (payload.get("panel_group_jid") or "").strip()
+
+    if not name:
+        return {"ok": False, "error": "MISSING_NAME"}
+
+    api_key = "sk_" + secrets.token_urlsafe(32)
+
+    client = ApiClient(
+        name=name,
+        api_key=api_key,
+        credit_balance=credit,
+        price_per_done=price,
+        panel_instance_name=panel_instance,
+        panel_group_jid=panel_group_jid or None,
+        count_in_panel=True,
+        is_active=True,
+    )
+
+    db.add(client)
+    db.commit()
+    db.refresh(client)
+
+    if not client.panel_group_jid:
+        client.panel_group_jid = f"api_cliente_{client.id}"
+        db.commit()
+        db.refresh(client)
+
+    _ensure_api_panel_group(db, client)
+
+    return {
+        "ok": True,
+        "client_id": client.id,
+        "name": client.name,
+        "api_key": client.api_key,
+        "credit_balance": _money(client.credit_balance),
+        "price_per_done": _money(client.price_per_done),
+        "panel_instance_name": client.panel_instance_name,
+        "panel_group_jid": client.panel_group_jid,
+    }
+
+
+@app.post("/api/admin/clients/{client_id}/recharge")
+def api_admin_recharge_client(
+    client_id: int,
+    payload: dict = Body(...),
+    token: str = "",
+    db: Session = Depends(get_db),
+):
+    if token != PANEL_TOKEN:
+        return {"ok": False, "error": "UNAUTHORIZED"}
+
+    amount = Decimal(str(payload.get("amount") or 0))
+    note = (payload.get("note") or "").strip()
+
+    if amount <= 0:
+        return {"ok": False, "error": "INVALID_AMOUNT"}
+
+    client = (
+        db.query(ApiClient)
+        .filter(ApiClient.id == client_id)
+        .with_for_update()
+        .first()
+    )
+
+    if not client:
+        return {"ok": False, "error": "CLIENT_NOT_FOUND"}
+
+    client.credit_balance = Decimal(str(client.credit_balance or 0)) + amount
+    client.updated_at = _utc_now_naive()
+
+    db.add(ApiCreditLog(
+        api_client_id=client.id,
+        request_log_id=None,
+        amount=amount,
+        type="RECHARGE",
+        note=note or "Recarga manual",
+        created_at=_utc_now_naive(),
+    ))
+
+    db.commit()
+
+    return {
+        "ok": True,
+        "client_id": client.id,
+        "balance": _money(client.credit_balance),
+    }
+
+
+
 @app.get("/health")
 def health():
     return {"ok": True}
@@ -10657,6 +11128,33 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
     print("PDF_CAPTION =", caption_text, flush=True)
 
     is_base64 = not pdf_data.startswith("http")
+
+    if getattr(req, "api_client_id", None):
+        raw = (pdf_data or "").strip()
+
+        if not is_base64:
+            r = requests.get(pdf_data, timeout=60)
+            r.raise_for_status()
+            raw = base64.b64encode(r.content).decode()
+
+        if raw.startswith("data:"):
+            raw = raw.split(",", 1)[1]
+
+        raw = raw.replace("\n", "").replace("\r", "").strip()
+
+        req.api_result_base64 = raw
+        req.api_result_filename = filename or f"{req.curp}.pdf"
+        req.provider_media_url = "BASE64_API_FROM_PROVIDER_WEBHOOK"
+        req.pdf_url = None
+        req.updated_at = _utc_now_naive()
+
+        print("API_MAIN_PDF_STORED_NO_WHATSAPP =", {
+            "req_id": req.id,
+            "filename": req.api_result_filename,
+            "b64_len": len(raw),
+        }, flush=True)
+
+        return
 
     if req.source_group_id:
         if is_base64:
@@ -12746,6 +13244,36 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     redis_conn.delete(sending_key)
                 except Exception as redis_done_exc:
                     print("PDF_DONE_MARK_REDIS_ERROR =", str(redis_done_exc), flush=True)
+
+                if getattr(open_req, "api_client_id", None):
+                    try:
+                        _handle_api_charge_after_done(open_req, db)
+                        print("API_MAIN_SKIP_BOT_LIMIT_AND_PROMOS =", open_req.id, flush=True)
+                    except Exception as api_charge_exc:
+                        print("API_MAIN_CHARGE_ERROR =", str(api_charge_exc), flush=True)
+
+                    total_relay_s = round(time.perf_counter() - t0, 3)
+                    open_req.t_total_provider1_relay = total_relay_s
+
+                    try:
+                        if open_req.created_at:
+                            created_ts = open_req.created_at.timestamp()
+                            provider_ts = pdf_received_ts
+                            open_req.provider_processing_time = round(provider_ts - created_ts, 3)
+                    except Exception as e:
+                        print("API_PROVIDER_PROCESSING_TIME_ERROR =", str(e), flush=True)
+
+                    try:
+                        delivered_ts = time.time()
+                        created_ts = open_req.created_at.timestamp()
+                        open_req.total_delivery_time = round(delivered_ts - created_ts, 3)
+                    except Exception as e:
+                        print("API_TOTAL_DELIVERY_TIME_ERROR =", str(e), flush=True)
+
+                    db.commit()
+
+                    print("API_PROVIDER1_DONE_NO_WHATSAPP =", open_req.id, flush=True)
+                    return {"ok": True, "provider_result": "api_pdf_stored_done"}
 
                 if _request_is_no_accounting_main(db, open_req):
                     print(

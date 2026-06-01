@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, Float, Numeric
+from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, Float, Numeric, ForeignKey
 from sqlalchemy.sql import func
 
 from app.db import Base
@@ -75,6 +75,15 @@ class RequestLog(Base):
     total_delivery_time = Column(Float, nullable=True)
 
     pdf_url = Column(Text, nullable=True)
+
+    # API externa
+    api_client_id = Column(Integer, ForeignKey("api_clients.id"), nullable=True, index=True)
+    api_external_id = Column(String(120), nullable=True, index=True)
+    api_charged = Column(Boolean, default=False, nullable=False)
+    api_price = Column(Numeric(12, 2), nullable=True)
+    api_result_base64 = Column(Text, nullable=True)
+    api_result_filename = Column(String(255), nullable=True)
+    api_count_in_panel = Column(Boolean, default=False, nullable=False)
 
     status = Column(String(20), default="QUEUED", nullable=False, index=True)
     error_message = Column(Text, nullable=True)
@@ -184,3 +193,40 @@ class BotRechargeLog(Base):
     note = Column(Text, nullable=True)
 
     created_at = Column(DateTime, server_default=func.now(), nullable=False, index=True)
+
+
+class ApiClient(Base):
+    __tablename__ = "api_clients"
+
+    id = Column(Integer, primary_key=True)
+
+    name = Column(String(120), nullable=False)
+    api_key = Column(String(160), unique=True, nullable=False, index=True)
+
+    credit_balance = Column(Numeric(12, 2), nullable=False, default=0)
+    price_per_done = Column(Numeric(12, 2), nullable=False, default=5)
+
+    panel_instance_name = Column(String(50), nullable=False, default="docifybot8")
+    panel_group_jid = Column(String(120), nullable=True, index=True)
+
+    count_in_panel = Column(Boolean, default=True, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class ApiCreditLog(Base):
+    __tablename__ = "api_credit_logs"
+
+    id = Column(Integer, primary_key=True)
+
+    api_client_id = Column(Integer, ForeignKey("api_clients.id"), nullable=False, index=True)
+    request_log_id = Column(Integer, nullable=True, index=True)
+
+    amount = Column(Numeric(12, 2), nullable=False)
+    type = Column(String(30), nullable=False)
+    note = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+

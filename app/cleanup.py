@@ -51,6 +51,7 @@ def cleanup_expired_and_mark_pending():
             db.query(RequestLog)
             .filter(
                 RequestLog.status == "PROCESSING",
+                RequestLog.api_client_id.is_(None),
                 RequestLog.updated_at.is_not(None),
                 RequestLog.updated_at <= limit,
                 RequestLog.provider_name.in_(whatsapp_providers),

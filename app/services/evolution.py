@@ -11,6 +11,12 @@ def _headers():
     }
 
 
+
+def _is_internal_api_group(group_jid: str | None) -> bool:
+    gid = (group_jid or "").strip().lower()
+    return gid.startswith("api_") or gid.startswith("api:")
+
+
 def _normalize_number(number: str) -> str:
     if not number:
         return ""
@@ -162,6 +168,10 @@ def send_document(number: str, pdf_url: str, filename: str = "acta.pdf", caption
 
 
 def send_group_text(group_jid: str, text: str, instance_name: str = None):
+    if _is_internal_api_group(group_jid):
+        print("SEND_GROUP_TEXT_SKIPPED_INTERNAL_API_GROUP =", group_jid, flush=True)
+        return {"ok": True, "skipped": "internal_api_group"}
+
     instance = instance_name or settings.EVOLUTION_INSTANCE
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendText/{instance}"
 
@@ -182,6 +192,10 @@ def send_group_text(group_jid: str, text: str, instance_name: str = None):
 
 
 def send_group_document(group_jid: str, pdf_url: str, filename: str = "acta.pdf", caption: str = "", instance_name: str = None):
+    if _is_internal_api_group(group_jid):
+        print("SEND_GROUP_DOCUMENT_SKIPPED_INTERNAL_API_GROUP =", group_jid, flush=True)
+        return {"ok": True, "skipped": "internal_api_group"}
+
     instance = instance_name or settings.EVOLUTION_INSTANCE
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{instance}"
 
@@ -298,6 +312,10 @@ def send_document_base64(number: str, media_b64: str, filename: str = "acta.pdf"
 
 
 def send_group_document_base64(group_jid: str, media_b64: str, filename: str = "acta.pdf", caption: str = "", instance_name: str = None):
+    if _is_internal_api_group(group_jid):
+        print("SEND_GROUP_DOCUMENT_BASE64_SKIPPED_INTERNAL_API_GROUP =", group_jid, flush=True)
+        return {"ok": True, "skipped": "internal_api_group"}
+
     instance = instance_name or settings.EVOLUTION_INSTANCE
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{instance}"
 

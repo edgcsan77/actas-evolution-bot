@@ -4,11 +4,12 @@ import threading
 import re
 import random
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from app.db import SessionLocal
 from sqlalchemy.orm import Session
 
-from app.models import RequestLog, ProviderSetting, AppSetting, GroupPromotion
+from app.models import RequestLog, ProviderSetting, AppSetting, GroupPromotion, ApiClient, ApiCreditLog
 from app.services.evolution import send_group_text, send_document_base64, send_group_document_base64
 from app.config import settings
 from app.utils.curp import provider_label_for_type, is_chain
@@ -204,7 +205,9 @@ def _notify_support_error(req, err: str, extra_msg: str = ""):
             msg += f"\nDetalle: {extra_msg}\n"
 
         instance = getattr(req, "instance_name", None) or getattr(settings, "EVOLUTION_INSTANCE", "docifybot8")
-        send_group_text(support_group, msg, instance)
+        support_instance = getattr(settings, "SOPORTE_ACTAS_INSTANCE", None) or "docifybot8"
+        print("SOPORTE_ACTAS_SEND_INSTANCE =", support_instance, flush=True)
+        send_group_text(support_group, msg, support_instance)
     except Exception as support_exc:
         print("SUPPORT_ERROR_NOTIFY_FAILED =", str(support_exc), flush=True)
 
@@ -277,6 +280,9 @@ def _fallback_to_provider3_web(req, db, process_started_ts):
     )
 
     instance = req.instance_name or "docifybot8"
+
+    if _store_api_pdf_result(req, db, safe_media_b64, filename, "BASE64_PROVIDER3_API"):
+        return
 
     if req.source_group_id:
         send_group_document_base64(
@@ -404,6 +410,90 @@ def provider3_keepalive_job():
     finally:
         db.close()
         
+
+
+def _is_api_request(req) -> bool:
+    return bool(getattr(req, "api_client_id", None))
+
+
+def _handle_api_charge_after_done(req, db):
+    if not _is_api_request(req):
+        return
+
+    if (req.status or "").upper() != "DONE":
+        return
+
+    if getattr(req, "api_charged", False):
+        print("API_CHARGE_ALREADY_DONE =", req.id, flush=True)
+        return
+
+    client = (
+        db.query(ApiClient)
+        .filter(ApiClient.id == req.api_client_id)
+        .with_for_update()
+        .first()
+    )
+
+    if not client:
+        print("API_CHARGE_CLIENT_NOT_FOUND =", req.api_client_id, flush=True)
+        return
+
+    price = Decimal(str(req.api_price or client.price_per_done or 5))
+
+    client.credit_balance = Decimal(str(client.credit_balance or 0)) - price
+    client.updated_at = _utc_now_naive()
+
+    req.api_charged = True
+    req.api_price = price
+    req.updated_at = _utc_now_naive()
+
+    db.add(ApiCreditLog(
+        api_client_id=client.id,
+        request_log_id=req.id,
+        amount=-price,
+        type="CHARGE",
+        note=f"Acta DONE request_id={req.id}",
+        created_at=_utc_now_naive(),
+    ))
+
+    db.commit()
+
+    print("API_CHARGED_DONE =", {
+        "req_id": req.id,
+        "api_client_id": client.id,
+        "amount": str(price),
+        "balance": str(client.credit_balance),
+    }, flush=True)
+
+
+def _store_api_pdf_result(req, db, safe_media_b64: str, filename: str, provider_media_label: str):
+    if not _is_api_request(req):
+        return False
+
+    raw = (safe_media_b64 or "").strip()
+    if raw.startswith("data:"):
+        raw = raw.split(",", 1)[1]
+    raw = raw.replace("\n", "").replace("\r", "").strip()
+
+    req.api_result_base64 = raw
+    req.api_result_filename = filename or f"{req.curp}.pdf"
+    req.provider_media_url = provider_media_label
+    req.pdf_url = None
+    req.status = "DONE"
+    req.error_message = None
+    req.updated_at = _utc_now_naive()
+    db.commit()
+
+    _handle_api_charge_after_done(req, db)
+
+    print("API_PDF_STORED_DONE =", {
+        "req_id": req.id,
+        "filename": req.api_result_filename,
+        "b64_len": len(raw),
+    }, flush=True)
+
+    return True
+
 
 def _get_or_create_provider(db, provider_name: str, default_enabled: bool):
     row = db.query(ProviderSetting).filter(ProviderSetting.provider_name == provider_name).first()
@@ -1409,6 +1499,11 @@ def _validate_act_type_pdf(pdf_bytes: bytes, act_type: str | None) -> bool:
 
 
 def _after_done_accounting(req, db):
+    if _is_api_request(req):
+        _handle_api_charge_after_done(req, db)
+        print("API_SKIP_BOT_LIMIT_AND_PROMOS =", req.id, flush=True)
+        return
+
     if _request_is_no_accounting(req, db):
         print(
             "PRIVATE_PROVIDER_SKIP_ACCOUNTING_WORKER =",
@@ -1716,6 +1811,9 @@ def process_request(request_id: int):
 
             instance = req.instance_name or "docifybot8"
 
+            if _store_api_pdf_result(req, db, safe_media_b64, filename, f"BASE64_{provider_name}_API"):
+                return
+
             print("REQ_INSTANCE_NAME =", req.instance_name, flush=True)
             print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
             print("PROVIDER3_SEND_INSTANCE =", instance, flush=True)
@@ -1979,6 +2077,9 @@ def process_request(request_id: int):
             )
 
             instance = req.instance_name or "docifybot8"
+
+            if _store_api_pdf_result(req, db, safe_media_b64, filename, "BASE64_PROVIDER7_API"):
+                return
 
             print("REQ_INSTANCE_NAME =", req.instance_name, flush=True)
             print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
