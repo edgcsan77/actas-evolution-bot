@@ -29,3 +29,9 @@ broadcast_queue = Queue(
     connection=redis_conn,
     default_timeout=1800,
 )
+
+ack_queue = Queue(
+    "ack",
+    connection=redis_conn,
+    default_timeout=120,
+)
