@@ -20,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.db import Base, engine, get_db, SessionLocal
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion, GroupAlias, GroupCategory, BotControl, BotRechargeLog
-from app.queue import request_queue, slow_request_queue, redis_conn, broadcast_queue
+from app.queue import request_queue, slow_request_queue, redis_conn, broadcast_queue, ack_queue
 from app.worker import process_request, provider3_keepalive_job, _validate_act_type_pdf, _validate_pdf_matches_term, _notify_support_error
 from app.services.provider3 import Provider3Client
 from app.services.provider4 import Provider4Client
@@ -13385,7 +13385,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         
             try:
                 if source_group_id:
-                    broadcast_queue.enqueue(
+                    ack_queue.enqueue(
                         send_group_text,
                         source_group_id,
                         ack_msg,
@@ -13393,7 +13393,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         job_timeout=60,
                     )
                 else:
-                    broadcast_queue.enqueue(
+                    ack_queue.enqueue(
                         send_text,
                         requester_wa_id,
                         ack_msg,
