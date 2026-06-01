@@ -836,10 +836,10 @@ class Provider4Client:
                     or "ACTION" in html_up
                 )
                 
-                if not html_clean or len(html_clean) < 30 or not looks_useful:
+                if not html_clean or not looks_useful:
                     print(
                         f"PROVIDER4_VGETOFI2_EMPTY_OR_USELESS_HTML_ATTEMPT_{attempt+1} = "
-                        f"len={len(html_clean)} useful={looks_useful}",
+                        f"len={len(html_clean)} useful={looks_useful} preview={repr(html_clean[:120])}",
                         flush=True,
                     )
                 
