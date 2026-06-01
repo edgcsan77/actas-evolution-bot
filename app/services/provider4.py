@@ -1371,6 +1371,8 @@ class Provider4Client:
         if (
             "ENVIADO EXITOSAMENTE" in html_up
             or "SU TRAMITE HA SIDO ENVIADO" in html_up
+            or "ENVIADO CON EXITO" in html_up
+            or "ENVIADO CON ÉXITO" in html_up
         ):
             vget_html = html
         
