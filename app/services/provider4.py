@@ -818,13 +818,26 @@ class Provider4Client:
                 resp.raise_for_status()
     
                 html = resp.text or ""
-    
+
                 print(
                     f"PROVIDER4_VGETOFI2_ATTEMPT_{attempt+1}_STATUS = {resp.status_code}",
                     flush=True,
                 )
                 print("PROVIDER4_VGETOFI2_HTML_PREVIEW =", html[:1200], flush=True)
-    
+                
+                html_clean = html.strip()
+                
+                if not html_clean:
+                    print(
+                        f"PROVIDER4_VGETOFI2_EMPTY_HTML_ATTEMPT_{attempt+1}",
+                        flush=True,
+                    )
+                    last_error = RuntimeError("PROVIDER4_EMPTY_HTML")
+                    if attempt < 2:
+                        time.sleep(8 + attempt * 5)
+                        continue
+                    raise RuntimeError("PROVIDER4_EMPTY_HTML")
+                
                 return html
     
             except requests.exceptions.RequestException as e:
