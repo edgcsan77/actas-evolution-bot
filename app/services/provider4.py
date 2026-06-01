@@ -823,20 +823,33 @@ class Provider4Client:
                     f"PROVIDER4_VGETOFI2_ATTEMPT_{attempt+1}_STATUS = {resp.status_code}",
                     flush=True,
                 )
+                print("PROVIDER4_VGETOFI2_HTML_LEN =", len(html), flush=True)
                 print("PROVIDER4_VGETOFI2_HTML_PREVIEW =", html[:1200], flush=True)
                 
                 html_clean = html.strip()
+                html_up = html_clean.upper()
                 
-                if not html_clean:
+                looks_useful = (
+                    "ENVIADO" in html_up
+                    or "NO_LOCALIZADO" in html_up
+                    or "<FORM" in html_up
+                    or "ACTION" in html_up
+                )
+                
+                if not html_clean or len(html_clean) < 30 or not looks_useful:
                     print(
-                        f"PROVIDER4_VGETOFI2_EMPTY_HTML_ATTEMPT_{attempt+1}",
+                        f"PROVIDER4_VGETOFI2_EMPTY_OR_USELESS_HTML_ATTEMPT_{attempt+1} = "
+                        f"len={len(html_clean)} useful={looks_useful}",
                         flush=True,
                     )
-                    last_error = RuntimeError("PROVIDER4_EMPTY_HTML")
+                
+                    last_error = RuntimeError("PROVIDER4_EMPTY_OR_USELESS_HTML")
+                
                     if attempt < 2:
-                        time.sleep(8 + attempt * 5)
+                        time.sleep(10 + attempt * 8)
                         continue
-                    raise RuntimeError("PROVIDER4_EMPTY_HTML")
+                
+                    raise RuntimeError("PROVIDER4_EMPTY_OR_USELESS_HTML")
                 
                 return html
     
