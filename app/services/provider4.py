@@ -1274,16 +1274,40 @@ class Provider4Client:
         return False
     
     def _extract_pdf_link(self, history_html: str, term: str, tipoa: str | None = None) -> str | None:
-        row_html = self._history_row_for_term(history_html, term, tipoa)
-        if not row_html:
-            return None
+        html = history_html or ""
+        term_up = (term or "").strip().upper()
     
-        m = re.search(r'href="(\./d\.php\?f=[^"]+)"', row_html, flags=re.IGNORECASE)
-        if m:
-            link = urljoin(f"{self.BASE_URL}/servicio/", m.group(1))
-            print("PROVIDER4_EXTRACTED_PDF_LINK =", link, flush=True)
-            return link
+        # 1) Intento normal: buscar primero en la fila exacta
+        row_html = self._history_row_for_term(html, term, tipoa)
+        if row_html:
+            m = re.search(
+                r"""href\s*=\s*["']([^"']*d\.php\?f=[^"']+)["']""",
+                row_html,
+                flags=re.IGNORECASE,
+            )
+            if m:
+                link = urljoin(f"{self.BASE_URL}/servicio/", unescape(m.group(1)))
+                print("PROVIDER4_EXTRACTED_PDF_LINK =", link, flush=True)
+                return link
     
+            print("PROVIDER4_ROW_FOUND_BUT_DPHP_NOT_FOUND =", term_up, flush=True)
+    
+        # 2) Fallback flexible: buscar en TODO el historial,
+        # aunque _history_row_for_term no haya reconocido la fila.
+        if term_up:
+            pattern = (
+                r"""href\s*=\s*["']([^"']*d\.php\?f=[^"']*"""
+                + re.escape(term_up)
+                + r"""[^"']*)["']"""
+            )
+    
+            m = re.search(pattern, html, flags=re.IGNORECASE)
+            if m:
+                link = urljoin(f"{self.BASE_URL}/servicio/", unescape(m.group(1)))
+                print("PROVIDER4_HISTORY_PDF_FOUND_REGEX =", link, flush=True)
+                return link
+    
+        print("PROVIDER4_EXTRACT_PDF_LINK_NOT_FOUND =", term_up, flush=True)
         return None
 
     def _extract_folio_link(self, history_html: str, term: str, tipoa: str | None = None) -> str | None:
@@ -1507,6 +1531,26 @@ class Provider4Client:
                 raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
     
             row_html = self._history_row_for_term(history_html, term, history_tipoa)
+
+            # Fallback: si el PDF ya aparece en el historial, úsalo aunque la fila no se haya parseado bien.
+            if not inc_folio:
+                direct_history_link = self._extract_pdf_link(history_html, term, history_tipoa)
+                if direct_history_link:
+                    history_confirmed = True
+                    print("PROVIDER4_HISTORY_DIRECT_LINK_WITHOUT_ROW_OK =", direct_history_link, flush=True)
+                    print("PROVIDER4_FINAL_DOWNLOAD_LINK =", direct_history_link, flush=True)
+            
+                    pdf_bytes = self._download_and_validate_with_retries(
+                        url=direct_history_link,
+                        term=term,
+                        tipoa=tipoa,
+                        inc_folio=inc_folio,
+                        is_chain=is_chain,
+                        use_folio_downloader=False,
+                        max_attempts=4,
+                        sleep_seconds=4,
+                    )
+                    return pdf_bytes
     
             if row_html:
                 history_confirmed = True
