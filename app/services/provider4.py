@@ -865,31 +865,95 @@ class Provider4Client:
         )
 
     def _parse_hidden_form(self, html: str) -> tuple[str, dict]:
-        form_action_match = re.search(
-            r'<form[^>]+action="([^"]+)"',
+        html = html or ""
+    
+        form_tag_match = re.search(
+            r"<form\b[^>]*>",
             html,
-            flags=re.IGNORECASE,
+            flags=re.IGNORECASE | re.DOTALL,
         )
-        if not form_action_match:
+    
+        if not form_tag_match:
+            print("PROVIDER4_NO_FORM_TAG_HTML_PREVIEW =", html[:1500], flush=True)
             raise RuntimeError("PROVIDER4_NO_FORM_ACTION")
-
-        action = form_action_match.group(1).strip()
+    
+        form_tag = form_tag_match.group(0)
+    
+        action_match = re.search(
+            r"""\baction\s*=\s*(['"])(.*?)\1""",
+            form_tag,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+    
+        if not action_match:
+            action_match = re.search(
+                r"""\baction\s*=\s*([^\s>]+)""",
+                form_tag,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+    
+        if not action_match:
+            print("PROVIDER4_FORM_TAG_WITHOUT_ACTION =", form_tag[:1000], flush=True)
+            print("PROVIDER4_NO_FORM_ACTION_HTML_PREVIEW =", html[:1500], flush=True)
+            raise RuntimeError("PROVIDER4_NO_FORM_ACTION")
+    
+        action = action_match.group(2 if action_match.lastindex and action_match.lastindex >= 2 else 1).strip()
         action_url = urljoin(f"{self.BASE_URL}/servicio/", action)
-
+    
         inputs = {}
-        for name, value in re.findall(
-            r'<input[^>]+name="([^"]+)"[^>]+value="([^"]*)"',
+    
+        input_tags = re.findall(
+            r"<input\b[^>]*>",
             html,
-            flags=re.IGNORECASE,
-        ):
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+    
+        for input_tag in input_tags:
+            name_match = re.search(
+                r"""\bname\s*=\s*(['"])(.*?)\1""",
+                input_tag,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+    
+            if not name_match:
+                name_match = re.search(
+                    r"""\bname\s*=\s*([^\s>]+)""",
+                    input_tag,
+                    flags=re.IGNORECASE | re.DOTALL,
+                )
+    
+            if not name_match:
+                continue
+    
+            name = name_match.group(2 if name_match.lastindex and name_match.lastindex >= 2 else 1)
+    
+            value_match = re.search(
+                r"""\bvalue\s*=\s*(['"])(.*?)\1""",
+                input_tag,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+    
+            if not value_match:
+                value_match = re.search(
+                    r"""\bvalue\s*=\s*([^\s>]*)""",
+                    input_tag,
+                    flags=re.IGNORECASE | re.DOTALL,
+                )
+    
+            value = ""
+            if value_match:
+                value = value_match.group(2 if value_match.lastindex and value_match.lastindex >= 2 else 1)
+    
             inputs[unescape(name)] = unescape(value)
-
+    
         if not inputs:
+            print("PROVIDER4_FORM_ACTION_BUT_NO_INPUTS =", action_url, flush=True)
+            print("PROVIDER4_FORM_INPUTS_HTML_PREVIEW =", html[:1500], flush=True)
             raise RuntimeError("PROVIDER4_NO_FORM_INPUTS")
-
+    
         print("PROVIDER4_FORM_ACTION =", action_url, flush=True)
         print("PROVIDER4_FORM_INPUT_KEYS =", list(inputs.keys()), flush=True)
-
+    
         return action_url, inputs
 
     def submit_vget_form(self, html: str) -> str:
