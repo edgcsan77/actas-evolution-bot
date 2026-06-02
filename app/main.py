@@ -11239,18 +11239,23 @@ def _pick_matching_processing_req_for_pdf(
     source_chat_id: str,
     quoted_msg_id: str | None,
     pdf_bytes: bytes,
+    instance_name: str | None = None,
 ):
     candidates = []
     status_filter = _provider_pdf_match_status_filter()
+    inst = (instance_name or "").strip()
 
     if lookup_id:
+        filters = [
+            RequestLog.curp == lookup_id,
+            status_filter,
+            RequestLog.provider_group_id == source_chat_id,
+        ]
+        if inst:
+            filters.append(RequestLog.instance_name == inst)
         candidates = (
             db.query(RequestLog)
-            .filter(
-                RequestLog.curp == lookup_id,
-                status_filter,
-                RequestLog.provider_group_id == source_chat_id,
-            )
+            .filter(*filters)
             .order_by(
                 case((RequestLog.status == "PROCESSING", 0), else_=1),
                 RequestLog.created_at.asc(),
@@ -11259,12 +11264,17 @@ def _pick_matching_processing_req_for_pdf(
         )
 
     if not candidates and quoted_msg_id:
+        filters = [
+            RequestLog.provider_message_id == quoted_msg_id,
+            status_filter,
+        ]
+
+        if inst:
+            filters.append(RequestLog.instance_name == inst)
+
         candidates = (
             db.query(RequestLog)
-            .filter(
-                RequestLog.provider_message_id == quoted_msg_id,
-                status_filter,
-            )
+            .filter(*filters)
             .order_by(
                 case((RequestLog.status == "PROCESSING", 0), else_=1),
                 RequestLog.created_at.desc(),
@@ -11273,12 +11283,17 @@ def _pick_matching_processing_req_for_pdf(
         )
 
     if not candidates and lookup_id:
+        filters = [
+            RequestLog.curp == lookup_id,
+            status_filter,
+        ]
+
+        if inst:
+            filters.append(RequestLog.instance_name == inst)
+
         candidates = (
             db.query(RequestLog)
-            .filter(
-                RequestLog.curp == lookup_id,
-                status_filter,
-            )
+            .filter(*filters)
             .order_by(
                 case((RequestLog.status == "PROCESSING", 0), else_=1),
                 RequestLog.created_at.asc(),
@@ -11806,11 +11821,12 @@ def _resolve_requester_wa_id(data: dict, key: dict, is_group: bool) -> str:
     return _normalize_wa_actor(remote_jid)
 
 
-def webhook_msg_seen(msg_id: str) -> bool:
+def webhook_msg_seen(msg_id: str, instance_name: str | None = None) -> bool:
     if not msg_id:
         return False
 
-    key = f"wa:webhook:msg:{msg_id}"
+    inst = (instance_name or "default").strip()
+    key = f"wa:webhook:msg:{inst}:{msg_id}"
     created = redis_conn.set(key, "1", ex=300, nx=True)
     return not bool(created)
 
@@ -12428,7 +12444,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         participant = key.get("participant", "")
         msg_id = key.get("id", "")
         
-        if webhook_msg_seen(msg_id):
+        if webhook_msg_seen(msg_id, instance_name):
             print("IGNORED_REASON = duplicate_msg_id", flush=True)
             print("IGNORED_MSG_ID =", msg_id, flush=True)
             return {"ok": True, "ignored": "duplicate_msg_id"}
@@ -12989,6 +13005,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     source_chat_id=source_chat_id,
                     quoted_msg_id=quoted_msg_id,
                     pdf_bytes=pdf_bytes,
+                    instance_name=instance_name,
                 )
                 
                 print("PROVIDER_PDF_FALLBACK_MATCH =", {
@@ -13011,12 +13028,17 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 
                     fallback_req = None
                     if lookup_id:
+                        fallback_filters = [
+                            RequestLog.curp == lookup_id,
+                            _provider_pdf_match_status_filter(),
+                        ]
+                        
+                        if instance_name:
+                            fallback_filters.append(RequestLog.instance_name == instance_name)
+                        
                         fallback_req = (
                             db.query(RequestLog)
-                            .filter(
-                                RequestLog.curp == lookup_id,
-                                _provider_pdf_match_status_filter(),
-                            )
+                            .filter(*fallback_filters)
                             .order_by(
                                 case((RequestLog.status == "PROCESSING", 0), else_=1),
                                 RequestLog.created_at.desc(),
@@ -13027,10 +13049,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     if fallback_req:
                         active_count = (
                             db.query(RequestLog)
-                            .filter(
-                                RequestLog.curp == lookup_id,
-                                _provider_pdf_match_status_filter(),
-                            )
+                            .filter(*fallback_filters)
                             .count()
                         )
                 
