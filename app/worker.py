@@ -903,12 +903,19 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
 def _provider_sender_instance(provider_name: str, req) -> str:
     provider_name = (provider_name or "").strip().upper()
 
-    # Solo el proveedor privado MAYAPROVIDER se manda desde la instancia del bot cliente.
-    # Ejemplo: docifybot8maya.
-    if provider_name == "MAYAPROVIDER":
+    # Para proveedores de WhatsApp, mandar desde la misma instancia del bot que recibió la solicitud.
+    # Así el PDF de respuesta regresa al mismo webhook/contexto del request.
+    if provider_name in (
+        "PROVIDER1",
+        "PROVIDER2",
+        "PROVIDER5",
+        "PROVIDER6",
+        "PROVIDER8",
+        "PROVIDER9",
+        "MAYAPROVIDER",
+    ):
         return req.instance_name or settings.EVOLUTION_INSTANCE
 
-    # Todos los proveedores globales se quedan como ya estaban.
     return settings.EVOLUTION_PROVIDER_INSTANCE
 
 
@@ -1349,7 +1356,8 @@ def _start_provider3_flow(req, db):
     print("FALLBACK_PROVIDER_GROUP_ID =", provider_group_id, flush=True)
     print("FALLBACK_PROVIDER_TEXT =", text_to_provider, flush=True)
 
-    send_group_text(provider_group_id, text_to_provider, settings.EVOLUTION_PROVIDER_INSTANCE)
+    sender_instance = _provider_sender_instance(provider_name, req) 
+    send_group_text(provider_group_id, text_to_provider, sender_instance)
 
 
 def _extract_pdf_visible_text(pdf_bytes: bytes) -> str:
@@ -1766,7 +1774,8 @@ def process_request(request_id: int):
                 req.updated_at = _utc_now_naive()
                 db.commit()
         
-                send_group_text(provider_group_id, text_to_provider, settings.EVOLUTION_PROVIDER_INSTANCE)
+                sender_instance = _provider_sender_instance(provider_name, req) 
+                send_group_text(provider_group_id, text_to_provider, sender_instance)
         
                 print(
                     "PROVIDER3_FALLBACK_SENT_TO_PROVIDER1 =",
