@@ -1890,49 +1890,9 @@ def _fmt_duration_seconds(seconds):
     return f"{s}s"
 
 
-def _parse_panel_date(value: str | None):
-    value = (value or "").strip()
-    if not value:
-        return None
-
-    try:
-        return datetime.strptime(value, "%Y-%m-%d")
-    except Exception:
-        return None
-
-
-def _panel_period_bounds(view: str, date_from: str = "", date_to: str = ""):
+def _panel_period_bounds(view: str):
     view = (view or "day").strip().lower()
-
-    # RANGO PERSONALIZADO
-    # date_from y date_to vienen en formato YYYY-MM-DD desde inputs type="date".
-    if view == "custom":
-        start_date = _parse_panel_date(date_from)
-        end_date = _parse_panel_date(date_to)
-
-        # Si falta una fecha, usa hoy para evitar romper el panel.
-        now = _panel_now()
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-        if not start_date:
-            start_date = today_start.replace(tzinfo=None)
-
-        if not end_date:
-            end_date = start_date
-
-        # Convertir a inicio de día local.
-        local_start = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
-        local_end = end_date.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-
-        # Si lo ponen al revés, corregir automáticamente.
-        if local_end <= local_start:
-            local_end = local_start + timedelta(days=1)
-
-        utc_start = _panel_to_utc_naive(local_start)
-        utc_end = _panel_to_utc_naive(local_end)
-
-        return utc_start, utc_end, "custom"
-
+    
     if view == "week":
         now = _panel_now()
         local_start = now - timedelta(days=now.weekday())
@@ -1948,7 +1908,7 @@ def _panel_period_bounds(view: str, date_from: str = "", date_to: str = ""):
         utc_end = _panel_to_utc_naive(local_end)
 
         return utc_start, utc_end, "week"
-
+        
     if view == "30d":
         now = _panel_now()
         local_start = now - timedelta(days=29)
@@ -1962,7 +1922,7 @@ def _panel_period_bounds(view: str, date_from: str = "", date_to: str = ""):
         utc_start = _panel_to_utc_naive(local_start)
         utc_end = _panel_to_utc_naive(local_end)
         return utc_start, utc_end, "30d"
-
+        
     if view == "month":
         local_start = _panel_month_start()
         local_end = _panel_month_end()
@@ -2346,19 +2306,12 @@ def _panel_daily_group_rows(rows: list[RequestLog], db: Session) -> list[dict]:
     return out
 
 
-def _panel_detail_for_group(
-    rows: list[RequestLog],
-    group_jid: str,
-    view: str,
-    db: Session,
-    date_from: str = "",
-    date_to: str = "",
-) -> dict:
+def _panel_detail_for_group(rows: list[RequestLog], group_jid: str, view: str, db: Session) -> dict:
     days = {}
 
     view = (view or "day").strip().lower()
 
-    time_min, time_max, view = _panel_period_bounds(view, date_from, date_to)
+    time_min, time_max, view = _panel_period_bounds(view)
     
     local_start = _to_panel_tz(time_min)
     local_end = _to_panel_tz(time_max)
@@ -2435,15 +2388,13 @@ def panel_audit_group(
     view: str = "day",
     range: str = "",
     instance_name: str = "",
-    date_from: str = "",
-    date_to: str = "",
     db: Session = Depends(get_db),
 ):
     if not _is_valid_admin_panel_token(request):
         return HTMLResponse("No autorizado", status_code=403)
 
     period_view = range or view
-    time_min, time_max, view = _panel_period_bounds(period_view, date_from, date_to)
+    time_min, time_max, view = _panel_period_bounds(period_view)
 
     q = db.query(RequestLog).filter(
         RequestLog.source_group_id == group_jid,
@@ -2854,14 +2805,10 @@ def panel_recent_requests(
     provider_name: str = "",
     status: str = "",
     act_type: str = "",
-    date_from: str = "",
-    date_to: str = "",
     db: Session = Depends(get_db),
 ):
     cache_key = "panel:recent_requests_html:" + "|".join([
         (view or "").strip(),
-        (date_from or "").strip(),
-        (date_to or "").strip(),
         (group_jid or "").strip(),
         (provider_name or "").strip(),
         (status or "").strip(),
@@ -2874,7 +2821,7 @@ def panel_recent_requests(
             cached_html = cached_html.decode("utf-8", errors="ignore")
         return HTMLResponse(content=cached_html)
 
-    time_min, time_max, view = _panel_period_bounds(view, date_from, date_to)
+    time_min, time_max, view = _panel_period_bounds(view)
     group_cache = _build_group_name_cache(db)
 
     rows = (
@@ -4145,19 +4092,12 @@ async def panel_save_group_acta_price(
 def panel_group_detail(
     group_jid: str = "",
     view: str = "month",
-    date_from: str = "",
-    date_to: str = "",
     db: Session = Depends(get_db),
 ):
     if not group_jid:
         return HTMLResponse("<pre>Falta group_jid</pre>", status_code=400)
 
-    cache_key = "panel:group_detail:" + "|".join([
-        (group_jid or "").strip(),
-        (view or "month").strip(),
-        (date_from or "").strip(),
-        (date_to or "").strip(),
-    ])
+    cache_key = f"panel:group_detail:{(group_jid or '').strip()}:{(view or 'month').strip()}"
     cached_html = redis_conn.get(cache_key)
     if cached_html:
         if isinstance(cached_html, bytes):
@@ -4185,7 +4125,7 @@ def panel_group_detail(
 
     acta_price_num = _get_group_acta_price(db, group_jid)
 
-    time_min, time_max, view = _panel_period_bounds(view, date_from, date_to)
+    time_min, time_max, view = _panel_period_bounds(view)
 
     rows = (
         db.query(
@@ -5673,13 +5613,9 @@ def _panel_cache_key(
     status: str,
     act_type: str,
     group_mode: str,
-    date_from: str = "",
-    date_to: str = "",
 ) -> str:
     return "panel:html:" + "|".join([
         (view or "").strip(),
-        (date_from or "").strip(),
-        (date_to or "").strip(),
         (group_jid or "").strip(),
         (provider_name or "").strip(),
         (status or "").strip(),
@@ -7219,8 +7155,6 @@ def panel_actas(
     status: str = "",
     act_type: str = "",
     group_mode: str = "active",
-    date_from: str = "",
-    date_to: str = "",
     db: Session = Depends(get_db),
 ):
     if not _is_valid_admin_panel_token(request):
@@ -7234,8 +7168,6 @@ def panel_actas(
             status=status,
             act_type=act_type,
             group_mode=group_mode,
-            date_from=date_from,
-            date_to=date_to,
         )
 
         cached_panel = redis_conn.get(cache_key)
@@ -7244,25 +7176,7 @@ def panel_actas(
                 cached_panel = cached_panel.decode("utf-8", errors="ignore")
             return HTMLResponse(content=cached_panel)
 
-        time_min, time_max, view = _panel_period_bounds(view, date_from, date_to)
-
-        local_start_label = _to_panel_tz(time_min)
-        local_end_label = _to_panel_tz(time_max)
-        
-        if view == "custom" and local_start_label and local_end_label:
-            period_label = (
-                f"Rango personalizado: "
-                f"{local_start_label.strftime('%Y-%m-%d')} "
-                f"a {(local_end_label - timedelta(days=1)).strftime('%Y-%m-%d')}"
-            )
-        else:
-            period_label = {
-                "day": "Hoy",
-                "week": "Semana actual",
-                "30d": "Últimos 30 días",
-                "month": "Mes actual",
-                "prev_month": "Mes anterior",
-            }.get(view, view)
+        time_min, time_max, view = _panel_period_bounds(view)
 
         base_q = _query_requests_for_panel(
             db=db,
@@ -8466,38 +8380,6 @@ def panel_actas(
                 <a href="/panel?token=docifymx2026&view=prev_month&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'prev_month' else ''}">Mes anterior</a>
                 <a href="/panel/promotions/report" class="tool-link" target="_blank">Promociones</a>
               </div>
-
-              <form method="get" action="/panel" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
-                <input type="hidden" name="token" value="{_esc(settings.ADMIN_PANEL_TOKEN)}">
-                <input type="hidden" name="view" value="custom">
-                <input type="hidden" name="group_jid" value="{_esc(group_jid)}">
-                <input type="hidden" name="provider_name" value="{_esc(provider_name)}">
-                <input type="hidden" name="status" value="{_esc(status)}">
-                <input type="hidden" name="act_type" value="{_esc(act_type)}">
-                <input type="hidden" name="group_mode" value="{_esc(group_mode)}">
-
-                <input
-                  type="date"
-                  name="date_from"
-                  value="{_esc(date_from)}"
-                  style="padding:8px 10px;border-radius:10px;border:1px solid #cbd5e1;"
-                >
-
-                <input
-                  type="date"
-                  name="date_to"
-                  value="{_esc(date_to)}"
-                  style="padding:8px 10px;border-radius:10px;border:1px solid #cbd5e1;"
-                >
-
-                <button
-                  type="submit"
-                  class="tool-link {'tool-link-active' if view == 'custom' else ''}"
-                  style="border:0;cursor:pointer;"
-                >
-                  Aplicar rango
-                </button>
-              </form>
         
               <div class="grid-hero">
                 <div class="glass">
@@ -9350,7 +9232,7 @@ def panel_actas(
                 html += f"""
                 <tr>
                   <td>
-                    <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}&date_from={_esc(date_from)}&date_to={_esc(date_to)}">
+                    <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}">
                       {_esc(r["group_name"])}
                     </a>
                   </td>
@@ -9362,7 +9244,7 @@ def panel_actas(
                   <td>{blocked_text}</td>
                   <td>
                     <a target="_blank"
-                       href="/panel/audit/group?token={settings.ADMIN_PANEL_TOKEN}&view={view}&group_jid={r['group_jid']}&date_from={_esc(date_from)}&date_to={_esc(date_to)}"
+                       href="/panel/audit/group?token={settings.ADMIN_PANEL_TOKEN}&view={view}&group_jid={r['group_jid']}"
                        class="btn btn-primary"
                        style="color:white;text-decoration:none;padding:6px 10px;font-size:12px;border-radius:10px;">
                        Ver evidencia
