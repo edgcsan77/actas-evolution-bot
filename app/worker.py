@@ -903,17 +903,7 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
 def _provider_sender_instance(provider_name: str, req) -> str:
     provider_name = (provider_name or "").strip().upper()
 
-    # Para proveedores de WhatsApp, mandar desde la misma instancia del bot que recibió la solicitud.
-    # Así el PDF de respuesta regresa al mismo webhook/contexto del request.
-    if provider_name in (
-        "PROVIDER1",
-        "PROVIDER2",
-        "PROVIDER5",
-        "PROVIDER6",
-        "PROVIDER8",
-        "PROVIDER9",
-        "MAYAPROVIDER",
-    ):
+    if provider_name == "MAYAPROVIDER":
         return req.instance_name or settings.EVOLUTION_INSTANCE
 
     return settings.EVOLUTION_PROVIDER_INSTANCE
