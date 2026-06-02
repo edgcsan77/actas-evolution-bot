@@ -216,6 +216,7 @@ SUPPORT_ERROR_LABELS_ES = {
     "PROVIDER8_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para ANGEL.",
     "PROVIDER9_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para EMILIANO.",
     "MAYAPROVIDER_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para el proveedor de MAYA.",
+    "PROVIDER6_ACT_TYPE_NOT_ALLOWED": "ACTAS ESCALANTE no acepta este tipo de acta. Solo debe recibir CADENA, NACIMIENTO y FOLIADA.",
 
     # Errores de PDF/validación
     "WRONG_ACT_TYPE_PDF_PENDING_RETRY": "El proveedor envió un PDF de otro tipo de acta. La solicitud sigue en proceso para esperar el PDF correcto.",
@@ -861,6 +862,44 @@ def _is_folio_type(act_type: str | None) -> bool:
     ])
 
 
+def _is_provider6_blocked_act_type(act_type: str | None) -> bool:
+    t = (act_type or "").upper().strip()
+
+    # Escalante NO debe recibir estos tipos, ni aunque vengan como FOLIO.
+    return any(x in t for x in [
+        "MATRIMONIO",
+        "MAT",
+        "DEFUNCION",
+        "DEFUNCIÓN",
+        "DEF",
+        "DIVORCIO",
+        "DIV",
+    ])
+
+
+def _is_provider6_allowed_request(term: str | None, act_type: str | None) -> bool:
+    t = (act_type or "").upper().strip()
+
+    # Primero bloquear MAT / DEF / DIV.
+    # Esto evita MATRIMONIO FOLIO, DEFUNCION FOLIO, DIVORCIO FOLIO.
+    if _is_provider6_blocked_act_type(t):
+        return False
+
+    # CADENA sí puede entrar a Escalante.
+    if is_chain(term):
+        return True
+
+    # FOLIADA sí puede entrar a Escalante.
+    if _is_folio_act(t):
+        return True
+
+    # NACIMIENTO sí puede entrar a Escalante.
+    if t.startswith("NACIMIENTO") or t.startswith("NAC"):
+        return True
+
+    return False
+
+
 def _pick_provider_by_weight(db: Session, enabled: list[str]) -> str:
     rows = (
         db.query(ProviderSetting)
@@ -909,10 +948,13 @@ def _pick_provider_name(
     # GLOBAL:PROVIDERX      => fuerza proveedor global y SÍ cuenta
     if forced_provider:
         print("BOT_PROVIDER_FORCED =", forced_provider, flush=True)
-
+    
         if forced_provider == "PROVIDER4" and not _is_provider4_eligible(term, act_type):
             raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
-
+    
+        if forced_provider == "PROVIDER6" and not _is_provider6_allowed_request(term, act_type):
+            raise RuntimeError("PROVIDER6_ACT_TYPE_NOT_ALLOWED")
+    
         return forced_provider
 
     # GLOBAL_POOL => usa el pool normal del panel principal y SÍ cuenta
@@ -940,6 +982,19 @@ def _pick_provider_name(
         enabled = [p for p in enabled if p not in ("PROVIDER4", "PROVIDER10", "PROVIDER11")]
         print("PROVIDER4_PROVIDER10_PROVIDER11_REMOVED_NOT_ELIGIBLE =", enabled, flush=True)
 
+        if not enabled:
+            raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
+
+    # PROVIDER6 / ACTAS ESCALANTE:
+    # Solo debe recibir CADENA, NACIMIENTO y FOLIADA.
+    if "PROVIDER6" in enabled and not _is_provider6_allowed_request(term, act_type):
+        enabled = [p for p in enabled if p != "PROVIDER6"]
+        print("PROVIDER6_REMOVED_NOT_ALLOWED_ACT_TYPE =", {
+            "enabled": enabled,
+            "term": term,
+            "act_type": act_type,
+        }, flush=True)
+    
         if not enabled:
             raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
 
@@ -1054,6 +1109,11 @@ def _pick_provider6_group(term: str | None, act_type: str, request_id: int) -> s
 
     is_folio_req = _is_folio_act(act_type_up)
     is_cadena_req = is_chain(term)
+    is_nacimiento_req = act_type_up.startswith("NACIMIENTO") or act_type_up.startswith("NAC")
+
+    # Escalante NO recibe matrimonio, defunción ni divorcio.
+    if not _is_provider6_allowed_request(term, act_type_up):
+        raise RuntimeError("PROVIDER6_ACT_TYPE_NOT_ALLOWED")
 
     # 1. FOLIADAS -> grupo foliadas
     if is_folio_req:
@@ -1062,22 +1122,27 @@ def _pick_provider6_group(term: str | None, act_type: str, request_id: int) -> s
         return foliadas_group
 
     # 2. CADENAS -> grupo especiales
+    # Nota: aquí se usa PROVIDER6_GROUP_ESPECIALES como grupo para cadenas.
     if is_cadena_req:
         if not especiales_group:
             raise RuntimeError("NO_PROVIDER6_ESPECIALES_GROUP_CONFIGURED")
         return especiales_group
 
-    # 3. NAC / MAT / DEF / DIV -> grupos nacimiento 1 y 2
-    nacimiento_groups = [
-        group
-        for group in (nacimiento_group_1, nacimiento_group_2)
-        if group
-    ]
+    # 3. NACIMIENTO -> grupos nacimiento 1 y 2
+    if is_nacimiento_req:
+        nacimiento_groups = [
+            group
+            for group in (nacimiento_group_1, nacimiento_group_2)
+            if group
+        ]
 
-    if not nacimiento_groups:
-        raise RuntimeError("NO_PROVIDER6_NACIMIENTO_GROUP_CONFIGURED")
+        if not nacimiento_groups:
+            raise RuntimeError("NO_PROVIDER6_NACIMIENTO_GROUP_CONFIGURED")
 
-    return nacimiento_groups[request_id % len(nacimiento_groups)]
+        return nacimiento_groups[(request_id - 1) % len(nacimiento_groups)]
+
+    # Por seguridad, cualquier otro tipo queda bloqueado.
+    raise RuntimeError("PROVIDER6_ACT_TYPE_NOT_ALLOWED")
 
 
 def _pick_provider_group(
