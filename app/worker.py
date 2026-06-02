@@ -2087,7 +2087,7 @@ def process_request(request_id: int):
 
             instance = req.instance_name or "docifybot8"
 
-            if _store_api_pdf_result(req, db, safe_media_b64, filename, "BASE64_PROVIDER7_API"):
+            if _store_api_pdf_result(req, db, safe_media_b64, filename, f"BASE64_{provider_name}_API"):
                 return
 
             print("REQ_INSTANCE_NAME =", req.instance_name, flush=True)
