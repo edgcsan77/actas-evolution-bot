@@ -4202,12 +4202,12 @@ def panel_group_detail(
     )
 
     days = {}
-    now_local = _panel_now()
 
-    if view == "month":
-        local_start = _panel_month_start(now_local)
-        local_end = _panel_month_end(now_local)
-    else:
+    local_start = _to_panel_tz(time_min)
+    local_end = _to_panel_tz(time_max)
+    
+    if not local_start or not local_end:
+        now_local = _panel_now()
         local_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
         local_end = local_start + timedelta(days=1)
 
@@ -4265,11 +4265,12 @@ def panel_group_detail(
     }
 
     title = detail["group_name"]
-    subtitle = (
-        f"Historial mensual: {detail['date_from']} a {detail['date_to']} ({PANEL_TZ})"
-        if view == "month"
-        else f"Historial diario: {detail['date_from']} ({PANEL_TZ})"
-    )
+    if view == "custom":
+        subtitle = f"Historial personalizado: {detail['date_from']} a {detail['date_to']} ({PANEL_TZ})"
+    elif view == "month":
+        subtitle = f"Historial mensual: {detail['date_from']} a {detail['date_to']} ({PANEL_TZ})"
+    else:
+        subtitle = f"Historial diario: {detail['date_from']} ({PANEL_TZ})"
 
     html = f"""
     <!doctype html>
@@ -5218,9 +5219,11 @@ def panel_api_actas(
     provider_name: str = "",
     status: str = "",
     act_type: str = "",
+    date_from: str = "",
+    date_to: str = "",
     db: Session = Depends(get_db),
 ):
-    time_min, time_max, view = _panel_period_bounds(view)
+    time_min, time_max, view = _panel_period_bounds(view, date_from, date_to)
 
     rows = _query_requests_for_panel(
         db=db,
@@ -5257,6 +5260,8 @@ def panel_api_actas(
     return {
         "ok": True,
         "view": view,
+        "date_from": date_from,
+        "date_to": date_to,
         "summary": summary,
         "by_group": by_group,
         "by_provider": by_provider,
@@ -7561,10 +7566,7 @@ def panel_actas(
             .all()
         )
         
-        subtitle = (
-            f"Vista mensual ({PANEL_TZ})" if view == "month"
-            else f"Vista diaria ({_panel_day_str()}, {PANEL_TZ})"
-        )
+        subtitle = f"{period_label} ({PANEL_TZ})"
         
         provider_states = _esc(_providers_status_text(db)).replace("\n", "<br>")
 
@@ -8766,6 +8768,9 @@ def panel_actas(
               <div class="filters">
                 <input type="hidden" name="view" value="{_esc(view)}">
                 <input type="hidden" name="group_mode" value="{_esc(group_mode)}">
+                <input type="hidden" name="date_from" value="{_esc(date_from)}">
+                <input type="hidden" name="date_to" value="{_esc(date_to)}">
+                
                 <input name="group_jid" placeholder="Grupo cliente" value="{_esc(group_jid)}">
                 <input name="provider_name" placeholder="Proveedor" value="{_esc(provider_name)}">
                 <input name="status" placeholder="Estado" value="{_esc(status)}">
@@ -9197,11 +9202,11 @@ def panel_actas(
           </div>
           <div class="group-mode-bar">
             <a class="group-mode-link {'group-mode-link-active' if group_mode == 'all' else ''}"
-               href="/panel?token=docifymx2026&view={_esc(view)}&group_mode=all&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
+               href="/panel?token=docifymx2026&view={_esc(view)}&group_mode=all&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}&date_from={_esc(date_from)}&date_to={_esc(date_to)}">
               Ver todos los grupos
             </a>
             <a class="group-mode-link {'group-mode-link-active' if group_mode == 'active' else ''}"
-               href="/panel?token=docifymx2026&view={_esc(view)}&group_mode=active&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}">
+               href="/panel?token=docifymx2026&view={_esc(view)}&group_mode=active&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}&date_from={_esc(date_from)}&date_to={_esc(date_to)}">
               Solo grupos con compras del día
             </a>
           </div>
@@ -10310,13 +10315,15 @@ def panel_actas(
           const wrap = document.getElementById("recentRequestsWrap");
           if (!wrap) return;
         
-          const params = new URLSearchParams({{
+          const params = new URLSearchParams({
             view: document.querySelector('input[name="view"]')?.value || "day",
             group_jid: document.querySelector('input[name="group_jid"]')?.value || "",
             provider_name: document.querySelector('input[name="provider_name"]')?.value || "",
             status: document.querySelector('input[name="status"]')?.value || "",
             act_type: document.querySelector('input[name="act_type"]')?.value || "",
-          }});
+            date_from: document.querySelector('input[name="date_from"]')?.value || "",
+            date_to: document.querySelector('input[name="date_to"]')?.value || "",
+          });
         
           try {{
             const res = await fetch(`/panel/recent-requests?${{params.toString()}}`);
