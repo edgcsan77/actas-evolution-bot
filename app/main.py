@@ -12746,6 +12746,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     "NO LOCALIZADA EN LA BASE DE DATOS NACIONAL DE REGISTRO CIVIL",
                     "NO LOCALIZADO EN BASE DE DATOS NACIONAL DE REGISTRO CIVIL",
                     "NO LOCALIZADA EN BASE DE DATOS NACIONAL DE REGISTRO CIVIL",
+                    "INVALIDA",
+                    "INVÁLIDA",
                 }
 
                 is_negative_text = any(
