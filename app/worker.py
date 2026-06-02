@@ -184,30 +184,318 @@ def providers_status_loop():
 threading.Thread(target=providers_status_loop, daemon=True).start()
 
 
+PROVIDER_LABELS_SUPPORT = {
+    "PROVIDER1": "ADMIN DIGITAL",
+    "PROVIDER2": "ACTAS DEL SURESTE",
+    "PROVIDER3": "AUSTRAM WEB",
+    "PROVIDER4": "LAZARO WEB 1",
+    "PROVIDER5": "LUIS SID",
+    "PROVIDER6": "ACTAS ESCALANTE",
+    "PROVIDER7": "MESINO SID",
+    "PROVIDER8": "ANGEL",
+    "PROVIDER9": "EMILIANO",
+    "PROVIDER10": "LAZARO WEB 2",
+    "PROVIDER11": "LAZARO WEB 3",
+    "MAYAPROVIDER": "PROVEEDOR DE MAYA",
+}
+
+
+SUPPORT_ERROR_LABELS_ES = {
+    # Errores generales de selección/configuración
+    "NO_PROVIDER_ENABLED": "No hay proveedores activos disponibles para procesar la solicitud.",
+    "NO_PROVIDER_FOR_SPECIAL_FORMAT": "No hay proveedor disponible para este tipo/formato de solicitud.",
+    "UNKNOWN_PROVIDER": "Proveedor desconocido o no configurado.",
+    "NO_FOLIADAS_PROVIDER_GROUP_CONFIGURED": "No hay grupo configurado para actas foliadas.",
+    "NO_BIRTH_PROVIDER_GROUP_CONFIGURED": "No hay grupo configurado para nacimientos.",
+    "NO_SPECIAL_PROVIDER_GROUP_CONFIGURED": "No hay grupo configurado para actas especiales.",
+    "NO_PROVIDER6_FOLIADAS_GROUP_CONFIGURED": "No hay grupo de foliadas configurado para ACTAS ESCALANTE.",
+    "NO_PROVIDER6_ESPECIALES_GROUP_CONFIGURED": "No hay grupo de especiales configurado para ACTAS ESCALANTE.",
+    "NO_PROVIDER6_NACIMIENTO_GROUP_CONFIGURED": "No hay grupo de nacimiento configurado para ACTAS ESCALANTE.",
+    "PROVIDER2_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para ACTAS DEL SURESTE.",
+    "PROVIDER5_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para LUIS SID.",
+    "PROVIDER8_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para ANGEL.",
+    "PROVIDER9_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para EMILIANO.",
+    "MAYAPROVIDER_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para el proveedor de MAYA.",
+
+    # Errores de PDF/validación
+    "WRONG_ACT_TYPE_PDF_PENDING_RETRY": "El proveedor envió un PDF de otro tipo de acta. La solicitud sigue en proceso para esperar el PDF correcto.",
+    "WRONG_CURP_IN_PDF": "El PDF recibido no corresponde al dato solicitado.",
+    "PROVIDER8_POSTPROCESS_ERROR": "Error al procesar el PDF recibido del proveedor ANGEL.",
+    "SHARED_GROUP_LIMIT_REACHED": "El grupo alcanzó su límite individual de actas.",
+
+    # Provider 3
+    "PROVIDER3_NO_PDF": "AUSTRAM WEB no devolvió un PDF válido.",
+    "PROVIDER3_PDF_SEND_FAILED": "No se pudo enviar el PDF generado por AUSTRAM WEB.",
+
+    # Provider 7 / otros
+    "PROVIDER7_ERROR": "Error al procesar la solicitud con MESINO SID.",
+    "DELIVERY_FAILED": "No se pudo entregar el PDF al cliente por WhatsApp.",
+}
+
+
+def _support_provider_label(provider_name: str | None) -> str:
+    p = (provider_name or "").strip().upper()
+    return PROVIDER_LABELS_SUPPORT.get(p, p or "N/D")
+
+
+def _support_provider_from_error(err: str | None) -> str:
+    text = (err or "").strip().upper()
+
+    # Detecta MAYAPROVIDER aunque no venga guardado todavía en req.provider_name.
+    if "MAYAPROVIDER" in text:
+        return "MAYAPROVIDER"
+
+    m = re.search(r"\bPROVIDER(?:_)?(10|11|[1-9])\b", text)
+    if m:
+        return f"PROVIDER{m.group(1)}"
+
+    return ""
+
+
+def _should_skip_support_error(req, err: str | None) -> bool:
+    provider_name = (getattr(req, "provider_name", "") or "").strip().upper()
+    instance_name = (getattr(req, "instance_name", "") or "").strip().lower()
+    err_text = (err or "").strip().upper()
+
+    # No enviar NADA de MAYAPROVIDER al grupo de soporte.
+    # Cubre:
+    # - req.provider_name = MAYAPROVIDER
+    # - err = MAYAPROVIDER_GROUPS_NOT_CONFIGURED
+    # - err = MAYAPROVIDER_SEND_FAILED
+    # - instancia docifybot8maya usando proveedor personal
+    if provider_name == "MAYAPROVIDER":
+        return True
+
+    if "MAYAPROVIDER" in err_text:
+        return True
+
+    if instance_name == "docifybot8maya":
+        return True
+
+    return False
+
+
+def _split_error_code_and_detail(err: str | None) -> tuple[str, str]:
+    raw = (err or "").strip()
+    if not raw:
+        return "", ""
+
+    if ":" in raw:
+        code, detail = raw.split(":", 1)
+        return code.strip(), detail.strip()
+
+    if " | " in raw:
+        code, detail = raw.split(" | ", 1)
+        return code.strip(), detail.strip()
+
+    return raw.strip(), ""
+
+
+def _clean_error_code(code: str | None) -> str:
+    code_up = (code or "").strip().upper()
+
+    # Algunos errores llegan como PROVIDER1_WRONG_CURP_IN_PDF.
+    # Para traducirlos mejor quitamos el prefijo del proveedor.
+    code_up = re.sub(r"^PROVIDER(?:10|11|[1-9])_", "", code_up)
+
+    # Y también MAYAPROVIDER_...
+    code_up = re.sub(r"^MAYAPROVIDER_", "", code_up)
+
+    return code_up
+
+
+def _humanize_support_code(err: str | None) -> str:
+    raw = (err or "").strip()
+    if not raw:
+        return "Error no especificado."
+
+    original_code, detail = _split_error_code_and_detail(raw)
+    code_up = (original_code or "").strip().upper()
+    code_clean = _clean_error_code(code_up)
+
+    provider_from_error = _support_provider_from_error(code_up)
+    provider_label = _support_provider_label(provider_from_error) if provider_from_error else ""
+
+    # 1) Traducción directa del error completo.
+    if code_up in SUPPORT_ERROR_LABELS_ES:
+        msg = SUPPORT_ERROR_LABELS_ES[code_up]
+        if detail:
+            msg += f"\nDetalle técnico: {detail}"
+        return msg
+
+    # 2) Traducción quitando prefijo PROVIDER1_, PROVIDER4_, etc.
+    if code_clean in SUPPORT_ERROR_LABELS_ES:
+        msg = SUPPORT_ERROR_LABELS_ES[code_clean]
+        if detail:
+            msg += f"\nDetalle técnico: {detail}"
+        return msg
+
+    # 3) Patrones generales por sufijo.
+    if code_clean == "SEND_FAILED":
+        msg = f"No se pudo enviar la solicitud al proveedor {provider_label or 'seleccionado'}."
+        if detail:
+            msg += f"\nDetalle técnico: {detail}"
+        return msg
+
+    if code_clean == "GROUPS_NOT_CONFIGURED":
+        return f"No hay grupos configurados para el proveedor {provider_label or 'seleccionado'}."
+
+    if code_clean == "WRONG_ACT_TYPE":
+        return f"El proveedor {provider_label or 'seleccionado'} devolvió un PDF de otro tipo de acta."
+
+    if code_clean == "WRONG_CURP_IN_PDF":
+        return f"El proveedor {provider_label or 'seleccionado'} devolvió un PDF que no corresponde al dato solicitado."
+
+    if code_clean == "WRONG_ELECTRONIC_ID_OR_CODE_IN_PDF":
+        return f"El proveedor {provider_label or 'seleccionado'} devolvió un PDF que no corresponde a la cadena/folio solicitado."
+
+    if code_clean == "NOT_CURP_OR_CHAIN":
+        return f"El proveedor {provider_label or 'seleccionado'} no pudo procesar el dato porque no parece CURP ni cadena válida."
+
+    if code_clean == "NOT_ALLOWED_GROUP":
+        return f"El proveedor {provider_label or 'seleccionado'} no está permitido para este grupo."
+
+    if code_clean == "PDF_SEND_FAILED":
+        return f"El PDF fue generado, pero no se pudo entregar al cliente desde el proveedor {provider_label or 'seleccionado'}."
+
+    if code_clean == "NO_PDF":
+        msg = f"El proveedor {provider_label or 'seleccionado'} no devolvió PDF."
+        if detail:
+            msg += f"\nDetalle técnico: {detail}"
+        return msg
+
+    if code_clean.startswith("FAILED_FALLBACK_TO_"):
+        fallback_provider = code_clean.replace("FAILED_FALLBACK_TO_", "").strip()
+        fallback_label = _support_provider_label(fallback_provider)
+        return f"Falló el proveedor inicial y también falló el respaldo hacia {fallback_label}."
+
+    if code_clean == "FALLBACK_NO_PROVIDER_AVAILABLE":
+        return "Falló el proveedor inicial y no hubo otro proveedor disponible para respaldo."
+
+    if code_clean in {
+        "BACKEND_FAILED",
+        "VGET_FAILED",
+        "HISTORY_FAILED",
+        "HISTORY_NOT_CONFIRMED_PDF",
+        "HISTORY_NOT_CONFIRMED_FOLIO",
+        "NO_PDF_LINK_FOR",
+        "NO_FOLIO_LINK_FOR",
+        "DOWNLOAD_FAILED",
+        "FOLIO_DOWNLOAD_FAILED",
+    }:
+        readable = code_clean.replace("_", " ").lower()
+        msg = f"Error del proveedor {provider_label or 'seleccionado'}: {readable}."
+        if detail:
+            msg += f"\nDetalle técnico: {detail}"
+        return msg
+
+    # 4) Patrones genéricos para errores futuros.
+    if "TIMEOUT" in code_up or "TIMED OUT" in raw.upper() or "READ TIMED OUT" in raw.upper():
+        return f"La solicitud excedió el tiempo máximo de espera. Código técnico: {code_up}"
+
+    if "NOT_CONFIGURED" in code_up:
+        readable = code_up.replace("_", " ").lower()
+        return f"Falta configuración en el sistema: {readable}."
+
+    if "WRONG" in code_up and "PDF" in code_up:
+        return f"El PDF recibido no pasó una validación del sistema. Código técnico: {code_up}"
+
+    if "FAILED" in code_up:
+        readable = code_up.replace("_", " ").lower()
+        msg = f"Ocurrió una falla durante el proceso: {readable}."
+        if detail:
+            msg += f"\nDetalle técnico: {detail}"
+        return msg
+
+    if "INVALID" in code_up:
+        readable = code_up.replace("_", " ").lower()
+        return f"El dato o respuesta fue detectado como inválido: {readable}."
+
+    # 5) Último fallback: NUNCA deja el error vacío ni rompe el aviso.
+    readable = code_up.replace("_", " ").lower()
+    if detail:
+        return f"Error del sistema: {readable}.\nDetalle técnico: {detail}"
+
+    return f"Error del sistema: {readable}."
+
+
+def _support_extra_es(extra_msg: str | None) -> str:
+    text = (extra_msg or "").strip()
+    if not text:
+        return ""
+
+    replacements = {
+        "filename=": "archivo=",
+        "expected_act_type=": "tipo_esperado=",
+        "expected_curp=": "dato_esperado=",
+        "provider=": "proveedor=",
+        "provider_name=": "proveedor=",
+        "group=": "grupo=",
+        "group_id=": "grupo_id=",
+        "source_group_id=": "grupo_origen=",
+        "request_id=": "solicitud_id=",
+        "status_code=": "codigo_http=",
+        "response=": "respuesta=",
+        "body=": "respuesta=",
+        "error=": "detalle_error=",
+        "timeout=": "tiempo_espera=",
+        "filename:": "archivo:",
+        "expected_act_type:": "tipo_esperado:",
+        "expected_curp:": "dato_esperado:",
+        "NO se notificó al cliente para evitar falso error": "No se notificó al cliente para evitar un falso error",
+    }
+
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+
+    # Cambia códigos PROVIDER dentro del detalle por nombre real.
+    for code, label in PROVIDER_LABELS_SUPPORT.items():
+        text = text.replace(code, label)
+
+    return text
+
+
 def _notify_support_error(req, err: str, extra_msg: str = ""):
+    if _should_skip_support_error(req, err):
+        print("SUPPORT_ERROR_SKIPPED =", {
+            "req_id": getattr(req, "id", None),
+            "provider_name": getattr(req, "provider_name", None),
+            "instance_name": getattr(req, "instance_name", None),
+            "err": err,
+            "reason": "MAYAPROVIDER_OR_PRIVATE_PROVIDER",
+        }, flush=True)
+        return
+
     support_group = (getattr(settings, "SOPORTE_ACTAS_GROUP", "") or "").strip()
     if not support_group:
         return
 
     try:
+        provider_name = (getattr(req, "provider_name", "") or "").strip().upper()
+
+        # Si req.provider_name viene vacío, intenta detectarlo desde el error.
+        if not provider_name:
+            provider_name = _support_provider_from_error(err)
+
         msg = (
             "🚨 *ERROR SOPORTE ACTAS*\n\n"
             f"Solicitud ID: {getattr(req, 'id', 'N/D')}\n"
             f"Dato: {getattr(req, 'curp', 'N/D')}\n"
             f"Tipo: {getattr(req, 'act_type', 'N/D')}\n"
-            f"Proveedor: {getattr(req, 'provider_name', 'N/D')}\n"
+            f"Proveedor: {_support_provider_label(provider_name)}\n"
             f"Grupo origen: {getattr(req, 'source_group_id', 'N/D')}\n"
             f"Solicitante: {getattr(req, 'requester_wa_id', 'N/D')}\n"
-            f"Error: {err}\n"
+            f"Error: {_humanize_support_code(err)}\n"
         )
 
-        if extra_msg:
-            msg += f"\nDetalle: {extra_msg}\n"
+        extra_msg_es = _support_extra_es(extra_msg)
+        if extra_msg_es:
+            msg += f"\nDetalle: {extra_msg_es}\n"
 
-        instance = getattr(req, "instance_name", None) or getattr(settings, "EVOLUTION_INSTANCE", "docifybot8")
         support_instance = getattr(settings, "SOPORTE_ACTAS_INSTANCE", None) or "docifybot8"
         print("SOPORTE_ACTAS_SEND_INSTANCE =", support_instance, flush=True)
         send_group_text(support_group, msg, support_instance)
+
     except Exception as support_exc:
         print("SUPPORT_ERROR_NOTIFY_FAILED =", str(support_exc), flush=True)
 
