@@ -11243,19 +11243,21 @@ def _pick_matching_processing_req_for_pdf(
 ):
     candidates = []
     status_filter = _provider_pdf_match_status_filter()
-    inst = (instance_name or "").strip()
+
+    # IMPORTANTE:
+    # NO filtrar por RequestLog.instance_name aquí.
+    # El PDF del proveedor global llega por docifybot8,
+    # pero el request original puede pertenecer a docifybot8moon/max/rywya.
+    # El match correcto es por CURP + provider_group_id o provider_message_id.
 
     if lookup_id:
-        filters = [
-            RequestLog.curp == lookup_id,
-            status_filter,
-            RequestLog.provider_group_id == source_chat_id,
-        ]
-        if inst:
-            filters.append(RequestLog.instance_name == inst)
         candidates = (
             db.query(RequestLog)
-            .filter(*filters)
+            .filter(
+                RequestLog.curp == lookup_id,
+                status_filter,
+                RequestLog.provider_group_id == source_chat_id,
+            )
             .order_by(
                 case((RequestLog.status == "PROCESSING", 0), else_=1),
                 RequestLog.created_at.asc(),
@@ -11264,17 +11266,12 @@ def _pick_matching_processing_req_for_pdf(
         )
 
     if not candidates and quoted_msg_id:
-        filters = [
-            RequestLog.provider_message_id == quoted_msg_id,
-            status_filter,
-        ]
-
-        if inst:
-            filters.append(RequestLog.instance_name == inst)
-
         candidates = (
             db.query(RequestLog)
-            .filter(*filters)
+            .filter(
+                RequestLog.provider_message_id == quoted_msg_id,
+                status_filter,
+            )
             .order_by(
                 case((RequestLog.status == "PROCESSING", 0), else_=1),
                 RequestLog.created_at.desc(),
@@ -11283,17 +11280,12 @@ def _pick_matching_processing_req_for_pdf(
         )
 
     if not candidates and lookup_id:
-        filters = [
-            RequestLog.curp == lookup_id,
-            status_filter,
-        ]
-
-        if inst:
-            filters.append(RequestLog.instance_name == inst)
-
         candidates = (
             db.query(RequestLog)
-            .filter(*filters)
+            .filter(
+                RequestLog.curp == lookup_id,
+                status_filter,
+            )
             .order_by(
                 case((RequestLog.status == "PROCESSING", 0), else_=1),
                 RequestLog.created_at.asc(),
@@ -11316,22 +11308,22 @@ def _pick_matching_processing_req_for_pdf(
         for r in candidates
     ], flush=True)
 
-    # Primero intentamos encontrar el request cuyo tipo coincida con el PDF.
     for r in candidates:
         if _pdf_matches_req_type(pdf_bytes, r):
             print("PROVIDER_PDF_SMART_TYPE_MATCH =", {
                 "matched_req_id": r.id,
                 "matched_act_type": r.act_type,
                 "matched_status": r.status,
+                "matched_instance_name": r.instance_name,
             }, flush=True)
             return r
 
-    # Si solo hay un candidato, lo regresamos para que las validaciones normales decidan.
     if len(candidates) == 1:
         print("PROVIDER_PDF_SINGLE_CANDIDATE_NO_TYPE_MATCH =", {
             "matched_req_id": candidates[0].id,
             "matched_act_type": candidates[0].act_type,
             "matched_status": candidates[0].status,
+            "matched_instance_name": candidates[0].instance_name,
         }, flush=True)
         return candidates[0]
 
@@ -11339,6 +11331,7 @@ def _pick_matching_processing_req_for_pdf(
         "lookup_id": lookup_id,
         "source_chat_id": source_chat_id,
         "quoted_msg_id": quoted_msg_id,
+        "webhook_instance_name": instance_name,
         "candidates": len(candidates),
     }, flush=True)
 
@@ -13032,9 +13025,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             RequestLog.curp == lookup_id,
                             _provider_pdf_match_status_filter(),
                         ]
-                        
-                        if instance_name:
-                            fallback_filters.append(RequestLog.instance_name == instance_name)
                         
                         fallback_req = (
                             db.query(RequestLog)
