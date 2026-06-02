@@ -246,7 +246,12 @@ def _support_provider_from_error(err: str | None) -> str:
     if "MAYAPROVIDER" in text:
         return "MAYAPROVIDER"
 
-    m = re.search(r"\bPROVIDER(?:_)?(10|11|[1-9])\b", text)
+    # Detecta:
+    # PROVIDER1
+    # PROVIDER1_SEND_FAILED
+    # PROVIDER_1_SEND_FAILED
+    # PROVIDER10_DOWNLOAD_FAILED
+    m = re.search(r"\bPROVIDER_?(10|11|[1-9])(?=\b|_)", text)
     if m:
         return f"PROVIDER{m.group(1)}"
 
@@ -255,7 +260,6 @@ def _support_provider_from_error(err: str | None) -> str:
 
 def _should_skip_support_error(req, err: str | None) -> bool:
     provider_name = (getattr(req, "provider_name", "") or "").strip().upper()
-    instance_name = (getattr(req, "instance_name", "") or "").strip().lower()
     err_text = (err or "").strip().upper()
 
     # No enviar NADA de MAYAPROVIDER al grupo de soporte.
@@ -263,14 +267,10 @@ def _should_skip_support_error(req, err: str | None) -> bool:
     # - req.provider_name = MAYAPROVIDER
     # - err = MAYAPROVIDER_GROUPS_NOT_CONFIGURED
     # - err = MAYAPROVIDER_SEND_FAILED
-    # - instancia docifybot8maya usando proveedor personal
     if provider_name == "MAYAPROVIDER":
         return True
 
     if "MAYAPROVIDER" in err_text:
-        return True
-
-    if instance_name == "docifybot8maya":
         return True
 
     return False
@@ -865,29 +865,26 @@ def _is_folio_type(act_type: str | None) -> bool:
 def _is_provider6_blocked_act_type(act_type: str | None) -> bool:
     t = (act_type or "").upper().strip()
 
-    # Escalante NO debe recibir estos tipos, ni aunque vengan como FOLIO.
-    return any(x in t for x in [
-        "MATRIMONIO",
-        "MAT",
-        "DEFUNCION",
-        "DEFUNCIÓN",
-        "DEF",
-        "DIVORCIO",
-        "DIV",
-    ])
+    # Escalante NO debe recibir estos tipos por CURP,
+    # ni aunque vengan como FOLIO.
+    return bool(re.search(
+        r"\b(MATRIMONIO|MAT|DEFUNCION|DEFUNCIÓN|DEF|DIVORCIO|DIV)\b",
+        t
+    ))
 
 
 def _is_provider6_allowed_request(term: str | None, act_type: str | None) -> bool:
     t = (act_type or "").upper().strip()
 
-    # Primero bloquear MAT / DEF / DIV.
-    # Esto evita MATRIMONIO FOLIO, DEFUNCION FOLIO, DIVORCIO FOLIO.
-    if _is_provider6_blocked_act_type(t):
-        return False
-
-    # CADENA sí puede entrar a Escalante.
+    # CADENA sí puede entrar a Escalante SIEMPRE.
+    # La cadena ya identifica el acta; no dependemos del act_type.
     if is_chain(term):
         return True
+
+    # Para solicitudes por CURP, Escalante NO debe recibir
+    # matrimonio, defunción ni divorcio.
+    if _is_provider6_blocked_act_type(t):
+        return False
 
     # FOLIADA sí puede entrar a Escalante.
     if _is_folio_act(t):
