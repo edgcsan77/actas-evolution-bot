@@ -1806,44 +1806,93 @@ def _validate_pdf_matches_term(pdf_bytes: bytes, term: str, act_type: str | None
     return False
 
 
-def _validate_act_type_pdf(pdf_bytes: bytes, act_type: str | None) -> bool:
+def _detect_pdf_act_type(pdf_bytes: bytes) -> str:
     text = _extract_pdf_visible_text(pdf_bytes)
+
     if not text or len(text.strip()) < 30:
-        print("PROVIDER_VALIDATE_ACT_TEXT_TOO_SHORT", flush=True)
-        return False
+        print("PROVIDER_VALIDATE_ACT_TEXT_TOO_SHORT_SOFT_PASS", flush=True)
+        return ""
 
     text = text.upper()
-    act_type = (act_type or "").upper()
 
-    if "NAC" in act_type:
-        if "ACTA DE NACIMIENTO" in text:
-            return True
-        if "MATRIMONIO" in text or "DIVORCIO" in text or "DEFUNCION" in text or "DEFUNCIÓN" in text:
-            return False
+    # Detectar tipo visible real del PDF.
+    # Ojo: primero revisar frases completas.
+    if "ACTA DE NACIMIENTO" in text:
+        return "NACIMIENTO"
+
+    if "ACTA DE MATRIMONIO" in text:
+        return "MATRIMONIO"
+
+    if "ACTA DE DIVORCIO" in text:
+        return "DIVORCIO"
+
+    if "ACTA DE DEFUNCION" in text or "ACTA DE DEFUNCIÓN" in text:
+        return "DEFUNCION"
+
+    # Fallback por palabras, solo si no encontró frase completa.
+    # Esto ayuda cuando pypdf extrae texto medio raro.
+    if "NACIMIENTO" in text and not any(x in text for x in ["MATRIMONIO", "DIVORCIO", "DEFUNCION", "DEFUNCIÓN"]):
+        return "NACIMIENTO"
+
+    if "MATRIMONIO" in text and not any(x in text for x in ["NACIMIENTO", "DIVORCIO", "DEFUNCION", "DEFUNCIÓN"]):
+        return "MATRIMONIO"
+
+    if "DIVORCIO" in text and not any(x in text for x in ["NACIMIENTO", "MATRIMONIO", "DEFUNCION", "DEFUNCIÓN"]):
+        return "DIVORCIO"
+
+    if ("DEFUNCION" in text or "DEFUNCIÓN" in text) and not any(x in text for x in ["NACIMIENTO", "MATRIMONIO", "DIVORCIO"]):
+        return "DEFUNCION"
+
+    # No se pudo confirmar el tipo, pero tampoco se detectó uno contrario claro.
+    return ""
+
+
+def _expected_act_type_group(act_type: str | None) -> str:
+    t = (act_type or "").upper().strip()
+
+    if "NAC" in t:
+        return "NACIMIENTO"
+
+    if "MAT" in t:
+        return "MATRIMONIO"
+
+    if "DIV" in t:
+        return "DIVORCIO"
+
+    if "DEF" in t:
+        return "DEFUNCION"
+
+    return ""
+
+
+def _validate_act_type_pdf(pdf_bytes: bytes, act_type: str | None) -> bool:
+    expected = _expected_act_type_group(act_type)
+    detected = _detect_pdf_act_type(pdf_bytes)
+
+    print("PROVIDER_VALIDATE_ACT_TYPE_EXPECTED =", expected, flush=True)
+    print("PROVIDER_VALIDATE_ACT_TYPE_DETECTED =", detected or "NO_CONFIRMADO", flush=True)
+
+    # Si no sabemos qué esperaba el sistema, no bloquear.
+    if not expected:
+        print("PROVIDER_VALIDATE_ACT_TYPE_NO_EXPECTED_SOFT_PASS", flush=True)
+        return True
+
+    # Si no se pudo confirmar el tipo por texto interno del PDF,
+    # NO bloquear. Esto evita falsos errores como el PDF visualmente correcto
+    # de matrimonio que pypdf no leyó bien.
+    if not detected:
+        print("PROVIDER_VALIDATE_ACT_TYPE_NOT_CONFIRMED_SOFT_PASS", flush=True)
+        return True
+
+    # Solo bloquear cuando el PDF confirma claramente OTRO tipo.
+    if detected != expected:
+        print("PROVIDER_VALIDATE_ACT_TYPE_MISMATCH_HARD_FAIL =", {
+            "expected": expected,
+            "detected": detected,
+        }, flush=True)
         return False
 
-    if "MAT" in act_type:
-        if "ACTA DE MATRIMONIO" in text:
-            return True
-        if "NACIMIENTO" in text or "DIVORCIO" in text or "DEFUNCION" in text or "DEFUNCIÓN" in text:
-            return False
-        return False
-
-    if "DIV" in act_type:
-        if "ACTA DE DIVORCIO" in text:
-            return True
-        if "NACIMIENTO" in text or "MATRIMONIO" in text or "DEFUNCION" in text or "DEFUNCIÓN" in text:
-            return False
-        return False
-
-    if "DEF" in act_type:
-        if "ACTA DE DEFUNCION" in text or "ACTA DE DEFUNCIÓN" in text:
-            return True
-        if "NACIMIENTO" in text or "MATRIMONIO" in text or "DIVORCIO" in text:
-            return False
-        return False
-
-    return False
+    return True
 
 
 def _after_done_accounting(req, db):
