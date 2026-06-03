@@ -1276,7 +1276,6 @@ def botpanel_audit_all_groups(
 
     range_buttons = f"""
         <a class="btn" href="/botpanel/{_esc(token)}/audit?period=day&status={_esc(status)}">Hoy</a>
-        <a class="btn" href="/botpanel/{_esc(token)}/audit?period=week&status={_esc(status)}">Semana actual (lun-dom)</a>
         <a class="btn" href="/botpanel/{_esc(token)}/audit?period=30d&status={_esc(status)}">30 días</a>
         <a class="btn" href="/botpanel/{_esc(token)}/audit?period=month&status={_esc(status)}">Mes actual</a>
         <a class="btn" href="/botpanel/{_esc(token)}/audit?period=prev_month&status={_esc(status)}">Mes anterior</a>
@@ -7263,7 +7262,6 @@ def panel_actas(
         else:
             period_label = {
                 "day": "Hoy",
-                "week": "Semana actual",
                 "30d": "Últimos 30 días",
                 "month": "Mes actual",
                 "prev_month": "Mes anterior",
@@ -8463,7 +8461,6 @@ def panel_actas(
         
               <div class="toolbar">
                 <a href="/panel?token=docifymx2026&view=day&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'day' else ''}">Hoy</a>
-                <a href="/panel?token=docifymx2026&view=week&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'week' else ''}">Semana actual</a>
                 <a href="/panel?token=docifymx2026&view=month&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'month' else ''}">Mes actual</a>
                 <a href="/panel?token=docifymx2026&view=prev_month&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'prev_month' else ''}">Mes anterior</a>
                 <a href="/panel/promotions/report" class="tool-link" target="_blank">Promociones</a>
