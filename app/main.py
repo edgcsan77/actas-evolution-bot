@@ -10730,7 +10730,13 @@ def _get_api_client_or_401(db: Session, authorization: str | None) -> ApiClient:
     token = _bearer_token(authorization)
 
     if not token:
-        raise HTTPException(status_code=401, detail="MISSING_API_KEY")
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error_code": "MISSING_API_KEY",
+                "error_message": "Falta enviar el encabezado Authorization: Bearer TU_API_KEY.",
+            },
+        )
 
     client = (
         db.query(ApiClient)
@@ -10742,7 +10748,13 @@ def _get_api_client_or_401(db: Session, authorization: str | None) -> ApiClient:
     )
 
     if not client:
-        raise HTTPException(status_code=401, detail="INVALID_API_KEY")
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error_code": "INVALID_API_KEY",
+                "error_message": "API key invalida.",
+            },
+        )
 
     return client
 
@@ -10834,6 +10846,8 @@ API_ERROR_MESSAGES = {
     "PROVIDER_FAILED": "El proveedor no pudo procesar la solicitud.",
     "NO_PROVIDER_AVAILABLE": "No hay proveedor disponible para procesar esta solicitud.",
     "INSUFFICIENT_BALANCE": "Saldo insuficiente para crear una nueva solicitud.",
+    "GROUP_LIMIT_REACHED": "El grupo o cliente alcanzo su limite disponible de solicitudes.",
+    "DELIVERY_FAILED": "El PDF fue generado, pero no se pudo entregar correctamente.",
     "REQUEST_NOT_FOUND": "La solicitud no existe o no pertenece al cliente autenticado.",
     "REQUEST_NOT_DONE": "La solicitud todavia no esta lista o termino en error.",
     "CREATE_REQUEST_FAILED": "No se pudo crear la solicitud.",
@@ -10955,6 +10969,23 @@ def _api_public_error_code(raw_error: str | None) -> str:
     if code in {
         "WRONG_ACT_TYPE",
         "WRONG_ACT_TYPE_PDF_PENDING_RETRY",
+    }:
+        return "WRONG_ACT_TYPE"
+
+    if code in {
+        "SHARED_GROUP_LIMIT_REACHED",
+    }:
+        return "GROUP_LIMIT_REACHED"
+    
+    if code in {
+        "DELIVERY_FAILED",
+        "PDF_SEND_FAILED",
+        "PROVIDER3_PDF_SEND_FAILED",
+    }:
+        return "DELIVERY_FAILED"
+    
+    if code in {
+        "PROVIDER6_ACT_TYPE_NOT_ALLOWED",
     }:
         return "WRONG_ACT_TYPE"
 
@@ -11210,7 +11241,7 @@ def api_v1_get_acta(
         data["pdf_url"] = str(request.base_url).rstrip("/") + f"/api/v1/actas/{row.id}/pdf"
 
     if row.status == "ERROR":
-        data["error"] = row.error_message or "ERROR"
+        data.update(_api_request_error_fields(row))
 
     db.refresh(client)
     data["balance"] = _money(client.credit_balance)
@@ -11257,7 +11288,14 @@ def api_v1_get_acta_pdf(
         raise HTTPException(status_code=400, detail=detail)
 
     if not row.api_result_base64:
-        raise HTTPException(status_code=404, detail="PDF_NOT_AVAILABLE")
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "NO_PDF_AVAILABLE",
+                "error_message": API_ERROR_MESSAGES["NO_PDF_AVAILABLE"],
+                "status": row.status,
+            },
+        )
 
     raw = row.api_result_base64.strip()
     if raw.startswith("data:"):
@@ -11266,7 +11304,14 @@ def api_v1_get_acta_pdf(
     try:
         pdf_bytes = base64.b64decode(raw)
     except Exception:
-        raise HTTPException(status_code=500, detail="INVALID_PDF_BASE64")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error_code": "NO_PDF_AVAILABLE",
+                "error_message": "El PDF existe en la solicitud, pero no se pudo decodificar correctamente.",
+                "status": row.status,
+            },
+        )
 
     filename = row.api_result_filename or f"{row.curp}.pdf"
 
@@ -11300,22 +11345,34 @@ def api_v1_list_actas(
         .all()
     )
 
+    items = []
+
+    base_url = "http://187.127.248.94:8000"
+    
+    for r in rows:
+        item = {
+            "request_id": r.id,
+            "external_id": r.api_external_id,
+            "term": r.curp,
+            "act_type": r.act_type,
+            "status": r.status,
+            "charged": bool(r.api_charged),
+            "charged_amount": _money(r.api_price if r.api_charged else 0),
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        }
+    
+        if r.status == "DONE" and r.api_result_base64:
+            item["pdf_url"] = f"{base_url}/api/v1/actas/{r.id}/pdf"
+    
+        if r.status == "ERROR":
+            item.update(_api_request_error_fields(r))
+    
+        items.append(item)
+    
     return {
         "ok": True,
-        "items": [
-            {
-                "request_id": r.id,
-                "external_id": r.api_external_id,
-                "term": r.curp,
-                "act_type": r.act_type,
-                "status": r.status,
-                "charged": bool(r.api_charged),
-                "charged_amount": _money(r.api_price if r.api_charged else 0),
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
-            }
-            for r in rows
-        ],
+        "items": items,
     }
 
 
