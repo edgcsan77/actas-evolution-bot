@@ -10816,6 +10816,218 @@ def _ensure_api_panel_group(db: Session, client: ApiClient):
     db.commit()
 
 
+# ============================================================
+# API V1 - CODIGOS PUBLICOS DE ERROR
+# ============================================================
+
+API_ERROR_MESSAGES = {
+    "MISSING_API_KEY": "Falta enviar el encabezado Authorization: Bearer TU_API_KEY.",
+    "INVALID_API_KEY": "API key invalida.",
+    "MISSING_TERM": "Falta enviar el dato a consultar.",
+    "INVALID_TERM_FORMAT": "El dato enviado no tiene un formato valido.",
+    "CURP_INVALID_OR_NOT_FOUND": "La CURP esta mal escrita, no existe o no fue posible encontrar informacion para generar el acta.",
+    "ACTA_NOT_FOUND": "No se encontro un acta disponible o registrada para el dato solicitado.",
+    "NO_PDF_AVAILABLE": "El proveedor no devolvio un PDF disponible.",
+    "WRONG_PDF_DATA": "El PDF recibido no corresponde al dato solicitado.",
+    "WRONG_ACT_TYPE": "El PDF recibido corresponde a otro tipo de acta.",
+    "PROVIDER_TIMEOUT": "El proveedor tardo demasiado en responder.",
+    "PROVIDER_FAILED": "El proveedor no pudo procesar la solicitud.",
+    "NO_PROVIDER_AVAILABLE": "No hay proveedor disponible para procesar esta solicitud.",
+    "INSUFFICIENT_BALANCE": "Saldo insuficiente para crear una nueva solicitud.",
+    "REQUEST_NOT_FOUND": "La solicitud no existe o no pertenece al cliente autenticado.",
+    "REQUEST_NOT_DONE": "La solicitud todavia no esta lista o termino en error.",
+    "CREATE_REQUEST_FAILED": "No se pudo crear la solicitud.",
+    "UNKNOWN_ERROR": "La solicitud no pudo completarse.",
+}
+
+
+def _api_error_response(error_code: str, **extra):
+    error_code = (error_code or "UNKNOWN_ERROR").strip().upper()
+    return {
+        "ok": False,
+        "error_code": error_code,
+        "error_message": API_ERROR_MESSAGES.get(error_code, API_ERROR_MESSAGES["UNKNOWN_ERROR"]),
+        **extra,
+    }
+
+
+def _api_split_error(raw_error: str | None) -> tuple[str, str]:
+    raw = (raw_error or "").strip()
+    if not raw:
+        return "", ""
+
+    if ":" in raw:
+        code, detail = raw.split(":", 1)
+        return code.strip(), detail.strip()
+
+    if " | " in raw:
+        code, detail = raw.split(" | ", 1)
+        return code.strip(), detail.strip()
+
+    return raw.strip(), ""
+
+
+def _api_clean_internal_error_code(code: str | None) -> str:
+    code_up = (code or "").strip().upper()
+
+    # Quita prefijos internos tipo PROVIDER1_WRONG_CURP_IN_PDF
+    code_up = re.sub(r"^PROVIDER(?:10|11|[1-9])_", "", code_up)
+
+    # Quita prefijo interno de proveedor privado
+    code_up = re.sub(r"^MAYAPROVIDER_", "", code_up)
+
+    return code_up
+
+
+def _api_public_error_code(raw_error: str | None) -> str:
+    original_code, detail = _api_split_error(raw_error)
+    code = _api_clean_internal_error_code(original_code)
+    raw_up = (raw_error or "").strip().upper()
+
+    if not code and not raw_up:
+        return ""
+
+    # Formato / captura
+    if code in {
+        "MISSING_TERM",
+        "EMPTY_TERM",
+        "TERM_REQUIRED",
+    }:
+        return "MISSING_TERM"
+
+    if code in {
+        "NOT_CURP_OR_CHAIN",
+        "INVALID_TERM",
+        "INVALID_CURP",
+        "BAD_CURP",
+        "CURP_EMPTY",
+        "CURP_INVALIDA",
+    }:
+        return "INVALID_TERM_FORMAT"
+
+    # CURP mal escrita / no encontrada
+    if code in {
+        "NO_DATA",
+        "NOT_FOUND",
+        "NO_ENCONTRADA",
+        "NO_ENCONTRADO",
+        "CHECKID_E101_BAD_TERM",
+        "CHECKID_E200_NOT_FOUND",
+        "CHECKID_NOT_FOUND",
+        "SATPI_NOT_FOUND",
+        "GOBMX_NOT_FOUND",
+    }:
+        return "CURP_INVALID_OR_NOT_FOUND"
+
+    # Acta no registrada / no disponible
+    if code in {
+        "NO_ACTA",
+        "ACTA_NOT_FOUND",
+        "HISTORY_NOT_CONFIRMED_PDF",
+        "HISTORY_NOT_CONFIRMED_FOLIO",
+        "NO_PDF_LINK_FOR",
+        "NO_FOLIO_LINK_FOR",
+        "NOT_REGISTERED",
+        "ACTA_NOT_REGISTERED",
+    }:
+        return "ACTA_NOT_FOUND"
+
+    # PDF no disponible
+    if code in {
+        "NO_PDF",
+        "PROVIDER3_NO_PDF",
+        "PDF_NOT_FOUND",
+        "DOWNLOAD_FAILED",
+        "FOLIO_DOWNLOAD_FAILED",
+        "PDF_DOWNLOAD_FAILED",
+        "NO_PROVIDER_MEDIA",
+    }:
+        return "NO_PDF_AVAILABLE"
+
+    # PDF incorrecto
+    if code in {
+        "WRONG_CURP_IN_PDF",
+        "WRONG_ELECTRONIC_ID_OR_CODE_IN_PDF",
+        "PDF_TERM_MISMATCH",
+    }:
+        return "WRONG_PDF_DATA"
+
+    if code in {
+        "WRONG_ACT_TYPE",
+        "WRONG_ACT_TYPE_PDF_PENDING_RETRY",
+    }:
+        return "WRONG_ACT_TYPE"
+
+    # Proveedor / configuracion
+    if code in {
+        "NO_PROVIDER_ENABLED",
+        "NO_PROVIDER_FOR_SPECIAL_FORMAT",
+        "UNKNOWN_PROVIDER",
+        "NO_FOLIADAS_PROVIDER_GROUP_CONFIGURED",
+        "NO_BIRTH_PROVIDER_GROUP_CONFIGURED",
+        "NO_SPECIAL_PROVIDER_GROUP_CONFIGURED",
+        "NO_PROVIDER6_FOLIADAS_GROUP_CONFIGURED",
+        "NO_PROVIDER6_ESPECIALES_GROUP_CONFIGURED",
+        "NO_PROVIDER6_NACIMIENTO_GROUP_CONFIGURED",
+        "PROVIDER2_GROUPS_NOT_CONFIGURED",
+        "PROVIDER5_GROUPS_NOT_CONFIGURED",
+        "PROVIDER8_GROUPS_NOT_CONFIGURED",
+        "PROVIDER9_GROUPS_NOT_CONFIGURED",
+        "MAYAPROVIDER_GROUPS_NOT_CONFIGURED",
+    }:
+        return "NO_PROVIDER_AVAILABLE"
+
+    if (
+        "TIMEOUT" in code
+        or "TIMED_OUT" in code
+        or "READ_TIMED_OUT" in code
+        or "TIMEOUT" in raw_up
+        or "READ TIMED OUT" in raw_up
+    ):
+        return "PROVIDER_TIMEOUT"
+
+    if (
+        "SEND_FAILED" in code
+        or "BACKEND_FAILED" in code
+        or "VGET_FAILED" in code
+        or "HISTORY_FAILED" in code
+        or "FAILED" in code
+        or "ERROR" in code
+    ):
+        return "PROVIDER_FAILED"
+
+    return "UNKNOWN_ERROR"
+
+
+def _api_public_error_message(error_code: str, raw_error: str | None = None) -> str:
+    error_code = (error_code or "UNKNOWN_ERROR").strip().upper()
+    return API_ERROR_MESSAGES.get(error_code, API_ERROR_MESSAGES["UNKNOWN_ERROR"])
+
+
+def _api_request_error_fields(req) -> dict:
+    status = (getattr(req, "status", "") or "").upper()
+
+    if status != "ERROR":
+        return {
+            "error_code": "",
+            "error_message": "",
+        }
+
+    raw_error = getattr(req, "error_message", None)
+    error_code = _api_public_error_code(raw_error)
+
+    if not error_code:
+        error_code = "UNKNOWN_ERROR"
+
+    return {
+        "error_code": error_code,
+        "error_message": _api_public_error_message(error_code, raw_error),
+        # Para depuracion. Si no quieres mostrar detalles internos al programador,
+        # puedes quitar esta linea.
+        "error_raw": raw_error or "",
+    }
+
+
 @app.get("/api/v1/balance")
 def api_v1_balance(
     authorization: str | None = Header(default=None),
@@ -10849,21 +11061,20 @@ def api_v1_create_acta(
     external_id = (payload.get("external_id") or "").strip()
 
     if not term:
-        return {"ok": False, "error": "MISSING_TERM"}
+        return _api_error_response("MISSING_TERM")
 
     price = Decimal(str(client.price_per_done or 5))
     reserved = _api_pending_reserved_amount(db, client)
     available = Decimal(str(client.credit_balance or 0)) - reserved
 
     if available < price:
-        return {
-            "ok": False,
-            "error": "INSUFFICIENT_BALANCE",
-            "balance": _money(client.credit_balance),
-            "reserved": _money(reserved),
-            "available": _money(available),
-            "price_per_done": _money(price),
-        }
+        return _api_error_response(
+            "INSUFFICIENT_BALANCE",
+            balance=_money(client.credit_balance),
+            reserved=_money(reserved),
+            available=_money(available),
+            price_per_done=_money(price),
+        )
 
     if external_id:
         existing = (
@@ -10877,13 +11088,25 @@ def api_v1_create_acta(
         )
 
         if existing:
-            return {
+            resp = {
                 "ok": True,
                 "request_id": existing.id,
                 "external_id": existing.api_external_id,
+                "term": existing.curp,
+                "act_type": existing.act_type,
                 "status": existing.status,
                 "duplicated": True,
+                "charged": bool(existing.api_charged),
+                "charged_amount": _money(existing.api_price) if existing.api_charged else 0.0,
             }
+        
+            if existing.status == "DONE":
+                resp["pdf_url"] = f"/api/v1/actas/{existing.id}/pdf"
+        
+            if existing.status == "ERROR":
+                resp.update(_api_request_error_fields(existing))
+        
+            return resp
 
     _ensure_api_panel_group(db, client)
 
@@ -10926,7 +11149,10 @@ def api_v1_create_acta(
         db.refresh(row)
     except Exception as e:
         db.rollback()
-        return {"ok": False, "error": f"CREATE_REQUEST_FAILED:{str(e)[:200]}"}
+        return _api_error_response(
+            "CREATE_REQUEST_FAILED",
+            error_raw=f"CREATE_REQUEST_FAILED:{str(e)[:200]}",
+        )
 
     _enqueue_process_request(row, "api_v1_create_acta")
 
@@ -10959,7 +11185,13 @@ def api_v1_get_acta(
     )
 
     if not row:
-        raise HTTPException(status_code=404, detail="REQUEST_NOT_FOUND")
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "REQUEST_NOT_FOUND",
+                "error_message": API_ERROR_MESSAGES["REQUEST_NOT_FOUND"],
+            },
+        )
 
     data = {
         "ok": True,
@@ -11004,10 +11236,25 @@ def api_v1_get_acta_pdf(
     )
 
     if not row:
-        raise HTTPException(status_code=404, detail="REQUEST_NOT_FOUND")
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "REQUEST_NOT_FOUND",
+                "error_message": API_ERROR_MESSAGES["REQUEST_NOT_FOUND"],
+            },
+        )
 
     if row.status != "DONE":
-        raise HTTPException(status_code=409, detail=f"REQUEST_NOT_DONE:{row.status}")
+        detail = {
+            "error_code": "REQUEST_NOT_DONE",
+            "error_message": API_ERROR_MESSAGES["REQUEST_NOT_DONE"],
+            "status": row.status,
+        }
+    
+        if row.status == "ERROR":
+            detail.update(_api_request_error_fields(row))
+    
+        raise HTTPException(status_code=400, detail=detail)
 
     if not row.api_result_base64:
         raise HTTPException(status_code=404, detail="PDF_NOT_AVAILABLE")
