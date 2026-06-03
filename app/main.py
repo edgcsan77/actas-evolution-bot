@@ -10898,6 +10898,30 @@ def _api_public_error_code(raw_error: str | None) -> str:
     code = _api_clean_internal_error_code(original_code)
     raw_up = (raw_error or "").strip().upper()
 
+    # Deteccion por texto crudo de errores comunes que vienen del proveedor
+    if (
+        "CURP INVALID" in raw_up
+        or "CURP INVÁLID" in raw_up
+        or "CURP INVALIDA" in raw_up
+        or "CURP INVÁLIDA" in raw_up
+        or "CURP INEXISTENTE" in raw_up
+        or "NO SE ENCONTRO INFORMACION" in raw_up
+        or "NO SE ENCONTRÓ INFORMACIÓN" in raw_up
+        or "NO SE ENCONTRO INFORMACIÓN" in raw_up
+        or "NO SE ENCONTRÓ INFORMACION" in raw_up
+        or "NO ENCONTRADA" in raw_up
+        or "NO ENCONTRADO" in raw_up
+    ):
+        return "CURP_INVALID_OR_NOT_FOUND"
+
+    if (
+        "ACTA NO REGISTRADA" in raw_up
+        or "ACTA NO ENCONTRADA" in raw_up
+        or "NO EXISTE ACTA" in raw_up
+        or "NO HAY ACTA" in raw_up
+    ):
+        return "ACTA_NOT_FOUND"
+
     if not code and not raw_up:
         return ""
 
