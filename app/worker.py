@@ -2207,8 +2207,14 @@ def process_request(request_id: int):
         
             send_ok = False
 
+            filename = (
+                f"{req.curp}_FOLIO.pdf"
+                if "FOLIO" in (req.act_type or "").upper()
+                else f"{req.curp}.pdf"
+            )
+            
             instance = req.instance_name or "docifybot8"
-
+            
             if _store_api_pdf_result(req, db, safe_media_b64, filename, f"BASE64_{provider_name}_API"):
                 return
 
@@ -2222,7 +2228,7 @@ def process_request(request_id: int):
                         send_group_document_base64(
                             req.source_group_id,
                             safe_media_b64,
-                            filename=f"{req.curp}.pdf",
+                            filename=filename,
                             caption=caption_text,
                             instance_name=instance
                         )
@@ -2230,7 +2236,7 @@ def process_request(request_id: int):
                         send_document_base64(
                             req.requester_wa_id,
                             safe_media_b64,
-                            filename=f"{req.curp}.pdf",
+                            filename=filename,
                             caption=caption_text,
                             instance_name=instance
                         )
