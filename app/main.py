@@ -9207,7 +9207,7 @@ def panel_actas(
             </a>
             <a class="group-mode-link {'group-mode-link-active' if group_mode == 'active' else ''}"
                href="/panel?token=docifymx2026&view={_esc(view)}&group_mode=active&group_jid={_esc(group_jid)}&provider_name={_esc(provider_name)}&status={_esc(status)}&act_type={_esc(act_type)}&date_from={_esc(date_from)}&date_to={_esc(date_to)}">
-              Solo grupos con compras del día
+              Solo grupos con compras del periodo
             </a>
           </div>
         </div>
@@ -9345,7 +9345,7 @@ def panel_actas(
                     """
                 else:
                     promo_cell = f"""
-                    <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}"
+                    <a href="/panel/group-detail?group_jid={r['group_jid']}&view={view}&date_from={_esc(date_from)}&date_to={_esc(date_to)}"
                        class="btn btn-success"
                        style="color:white;display:inline-flex;align-items:center;justify-content:center;padding:6px 12px; font-size:13px; border-radius:16px; text-decoration:none;">
                        +Promoción
