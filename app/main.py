@@ -10315,7 +10315,7 @@ def panel_actas(
           const wrap = document.getElementById("recentRequestsWrap");
           if (!wrap) return;
         
-          const params = new URLSearchParams({
+          const params = new URLSearchParams({{
             view: document.querySelector('input[name="view"]')?.value || "day",
             group_jid: document.querySelector('input[name="group_jid"]')?.value || "",
             provider_name: document.querySelector('input[name="provider_name"]')?.value || "",
@@ -10323,7 +10323,7 @@ def panel_actas(
             act_type: document.querySelector('input[name="act_type"]')?.value || "",
             date_from: document.querySelector('input[name="date_from"]')?.value || "",
             date_to: document.querySelector('input[name="date_to"]')?.value || "",
-          });
+          }});
         
           try {{
             const res = await fetch(`/panel/recent-requests?${{params.toString()}}`);
