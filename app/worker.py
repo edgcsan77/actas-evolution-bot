@@ -1976,21 +1976,23 @@ def _detect_pdf_act_type(pdf_bytes: bytes) -> str:
         print("PROVIDER_VALIDATE_ACT_TEXT_TOO_SHORT_SOFT_PASS", flush=True)
         return ""
 
-    text = text.upper()
+    text_up = text.upper()
     text_norm = (
-        text.replace("Á", "A")
-            .replace("É", "E")
-            .replace("Í", "I")
-            .replace("Ó", "O")
-            .replace("Ú", "U")
-            .replace("Ü", "U")
+        text_up
+        .replace("Á", "A")
+        .replace("É", "E")
+        .replace("Í", "I")
+        .replace("Ó", "O")
+        .replace("Ú", "U")
+        .replace("Ü", "U")
     )
+
     text_compact = re.sub(r"[^A-Z]", "", text_norm)
 
-    print("PROVIDER_VALIDATE_ACT_TEXT_PREVIEW =", text_norm[:500], flush=True)
+    print("PROVIDER_VALIDATE_ACT_TEXT_PREVIEW =", text_norm[:800], flush=True)
 
-    # 1) Detectar SOLO por encabezado/título del acta, no por campos internos.
-    # En defunción aparecen campos como "fecha de nacimiento"; eso NO debe volverlo NACIMIENTO.
+    # 1) Primero detectar por título real del acta.
+    # Esto es la evidencia más fuerte.
     title_patterns = [
         ("DEFUNCION", [
             r"ACTA\s+DE\s+DEFUNCION",
@@ -2013,51 +2015,96 @@ def _detect_pdf_act_type(pdf_bytes: bytes) -> str:
 
     for act_group, patterns in title_patterns:
         for pat in patterns:
-            if re.search(pat, text_norm, flags=re.IGNORECASE) or re.search(pat, text_compact, flags=re.IGNORECASE):
+            if re.search(pat, text_norm, flags=re.IGNORECASE):
                 print("PROVIDER_VALIDATE_ACT_TYPE_TITLE_MATCH =", act_group, flush=True)
                 return act_group
 
-    # 2) Fallback por identificadores de estructura, NO por la palabra suelta "nacimiento".
-    # Esto evita que "Fecha de nacimiento" en defunción se detecte como NACIMIENTO.
-    structural_scores = {
-        "DEFUNCION": 0,
-        "MATRIMONIO": 0,
-        "DIVORCIO": 0,
+            if re.search(pat, text_compact, flags=re.IGNORECASE):
+                print("PROVIDER_VALIDATE_ACT_TYPE_TITLE_COMPACT_MATCH =", act_group, flush=True)
+                return act_group
+
+    # 2) Si no encontró título, usar SOLO estructura fuerte.
+    # No usar palabras sueltas como NACIMIENTO, MATRIMONIO, CONTRAYENTE.
+    scores = {
         "NACIMIENTO": 0,
+        "MATRIMONIO": 0,
+        "DEFUNCION": 0,
+        "DIVORCIO": 0,
     }
 
-    if "DATOSDELAPERSONAFALLECIDA" in text_compact or "DATOSDELADEFUNCION" in text_compact:
-        structural_scores["DEFUNCION"] += 5
+    # NACIMIENTO: estructura fuerte
+    if "DATOSDELAPERSONAREGISTRADA" in text_compact:
+        scores["NACIMIENTO"] += 8
 
-    if "DATOSDELOSCONTRAYENTES" in text_compact or "CONTRAYENTE" in text_compact:
-        structural_scores["MATRIMONIO"] += 5
+    if "DATOSDELREGISTRADO" in text_compact:
+        scores["NACIMIENTO"] += 8
 
-    if "DATOSDELDIVORCIO" in text_compact or "DIVORCIADO" in text_compact or "DIVORCIADA" in text_compact:
-        structural_scores["DIVORCIO"] += 5
+    if "PERSONAREGISTRADA" in text_compact:
+        scores["NACIMIENTO"] += 5
 
-    if "DATOSDELREGISTRADO" in text_compact or "DATOSDELAPERSONAREGISTRADA" in text_compact:
-        structural_scores["NACIMIENTO"] += 5
+    if "DATOSDEREGISTRO" in text_compact and "PADRES" in text_compact:
+        scores["NACIMIENTO"] += 5
 
-    # Señales secundarias
-    if "CERTIFICADODEDEFUNCION" in text_compact or "DESTINODELCADAVER" in text_compact or "CAUSASDELADEFUNCION" in text_compact:
-        structural_scores["DEFUNCION"] += 3
+    # MATRIMONIO: estructura fuerte
+    # OJO: ya NO usamos "CONTRAYENTE" solo.
+    if "DATOSDELOSCONTRAYENTES" in text_compact:
+        scores["MATRIMONIO"] += 8
 
-    if "REGIMENPATRIMONIAL" in text_compact or "SOCIEDADCONYUGAL" in text_compact:
-        structural_scores["MATRIMONIO"] += 3
+    if "PRIMERCONTRAYENTE" in text_compact and "SEGUNDOCONTRAYENTE" in text_compact:
+        scores["MATRIMONIO"] += 8
+
+    if "CONTRAYENTES" in text_compact and "REGIMENPATRIMONIAL" in text_compact:
+        scores["MATRIMONIO"] += 6
+
+    if "SOCIEDADCONYUGAL" in text_compact or "SEPARACIONDEBIENES" in text_compact:
+        scores["MATRIMONIO"] += 4
+
+    # DEFUNCIÓN: estructura fuerte
+    if "DATOSDELAPERSONAFALLECIDA" in text_compact:
+        scores["DEFUNCION"] += 8
+
+    if "DATOSDELADEFUNCION" in text_compact:
+        scores["DEFUNCION"] += 8
+
+    if "CERTIFICADODEDEFUNCION" in text_compact:
+        scores["DEFUNCION"] += 5
+
+    if "DESTINODELCADAVER" in text_compact or "CAUSASDELADEFUNCION" in text_compact:
+        scores["DEFUNCION"] += 5
+
+    # DIVORCIO: estructura fuerte
+    if "DATOSDELDIVORCIO" in text_compact:
+        scores["DIVORCIO"] += 8
 
     if "SENTENCIADEDIVORCIO" in text_compact:
-        structural_scores["DIVORCIO"] += 3
+        scores["DIVORCIO"] += 6
 
-    print("PROVIDER_VALIDATE_ACT_TYPE_STRUCTURAL_SCORES =", structural_scores, flush=True)
+    if "DIVORCIADO" in text_compact and "DIVORCIADA" in text_compact:
+        scores["DIVORCIO"] += 5
 
-    best_type = max(structural_scores, key=structural_scores.get)
-    best_score = structural_scores[best_type]
+    print("PROVIDER_VALIDATE_ACT_TYPE_STRUCTURAL_SCORES =", scores, flush=True)
 
-    # Solo aceptar fallback estructural si hay señal fuerte.
-    if best_score >= 5:
+    ordered = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    best_type, best_score = ordered[0]
+    second_type, second_score = ordered[1]
+
+    print("PROVIDER_VALIDATE_ACT_TYPE_BEST =", {
+        "best_type": best_type,
+        "best_score": best_score,
+        "second_type": second_type,
+        "second_score": second_score,
+    }, flush=True)
+
+    # Solo aceptar estructura si:
+    # - tiene score fuerte
+    # - gana claramente al segundo lugar
+    if best_score >= 8 and (best_score - second_score) >= 3:
+        print("PROVIDER_VALIDATE_ACT_TYPE_STRUCTURAL_MATCH =", best_type, flush=True)
         return best_type
 
-    # 3) Si no hay título ni estructura clara, NO adivinar.
+    # 3) Si no hay título ni estructura fuerte, NO adivinar.
+    # Así evita falso MATRIMONIO/NACIMIENTO.
+    print("PROVIDER_VALIDATE_ACT_TYPE_NOT_CONFIRMED_SAFE =", flush=True)
     return ""
 
 
