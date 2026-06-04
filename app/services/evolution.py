@@ -60,8 +60,12 @@ def _post_send_media_with_retries(url: str, payload: dict, *, label: str, max_at
                 response=resp,
             )
 
-            # Reintentar solo errores temporales/server
-            if resp.status_code not in (408, 429, 500, 502, 503, 504):
+            body_text = resp.text or ""
+            connection_closed = "Connection Closed" in body_text or "CONNECTION CLOSED" in body_text.upper()
+            
+            # Reintentar errores temporales/server.
+            # Evolution a veces responde 400 aunque el problema real sea Connection Closed.
+            if resp.status_code not in (408, 429, 500, 502, 503, 504) and not connection_closed:
                 raise last_error
 
         except Exception as e:
