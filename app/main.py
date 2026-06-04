@@ -850,6 +850,35 @@ def _bot_month_30d_start():
     return _panel_to_utc_naive(start_local)
 
 
+def _bot_30d_bounds():
+    now_local = _mx_now()
+    start_local = now_local - timedelta(days=29)
+    start_local = start_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_local = now_local.replace(hour=23, minute=59, second=59, microsecond=999999)
+    return _panel_to_utc_naive(start_local), _panel_to_utc_naive(end_local)
+
+
+def _bot_current_month_bounds():
+    now_local = _mx_now()
+    start_local = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    if start_local.month == 12:
+        end_local = start_local.replace(year=start_local.year + 1, month=1)
+    else:
+        end_local = start_local.replace(month=start_local.month + 1)
+
+    return _panel_to_utc_naive(start_local), _panel_to_utc_naive(end_local)
+
+
+def _bot_prev_month_bounds():
+    now_local = _mx_now()
+    first_this_month = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    last_prev_month = first_this_month - timedelta(days=1)
+    first_prev_month = last_prev_month.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    return _panel_to_utc_naive(first_prev_month), _panel_to_utc_naive(first_this_month)
+
+
 def _bot_sales_today(db: Session, instance_name: str) -> int:
     start_utc, end_utc = _bot_day_bounds()
     owned_group_ids = _owned_group_ids_for_instance(db, instance_name)
@@ -935,7 +964,9 @@ def _bot_sales_history_30d(db: Session, instance_name: str):
 
 def _bot_group_stats(db: Session, instance_name: str):
     start_day, end_day = _bot_day_bounds()
-    start_30d = _bot_month_30d_start()
+    start_30d, end_30d = _bot_30d_bounds()
+    start_month, end_month = _bot_current_month_bounds()
+    start_prev_month, end_prev_month = _bot_prev_month_bounds()
 
     groups = _bot_groups_for_instance(db, instance_name)
     out = []
@@ -956,19 +987,47 @@ def _bot_group_stats(db: Session, instance_name: str):
         
         today_done = q_today.count()
 
-        q_month = (
+        q_30d = (
             db.query(RequestLog)
             .filter(
                 RequestLog.instance_name == instance_name,
                 RequestLog.source_group_id == g.group_jid,
                 RequestLog.status == "DONE",
                 RequestLog.created_at >= start_30d,
+                RequestLog.created_at <= end_30d,
+            )
+        )
+        
+        q_30d = _exclude_private_provider_query(q_30d, db, instance_name)
+        done_30d = q_30d.count()
+        
+        q_month = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.instance_name == instance_name,
+                RequestLog.source_group_id == g.group_jid,
+                RequestLog.status == "DONE",
+                RequestLog.created_at >= start_month,
+                RequestLog.created_at < end_month,
             )
         )
         
         q_month = _exclude_private_provider_query(q_month, db, instance_name)
-        
         month_done = q_month.count()
+        
+        q_prev_month = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.instance_name == instance_name,
+                RequestLog.source_group_id == g.group_jid,
+                RequestLog.status == "DONE",
+                RequestLog.created_at >= start_prev_month,
+                RequestLog.created_at < end_prev_month,
+            )
+        )
+        
+        q_prev_month = _exclude_private_provider_query(q_prev_month, db, instance_name)
+        prev_month_done = q_prev_month.count()
 
         promo = db.query(GroupPromotion).filter_by(group_jid=g.group_jid).first()
 
@@ -976,14 +1035,16 @@ def _bot_group_stats(db: Session, instance_name: str):
             "group_jid": g.group_jid,
             "group_name": _get_bot_group_name(db, g.group_jid),
             "today_done": today_done,
+            "done_30d": done_30d,
             "month_done": month_done,
+            "prev_month_done": prev_month_done,
             "blocked": is_group_blocked(g.group_jid),
             "promo_total": int(promo.total_actas or 0) if promo else 0,
             "promo_used": int(promo.used_actas or 0) if promo else 0,
             "promo_active": bool(promo.is_active) if promo else False,
         })
 
-    out.sort(key=lambda x: (-x["month_done"], x["group_name"].lower()))
+    out.sort(key=lambda x: (-x["done_30d"], x["group_name"].lower()))
     return out
 
 
@@ -4267,7 +4328,11 @@ def panel_group_detail(
     if view == "custom":
         subtitle = f"Historial personalizado: {detail['date_from']} a {detail['date_to']} ({PANEL_TZ})"
     elif view == "month":
-        subtitle = f"Historial mensual: {detail['date_from']} a {detail['date_to']} ({PANEL_TZ})"
+        subtitle = f"Historial mes actual: {detail['date_from']} a {detail['date_to']} ({PANEL_TZ})"
+    elif view == "prev_month":
+        subtitle = f"Historial mes anterior: {detail['date_from']} a {detail['date_to']} ({PANEL_TZ})"
+    elif view == "30d":
+        subtitle = f"Historial últimos 30 días: {detail['date_from']} a {detail['date_to']} ({PANEL_TZ})"
     else:
         subtitle = f"Historial diario: {detail['date_from']} ({PANEL_TZ})"
 
@@ -6721,6 +6786,8 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                   <th>Grupo</th>
                   <th>Hoy</th>
                   <th>30 días</th>
+                  <th>Mes actual</th>
+                  <th>Mes anterior</th>
                   <th>Promoción</th>
                   <th>Estado</th>
                   <th>Evidencia</th>
@@ -6760,7 +6827,9 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                     <span class="small">{_esc(g["group_jid"])}</span>
                   </td>
                   <td>{g["today_done"]}</td>
+                  <td>{g["done_30d"]}</td>
                   <td>{g["month_done"]}</td>
+                  <td>{g["prev_month_done"]}</td>
                   <td>{promo_text}</td>
                   <td>{status_badge}</td>
 
@@ -6772,11 +6841,28 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                        Hoy
                     </a>
                     <br><br>
+                    
                     <a target="_blank"
                        href="/botpanel/{_esc(token)}/audit?period=30d&status=DONE&group_jid={_esc(g['group_jid'])}"
                        class="btn btn-success"
                        style="color:white;text-decoration:none;padding:6px 10px;font-size:12px;border-radius:10px;">
                        30 días
+                    </a>
+                    <br><br>
+                    
+                    <a target="_blank"
+                       href="/botpanel/{_esc(token)}/audit?period=month&status=DONE&group_jid={_esc(g['group_jid'])}"
+                       class="btn btn-primary"
+                       style="color:white;text-decoration:none;padding:6px 10px;font-size:12px;border-radius:10px;">
+                       Mes actual
+                    </a>
+                    <br><br>
+                    
+                    <a target="_blank"
+                       href="/botpanel/{_esc(token)}/audit?period=prev_month&status=DONE&group_jid={_esc(g['group_jid'])}"
+                       class="btn btn-success"
+                       style="color:white;text-decoration:none;padding:6px 10px;font-size:12px;border-radius:10px;">
+                       Mes anterior
                     </a>
                   </td>
   
@@ -6816,7 +6902,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                 </tr>
             """
     else:
-        html += '<tr><td colspan="9">Este bot aún no tiene grupos asignados.</td></tr>'
+        html += '<tr><td colspan="11">Este bot aún no tiene grupos asignados.</td></tr>'
 
     html += """
               </tbody>
