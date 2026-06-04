@@ -17,7 +17,7 @@ from app.services.provider3 import Provider3Client, decode_pdf_base64
 from app.services.provider4 import Provider4Client
 from app.services.provider7 import Provider7Client
 from rq import get_current_job
-from app.queue import redis_conn, slow_request_queue
+from app.queue import redis_conn, request_queue, slow_request_queue
 from app.provider_status_cache import refresh_providers_status
 from app.utils.bot_limits import increment_bot_used_and_maybe_block
 
@@ -2274,7 +2274,7 @@ def process_request(request_id: int):
                         req.updated_at = _utc_now_naive()
                         db.commit()
             
-                        slow_request_queue.enqueue_in(
+                        request_queue.enqueue_in(
                             timedelta(seconds=20),
                             process_request,
                             req.id,
@@ -2317,7 +2317,11 @@ def process_request(request_id: int):
             except Exception as notify_exc:
                 print("CLIENT_NOTIFY_AFTER_PROVIDER_SEND_FAIL_ERROR =", str(notify_exc), flush=True)
         
-            _notify_support_error(req, f"{provider_name}_SEND_FAILED", last_err or "")
+            _notify_support_error(
+                req,
+                f"{provider_name}_SEND_FAILED:{last_err or ''}",
+                last_err or ""
+            )
             return
 
         if provider_name == "PROVIDER3":
