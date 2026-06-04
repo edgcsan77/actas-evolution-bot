@@ -2448,9 +2448,41 @@ def process_request(request_id: int):
                         print(f"{provider_name}_VALIDATE_FAIL_REQ_ELECTRONIC_ID_OR_CODE =", term, flush=True)
                         raise RuntimeError(f"{provider_name}_WRONG_ELECTRONIC_ID_OR_CODE_IN_PDF:{term}")
                 else:
-                    if not _validate_pdf_matches_term(pdf_bytes, term, req.act_type):
-                        print(f"{provider_name}_VALIDATE_FAIL_REQ_CURP =", term, flush=True)
-                        raise RuntimeError(f"{provider_name}_WRONG_CURP_IN_PDF:{term}")
+                    term_check = _validate_pdf_term_detailed(
+                        pdf_bytes,
+                        term,
+                        req.act_type,
+                    )
+                
+                    term_status = term_check.get("status")
+                    term_reason = term_check.get("reason")
+                    found_curps = term_check.get("found_curps") or []
+                
+                    print(f"{provider_name}_VALIDATE_TERM_DETAILED =", {
+                        "req_id": req.id,
+                        "term": term,
+                        "status": term_status,
+                        "reason": term_reason,
+                        "found_curps": found_curps,
+                    }, flush=True)
+                
+                    if term_status == "MISMATCH":
+                        print(f"{provider_name}_VALIDATE_FAIL_INTERNAL_CURP =", {
+                            "req_id": req.id,
+                            "expected": term,
+                            "found_curps": found_curps,
+                        }, flush=True)
+                        raise RuntimeError(f"{provider_name}_WRONG_CURP_IN_PDF:{term}:found_curps={found_curps}")
+                
+                    if term_status == "UNCERTAIN":
+                        # Provider4/10/11 ya pasó por su propio proceso de descarga/validación.
+                        # Si aquí pypdf no pudo confirmar CURP interna, NO lo mates como CURP incorrecta.
+                        print(f"{provider_name}_VALIDATE_CURP_UNCERTAIN_SOFT_PASS =", {
+                            "req_id": req.id,
+                            "term": term,
+                            "reason": term_reason,
+                            "found_curps": found_curps,
+                        }, flush=True)
         
             except Exception as p4_exc:
                 p4_err = str(p4_exc)
