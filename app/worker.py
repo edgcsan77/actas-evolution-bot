@@ -1969,8 +1969,25 @@ def _validate_pdf_matches_term(pdf_bytes: bytes, term: str, act_type: str | None
     return False
 
 
+def _extract_pdf_first_page_text(pdf_bytes: bytes) -> str:
+    try:
+        reader = PdfReader(BytesIO(pdf_bytes))
+
+        if len(reader.pages) < 1:
+            return ""
+
+        text = reader.pages[0].extract_text() or ""
+        return text.upper().strip()
+
+    except Exception as e:
+        print("PROVIDER_VALIDATE_FIRST_PAGE_TEXT_ERROR =", str(e), flush=True)
+        return ""
+
+
 def _detect_pdf_act_type(pdf_bytes: bytes) -> str:
-    text = _extract_pdf_visible_text(pdf_bytes)
+    # El tipo debe detectarse únicamente desde el frente del acta.
+    # El reverso puede contener referencias a otros tipos de actas.
+    text = _extract_pdf_first_page_text(pdf_bytes)
 
     if not text or len(text.strip()) < 30:
         print("PROVIDER_VALIDATE_ACT_TEXT_TOO_SHORT_SOFT_PASS", flush=True)
