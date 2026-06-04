@@ -3,7 +3,7 @@ import time
 import threading
 import re
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
 from app.db import SessionLocal
@@ -378,6 +378,13 @@ def _humanize_support_code(err: str | None) -> str:
         if detail:
             msg += f"\nDetalle técnico: {detail}"
         return msg
+
+    if code_clean == "SEND_FAILED" and "CONNECTION CLOSED" in raw_up:
+        return (
+            f"No se pudo enviar la solicitud al proveedor {provider_label or 'seleccionado'} "
+            "porque la conexión de WhatsApp/Evolution se cerró al mandar el mensaje. "
+            "Es un error temporal de la instancia, no necesariamente del proveedor."
+        )
 
     # 3) Patrones generales por sufijo.
     if code_clean == "SEND_FAILED":
@@ -2245,11 +2252,46 @@ def process_request(request_id: int):
                     last_err = str(e)
                     print(f"PROVIDER_SEND_ATTEMPT_{attempt+1}_ERROR =", last_err, flush=True)
                     if attempt < 2:
-                        time.sleep(1.5)
+                        time.sleep(5 * (attempt + 1))
         
             if send_ok:
                 return
-        
+            
+            last_err_text = (last_err or "")
+            is_connection_closed = "CONNECTION CLOSED" in last_err_text.upper()
+            
+            retry_key = f"provider_send_retry:{req.id}"
+            
+            if is_connection_closed:
+                try:
+                    already_retried = redis_conn.get(retry_key)
+            
+                    if not already_retried:
+                        redis_conn.set(retry_key, "1", ex=600)
+            
+                        req.status = "QUEUED"
+                        req.error_message = f"{provider_name}_SEND_RETRY_CONNECTION_CLOSED"
+                        req.updated_at = _utc_now_naive()
+                        db.commit()
+            
+                        slow_request_queue.enqueue_in(
+                            timedelta(seconds=20),
+                            process_request,
+                            req.id,
+                        )
+            
+                        print("PROVIDER_SEND_CONNECTION_CLOSED_REQUEUED =", {
+                            "req_id": req.id,
+                            "provider_name": provider_name,
+                            "retry_in_seconds": 20,
+                            "last_err": last_err_text[:300],
+                        }, flush=True)
+            
+                        return
+            
+                except Exception as retry_exc:
+                    print("PROVIDER_SEND_REQUEUE_ERROR =", str(retry_exc), flush=True)
+            
             req.status = "ERROR"
             req.error_message = f"{provider_name}_SEND_FAILED"
             req.updated_at = _utc_now_naive()
