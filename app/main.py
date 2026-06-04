@@ -843,13 +843,6 @@ def _bot_day_bounds():
     return _panel_to_utc_naive(start_local), _panel_to_utc_naive(end_local)
 
 
-def _bot_month_30d_start():
-    now_local = _mx_now()
-    start_local = now_local - timedelta(days=29)
-    start_local = start_local.replace(hour=0, minute=0, second=0, microsecond=0)
-    return _panel_to_utc_naive(start_local)
-
-
 def _bot_30d_bounds():
     now_local = _mx_now()
     start_local = now_local - timedelta(days=29)
@@ -926,7 +919,7 @@ def _bot_sales_30d(db: Session, instance_name: str) -> int:
 
 
 def _bot_sales_history_30d(db: Session, instance_name: str):
-    start_utc = _bot_month_30d_start()
+    start_utc, end_utc = _bot_30d_bounds()
     owned_group_ids = _owned_group_ids_for_instance(db, instance_name)
 
     if not owned_group_ids:
@@ -949,6 +942,7 @@ def _bot_sales_history_30d(db: Session, instance_name: str):
             RequestLog.source_group_id.in_(owned_group_ids),
             RequestLog.status == "DONE",
             RequestLog.created_at >= start_utc,
+            RequestLog.created_at < end_utc,
         )
     )
 
@@ -961,7 +955,6 @@ def _bot_sales_history_30d(db: Session, instance_name: str):
     )
 
     return rows
-
 
 def _bot_group_stats(db: Session, instance_name: str):
     start_day, end_day = _bot_day_bounds()
