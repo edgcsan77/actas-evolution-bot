@@ -140,54 +140,83 @@ class Provider4Client:
         is_chain: bool = False,
     ) -> bool:
         text = self._extract_pdf_visible_text(pdf_bytes)
-        if not text or len(text.strip()) < 30:
-            print("PROVIDER4_VALIDATE_TEXT_TOO_SHORT = TRUE", flush=True)
-            return False
+        text_up = (text or "").upper()
     
-        text_up = text.upper()
-
-        # Si viene por cadena, NO validamos tipo de acta.
-        # La cadena ya identifica el acta y puede ser nacimiento, matrimonio, defunción o divorcio.
+        expected = self._normalize_alnum(expected_curp)
+    
+        # Si no se pudo extraer texto confiable, NO rechazar aquí.
+        # El worker ya hace validación posterior con _validate_pdf_term_detailed.
+        if not text or len(text.strip()) < 30:
+            print("PROVIDER4_VALIDATE_TEXT_TOO_SHORT_SOFT_PASS = TRUE", flush=True)
+            return True
+    
+        # Cadena: no validar tipo; la cadena identifica el acta.
         if is_chain:
             print("PROVIDER4_VALIDATE_CHAIN_MODE = TRUE", flush=True)
-
+    
             expected_chain = self._normalize_alnum(expected_curp)
             normalized_text = self._normalize_alnum(text_up)
-
+    
             if expected_chain and expected_chain in normalized_text:
                 print("PROVIDER4_VALIDATE_CHAIN_FOUND_IN_PDF = TRUE", flush=True)
                 return True
-
-            # A veces pypdf no extrae bien la cadena/código; no fallamos por tipo.
-            print("PROVIDER4_VALIDATE_CHAIN_NOT_FOUND_BUT_TYPE_SKIPPED = TRUE", flush=True)
+    
+            print("PROVIDER4_VALIDATE_CHAIN_NOT_FOUND_SOFT_PASS = TRUE", flush=True)
             return True
-
+    
         tipoa_up = (tipoa or "").strip().lower()
     
-        # Validar tipo de acta solo para CURP
-        if tipoa_up == "nacimiento" and "ACTA DE NACIMIENTO" not in text_up:
-            return False
-        if tipoa_up == "matrimonio" and "ACTA DE MATRIMONIO" not in text_up:
-            return False
-        if tipoa_up == "defuncion" and ("ACTA DE DEFUNCION" not in text_up and "ACTA DE DEFUNCIÓN" not in text_up):
-            return False
-        if tipoa_up == "divorcio" and "ACTA DE DIVORCIO" not in text_up:
-            return False
+        detected_types = set()
     
-        expected = self._normalize_alnum(expected_curp)
+        if "ACTA DE NACIMIENTO" in text_up:
+            detected_types.add("nacimiento")
+    
+        if "ACTA DE MATRIMONIO" in text_up:
+            detected_types.add("matrimonio")
+    
+        if "ACTA DE DEFUNCION" in text_up or "ACTA DE DEFUNCIÓN" in text_up:
+            detected_types.add("defuncion")
+    
+        if "ACTA DE DIVORCIO" in text_up:
+            detected_types.add("divorcio")
+    
+        print("PROVIDER4_VALIDATE_DETECTED_TYPES =", detected_types, flush=True)
+        print("PROVIDER4_VALIDATE_EXPECTED_TIPOA =", tipoa_up, flush=True)
+    
+        # Solo rechazar si detectó claramente otro tipo.
+        # Si no detectó tipo, soft-pass.
+        if detected_types and tipoa_up in {"nacimiento", "matrimonio", "defuncion", "divorcio"}:
+            if tipoa_up not in detected_types:
+                print("PROVIDER4_VALIDATE_WRONG_ACT_TYPE_CONFIRMED = TRUE", flush=True)
+                return False
+    
         found_curps = self._find_curps_in_text(text)
     
         print("PROVIDER4_VALIDATE_EXPECTED_CURP =", expected, flush=True)
         print("PROVIDER4_VALIDATE_FOUND_CURPS =", found_curps, flush=True)
         print("PROVIDER4_VALIDATE_TIPOA =", tipoa, flush=True)
     
+        # Si encontró CURP(s) internas, ahí sí debe estar la esperada.
+        # Si hay una CURP interna diferente, rechazar.
         if found_curps:
             if expected not in found_curps:
+                print("PROVIDER4_VALIDATE_WRONG_INTERNAL_CURP_CONFIRMED = TRUE", flush=True)
                 return False
     
             if len(found_curps) > 1:
                 print("PROVIDER4_VALIDATE_MULTIPLE_CURPS_ALLOWED = TRUE", flush=True)
     
+            return True
+    
+        # Si no encontró ninguna CURP interna, NO rechazar aquí.
+        # El worker/main hacen la validación final.
+        normalized_text = self._normalize_alnum(text_up)
+    
+        if expected and expected in normalized_text:
+            print("PROVIDER4_VALIDATE_EXPECTED_FOUND_IN_NORMALIZED_TEXT = TRUE", flush=True)
+            return True
+    
+        print("PROVIDER4_VALIDATE_NO_INTERNAL_CURP_SOFT_PASS = TRUE", flush=True)
         return True
 
     def _download_and_validate_with_retries(
