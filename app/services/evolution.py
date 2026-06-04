@@ -112,7 +112,7 @@ def _post_send_text_with_retries(url: str, payload: dict, *, label: str, max_att
             print(f"{label}_ERROR_ATTEMPT_{attempt} =", str(e), flush=True)
 
         if attempt < max_attempts:
-            time.sleep(2 * attempt)
+            time.sleep(5 * attempt)
 
     raise last_error
 
