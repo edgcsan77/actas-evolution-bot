@@ -2030,15 +2030,33 @@ def _detect_pdf_act_type(pdf_bytes: bytes) -> str:
         ]),
     ]
 
+    title_matches = []
+
     for act_group, patterns in title_patterns:
+        matched = False
+    
         for pat in patterns:
             if re.search(pat, text_norm, flags=re.IGNORECASE):
-                print("PROVIDER_VALIDATE_ACT_TYPE_TITLE_MATCH =", act_group, flush=True)
-                return act_group
-
+                matched = True
+                break
+    
             if re.search(pat, text_compact, flags=re.IGNORECASE):
-                print("PROVIDER_VALIDATE_ACT_TYPE_TITLE_COMPACT_MATCH =", act_group, flush=True)
-                return act_group
+                matched = True
+                break
+    
+        if matched:
+            title_matches.append(act_group)
+    
+    print("PROVIDER_VALIDATE_ACT_TYPE_TITLE_MATCHES =", title_matches, flush=True)
+    
+    # Solo aceptar el título si encontró exactamente un tipo.
+    # Si aparecen varios títulos, continuar con la estructura fuerte.
+    if len(title_matches) == 1:
+        print("PROVIDER_VALIDATE_ACT_TYPE_TITLE_MATCH =", title_matches[0], flush=True)
+        return title_matches[0]
+    
+    if len(title_matches) > 1:
+        print("PROVIDER_VALIDATE_ACT_TYPE_MULTIPLE_TITLES_CONTINUE_TO_STRUCTURE =", title_matches, flush=True)
 
     # 2) Si no encontró título, usar SOLO estructura fuerte.
     # No usar palabras sueltas como NACIMIENTO, MATRIMONIO, CONTRAYENTE.
