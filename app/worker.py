@@ -221,6 +221,11 @@ SUPPORT_ERROR_LABELS_ES = {
     # Errores de PDF/validación
     "WRONG_ACT_TYPE_PDF_PENDING_RETRY": "El proveedor envió un PDF de otro tipo de acta. La solicitud sigue en proceso para esperar el PDF correcto.",
     "WRONG_CURP_IN_PDF": "El PDF recibido no corresponde al dato solicitado.",
+    "WRONG_CURP_IN_PDF_PENDING_RETRY": (
+        "El PDF recibido no se entregó al cliente porque no se pudo confirmar que corresponda al dato solicitado. "
+        "Si el PDF trae una CURP interna diferente, se espera otro PDF correcto. "
+        "Si no se pudo leer la CURP interna, revisar manualmente o esperar reenvío."
+    ),
     "PROVIDER8_POSTPROCESS_ERROR": "Error al procesar el PDF recibido del proveedor ANGEL.",
     "SHARED_GROUP_LIMIT_REACHED": "El grupo alcanzó su límite individual de actas.",
 
@@ -231,6 +236,28 @@ SUPPORT_ERROR_LABELS_ES = {
     # Provider 7 / otros
     "PROVIDER7_ERROR": "Error al procesar la solicitud con MESINO SID.",
     "DELIVERY_FAILED": "No se pudo entregar el PDF al cliente por WhatsApp.",
+
+    # Provider 4 / 10 / 11
+    "EMPTY_OR_USELESS_HTML": (
+        "Lázaro Web respondió vacío o con HTML inútil. "
+        "La solicitud debe reintentarse automáticamente con otro proveedor; "
+        "no significa que el acta quedó perdida definitivamente."
+    ),
+    "PROVIDER4_EMPTY_OR_USELESS_HTML": (
+        "LAZARO WEB 1 respondió vacío o con HTML inútil. "
+        "La solicitud debe reintentarse automáticamente con otro proveedor; "
+        "no significa que el acta quedó perdida definitivamente."
+    ),
+    "PROVIDER10_EMPTY_OR_USELESS_HTML": (
+        "LAZARO WEB 2 respondió vacío o con HTML inútil. "
+        "La solicitud debe reintentarse automáticamente con otro proveedor; "
+        "no significa que el acta quedó perdida definitivamente."
+    ),
+    "PROVIDER11_EMPTY_OR_USELESS_HTML": (
+        "LAZARO WEB 3 respondió vacío o con HTML inútil. "
+        "La solicitud debe reintentarse automáticamente con otro proveedor; "
+        "no significa que el acta quedó perdida definitivamente."
+    ),
 }
 
 
@@ -1806,6 +1833,79 @@ def _find_curps_in_text(text: str) -> list[str]:
     return unique
 
 
+def _validate_pdf_term_detailed(pdf_bytes: bytes, term: str, act_type: str | None = None) -> dict:
+    """
+    Valida CURP interna del PDF con 3 estados:
+    - MATCH: la CURP esperada aparece internamente.
+    - MISMATCH: el PDF trae CURP(s), pero ninguna es la esperada.
+    - UNCERTAIN: no se pudo extraer CURP interna confiable.
+    """
+    expected = _normalize_alnum(term)
+
+    if not expected:
+        return {
+            "status": "MATCH",
+            "reason": "empty_expected",
+            "expected": expected,
+            "found_curps": [],
+        }
+
+    text = _extract_pdf_visible_text(pdf_bytes)
+
+    if not text or len(text.strip()) < 30:
+        return {
+            "status": "UNCERTAIN",
+            "reason": "text_too_short",
+            "expected": expected,
+            "found_curps": [],
+        }
+
+    found_curps = _find_curps_in_text(text)
+    normalized_text = _normalize_alnum(text)
+    act_type_up = (act_type or "").upper().strip()
+
+    print("PROVIDER_VALIDATE_DETAILED_EXPECTED_CURP =", expected, flush=True)
+    print("PROVIDER_VALIDATE_DETAILED_FOUND_CURPS =", found_curps, flush=True)
+    print("PROVIDER_VALIDATE_DETAILED_ACT_TYPE =", act_type_up, flush=True)
+
+    # 1) Si encontró CURPs completas internas, esa es la evidencia fuerte.
+    # Si hay una diferente y no aparece la esperada, NO aceptar por filename.
+    if found_curps:
+        if expected in found_curps:
+            return {
+                "status": "MATCH",
+                "reason": "expected_curp_found_in_pdf",
+                "expected": expected,
+                "found_curps": found_curps,
+            }
+
+        return {
+            "status": "MISMATCH",
+            "reason": "different_internal_curp_found",
+            "expected": expected,
+            "found_curps": found_curps,
+        }
+
+    # 2) A veces pypdf separa letras/números y el regex no arma CURP completa.
+    # Aquí solo si el texto normalizado contiene exactamente la esperada.
+    if expected in normalized_text:
+        return {
+            "status": "MATCH",
+            "reason": "expected_found_in_normalized_text",
+            "expected": expected,
+            "found_curps": [],
+        }
+
+    # 3) No encontré CURP diferente, pero tampoco pude confirmar.
+    # Aquí sí puede entrar respaldo por filename en main.py.
+    return {
+        "status": "UNCERTAIN",
+        "reason": "no_internal_curp_detected",
+        "expected": expected,
+        "found_curps": [],
+    }
+
+
 def _validate_pdf_contains_electronic_id_or_code(pdf_bytes: bytes, value: str) -> bool:
     expected = _normalize_alnum(value)
     if not expected:
@@ -2389,6 +2489,7 @@ def process_request(request_id: int):
                 fallback_errors = (
                     p4_err.startswith(f"{provider_name}_BACKEND_FAILED:")
                     or p4_err.startswith(f"{provider_name}_VGET_FAILED:")
+                    or p4_err.startswith(f"{provider_name}_EMPTY_OR_USELESS_HTML")
                     or p4_err.startswith(f"{provider_name}_HISTORY_FAILED:")
                     or p4_err.startswith(f"{provider_name}_HISTORY_NOT_CONFIRMED_PDF:")
                     or p4_err.startswith(f"{provider_name}_HISTORY_NOT_CONFIRMED_FOLIO:")
@@ -2402,8 +2503,15 @@ def process_request(request_id: int):
                     or "Read timed out" in p4_err
                 )
             
-                should_fallback = (
+                immediate_fallback_errors = (
                     p4_err.startswith(f"{provider_name}_NO_FORM_ACTION")
+                    or p4_err.startswith(f"{provider_name}_EMPTY_OR_USELESS_HTML")
+                    or p4_err.startswith(f"{provider_name}_BACKEND_FAILED:")
+                    or p4_err.startswith(f"{provider_name}_VGET_FAILED:")
+                )
+                
+                should_fallback = (
+                    immediate_fallback_errors
                     or (fallback_errors and p4_elapsed >= 90)
                 )
             
