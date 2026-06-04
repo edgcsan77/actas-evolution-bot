@@ -8524,25 +8524,6 @@ def panel_actas(
                     </div>
             
                     <div class="provider-card">
-                      <div class="provider-name">ACTAS DEL SURESTE</div>
-                      <div style="margin:6px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
-                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
-                          <div style="display:flex;align-items:center;gap:6px;">
-                            <input id="weight_PROVIDER2" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER2', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
-                            <span style="font-size:12px;opacity:.7;">nivel</span>
-                          </div>
-                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER2')">Aplicar</button>
-                        </div>
-                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
-                      </div>
-                      <div class="provider-actions">
-                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER2','on')">Activar</button>
-                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER2','off')">Desactivar</button>
-                      </div>
-                    </div>
-            
-                    <div class="provider-card">
                       <div class="provider-name">AUSTRAM WEB</div>
                       <div style="margin:6px 0;">
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
@@ -8617,25 +8598,6 @@ def panel_actas(
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER6','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER6','off')">Desactivar</button>
-                      </div>
-                    </div>
-            
-                    <div class="provider-card">
-                      <div class="provider-name">ANGEL</div>
-                      <div style="margin:6px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
-                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
-                          <div style="display:flex;align-items:center;gap:6px;">
-                            <input id="weight_PROVIDER8" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER8', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
-                            <span style="font-size:12px;opacity:.7;">nivel</span>
-                          </div>
-                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER8')">Aplicar</button>
-                        </div>
-                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
-                      </div>
-                      <div class="provider-actions">
-                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER8','on')">Activar</button>
-                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER8','off')">Desactivar</button>
                       </div>
                     </div>
 
@@ -12221,12 +12183,10 @@ def _providers_status_text(db: Session) -> str:
 
     text = (
         f"ADMIN DIGITAL:     {s1}{provider1_extra}\n"
-        f"ACTAS DEL SURESTE: {s2}{provider2_extra}\n"
         f"AUSTRAM WEB:       {s3}{provider3_extra}\n"
         f"LAZARO WEB 1:      {s4}{provider4_extra}\n"
         f"LUIS SID:          {s5}{provider5_extra}\n"
         f"ACTAS ESCALANTE:   {s6}{provider6_extra}\n"
-        f"ANGEL:             {s8}{provider8_extra}\n"
         f"EMILIANO:          {s9}{provider9_extra}\n"
         f"LAZARO WEB 2:      {s10}{provider10_extra}\n"
         f"LAZARO WEB 3:      {s11}{provider11_extra}"
