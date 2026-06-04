@@ -24,7 +24,7 @@ from app.config import settings
 from app.db import Base, engine, get_db, SessionLocal
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion, GroupAlias, GroupCategory, BotControl, BotRechargeLog, ApiClient, ApiCreditLog
 from app.queue import request_queue, slow_request_queue, redis_conn, broadcast_queue, ack_queue
-from app.worker import process_request, provider3_keepalive_job, _validate_act_type_pdf, _validate_pdf_matches_term, _notify_support_error, _handle_api_charge_after_done
+from app.worker import process_request, provider3_keepalive_job, _validate_act_type_pdf, _validate_pdf_matches_term, _validate_pdf_term_detailed, _notify_support_error, _handle_api_charge_after_done
 from app.services.provider3 import Provider3Client
 from app.services.provider4 import Provider4Client
 from app.services.provider7 import Provider7Client
@@ -13588,26 +13588,117 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 if is_chain_req:
                     print("PROVIDER_CHAIN_SKIP_ACT_TYPE_VALIDATION =", open_req.curp, flush=True)
                 
-                if (not is_chain_req) and (not _validate_pdf_matches_term(pdf_bytes, open_req.curp, open_req.act_type)):
-                    print("PROVIDER_PDF_WRONG_CURP =", {
-                        "req_id": open_req.id,
-                        "curp": open_req.curp,
-                        "expected_act_type": open_req.act_type,
-                        "filename": filename,
-                        "source_chat_id": source_chat_id,
-                    }, flush=True)
-                
-                    open_req.status = "ERROR"
-                    open_req.error_message = "WRONG_CURP_IN_PDF"
-                    open_req.updated_at = _utc_now_naive()
-                    db.commit()
-                
-                    _notify_support_error(
-                        open_req,
-                        "WRONG_CURP_IN_PDF",
-                        f"filename={filename} | expected_curp={open_req.curp}"
+                if not is_chain_req:
+                    term_check = _validate_pdf_term_detailed(
+                        pdf_bytes,
+                        open_req.curp,
+                        open_req.act_type,
                     )
-                    return {"ok": True, "ignored": "provider_pdf_wrong_curp"}
+                
+                    term_status = term_check.get("status")
+                    term_reason = term_check.get("reason")
+                    found_curps = term_check.get("found_curps") or []
+                
+                    expected_term_norm = re.sub(r"[^A-Z0-9]", "", (open_req.curp or "").upper())
+                    filename_id_norm = re.sub(r"[^A-Z0-9]", "", (filename_id or "").upper())
+                    provider_id_norm = re.sub(r"[^A-Z0-9]", "", (provider_id or "").upper())
+                
+                    filename_matches_expected = bool(
+                        expected_term_norm
+                        and filename_id_norm
+                        and filename_id_norm == expected_term_norm
+                    )
+                
+                    provider_text_matches_expected = bool(
+                        expected_term_norm
+                        and provider_id_norm
+                        and provider_id_norm == expected_term_norm
+                    )
+                
+                    if term_status == "MISMATCH":
+                        print("PROVIDER_PDF_WRONG_INTERNAL_CURP =", {
+                            "req_id": open_req.id,
+                            "expected_curp": open_req.curp,
+                            "found_curps": found_curps,
+                            "expected_act_type": open_req.act_type,
+                            "filename": filename,
+                            "filename_id": filename_id,
+                            "provider_id": provider_id,
+                            "source_chat_id": source_chat_id,
+                        }, flush=True)
+                
+                        open_req.status = "PROCESSING"
+                        open_req.error_message = "WRONG_CURP_IN_PDF_PENDING_RETRY"
+                        open_req.updated_at = _utc_now_naive()
+                        db.commit()
+                
+                        try:
+                            support_key = f"support_wrong_curp_pending:{open_req.id}"
+                            if redis_conn.set(support_key, "1", ex=120, nx=True):
+                                _notify_support_error(
+                                    open_req,
+                                    "WRONG_CURP_IN_PDF_PENDING_RETRY",
+                                    (
+                                        f"filename={filename} | "
+                                        f"expected_curp={open_req.curp} | "
+                                        f"found_curps={found_curps} | "
+                                        f"motivo=CURP interna diferente; NO se entregó al cliente"
+                                    )
+                                )
+                        except Exception as support_exc:
+                            print("NOTIFY_SUPPORT_WRONG_CURP_PENDING_FAILED =", str(support_exc), flush=True)
+                
+                        return {"ok": True, "ignored": "provider_pdf_wrong_internal_curp_pending_retry"}
+                
+                    if term_status == "UNCERTAIN":
+                        # Aquí NO hay CURP interna diferente.
+                        # Solo no se pudo leer bien el texto interno.
+                        # En este caso sí se permite respaldo por filename/texto del proveedor.
+                        if filename_matches_expected or provider_text_matches_expected:
+                            print("PROVIDER_PDF_CURP_UNCERTAIN_BUT_FILENAME_MATCHES =", {
+                                "req_id": open_req.id,
+                                "expected_curp": open_req.curp,
+                                "expected_act_type": open_req.act_type,
+                                "filename": filename,
+                                "filename_id": filename_id,
+                                "provider_id": provider_id,
+                                "reason": term_reason,
+                            }, flush=True)
+                        else:
+                            print("PROVIDER_PDF_CURP_UNCERTAIN_NO_FILENAME_MATCH =", {
+                                "req_id": open_req.id,
+                                "expected_curp": open_req.curp,
+                                "expected_act_type": open_req.act_type,
+                                "filename": filename,
+                                "filename_id": filename_id,
+                                "provider_id": provider_id,
+                                "reason": term_reason,
+                                "source_chat_id": source_chat_id,
+                            }, flush=True)
+                
+                            open_req.status = "PROCESSING"
+                            open_req.error_message = "WRONG_CURP_IN_PDF_PENDING_RETRY"
+                            open_req.updated_at = _utc_now_naive()
+                            db.commit()
+                
+                            try:
+                                support_key = f"support_wrong_curp_uncertain:{open_req.id}"
+                                if redis_conn.set(support_key, "1", ex=120, nx=True):
+                                    _notify_support_error(
+                                        open_req,
+                                        "WRONG_CURP_IN_PDF_PENDING_RETRY",
+                                        (
+                                            f"filename={filename} | "
+                                            f"filename_id={filename_id} | "
+                                            f"provider_id={provider_id} | "
+                                            f"expected_curp={open_req.curp} | "
+                                            f"motivo=No se pudo confirmar CURP interna y filename/texto no coincide; NO se entregó al cliente"
+                                        )
+                                    )
+                            except Exception as support_exc:
+                                print("NOTIFY_SUPPORT_WRONG_CURP_UNCERTAIN_FAILED =", str(support_exc), flush=True)
+                
+                            return {"ok": True, "ignored": "provider_pdf_curp_uncertain_pending_retry"}
 
                 if open_req.provider_name == "PROVIDER8":
                     try:
