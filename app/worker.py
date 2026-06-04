@@ -317,6 +317,27 @@ def _humanize_support_code(err: str | None) -> str:
     provider_from_error = _support_provider_from_error(code_up)
     provider_label = _support_provider_label(provider_from_error) if provider_from_error else ""
 
+    raw_up = raw.upper()
+
+    # Fallas de entrega por WhatsApp / Evolution.
+    # Ejemplo: sendMedia/docifybot8max -> Error: Connection Closed
+    # Esto NO significa que el proveedor no haya generado el PDF.
+    if (
+        "SENDMEDIA" in raw_up
+        or "/MESSAGE/SENDMEDIA/" in raw_up
+        or "MESSAGE/SENDMEDIA" in raw_up
+    ) and (
+        "CONNECTION CLOSED" in raw_up
+        or "500 SERVER ERROR" in raw_up
+        or "INTERNAL SERVER ERROR" in raw_up
+    ):
+        return (
+            "El PDF sí se generó, pero falló la entrega por WhatsApp/Evolution. "
+            "La conexión de la instancia se cerró al intentar enviar el archivo. "
+            "No es un PDF perdido del proveedor; revisar/reconectar la instancia del bot "
+            "y reenviar la solicitud o entregar el PDF manualmente si quedó disponible."
+        )
+
     # 1) Traducción directa del error completo.
     if code_up in SUPPORT_ERROR_LABELS_ES:
         msg = SUPPORT_ERROR_LABELS_ES[code_up]
@@ -368,7 +389,13 @@ def _humanize_support_code(err: str | None) -> str:
     if code_clean.startswith("FAILED_FALLBACK_TO_"):
         fallback_provider = code_clean.replace("FAILED_FALLBACK_TO_", "").strip()
         fallback_label = _support_provider_label(fallback_provider)
-        return f"Falló el proveedor inicial y también falló el respaldo hacia {fallback_label}."
+        msg = (
+            f"Falló el proveedor inicial, pero la solicitud sigue EN PROCESO "
+            f"y ya fue reenviada al proveedor de respaldo: {fallback_label}."
+        )
+        if detail:
+            msg += f"\nDetalle técnico del proveedor inicial: {detail}"
+        return msg
 
     if code_clean == "FALLBACK_NO_PROVIDER_AVAILABLE":
         return "Falló el proveedor inicial y no hubo otro proveedor disponible para respaldo."
@@ -496,6 +523,35 @@ def _notify_support_error(req, err: str, extra_msg: str = ""):
         support_instance = getattr(settings, "SOPORTE_ACTAS_INSTANCE", None) or "docifybot8"
         print("SOPORTE_ACTAS_SEND_INSTANCE =", support_instance, flush=True)
         send_group_text(support_group, msg, support_instance)
+
+        # También mandar copia al grupo del proveedor que está atendiendo la solicitud.
+        # Ejemplo: si el proveedor es ADMIN DIGITAL, también le cae a su grupo.
+        provider_group = (getattr(req, "provider_group_id", "") or "").strip()
+
+        if provider_group and provider_group != support_group:
+            try:
+                provider_msg = msg.replace(
+                    "🚨 *ERROR SOPORTE ACTAS*",
+                    "⚠️ *AVISO SOPORTE ACTAS / PROVEEDOR*"
+                )
+
+                provider_sender_instance = _provider_sender_instance(provider_name, req)
+
+                print("SOPORTE_PROVIDER_COPY =", {
+                    "req_id": getattr(req, "id", None),
+                    "provider_name": provider_name,
+                    "provider_group": provider_group,
+                    "sender_instance": provider_sender_instance,
+                }, flush=True)
+
+                send_group_text(provider_group, provider_msg, provider_sender_instance)
+
+            except Exception as provider_support_exc:
+                print("PROVIDER_SUPPORT_NOTIFY_FAILED =", {
+                    "req_id": getattr(req, "id", None),
+                    "provider_group": provider_group,
+                    "error": str(provider_support_exc),
+                }, flush=True)
 
     except Exception as support_exc:
         print("SUPPORT_ERROR_NOTIFY_FAILED =", str(support_exc), flush=True)
@@ -2801,8 +2857,17 @@ def process_request(request_id: int):
 
             req.status = "ERROR"
             req.error_message = err
+            req.updated_at = _utc_now_naive()
             db.commit()
-            _notify_support_error(req, err, "ERROR NO CONTROLADO EN WORKER")
+
+            extra_soporte = (
+                "Falla capturada por el worker. "
+                "Revisar si fue error de proveedor, validación o entrega por WhatsApp. "
+                "Si el detalle menciona sendMedia / Connection Closed, el PDF pudo haberse generado "
+                "pero falló la entrega por la instancia del bot."
+            )
+
+            _notify_support_error(req, err, extra_soporte)
         raise
         
     finally:
