@@ -902,8 +902,8 @@ def _bot_sales_today(db: Session, instance_name: str) -> int:
     return q.count()
 
 
-def _bot_sales_month(db: Session, instance_name: str) -> int:
-    start_utc = _bot_month_30d_start()
+def _bot_sales_30d(db: Session, instance_name: str) -> int:
+    start_utc, end_utc = _bot_30d_bounds()
     owned_group_ids = _owned_group_ids_for_instance(db, instance_name)
 
     if not owned_group_ids:
@@ -916,6 +916,7 @@ def _bot_sales_month(db: Session, instance_name: str) -> int:
             RequestLog.source_group_id.in_(owned_group_ids),
             RequestLog.status == "DONE",
             RequestLog.created_at >= start_utc,
+            RequestLog.created_at < end_utc,
         )
     )
 
@@ -994,7 +995,7 @@ def _bot_group_stats(db: Session, instance_name: str):
                 RequestLog.source_group_id == g.group_jid,
                 RequestLog.status == "DONE",
                 RequestLog.created_at >= start_30d,
-                RequestLog.created_at <= end_30d,
+                RequestLog.created_at < end_30d,
             )
         )
         
@@ -6417,7 +6418,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
 
     title = _bot_title(db, instance_name)
     today_sales = _bot_sales_today(db, instance_name)
-    month_sales = _bot_sales_month(db, instance_name)
+    month_sales = _bot_sales_30d(db, instance_name)
     history_rows = _bot_sales_history_30d(db, instance_name)
     groups = _bot_group_stats(db, instance_name)
     credits = _bot_credit_stats(db, instance_name)
