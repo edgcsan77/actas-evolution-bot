@@ -45,7 +45,7 @@ def cleanup_expired_and_mark_pending():
         timeout_minutes = int(getattr(settings, "REQUEST_TIMEOUT_MINUTES", 8) or 8)
         limit = now - timedelta(minutes=timeout_minutes)
         
-        whatsapp_providers = ["PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6", "PROVIDER8"]
+        whatsapp_providers = ["PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9"]
         
         rows = (
             db.query(RequestLog)
