@@ -1977,36 +1977,87 @@ def _detect_pdf_act_type(pdf_bytes: bytes) -> str:
         return ""
 
     text = text.upper()
+    text_norm = (
+        text.replace("Á", "A")
+            .replace("É", "E")
+            .replace("Í", "I")
+            .replace("Ó", "O")
+            .replace("Ú", "U")
+            .replace("Ü", "U")
+    )
+    text_compact = re.sub(r"[^A-Z]", "", text_norm)
 
-    # Detectar tipo visible real del PDF.
-    # Ojo: primero revisar frases completas.
-    if "ACTA DE NACIMIENTO" in text:
-        return "NACIMIENTO"
+    print("PROVIDER_VALIDATE_ACT_TEXT_PREVIEW =", text_norm[:500], flush=True)
 
-    if "ACTA DE MATRIMONIO" in text:
-        return "MATRIMONIO"
+    # 1) Detectar SOLO por encabezado/título del acta, no por campos internos.
+    # En defunción aparecen campos como "fecha de nacimiento"; eso NO debe volverlo NACIMIENTO.
+    title_patterns = [
+        ("DEFUNCION", [
+            r"ACTA\s+DE\s+DEFUNCION",
+            r"ACTA\s+DE\s+DEFUNCI[OÓ]N",
+            r"ACTADEDEFUNCION",
+        ]),
+        ("MATRIMONIO", [
+            r"ACTA\s+DE\s+MATRIMONIO",
+            r"ACTADEMATRIMONIO",
+        ]),
+        ("DIVORCIO", [
+            r"ACTA\s+DE\s+DIVORCIO",
+            r"ACTADEDIVORCIO",
+        ]),
+        ("NACIMIENTO", [
+            r"ACTA\s+DE\s+NACIMIENTO",
+            r"ACTADENACIMIENTO",
+        ]),
+    ]
 
-    if "ACTA DE DIVORCIO" in text:
-        return "DIVORCIO"
+    for act_group, patterns in title_patterns:
+        for pat in patterns:
+            if re.search(pat, text_norm, flags=re.IGNORECASE) or re.search(pat, text_compact, flags=re.IGNORECASE):
+                print("PROVIDER_VALIDATE_ACT_TYPE_TITLE_MATCH =", act_group, flush=True)
+                return act_group
 
-    if "ACTA DE DEFUNCION" in text or "ACTA DE DEFUNCIÓN" in text:
-        return "DEFUNCION"
+    # 2) Fallback por identificadores de estructura, NO por la palabra suelta "nacimiento".
+    # Esto evita que "Fecha de nacimiento" en defunción se detecte como NACIMIENTO.
+    structural_scores = {
+        "DEFUNCION": 0,
+        "MATRIMONIO": 0,
+        "DIVORCIO": 0,
+        "NACIMIENTO": 0,
+    }
 
-    # Fallback por palabras, solo si no encontró frase completa.
-    # Esto ayuda cuando pypdf extrae texto medio raro.
-    if "NACIMIENTO" in text and not any(x in text for x in ["MATRIMONIO", "DIVORCIO", "DEFUNCION", "DEFUNCIÓN"]):
-        return "NACIMIENTO"
+    if "DATOSDELAPERSONAFALLECIDA" in text_compact or "DATOSDELADEFUNCION" in text_compact:
+        structural_scores["DEFUNCION"] += 5
 
-    if "MATRIMONIO" in text and not any(x in text for x in ["NACIMIENTO", "DIVORCIO", "DEFUNCION", "DEFUNCIÓN"]):
-        return "MATRIMONIO"
+    if "DATOSDELOSCONTRAYENTES" in text_compact or "CONTRAYENTE" in text_compact:
+        structural_scores["MATRIMONIO"] += 5
 
-    if "DIVORCIO" in text and not any(x in text for x in ["NACIMIENTO", "MATRIMONIO", "DEFUNCION", "DEFUNCIÓN"]):
-        return "DIVORCIO"
+    if "DATOSDELDIVORCIO" in text_compact or "DIVORCIADO" in text_compact or "DIVORCIADA" in text_compact:
+        structural_scores["DIVORCIO"] += 5
 
-    if ("DEFUNCION" in text or "DEFUNCIÓN" in text) and not any(x in text for x in ["NACIMIENTO", "MATRIMONIO", "DIVORCIO"]):
-        return "DEFUNCION"
+    if "DATOSDELREGISTRADO" in text_compact or "DATOSDELAPERSONAREGISTRADA" in text_compact:
+        structural_scores["NACIMIENTO"] += 5
 
-    # No se pudo confirmar el tipo, pero tampoco se detectó uno contrario claro.
+    # Señales secundarias
+    if "CERTIFICADODEDEFUNCION" in text_compact or "DESTINODELCADAVER" in text_compact or "CAUSASDELADEFUNCION" in text_compact:
+        structural_scores["DEFUNCION"] += 3
+
+    if "REGIMENPATRIMONIAL" in text_compact or "SOCIEDADCONYUGAL" in text_compact:
+        structural_scores["MATRIMONIO"] += 3
+
+    if "SENTENCIADEDIVORCIO" in text_compact:
+        structural_scores["DIVORCIO"] += 3
+
+    print("PROVIDER_VALIDATE_ACT_TYPE_STRUCTURAL_SCORES =", structural_scores, flush=True)
+
+    best_type = max(structural_scores, key=structural_scores.get)
+    best_score = structural_scores[best_type]
+
+    # Solo aceptar fallback estructural si hay señal fuerte.
+    if best_score >= 5:
+        return best_type
+
+    # 3) Si no hay título ni estructura clara, NO adivinar.
     return ""
 
 
