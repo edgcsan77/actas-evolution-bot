@@ -24,7 +24,17 @@ from app.config import settings
 from app.db import Base, engine, get_db, SessionLocal
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion, GroupAlias, GroupCategory, BotControl, BotRechargeLog, ApiClient, ApiCreditLog
 from app.queue import request_queue, slow_request_queue, redis_conn, broadcast_queue, ack_queue
-from app.worker import process_request, provider3_keepalive_job, _validate_act_type_pdf, _validate_pdf_matches_term, _validate_pdf_term_detailed, _notify_support_error, _handle_api_charge_after_done
+from app.worker import (
+    process_request,
+    provider3_keepalive_job,
+    _validate_act_type_pdf,
+    _validate_pdf_matches_term,
+    _validate_pdf_term_detailed,
+    _notify_support_error,
+    _handle_api_charge_after_done,
+    _detect_pdf_act_type,
+    _expected_act_type_group,
+)
 from app.services.provider3 import Provider3Client
 from app.services.provider4 import Provider4Client
 from app.services.provider7 import Provider7Client
@@ -11702,6 +11712,67 @@ def _extract_identifier_from_filename_local(filename: str) -> str | None:
     return extract_identifier_from_filename(filename)
 
 
+def _text_mentions_act_type_group(text: str | None) -> str:
+    t = normalize_text(text or "")
+
+    if "MATRIMONIO" in t or "MATRI" in t:
+        return "MATRIMONIO"
+
+    if "NACIMIENTO" in t or "NACIM" in t:
+        return "NACIMIENTO"
+
+    if "DEFUNCION" in t or "DEFUN" in t:
+        return "DEFUNCION"
+
+    if "DIVORCIO" in t or "DIVOR" in t:
+        return "DIVORCIO"
+
+    return ""
+
+
+def _find_same_curp_req_by_act_type(
+    db: Session,
+    *,
+    curp: str,
+    provider_group_id: str,
+    detected_type: str,
+):
+    detected_type = (detected_type or "").strip().upper()
+
+    if not curp or not provider_group_id or not detected_type:
+        return None
+
+    candidates = (
+        db.query(RequestLog)
+        .filter(
+            RequestLog.curp == curp,
+            RequestLog.provider_group_id == provider_group_id,
+            RequestLog.status == "PROCESSING",
+        )
+        .order_by(RequestLog.created_at.asc())
+        .all()
+    )
+
+    matched = [
+        r for r in candidates
+        if _expected_act_type_group(r.act_type) == detected_type
+    ]
+
+    print("SAME_CURP_ACT_TYPE_CANDIDATES =", {
+        "curp": curp,
+        "provider_group_id": provider_group_id,
+        "detected_type": detected_type,
+        "candidate_ids": [r.id for r in candidates],
+        "candidate_types": [r.act_type for r in candidates],
+        "matched_ids": [r.id for r in matched],
+    }, flush=True)
+
+    if len(matched) == 1:
+        return matched[0]
+
+    return None
+
+
 def _pdf_matches_req_type(pdf_bytes: bytes, req: RequestLog) -> bool:
     try:
         if is_chain(req.curp):
@@ -11800,24 +11871,73 @@ def _pick_matching_processing_req_for_pdf(
         for r in candidates
     ], flush=True)
 
-    for r in candidates:
+    detected_pdf_type = _detect_pdf_act_type(pdf_bytes)
+
+    print("PROVIDER_PDF_DETECTED_TYPE_FOR_MATCH =", {
+        "lookup_id": lookup_id,
+        "detected_pdf_type": detected_pdf_type,
+        "candidate_ids": [r.id for r in candidates],
+        "candidate_types": [r.act_type for r in candidates],
+    }, flush=True)
+    
+    # Si el PDF trae tipo claro y hay candidatos con la misma CURP,
+    # escoger SOLO el request cuyo tipo coincida.
+    if detected_pdf_type:
+        typed_candidates = [
+            r for r in candidates
+            if is_chain(r.curp) or _expected_act_type_group(r.act_type) == detected_pdf_type
+        ]
+    
+        if len(typed_candidates) == 1:
+            r = typed_candidates[0]
+            print("PROVIDER_PDF_SMART_DETECTED_TYPE_MATCH =", {
+                "matched_req_id": r.id,
+                "matched_act_type": r.act_type,
+                "detected_pdf_type": detected_pdf_type,
+                "matched_status": r.status,
+                "matched_instance_name": r.instance_name,
+            }, flush=True)
+            return r
+    
+        if len(typed_candidates) > 1:
+            print("PROVIDER_PDF_MULTIPLE_TYPED_MATCHES_AMBIGUOUS =", {
+                "lookup_id": lookup_id,
+                "detected_pdf_type": detected_pdf_type,
+                "typed_candidate_ids": [r.id for r in typed_candidates],
+                "typed_candidate_types": [r.act_type for r in typed_candidates],
+            }, flush=True)
+            return None
+    
+    # Si no detectó tipo claro, usa validación vieja SOLO si hay un candidato.
+    # Si hay varios con misma CURP, no escoger por antigüedad porque puede cruzar nacimiento/matrimonio.
+    if len(candidates) == 1:
+        r = candidates[0]
+    
         if _pdf_matches_req_type(pdf_bytes, r):
-            print("PROVIDER_PDF_SMART_TYPE_MATCH =", {
+            print("PROVIDER_PDF_SINGLE_CANDIDATE_TYPE_OK =", {
                 "matched_req_id": r.id,
                 "matched_act_type": r.act_type,
                 "matched_status": r.status,
                 "matched_instance_name": r.instance_name,
             }, flush=True)
             return r
-
-    if len(candidates) == 1:
-        print("PROVIDER_PDF_SINGLE_CANDIDATE_NO_TYPE_MATCH =", {
-            "matched_req_id": candidates[0].id,
-            "matched_act_type": candidates[0].act_type,
-            "matched_status": candidates[0].status,
-            "matched_instance_name": candidates[0].instance_name,
+    
+        print("PROVIDER_PDF_SINGLE_CANDIDATE_TYPE_UNCONFIRMED_SOFT_MATCH =", {
+            "matched_req_id": r.id,
+            "matched_act_type": r.act_type,
+            "matched_status": r.status,
+            "matched_instance_name": r.instance_name,
         }, flush=True)
-        return candidates[0]
+        return r
+    
+    if len(candidates) > 1:
+        print("PROVIDER_PDF_MULTIPLE_CANDIDATES_NO_CLEAR_TYPE_IGNORE =", {
+            "lookup_id": lookup_id,
+            "source_chat_id": source_chat_id,
+            "candidate_ids": [r.id for r in candidates],
+            "candidate_types": [r.act_type for r in candidates],
+        }, flush=True)
+        return None
 
     print("PROVIDER_PDF_NO_SAFE_TYPE_MATCH =", {
         "lookup_id": lookup_id,
@@ -13269,6 +13389,18 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                     if open_req:
                         print("PROVIDER_NEGATIVE_MATCHED_REQ_ID =", open_req.id, flush=True)
+                        negative_act_group = _text_mentions_act_type_group(text_norm)
+
+                        if negative_act_group and _expected_act_type_group(open_req.act_type) != negative_act_group:
+                            print("PROVIDER_NEGATIVE_REPLY_TYPE_MISMATCH_IGNORE =", {
+                                "req_id": open_req.id,
+                                "req_act_type": open_req.act_type,
+                                "negative_act_group": negative_act_group,
+                                "provider_id": provider_id,
+                            }, flush=True)
+                    
+                            return {"ok": True, "ignored": "negative_reply_type_mismatch"}
+                            
                         print("PROVIDER_NEGATIVE_MATCHED_PROVIDER =", open_req.provider_name, flush=True)
                         print("PROVIDER_NEGATIVE_MATCHED_CURP =", open_req.curp, flush=True)
 
@@ -13299,7 +13431,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                 # 2) FALLBACK POR CURP EN TEXTO
                 if provider_id and is_negative_text:
-                    open_req = (
+                    negative_act_group = _text_mentions_act_type_group(text_norm)
+
+                    candidates = (
                         db.query(RequestLog)
                         .filter(
                             RequestLog.provider_group_id == source_chat_id,
@@ -13308,8 +13442,33 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             RequestLog.provider_name.in_(["PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9", "MAYAPROVIDER"]),
                         )
                         .order_by(RequestLog.created_at.desc())
-                        .first()
+                        .all()
                     )
+                    
+                    if negative_act_group:
+                        typed_candidates = [
+                            r for r in candidates
+                            if _expected_act_type_group(r.act_type) == negative_act_group
+                        ]
+                    
+                        print("PROVIDER_NEGATIVE_TYPED_CANDIDATES =", {
+                            "provider_id": provider_id,
+                            "negative_act_group": negative_act_group,
+                            "candidate_ids": [r.id for r in candidates],
+                            "candidate_types": [r.act_type for r in candidates],
+                            "typed_ids": [r.id for r in typed_candidates],
+                        }, flush=True)
+                    
+                        open_req = typed_candidates[0] if len(typed_candidates) == 1 else None
+                    else:
+                        open_req = candidates[0] if len(candidates) == 1 else None
+                    
+                        if len(candidates) > 1:
+                            print("PROVIDER_NEGATIVE_AMBIGUOUS_SAME_CURP_NO_TYPE =", {
+                                "provider_id": provider_id,
+                                "candidate_ids": [r.id for r in candidates],
+                                "candidate_types": [r.act_type for r in candidates],
+                            }, flush=True)
 
                     if open_req:
                         print("PROVIDER5_FALLBACK_MATCHED_REQ_ID =", open_req.id, flush=True)
@@ -13558,32 +13717,65 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         return {"ok": True, "ignored": "provider_pdf_without_safe_match"}
 
                 is_chain_req = is_chain(open_req.curp)
-                if (not is_chain_req) and (not _validate_act_type_pdf(pdf_bytes, open_req.act_type)):
+                detected_pdf_type = "" if is_chain_req else _detect_pdf_act_type(pdf_bytes)
+
+                if (
+                    not is_chain_req
+                    and detected_pdf_type
+                    and _expected_act_type_group(open_req.act_type) != detected_pdf_type
+                ):
                     print("PROVIDER_PDF_WRONG_ACT_TYPE_AFTER_SMART_MATCH =", {
                         "req_id": open_req.id,
                         "curp": open_req.curp,
                         "expected_act_type": open_req.act_type,
+                        "detected_pdf_type": detected_pdf_type,
                         "filename": filename,
                         "source_chat_id": source_chat_id,
                     }, flush=True)
-
-                    open_req.status = "PROCESSING"
-                    open_req.error_message = "WRONG_ACT_TYPE_PDF_PENDING_RETRY"
-                    open_req.updated_at = _utc_now_naive()
-                    db.commit()
-                    
-                    try:
-                        support_key = f"support_wrong_type_pending:{open_req.id}"
-                        if redis_conn.set(support_key, "1", ex=120, nx=True):
-                            _notify_support_error(
-                                open_req,
-                                "WRONG_ACT_TYPE_PDF_PENDING_RETRY",
-                                f"filename={filename} | expected_act_type={open_req.act_type} | NO se notificó al cliente para evitar falso error"
-                            )
-                    except Exception as support_exc:
-                        print("NOTIFY_SUPPORT_ERROR_FAILED =", str(support_exc), flush=True)
-                    
-                    return {"ok": True, "ignored": "provider_pdf_wrong_act_type_pending_retry"}
+                
+                    reroute_req = _find_same_curp_req_by_act_type(
+                        db,
+                        curp=open_req.curp,
+                        provider_group_id=source_chat_id,
+                        detected_type=detected_pdf_type,
+                    )
+                
+                    if reroute_req and reroute_req.id != open_req.id:
+                        print("PROVIDER_PDF_REROUTED_TO_SAME_CURP_CORRECT_ACT_TYPE =", {
+                            "old_req_id": open_req.id,
+                            "old_act_type": open_req.act_type,
+                            "new_req_id": reroute_req.id,
+                            "new_act_type": reroute_req.act_type,
+                            "detected_pdf_type": detected_pdf_type,
+                            "filename": filename,
+                        }, flush=True)
+                
+                        open_req = reroute_req
+                        is_chain_req = is_chain(open_req.curp)
+                
+                    else:
+                        open_req.status = "PROCESSING"
+                        open_req.error_message = "WRONG_ACT_TYPE_PDF_PENDING_RETRY"
+                        open_req.updated_at = _utc_now_naive()
+                        db.commit()
+                
+                        try:
+                            support_key = f"support_wrong_type_pending:{open_req.id}"
+                            if redis_conn.set(support_key, "1", ex=120, nx=True):
+                                _notify_support_error(
+                                    open_req,
+                                    "WRONG_ACT_TYPE_PDF_PENDING_RETRY",
+                                    (
+                                        f"filename={filename} | "
+                                        f"expected_act_type={open_req.act_type} | "
+                                        f"detected_pdf_type={detected_pdf_type} | "
+                                        f"NO se notificó al cliente para evitar falso error"
+                                    )
+                                )
+                        except Exception as support_exc:
+                            print("NOTIFY_SUPPORT_ERROR_FAILED =", str(support_exc), flush=True)
+                
+                        return {"ok": True, "ignored": "provider_pdf_wrong_act_type_pending_retry"}
                 
                 if is_chain_req:
                     print("PROVIDER_CHAIN_SKIP_ACT_TYPE_VALIDATION =", open_req.curp, flush=True)
