@@ -11792,6 +11792,74 @@ def _extract_provider_identifier_loose(text_body: str) -> str | None:
     return extract_identifier_loose(text_body)
 
 
+def _extract_provider_no_record_identifiers(text_body: str | None) -> list[str]:
+    """
+    Extrae TODOS los identificadores de mensajes individuales tipo PROVIDER_NO_RECORD_TEXT.
+
+    Usa settings.PROVIDER_NO_RECORD_TEXT como base de frases negativas.
+
+    Soporta:
+    GACG640211HOCLSD00    No hay registros disponibles
+    MALA530523HGRRPL04    No hay registros disponibles
+    CAUS580930MGRLRF02    No hay registros disponibles
+    09007002520260158490No hay registros disponibles
+    """
+    raw = (text_body or "").replace("\u00A0", " ").strip()
+    if not raw:
+        return []
+
+    # Normalizado para comparar contra PROVIDER_NO_RECORD_TEXT.
+    norm = normalize_text(raw)
+
+    # CURP y cadena/folio electrónico.
+    curp_pat = r"[A-Z][AEIOUX][A-Z]{2}\d{6}[HM][A-Z]{5}[A-Z0-9]\d"
+    chain_pat = r"\d{18,25}"
+
+    ids_pat = rf"(?:{curp_pat}|{chain_pat})"
+
+    # Usamos exactamente las frases configuradas en PROVIDER_NO_RECORD_TEXT.
+    patterns = _provider_no_record_patterns()
+
+    found = []
+
+    for phrase in patterns:
+        phrase = normalize_text(phrase)
+        if not phrase:
+            continue
+
+        # Convertir la frase normalizada a regex flexible:
+        # "NO HAY REGISTROS DISPONIBLES" -> NO\s+HAY\s+REGISTROS\s+DISPONIBLES
+        phrase_regex = r"\s+".join(re.escape(part) for part in phrase.split())
+
+        # Caso normal:
+        # CURP + texto negativo
+        # CADENA + texto negativo
+        # También soporta pegado:
+        # 09007002520260158490No hay registros disponibles
+        pattern_before = re.compile(
+            rf"(?P<id>{ids_pat})\s*(?:[-:|,;]*)\s*(?P<neg>{phrase_regex})",
+            re.IGNORECASE,
+        )
+
+        # Caso inverso por seguridad:
+        # texto negativo + CURP/CADENA
+        pattern_after = re.compile(
+            rf"(?P<neg>{phrase_regex})\s*(?:[-:|,;]*)\s*(?P<id>{ids_pat})",
+            re.IGNORECASE,
+        )
+
+        for m in pattern_before.finditer(norm):
+            ident = re.sub(r"[^A-Z0-9]", "", m.group("id").upper())
+            if ident and ident not in found:
+                found.append(ident)
+
+        for m in pattern_after.finditer(norm):
+            ident = re.sub(r"[^A-Z0-9]", "", m.group("id").upper())
+            if ident and ident not in found:
+                found.append(ident)
+
+    return found
+
 def _extract_identifier_from_filename_local(filename: str) -> str | None:
     return extract_identifier_from_filename(filename)
 
@@ -14217,57 +14285,109 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 return {"ok": True, "provider_result": "pdf_delivered"}
 
             # 2) SI NO HAY PDF, INTENTAR TEXTO
-            open_req = None
-            if provider_id:
-                open_req = (
-                    db.query(RequestLog)
-                    .filter(
-                        RequestLog.provider_group_id == source_chat_id,
-                        RequestLog.curp == provider_id,
-                        RequestLog.status == "PROCESSING",
-                    )
-                    .order_by(RequestLog.created_at.asc())
-                    .first()
-                )
+            # Este bloque es SOLO para mensajes individuales tipo PROVIDER_NO_RECORD_TEXT:
+            # - GACG640211HOCLSD00    No hay registros disponibles
+            # - MALA530523HGRRPL04    No hay registros disponibles
+            # - CAUS580930MGRLRF02    No hay registros disponibles
+            # - 09007002520260158490No hay registros disponibles
+            #
+            # NO es para replies tipo: "SIN", "VERIFICAR", "NO ESTÁ".
+            # Esos ya se manejan arriba por quoted_msg_id.
+            if text_body and _is_no_record_message(text_upper):
+                no_record_ids = _extract_provider_no_record_identifiers(text_body)
             
-                if not open_req:
+                # Fallback viejo: por si viene un solo dato y extract_identifier_loose sí lo detectó.
+                if not no_record_ids and provider_id:
+                    no_record_ids = [provider_id]
+            
+                if not no_record_ids:
+                    print("PROVIDER_NO_RECORD_WITHOUT_IDENTIFIER =", {
+                        "text_body": text_body,
+                        "source_chat_id": source_chat_id,
+                    }, flush=True)
+            
+                    return {"ok": True, "ignored": "provider_no_record_without_identifier"}
+            
+                matched_req_ids = []
+                unmatched_ids = []
+            
+                for no_record_id in no_record_ids:
                     open_req = (
                         db.query(RequestLog)
                         .filter(
-                            RequestLog.curp == provider_id,
+                            RequestLog.provider_group_id == source_chat_id,
+                            RequestLog.curp == no_record_id,
                             RequestLog.status == "PROCESSING",
                         )
-                        .order_by(RequestLog.created_at.desc())
+                        .order_by(RequestLog.created_at.asc())
                         .first()
                     )
             
-                    print("PROVIDER_NO_RECORD_FALLBACK_MATCH =", {
-                        "provider_id": provider_id,
-                        "matched_req_id": getattr(open_req, "id", None),
-                        "matched_provider_group_id": getattr(open_req, "provider_group_id", None),
-                        "matched_source_group_id": getattr(open_req, "source_group_id", None),
-                        "matched_instance_name": getattr(open_req, "instance_name", None),
-                    }, flush=True)
-
-            if text_body and _is_no_record_message(text_upper):
-                if not open_req:
-                    print("PROVIDER_NO_RECORD_WITHOUT_MATCH =", text_body, flush=True)
-                    return {"ok": True, "ignored": "provider_no_record_without_match"}
-
-                print("PROVIDER_NO_RECORD_MATCHED_REQ_ID =", open_req.id, flush=True)
-                print("PROVIDER_NO_RECORD_MATCHED_CURP =", open_req.curp, flush=True)
-
-                open_req.status = "ERROR"
-                open_req.error_message = text_body.strip()
-                open_req.updated_at = _utc_now_naive()
-                db.commit()
-
-                _deliver_text_result(
-                    open_req,
-                    f"❌ No hay registros disponibles.\nDato: {open_req.curp}\nTipo: {open_req.act_type}\n\nVerificar que la CURP esté certificada en RENAPO",
-                )
-                return {"ok": True, "provider_result": "no_record"}
-
+                    if not open_req:
+                        open_req = (
+                            db.query(RequestLog)
+                            .filter(
+                                RequestLog.curp == no_record_id,
+                                RequestLog.status == "PROCESSING",
+                            )
+                            .order_by(RequestLog.created_at.desc())
+                            .first()
+                        )
+            
+                        print("PROVIDER_NO_RECORD_FALLBACK_MATCH =", {
+                            "provider_id": no_record_id,
+                            "matched_req_id": getattr(open_req, "id", None),
+                            "matched_provider_group_id": getattr(open_req, "provider_group_id", None),
+                            "matched_source_group_id": getattr(open_req, "source_group_id", None),
+                            "matched_instance_name": getattr(open_req, "instance_name", None),
+                        }, flush=True)
+            
+                    if not open_req:
+                        unmatched_ids.append(no_record_id)
+                        continue
+            
+                    print("PROVIDER_NO_RECORD_MATCHED_REQ_ID =", open_req.id, flush=True)
+                    print("PROVIDER_NO_RECORD_MATCHED_CURP =", open_req.curp, flush=True)
+            
+                    open_req.status = "ERROR"
+                    open_req.error_message = "SIN REGISTRO"
+                    open_req.updated_at = _utc_now_naive()
+                    db.commit()
+            
+                    _deliver_text_result(
+                        open_req,
+                        (
+                            f"❌ No hay registros disponibles.\n"
+                            f"Dato: {open_req.curp}\n"
+                            f"Tipo: {open_req.act_type}\n\n"
+                            f"Verificar que la CURP esté certificada en RENAPO"
+                        ),
+                    )
+            
+                    matched_req_ids.append(open_req.id)
+            
+                print("PROVIDER_NO_RECORD_TEXT_LIST_RESULT =", {
+                    "ids_detected": no_record_ids,
+                    "matched_req_ids": matched_req_ids,
+                    "unmatched_ids": unmatched_ids,
+                }, flush=True)
+            
+                if matched_req_ids:
+                    return {
+                        "ok": True,
+                        "provider_result": "provider_no_record_text_matched",
+                        "matched_req_ids": matched_req_ids,
+                        "unmatched_ids": unmatched_ids,
+                    }
+            
+                print("PROVIDER_NO_RECORD_WITHOUT_MATCH =", {
+                    "text_body": text_body,
+                    "ids_detected": no_record_ids,
+                    "source_chat_id": source_chat_id,
+                }, flush=True)
+            
+                return {"ok": True, "ignored": "provider_no_record_without_match"}
+            
             print("PROVIDER_RAW_MESSAGE_KEYS =", list(message.keys()), flush=True)
             print("PROVIDER_RAW_MESSAGE =", message, flush=True)
             print("PROVIDER_UNHANDLED_MESSAGE =", message, flush=True)
