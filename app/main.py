@@ -77,6 +77,7 @@ app = FastAPI(title=settings.APP_NAME)
 PANEL_TZ = "America/Monterrey"
 BLOCKED_GROUPS_KEY = "blocked_groups_no_response"
 BLOCKED_INSTANCES_KEY = "blocked_instances_no_response"
+ADMIN_BLOCKED_INSTANCES_KEY = "admin_blocked_instances_no_minipanel_unlock"
 
 PANEL_HTML_TTL = 180
 PANEL_RECENT_TTL = 60
@@ -1157,17 +1158,72 @@ def is_group_blocked(group_jid: str) -> bool:
         db.close()
 
 
+def _redis_sismember_str(key: str, value: str) -> bool:
+    value = (value or "").strip()
+    if not value:
+        return False
+
+    try:
+        blocked = redis_conn.sismember(key, value)
+
+        if not blocked:
+            blocked = redis_conn.sismember(key, value.encode("utf-8"))
+
+        return bool(blocked)
+
+    except Exception as e:
+        print("REDIS_SISMEMBER_ERROR =", key, value, str(e), flush=True)
+        return False
+
+
+def is_instance_admin_blocked(instance_name: str) -> bool:
+    instance_name = (instance_name or "").strip()
+    if not instance_name:
+        return False
+
+    return _redis_sismember_str(ADMIN_BLOCKED_INSTANCES_KEY, instance_name)
+
+
 def is_instance_blocked(instance_name: str) -> bool:
     instance_name = (instance_name or "").strip()
     if not instance_name:
         return False
 
-    blocked = redis_conn.sismember(BLOCKED_INSTANCES_KEY, instance_name)
+    # Bloqueo normal: límite, mini panel, etc.
+    normal_blocked = _redis_sismember_str(BLOCKED_INSTANCES_KEY, instance_name)
 
-    if not blocked:
-        blocked = redis_conn.sismember(BLOCKED_INSTANCES_KEY, instance_name.encode("utf-8"))
+    # Bloqueo administrativo: impuesto desde panel principal.
+    admin_blocked = is_instance_admin_blocked(instance_name)
 
-    return bool(blocked)
+    return bool(normal_blocked or admin_blocked)
+
+
+def admin_block_instance(instance_name: str):
+    instance_name = (instance_name or "").strip()
+    if not instance_name:
+        return
+
+    # Lo metemos en ambos:
+    # 1) en el bloqueo normal para que el webhook lo ignore
+    # 2) en el bloqueo admin para que el mini panel NO pueda desbloquearlo
+    block_instance(instance_name)
+    redis_conn.sadd(ADMIN_BLOCKED_INSTANCES_KEY, instance_name)
+
+    print("ADMIN_INSTANCE_BLOCKED =", instance_name, flush=True)
+    print("ADMIN_BLOCKED_INSTANCES_NOW =", redis_conn.smembers(ADMIN_BLOCKED_INSTANCES_KEY), flush=True)
+
+
+def admin_unblock_instance(instance_name: str):
+    instance_name = (instance_name or "").strip()
+    if not instance_name:
+        return
+
+    # Solo el panel principal debe llamar esto.
+    redis_conn.srem(ADMIN_BLOCKED_INSTANCES_KEY, instance_name)
+    unblock_instance(instance_name)
+
+    print("ADMIN_INSTANCE_UNBLOCKED =", instance_name, flush=True)
+    print("ADMIN_BLOCKED_INSTANCES_NOW =", redis_conn.smembers(ADMIN_BLOCKED_INSTANCES_KEY), flush=True)
 
 
 def list_blocked_instances():
@@ -1671,16 +1727,26 @@ def panel_instances(db: Session = Depends(get_db)):
 
 @app.post("/panel/instance/{instance_name}/block")
 def panel_block_instance(instance_name: str):
-    block_instance(instance_name)
+    admin_block_instance(instance_name)
     _clear_panel_cache()
-    return {"ok": True, "instance_name": instance_name, "blocked": True}
+    return {
+        "ok": True,
+        "instance_name": instance_name,
+        "blocked": True,
+        "admin_blocked": True,
+    }
 
 
 @app.post("/panel/instance/{instance_name}/unblock")
 def panel_unblock_instance(instance_name: str):
-    unblock_instance(instance_name)
+    admin_unblock_instance(instance_name)
     _clear_panel_cache()
-    return {"ok": True, "instance_name": instance_name, "blocked": False}
+    return {
+        "ok": True,
+        "instance_name": instance_name,
+        "blocked": False,
+        "admin_blocked": False,
+    }
 
 
 @app.post("/panel/instance/{instance_name}/limit")
@@ -5931,6 +5997,15 @@ def botpanel_unblock_bot(token: str, db: Session = Depends(get_db)):
         if not instance_name:
             return {"ok": False, "error": "Panel no válido"}
 
+        if is_instance_admin_blocked(instance_name):
+            return {
+                "ok": False,
+                "error": "Este bot fue bloqueado desde el panel principal. Solo el panel principal puede desbloquearlo.",
+                "instance_name": instance_name,
+                "blocked": True,
+                "admin_blocked": True,
+            }
+
         unblock_instance(instance_name)
         _clear_panel_cache()
 
@@ -6439,7 +6514,12 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
     active_promos = sum(1 for g in groups if g["promo_active"])
 
     bot_blocked = is_instance_blocked(instance_name)
-    bot_status_label = "APAGADO" if bot_blocked else "PRENDIDO"
+    bot_admin_blocked = is_instance_admin_blocked(instance_name)
+    
+    if bot_admin_blocked:
+        bot_status_label = "BLOQUEADO POR PANEL PRINCIPAL"
+    else:
+        bot_status_label = "APAGADO" if bot_blocked else "PRENDIDO"
     bot_status_badge = (
         '<span class="badge badge-danger">BOT APAGADO</span>'
         if bot_blocked else
@@ -6656,9 +6736,13 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
             </div>
 
             {
-              '<button class="btn btn-success" onclick="unblockMiniBot()">Prender bot</button>'
-              if bot_blocked else
-              '<button class="btn btn-danger" onclick="blockMiniBot()">Apagar bot</button>'
+              '<button class="btn btn-danger" disabled style="opacity:.6;cursor:not-allowed;">Bloqueado por panel principal</button>'
+              if bot_admin_blocked else
+              (
+                '<button class="btn btn-success" onclick="unblockMiniBot()">Prender bot</button>'
+                if bot_blocked else
+                '<button class="btn btn-danger" onclick="blockMiniBot()">Apagar bot</button>'
+              )
             }
           </div>
         </div>
