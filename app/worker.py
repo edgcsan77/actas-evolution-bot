@@ -100,13 +100,18 @@ def _provider_from_mode(mode: str | None) -> str | None:
 
 
 def _request_is_no_accounting(req, db) -> bool:
+    provider_name = (getattr(req, "provider_name", "") or "").strip().upper()
+
+    if provider_name == "MAYAPROVIDER":
+        return True
+
     mode = _bot_provider_mode(db, getattr(req, "instance_name", None))
     mode_provider = _provider_from_mode(mode)
 
     return (
         _is_personal_provider_mode(mode)
         and mode_provider
-        and (getattr(req, "provider_name", "") or "").strip().upper() == mode_provider
+        and provider_name == mode_provider
     )
 
 
@@ -260,6 +265,7 @@ SUPPORT_ERROR_LABELS_ES = {
         "La solicitud debe reintentarse automáticamente con otro proveedor; "
         "no significa que el acta quedó perdida definitivamente."
     ),
+    "PROVIDER12_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para VILLAFUERTE.",
 }
 
 
@@ -940,8 +946,6 @@ def _enabled_providers(db) -> list[str]:
         enabled.append("PROVIDER11")
     if p12.is_enabled:
         enabled.append("PROVIDER12")
-    if p13.is_enabled:
-        enabled.append("MAYAPROVIDER")
 
     return enabled
 
@@ -2758,6 +2762,7 @@ def process_request(request_id: int):
                             "PROVIDER6",
                             "PROVIDER8",
                             "PROVIDER9",
+                            "PROVIDER12",
                         }
                         and p != provider_name
                     ]
