@@ -12066,11 +12066,65 @@ def _pick_matching_processing_req_for_pdf(
             return r
     
         if len(typed_candidates) > 1:
+            same_request_keys = {
+                (
+                    (r.curp or "").strip().upper(),
+                    (r.act_type or "").strip().upper(),
+                    (r.provider_name or "").strip().upper(),
+                    (r.provider_group_id or "").strip(),
+                    (r.source_group_id or "").strip(),
+                    (r.instance_name or "").strip(),
+                )
+                for r in typed_candidates
+            }
+
+            # Si todos son realmente el mismo pedido duplicado,
+            # elegir el más reciente y cancelar los demás duplicados.
+            if len(same_request_keys) == 1:
+                picked = sorted(
+                    typed_candidates,
+                    key=lambda r: (
+                        r.created_at or datetime.min,
+                        r.id or 0,
+                    ),
+                    reverse=True,
+                )[0]
+
+                duplicate_ids = [r.id for r in typed_candidates if r.id != picked.id]
+
+                print("PROVIDER_PDF_DUPLICATE_SAME_REQUEST_PICKED =", {
+                    "lookup_id": lookup_id,
+                    "detected_pdf_type": detected_pdf_type,
+                    "picked_req_id": picked.id,
+                    "duplicate_ids": duplicate_ids,
+                    "picked_curp": picked.curp,
+                    "picked_act_type": picked.act_type,
+                    "picked_provider_group_id": picked.provider_group_id,
+                    "picked_source_group_id": picked.source_group_id,
+                    "picked_instance_name": picked.instance_name,
+                }, flush=True)
+
+                now = _utc_now_naive()
+
+                for dup in typed_candidates:
+                    if dup.id == picked.id:
+                        continue
+
+                    dup.status = "ERROR"
+                    dup.error_message = f"DUPLICADO_IGNORADO: entregado en solicitud {picked.id}"
+                    dup.updated_at = now
+
+                db.commit()
+
+                return picked
+
             print("PROVIDER_PDF_MULTIPLE_TYPED_MATCHES_AMBIGUOUS =", {
                 "lookup_id": lookup_id,
                 "detected_pdf_type": detected_pdf_type,
                 "typed_candidate_ids": [r.id for r in typed_candidates],
                 "typed_candidate_types": [r.act_type for r in typed_candidates],
+                "typed_candidate_source_groups": [r.source_group_id for r in typed_candidates],
+                "typed_candidate_instances": [r.instance_name for r in typed_candidates],
             }, flush=True)
             return None
     
@@ -12097,6 +12151,52 @@ def _pick_matching_processing_req_for_pdf(
         return r
     
     if len(candidates) > 1:
+        same_request_keys = {
+            (
+                (r.curp or "").strip().upper(),
+                (r.act_type or "").strip().upper(),
+                (r.provider_name or "").strip().upper(),
+                (r.provider_group_id or "").strip(),
+                (r.source_group_id or "").strip(),
+                (r.instance_name or "").strip(),
+            )
+            for r in candidates
+        }
+
+        if len(same_request_keys) == 1:
+            picked = sorted(
+                candidates,
+                key=lambda r: (
+                    r.created_at or datetime.min,
+                    r.id or 0,
+                ),
+                reverse=True,
+            )[0]
+
+            duplicate_ids = [r.id for r in candidates if r.id != picked.id]
+
+            print("PROVIDER_PDF_DUPLICATE_SAME_REQUEST_PICKED_NO_CLEAR_TYPE =", {
+                "lookup_id": lookup_id,
+                "picked_req_id": picked.id,
+                "duplicate_ids": duplicate_ids,
+                "picked_curp": picked.curp,
+                "picked_act_type": picked.act_type,
+            }, flush=True)
+
+            now = _utc_now_naive()
+
+            for dup in candidates:
+                if dup.id == picked.id:
+                    continue
+
+                dup.status = "ERROR"
+                dup.error_message = f"DUPLICADO_IGNORADO: entregado en solicitud {picked.id}"
+                dup.updated_at = now
+
+            db.commit()
+
+            return picked
+
         print("PROVIDER_PDF_MULTIPLE_CANDIDATES_NO_CLEAR_TYPE_IGNORE =", {
             "lookup_id": lookup_id,
             "source_chat_id": source_chat_id,
