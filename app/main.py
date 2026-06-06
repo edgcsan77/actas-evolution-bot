@@ -72,6 +72,7 @@ from app.utils.bot_limits import (
 
 from sqlalchemy import func, case, or_
 from app.broadcast_jobs import botpanel_broadcast_job
+from app.pdf_storage import save_request_pdf_to_r2, generate_r2_presigned_download_url
 
 app = FastAPI(title=settings.APP_NAME)
 PANEL_TZ = "America/Monterrey"
@@ -1628,6 +1629,7 @@ def botpanel_audit_all_groups(
                 <th>Tipo</th>
                 <th>Estado</th>
                 <th>Grupo</th>
+                <th>PDF</th>
                 <th>Error</th>
               </tr>
             </thead>
@@ -1661,6 +1663,18 @@ def botpanel_audit_all_groups(
             gid = r.source_group_id or ""
             gname = _group_name_cached(gid, group_cache) if gid else "PRIVADO"
 
+            pdf_btn = "<span class='small'>No disponible</span>"
+
+            if r.status == "DONE" and getattr(r, "pdf_storage_key", None):
+                pdf_btn = f"""
+                  <button class="btn"
+                          type="button"
+                          onclick="downloadPdf('{_esc(token)}', {int(r.id)})"
+                          style="background:#16a34a;border:0;cursor:pointer;">
+                    📄 Descargar
+                  </button>
+                """
+
             html += f"""
               <tr>
                 <td>{_esc(hora_envio)}</td>
@@ -1674,13 +1688,14 @@ def botpanel_audit_all_groups(
                   <strong>{_esc(gname)}</strong><br>
                   <span class="small">{_esc(gid)}</span>
                 </td>
+                <td>{pdf_btn}</td>
                 <td class="small">{_esc((r.error_message or "")[:180])}</td>
               </tr>
             """
     else:
         html += """
               <tr>
-                <td colspan="9">Sin movimientos en este periodo.</td>
+                <td colspan="10">Sin movimientos en este periodo.</td>
               </tr>
         """
 
@@ -1689,11 +1704,81 @@ def botpanel_audit_all_groups(
           </table>
         </div>
       </div>
+      
+    <script>
+      async function downloadPdf(token, requestId) {
+        try {
+          const res = await fetch(`/botpanel/${token}/request/${requestId}/pdf`);
+          const data = await res.json();
+
+          if (!res.ok || !data.ok || !data.url) {
+            alert(data.detail || "PDF no disponible");
+            return;
+          }
+
+          window.open(data.url, "_blank");
+        } catch (e) {
+          alert("Error al generar descarga del PDF");
+        }
+      }
+    </script>
     </body>
     </html>
     """
 
     return HTMLResponse(content=html)
+
+
+@app.get("/botpanel/{token}/request/{request_id}/pdf")
+def botpanel_download_request_pdf(
+    token: str,
+    request_id: int,
+    db: Session = Depends(get_db),
+):
+    instance_name = _bot_instance_from_token(db, token)
+
+    if not instance_name:
+        raise HTTPException(status_code=404, detail="Panel no válido")
+
+    row = (
+        db.query(RequestLog)
+        .filter(
+            RequestLog.id == request_id,
+            RequestLog.instance_name == instance_name,
+            RequestLog.status == "DONE",
+        )
+        .first()
+    )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+
+    allowed_group_ids = _owned_group_ids_for_instance(db, instance_name)
+
+    if row.source_group_id not in allowed_group_ids:
+        raise HTTPException(status_code=403, detail="No autorizado")
+
+    if not row.pdf_storage_key:
+        raise HTTPException(status_code=404, detail="PDF no guardado")
+
+    try:
+        url = generate_r2_presigned_download_url(
+            row.pdf_storage_key,
+            row.pdf_filename or f"{row.curp}.pdf",
+            expires_sec=300,
+        )
+    except Exception as e:
+        print("R2_PRESIGNED_URL_ERROR =", {
+            "request_id": request_id,
+            "storage_key": row.pdf_storage_key,
+            "error": str(e),
+        }, flush=True)
+        raise HTTPException(status_code=500, detail="No se pudo generar link de descarga")
+
+    return {
+        "ok": True,
+        "url": url,
+    }
 
 
 @app.get("/panel/instances")
@@ -14272,6 +14357,22 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     "source_group_id": open_req.source_group_id,
                     "doc_mode": doc_mode,
                 }, flush=True)
+
+                try:
+                    save_request_pdf_to_r2(
+                        open_req,
+                        db,
+                        pdf_bytes,
+                        filename=filename or f"{open_req.curp}.pdf",
+                        origin=f"provider_whatsapp:{open_req.provider_name or ''}",
+                    )
+                except Exception as r2_exc:
+                    print("R2_SAVE_PROVIDER_WHATSAPP_PDF_ERROR =", {
+                        "req_id": getattr(open_req, "id", None),
+                        "provider_name": getattr(open_req, "provider_name", None),
+                        "filename": filename,
+                        "error": str(r2_exc),
+                    }, flush=True)
     
                 total_relay_s = None
                 t4 = time.perf_counter()
