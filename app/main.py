@@ -14357,22 +14357,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     "source_group_id": open_req.source_group_id,
                     "doc_mode": doc_mode,
                 }, flush=True)
-
-                try:
-                    save_request_pdf_to_r2(
-                        open_req,
-                        db,
-                        pdf_bytes,
-                        filename=filename or f"{open_req.curp}.pdf",
-                        origin=f"provider_whatsapp:{open_req.provider_name or ''}",
-                    )
-                except Exception as r2_exc:
-                    print("R2_SAVE_PROVIDER_WHATSAPP_PDF_ERROR =", {
-                        "req_id": getattr(open_req, "id", None),
-                        "provider_name": getattr(open_req, "provider_name", None),
-                        "filename": filename,
-                        "error": str(r2_exc),
-                    }, flush=True)
     
                 total_relay_s = None
                 t4 = time.perf_counter()
@@ -14383,6 +14367,22 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         filename=filename or f"{open_req.curp}.pdf",
                     )
                     print("T_DELIVER_PDF_RESULT =", round(time.perf_counter() - t4, 3), flush=True)
+
+                    try:
+                        save_request_pdf_to_r2(
+                            open_req,
+                            db,
+                            pdf_bytes,
+                            filename=filename or f"{open_req.curp}.pdf",
+                            origin=f"provider_whatsapp_after_delivery:{open_req.provider_name or ''}",
+                        )
+                    except Exception as r2_exc:
+                        print("R2_SAVE_AFTER_DELIVERY_ERROR =", {
+                            "req_id": getattr(open_req, "id", None),
+                            "provider_name": getattr(open_req, "provider_name", None),
+                            "filename": filename,
+                            "error": str(r2_exc),
+                        }, flush=True)
                 
                 except Exception as delivery_exc:
                     print("DELIVERY_FAILED =", str(delivery_exc), flush=True)
