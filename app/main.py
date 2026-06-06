@@ -12542,7 +12542,7 @@ def _providers_status_text(db: Session) -> str:
                 f" | CURP hechas: {total_done if total_done is not None else 'N/D'}"
             )
 
-    ry:
+    try:
         provider12_total = (
             db.query(func.count(RequestLog.id))
             .filter(
