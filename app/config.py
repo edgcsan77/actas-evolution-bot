@@ -21,6 +21,15 @@ class Settings(BaseSettings):
 
     SOPORTE_ACTAS_GROUP: str = ""
 
+    # Cloudflare R2 - almacenamiento de PDFs
+    R2_ACCOUNT_ID: str = ""
+    R2_ACCESS_KEY_ID: str = ""
+    R2_SECRET_ACCESS_KEY: str = ""
+    R2_BUCKET: str = ""
+    R2_ENDPOINT: str = ""
+    R2_REGION: str = "auto"
+    PDF_RETENTION_DAYS: int = 30
+
     PROVIDER_API_URL: str = ""
     PROVIDER_API_TOKEN: str = ""
 
