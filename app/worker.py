@@ -265,7 +265,11 @@ SUPPORT_ERROR_LABELS_ES = {
         "La solicitud debe reintentarse automáticamente con otro proveedor; "
         "no significa que el acta quedó perdida definitivamente."
     ),
+    "PROVIDER5_NACIMIENTO_GROUP_NOT_CONFIGURED": "No hay grupo de nacimiento configurado para LUIS SID.",
+    "PROVIDER5_ESPECIALES_GROUP_NOT_CONFIGURED": "No hay grupo de especiales configurado para LUIS SID.",
     "PROVIDER12_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para VILLAFUERTE.",
+    "PROVIDER12_NACIMIENTO_GROUP_NOT_CONFIGURED": "No hay grupo de nacimiento configurado para VILLAFUERTE.",
+    "PROVIDER12_ESPECIALES_GROUP_NOT_CONFIGURED": "No hay grupo de especiales configurado para VILLAFUERTE.",
 }
 
 
@@ -1241,6 +1245,44 @@ def _pick_provider6_group(term: str | None, act_type: str, request_id: int) -> s
     raise RuntimeError("PROVIDER6_ACT_TYPE_NOT_ALLOWED")
 
 
+def _is_birth_request(term: str | None, act_type: str | None) -> bool:
+    t = (act_type or "").upper().strip()
+
+    if is_chain(term):
+        return False
+
+    if _is_folio_type(t):
+        return False
+
+    return t.startswith("NACIMIENTO") or t.startswith("NAC")
+
+
+def _pick_provider5_group(term: str | None, act_type: str | None, request_id: int) -> str:
+    if _is_birth_request(term, act_type):
+        group = (settings.PROVIDER5_GROUP_NACIMIENTO or "").strip()
+        if not group:
+            raise RuntimeError("PROVIDER5_NACIMIENTO_GROUP_NOT_CONFIGURED")
+        return group
+
+    group = (settings.PROVIDER5_GROUP_ESPECIALES or "").strip()
+    if not group:
+        raise RuntimeError("PROVIDER5_ESPECIALES_GROUP_NOT_CONFIGURED")
+    return group
+
+
+def _pick_provider12_group(term: str | None, act_type: str | None, request_id: int) -> str:
+    if _is_birth_request(term, act_type):
+        group = (settings.PROVIDER12_GROUP_NACIMIENTO or "").strip()
+        if not group:
+            raise RuntimeError("PROVIDER12_NACIMIENTO_GROUP_NOT_CONFIGURED")
+        return group
+
+    group = (settings.PROVIDER12_GROUP_ESPECIALES or "").strip()
+    if not group:
+        raise RuntimeError("PROVIDER12_ESPECIALES_GROUP_NOT_CONFIGURED")
+    return group
+
+
 def _pick_provider_group(
     provider_name: str,
     term: str | None,
@@ -1270,17 +1312,7 @@ def _pick_provider_group(
         return None
 
     if provider_name == "PROVIDER5":
-        provider5_groups = [
-            settings.PROVIDER5_GROUP_1,
-            settings.PROVIDER5_GROUP_2,
-        ]
-        provider5_groups = [g for g in provider5_groups if g]
-
-        if not provider5_groups:
-            raise RuntimeError("PROVIDER5_GROUPS_NOT_CONFIGURED")
-
-        idx = (request_id - 1) % len(provider5_groups)
-        return provider5_groups[idx]
+        return _pick_provider5_group(term, act_type, request_id)
 
     if provider_name == "PROVIDER6":
         return _pick_provider6_group(term, act_type, request_id)
@@ -1315,17 +1347,7 @@ def _pick_provider_group(
         return provider9_groups[idx]
 
     if provider_name == "PROVIDER12":
-        provider12_groups = [
-            settings.PROVIDER12_GROUP_1,
-            settings.PROVIDER12_GROUP_2,
-        ]
-        provider12_groups = [g for g in provider12_groups if g]
-
-        if not provider12_groups:
-            raise RuntimeError("PROVIDER12_GROUPS_NOT_CONFIGURED")
-
-        idx = (request_id - 1) % len(provider12_groups)
-        return provider12_groups[idx]
+        return _pick_provider12_group(term, act_type, request_id)
 
     if provider_name == "MAYAPROVIDER":
         provider11_groups = [
