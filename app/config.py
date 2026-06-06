@@ -68,7 +68,11 @@ class Settings(BaseSettings):
     PROVIDER9_GROUP_1: str = ""
     PROVIDER9_GROUP_2: str = ""
 
-    # PROVIDER 11
+    # PROVIDER 12
+    PROVIDER12_GROUP_1: str = ""
+    PROVIDER12_GROUP_2: str = ""
+
+    # PROVIDER 13
     MAYAPROVIDER_GROUP_1: str = ""
     MAYAPROVIDER_GROUP_2: str = ""
 
