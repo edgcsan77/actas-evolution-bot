@@ -91,6 +91,7 @@ def _provider_from_mode(mode: str | None) -> str | None:
         "PROVIDER9",
         "PROVIDER10",
         "PROVIDER11",
+        "PROVIDER12",
         "MAYAPROVIDER",
     }:
         return provider_name
@@ -196,6 +197,7 @@ PROVIDER_LABELS_SUPPORT = {
     "PROVIDER9": "EMILIANO",
     "PROVIDER10": "LAZARO WEB 2",
     "PROVIDER11": "LAZARO WEB 3",
+    "PROVIDER12": "VILLAFUERTE",
     "MAYAPROVIDER": "PROVEEDOR DE MAYA",
 }
 
@@ -910,7 +912,8 @@ def _enabled_providers(db) -> list[str]:
     p9 = _get_or_create_provider(db, "PROVIDER9", False)
     p10 = _get_or_create_provider(db, "PROVIDER10", False)
     p11 = _get_or_create_provider(db, "PROVIDER11", False)
-    p12 = _get_or_create_provider(db, "MAYAPROVIDER", False)
+    p12 = _get_or_create_provider(db, "PROVIDER12", False)
+    p13 = _get_or_create_provider(db, "MAYAPROVIDER", False)
 
     enabled = []
     if p1.is_enabled:
@@ -936,6 +939,8 @@ def _enabled_providers(db) -> list[str]:
     if p11.is_enabled:
         enabled.append("PROVIDER11")
     if p12.is_enabled:
+        enabled.append("PROVIDER12")
+    if p13.is_enabled:
         enabled.append("MAYAPROVIDER")
 
     return enabled
@@ -1305,6 +1310,19 @@ def _pick_provider_group(
         idx = (request_id - 1) % len(provider9_groups)
         return provider9_groups[idx]
 
+    if provider_name == "PROVIDER12":
+        provider12_groups = [
+            settings.PROVIDER12_GROUP_1,
+            settings.PROVIDER12_GROUP_2,
+        ]
+        provider12_groups = [g for g in provider12_groups if g]
+
+        if not provider12_groups:
+            raise RuntimeError("PROVIDER12_GROUPS_NOT_CONFIGURED")
+
+        idx = (request_id - 1) % len(provider12_groups)
+        return provider12_groups[idx]
+
     if provider_name == "MAYAPROVIDER":
         provider11_groups = [
             settings.MAYAPROVIDER_GROUP_1,
@@ -1322,7 +1340,7 @@ def _pick_provider_group(
 
 
 def _build_provider_message(provider_name: str, term: str, act_type: str) -> str | None:
-    if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9", "MAYAPROVIDER"):
+    if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9", "PROVIDER12", "MAYAPROVIDER"):
         if is_chain(term):
             return f"{term}"
         provider_type = provider_label_for_type(act_type)
@@ -2351,7 +2369,7 @@ def process_request(request_id: int):
 
             return
 
-        if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9", "MAYAPROVIDER"):
+        if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9", "PROVIDER12", "MAYAPROVIDER"):
             print("PROVIDER_SEND_TO_PROVIDER =", req.id, time.time(), flush=True)
         
             send_ok = False
