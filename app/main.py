@@ -12111,7 +12111,7 @@ def _pick_matching_processing_req_for_pdf(
                         continue
 
                     dup.status = "ERROR"
-                    dup.error_message = f"DUPLICADO_IGNORADO: entregado en solicitud {picked.id}"
+                    dup.error_message = f"DUPLICADO_IGNORADO: se usará solicitud {picked.id}"
                     dup.updated_at = now
 
                 db.commit()
@@ -12190,7 +12190,7 @@ def _pick_matching_processing_req_for_pdf(
                     continue
 
                 dup.status = "ERROR"
-                dup.error_message = f"DUPLICADO_IGNORADO: entregado en solicitud {picked.id}"
+                dup.error_message = f"DUPLICADO_IGNORADO: se usará solicitud {picked.id}"
                 dup.updated_at = now
 
             db.commit()
