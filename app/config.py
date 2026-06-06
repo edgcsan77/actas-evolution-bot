@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     SOPORTE_ACTAS_GROUP: str = ""
 
-    # Cloudflare R2 - almacenamiento de PDFs
+    # Cloudflare R2
     R2_ACCOUNT_ID: str = ""
     R2_ACCESS_KEY_ID: str = ""
     R2_SECRET_ACCESS_KEY: str = ""
