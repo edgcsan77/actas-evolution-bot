@@ -20,6 +20,7 @@ from rq import get_current_job
 from app.queue import redis_conn, request_queue, slow_request_queue
 from app.provider_status_cache import refresh_providers_status
 from app.utils.bot_limits import increment_bot_used_and_maybe_block
+from app.pdf_storage import save_request_pdf_to_r2
 
 from zoneinfo import ZoneInfo
 
@@ -865,6 +866,23 @@ def _store_api_pdf_result(req, db, safe_media_b64: str, filename: str, provider_
     if raw.startswith("data:"):
         raw = raw.split(",", 1)[1]
     raw = raw.replace("\n", "").replace("\r", "").strip()
+
+    try:
+        pdf_bytes = base64.b64decode(raw)
+        save_request_pdf_to_r2(
+            req,
+            db,
+            pdf_bytes,
+            filename=filename or f"{req.curp}.pdf",
+            origin=f"api:{provider_media_label}",
+        )
+    except Exception as r2_exc:
+        print("R2_SAVE_API_PDF_ERROR =", {
+            "req_id": getattr(req, "id", None),
+            "filename": filename,
+            "provider_media_label": provider_media_label,
+            "error": str(r2_exc),
+        }, flush=True)
 
     req.api_result_base64 = raw
     req.api_result_filename = filename or f"{req.curp}.pdf"
@@ -2591,6 +2609,21 @@ def process_request(request_id: int):
                 if "FOLIO" in (req.act_type or "").upper()
                 else f"{req.curp}.pdf"
             )
+
+            try:
+                save_request_pdf_to_r2(
+                    req,
+                    db,
+                    pdf_bytes,
+                    filename=filename,
+                    origin="worker:PROVIDER3",
+                )
+            except Exception as r2_exc:
+                print("R2_SAVE_PROVIDER3_PDF_ERROR =", {
+                    "req_id": getattr(req, "id", None),
+                    "filename": filename,
+                    "error": str(r2_exc),
+                }, flush=True)
             
             instance = req.instance_name or "docifybot8"
             
@@ -2900,6 +2933,21 @@ def process_request(request_id: int):
                 else f"{req.curp}.pdf"
             )
 
+            try:
+                save_request_pdf_to_r2(
+                    req,
+                    db,
+                    pdf_bytes,
+                    filename=filename,
+                    origin=f"worker:{provider_name}",
+                )
+            except Exception as r2_exc:
+                print(f"R2_SAVE_{provider_name}_PDF_ERROR =", {
+                    "req_id": getattr(req, "id", None),
+                    "filename": filename,
+                    "error": str(r2_exc),
+                }, flush=True)
+
             instance = req.instance_name or "docifybot8"
 
             if _store_api_pdf_result(req, db, safe_media_b64, filename, f"BASE64_{provider_name}_API"):
@@ -3028,6 +3076,21 @@ def process_request(request_id: int):
                 if "FOLIO" in (req.act_type or "").upper()
                 else f"{req.curp}.pdf"
             )
+
+            try:
+                save_request_pdf_to_r2(
+                    req,
+                    db,
+                    pdf_bytes,
+                    filename=filename,
+                    origin="worker:PROVIDER7",
+                )
+            except Exception as r2_exc:
+                print("R2_SAVE_PROVIDER7_PDF_ERROR =", {
+                    "req_id": getattr(req, "id", None),
+                    "filename": filename,
+                    "error": str(r2_exc),
+                }, flush=True)
 
             instance = req.instance_name or "docifybot8"
 
