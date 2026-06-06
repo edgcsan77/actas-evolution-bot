@@ -45,8 +45,8 @@ class Settings(BaseSettings):
     PROVIDER3_TIMEOUT_GENERATE: int = 480
 
     # PROVIDER 5
-    PROVIDER5_GROUP_1: str = ""
-    PROVIDER5_GROUP_2: str = ""
+    PROVIDER5_GROUP_NACIMIENTO: str = ""
+    PROVIDER5_GROUP_ESPECIALES: str = ""
 
     # PROVIDER 6
     PROVIDER6_GROUP_1_NACIMIENTO: str = ""
@@ -69,8 +69,8 @@ class Settings(BaseSettings):
     PROVIDER9_GROUP_2: str = ""
 
     # PROVIDER 12
-    PROVIDER12_GROUP_1: str = ""
-    PROVIDER12_GROUP_2: str = ""
+    PROVIDER12_GROUP_NACIMIENTO: str = ""
+    PROVIDER12_GROUP_ESPECIALES: str = ""
 
     # PROVIDER 13
     MAYAPROVIDER_GROUP_1: str = ""
