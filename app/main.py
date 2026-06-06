@@ -8540,6 +8540,14 @@ def panel_actas(
                 border-color: #334155;
                 box-shadow: 0 0 0 3px rgba(51, 65, 85, .10);
               }}
+
+              .provider-placeholder {{
+                visibility: hidden;
+                pointer-events: none;
+                box-shadow: none;
+                background: transparent;
+                border: none;
+              }}
             
               @media (max-width: 1200px) {{
                 .grid-hero {{
@@ -8680,9 +8688,28 @@ def panel_actas(
                   <h3 class="section-title">Proveedores</h3>
             
                   <div class="provider-grid">
-            
+
                     <div class="provider-card">
-                      <div class="provider-name">ADMIN DIGITAL</div>
+                      <div class="provider-name">ESCALANTE</div>
+                      <div style="margin:6px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
+                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
+                          <div style="display:flex;align-items:center;gap:6px;">
+                            <input id="weight_PROVIDER6" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER6', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <span style="font-size:12px;opacity:.7;">nivel</span>
+                          </div>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER6')">Aplicar</button>
+                        </div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
+                      </div>
+                      <div class="provider-actions">
+                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER6','on')">Activar</button>
+                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER6','off')">Desactivar</button>
+                      </div>
+                    </div>
+
+                    <div class="provider-card">
+                      <div class="provider-name">ADMIN</div>
                       <div style="margin:6px 0;">
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
@@ -8699,49 +8726,9 @@ def panel_actas(
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER1','off')">Desactivar</button>
                       </div>
                     </div>
-            
+
                     <div class="provider-card">
-                      <div class="provider-name">AUSTRAM WEB</div>
-                      <div style="margin:6px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
-                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
-                          <div style="display:flex;align-items:center;gap:6px;">
-                            <input id="weight_PROVIDER3" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER3', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
-                            <span style="font-size:12px;opacity:.7;">nivel</span>
-                          </div>
-                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER3')">Aplicar</button>
-                        </div>
-                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
-                      </div>
-                      <div class="provider-actions">
-                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER3','on')">Activar</button>
-                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER3','off')">Desactivar</button>
-                        <button class="btn btn-warning" onclick="refreshSID()">Actualizar SID</button>
-                      </div>
-                    </div>
-            
-                    <div class="provider-card">
-                      <div class="provider-name">LAZARO WEB 1</div>
-                      <div style="margin:6px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
-                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
-                          <div style="display:flex;align-items:center;gap:6px;">
-                            <input id="weight_PROVIDER4" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER4', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
-                            <span style="font-size:12px;opacity:.7;">nivel</span>
-                          </div>
-                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER4')">Aplicar</button>
-                        </div>
-                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
-                      </div>
-                      <div class="provider-actions">
-                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER4','on')">Activar</button>
-                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER4','off')">Desactivar</button>
-                        <button class="btn btn-warning" onclick="refreshHID()">Actualizar HID</button>
-                      </div>
-                    </div>
-            
-                    <div class="provider-card">
-                      <div class="provider-name">LUIS SID</div>
+                      <div class="provider-name">LUIS</div>
                       <div style="margin:6px 0;">
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
@@ -8758,23 +8745,23 @@ def panel_actas(
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER5','off')">Desactivar</button>
                       </div>
                     </div>
-            
+
                     <div class="provider-card">
-                      <div class="provider-name">ACTAS ESCALANTE</div>
+                      <div class="provider-name">VILLAFUERTE</div>
                       <div style="margin:6px 0;">
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
                           <div style="display:flex;align-items:center;gap:6px;">
-                            <input id="weight_PROVIDER6" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER6', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <input id="weight_PROVIDER12" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER12', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
                             <span style="font-size:12px;opacity:.7;">nivel</span>
                           </div>
-                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER6')">Aplicar</button>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER12')">Aplicar</button>
                         </div>
                         <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
                       </div>
                       <div class="provider-actions">
-                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER6','on')">Activar</button>
-                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER6','off')">Desactivar</button>
+                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER12','on')">Activar</button>
+                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER12','off')">Desactivar</button>
                       </div>
                     </div>
 
@@ -8797,8 +8784,30 @@ def panel_actas(
                       </div>
                     </div>
 
+                    <div class="provider-card provider-placeholder"></div>
+
                     <div class="provider-card">
-                      <div class="provider-name">LAZARO WEB 2</div>
+                      <div class="provider-name">LAZARO 1</div>
+                      <div style="margin:6px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
+                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
+                          <div style="display:flex;align-items:center;gap:6px;">
+                            <input id="weight_PROVIDER4" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER4', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
+                            <span style="font-size:12px;opacity:.7;">nivel</span>
+                          </div>
+                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER4')">Aplicar</button>
+                        </div>
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
+                      </div>
+                      <div class="provider-actions">
+                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER4','on')">Activar</button>
+                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER4','off')">Desactivar</button>
+                        <button class="btn btn-warning" onclick="refreshHID()">Actualizar HID</button>
+                      </div>
+                    </div>
+
+                    <div class="provider-card">
+                      <div class="provider-name">LAZARO 2</div>
                       <div style="margin:6px 0;">
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
@@ -8818,7 +8827,7 @@ def panel_actas(
                     </div>
 
                     <div class="provider-card">
-                      <div class="provider-name">LAZARO WEB 3</div>
+                      <div class="provider-name">LAZARO 3</div>
                       <div style="margin:6px 0;">
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
@@ -8836,6 +8845,7 @@ def panel_actas(
                         <button class="btn btn-warning" onclick="refreshHID11()">Actualizar HID</button>
                       </div>
                     </div>
+
                   </div>
                 </div>
         
@@ -12558,15 +12568,14 @@ def _providers_status_text(db: Session) -> str:
         provider12_extra = f" | ERROR DB: {str(e)}"
 
     text = (
-        f"ADMIN DIGITAL:     {s1}{provider1_extra}\n"
-        f"AUSTRAM WEB:       {s3}{provider3_extra}\n"
-        f"LAZARO WEB 1:      {s4}{provider4_extra}\n"
-        f"LUIS SID:          {s5}{provider5_extra}\n"
-        f"ACTAS ESCALANTE:   {s6}{provider6_extra}\n"
-        f"EMILIANO:          {s9}{provider9_extra}\n"
-        f"LAZARO WEB 2:      {s10}{provider10_extra}\n"
-        f"LAZARO WEB 3:      {s11}{provider11_extra}\n"
-        f"VILLAFUERTE:       {s12}{provider12_extra}"
+        f"ESCALANTE:      {s6}{provider6_extra}\n"
+        f"ADMIN:          {s1}{provider1_extra}\n"
+        f"LUIS:           {s5}{provider5_extra}\n"
+        f"VILLAFUERTE:    {s12}{provider12_extra}\n"
+        f"EMILIANO:       {s9}{provider9_extra}\n"
+        f"LAZARO 1:       {s4}{provider4_extra}\n"
+        f"LAZARO 2:       {s10}{provider10_extra}\n"
+        f"LAZARO 3:       {s11}{provider11_extra}"
     )
 
     return text
