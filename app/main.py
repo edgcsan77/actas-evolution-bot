@@ -151,6 +151,7 @@ def _provider_from_mode(mode: str | None) -> str | None:
         "PROVIDER9",
         "PROVIDER10",
         "PROVIDER11",
+        "PROVIDER12",
         "MAYAPROVIDER",
     }:
         return provider_name
@@ -506,7 +507,7 @@ def panel_create_bot(
     
     total = visible_static_count + active_dynamic
 
-    if total >= 20:
+    if total >= 21:
         return {"ok": False, "error": "MAX_20_BOTS"}
 
     exists_static = instance_name in BOT_LABELS or instance_name in BOT_PANEL_TOKENS.values()
@@ -690,6 +691,7 @@ PROVIDER_LABELS = {
     "PROVIDER9": "EMILIANO",
     "PROVIDER10": "LAZARO WEB 2",
     "PROVIDER11": "LAZARO WEB 3",
+    "PROVIDER12": "VILLAFUERTE",
     "MAYAPROVIDER": "PROVEEDOR DE MAYA",
 }
 
@@ -7371,6 +7373,7 @@ def panel_provider_weight(payload: dict, db: Session = Depends(get_db)):
         "PROVIDER9",
         "PROVIDER10",
         "PROVIDER11",
+        "PROVIDER12",
     }:
         return {"ok": False, "error": "Proveedor inválido"}
 
@@ -10644,6 +10647,7 @@ def startup():
         _get_or_create_provider(db, "PROVIDER9", False)
         _get_or_create_provider(db, "PROVIDER10", False)
         _get_or_create_provider(db, "PROVIDER11", False)
+        _get_or_create_provider(db, "PROVIDER12", False)
         _get_or_create_provider(db, "MAYAPROVIDER", False)
     
         current = _get_app_setting(db, "PROVIDER3_PHPSESSID", "")
@@ -12191,6 +12195,8 @@ def _all_provider_groups() -> set[str]:
         settings.PROVIDER8_GROUP_2,
         settings.PROVIDER9_GROUP_1,
         settings.PROVIDER9_GROUP_2,
+        settings.PROVIDER12_GROUP_1,
+        settings.PROVIDER12_GROUP_2,
         settings.MAYAPROVIDER_GROUP_1,
         settings.MAYAPROVIDER_GROUP_2,
     }
@@ -12353,6 +12359,7 @@ def _providers_status_text(db: Session) -> str:
     p9 = _get_or_create_provider(db, "PROVIDER9", False)
     p10 = _get_or_create_provider(db, "PROVIDER10", False)
     p11 = _get_or_create_provider(db, "PROVIDER11", False)
+    p12 = _get_or_create_provider(db, "PROVIDER12", False)
 
     s1 = "ON" if p1.is_enabled else "OFF"
     s2 = "ON" if p2.is_enabled else "OFF"
@@ -12365,6 +12372,7 @@ def _providers_status_text(db: Session) -> str:
     s9 = "ON" if p9.is_enabled else "OFF"
     s10 = "ON" if p10.is_enabled else "OFF"
     s11 = "ON" if p11.is_enabled else "OFF"
+    s12 = "ON" if p12.is_enabled else "OFF"
 
     provider1_extra = ""
     provider2_extra = ""
@@ -12377,6 +12385,7 @@ def _providers_status_text(db: Session) -> str:
     provider9_extra = ""
     provider10_extra = ""
     provider11_extra = ""
+    provider12_extra = ""
 
     local_start = _panel_month_start()
     local_end = _panel_month_end()
@@ -12533,6 +12542,21 @@ def _providers_status_text(db: Session) -> str:
                 f" | CURP hechas: {total_done if total_done is not None else 'N/D'}"
             )
 
+    ry:
+        provider12_total = (
+            db.query(func.count(RequestLog.id))
+            .filter(
+                RequestLog.provider_name == "PROVIDER12",
+                RequestLog.status == "DONE",
+                RequestLog.created_at >= utc_start,
+                RequestLog.created_at < utc_end,
+            )
+            .scalar()
+        ) or 0
+        provider12_extra = f" | CURP hechas: {provider12_total}"
+    except Exception as e:
+        provider12_extra = f" | ERROR DB: {str(e)}"
+
     text = (
         f"ADMIN DIGITAL:     {s1}{provider1_extra}\n"
         f"AUSTRAM WEB:       {s3}{provider3_extra}\n"
@@ -12541,7 +12565,8 @@ def _providers_status_text(db: Session) -> str:
         f"ACTAS ESCALANTE:   {s6}{provider6_extra}\n"
         f"EMILIANO:          {s9}{provider9_extra}\n"
         f"LAZARO WEB 2:      {s10}{provider10_extra}\n"
-        f"LAZARO WEB 3:      {s11}{provider11_extra}"
+        f"LAZARO WEB 3:      {s11}{provider11_extra}\n"
+        f"VILLAFUERTE:       {s12}{provider12_extra}"
     )
 
     return text
