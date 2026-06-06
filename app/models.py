@@ -75,8 +75,11 @@ class RequestLog(Base):
     total_delivery_time = Column(Float, nullable=True)
 
     pdf_url = Column(Text, nullable=True)
+    pdf_storage_key = Column(Text, nullable=True, index=True)
+    pdf_filename = Column(String(255), nullable=True)
+    pdf_saved_at = Column(DateTime, nullable=True)
+    pdf_expires_at = Column(DateTime, nullable=True, index=True)
 
-    # API externa
     api_client_id = Column(Integer, ForeignKey("api_clients.id"), nullable=True, index=True)
     api_external_id = Column(String(120), nullable=True, index=True)
     api_charged = Column(Boolean, default=False, nullable=False)
