@@ -1541,7 +1541,7 @@ class Provider4Client:
             html = self.consultar_por_curp(
                 curp=term,
                 tipoa=tipoa,
-                inc_folio=False,
+                inc_folio=inc_folio,
             )
     
         print("PROVIDER4_BACKEND_HTML_PREVIEW =", html[:1200], flush=True)
@@ -1638,34 +1638,57 @@ class Provider4Client:
                 if inc_folio:
                     dphp_link = self._extract_pdf_link(history_html, term, history_tipoa)
                     folio_link = self._extract_folio_link(history_html, term, history_tipoa)
-                    
+                
                     print("PROVIDER4_INC_FOLIO_MODE = TRUE", flush=True)
                     print("PROVIDER4_INC_FOLIO_TERM =", term, flush=True)
                     print("PROVIDER4_INC_FOLIO_TIPOA =", tipoa, flush=True)
                     print("PROVIDER4_INC_FOLIO_DPHP_LINK =", dphp_link, flush=True)
                     print("PROVIDER4_INC_FOLIO_ADD_FOL_LINK =", folio_link, flush=True)
-                    
-                    # Si el cliente pidió foliada, priorizar addFol.php.
-                    # Si no existe, usar d.php como respaldo.
-                    final_link = folio_link or dphp_link
-                    final_link_source = "ADDFOL" if folio_link else ("DPHP" if dphp_link else "NONE")
-                    
-                    print("PROVIDER4_FINAL_FOLIO_LINK_SOURCE =", final_link_source, flush=True)
-                    print("PROVIDER4_FINAL_FOLIO_LINK =", final_link, flush=True)
-                    
-                    if final_link:
-                        pdf_bytes = self._download_and_validate_with_retries(
-                            url=final_link,
-                            term=term,
-                            tipoa=tipoa,
-                            inc_folio=inc_folio,
-                            is_chain=is_chain,
-                            use_folio_downloader=(final_link_source == "ADDFOL"),
-                            max_attempts=4,
-                            sleep_seconds=4,
-                        )
-                        return pdf_bytes
-
+                
+                    # NUEVA REGLA:
+                    # Si ya se pidió incF=on, preferimos d.php.
+                    # addFol.php se deja solo como respaldo.
+                    attempts = []
+                
+                    if dphp_link:
+                        attempts.append(("DPHP_FOLIADO", dphp_link, False))
+                
+                    if folio_link:
+                        attempts.append(("ADDFOL_FALLBACK", folio_link, True))
+                
+                    last_folio_error = None
+                
+                    for final_link_source, final_link, use_folio_downloader in attempts:
+                        try:
+                            print("PROVIDER4_FINAL_FOLIO_LINK_SOURCE =", final_link_source, flush=True)
+                            print("PROVIDER4_FINAL_FOLIO_LINK =", final_link, flush=True)
+                
+                            pdf_bytes = self._download_and_validate_with_retries(
+                                url=final_link,
+                                term=term,
+                                tipoa=tipoa,
+                                inc_folio=inc_folio,
+                                is_chain=is_chain,
+                                use_folio_downloader=use_folio_downloader,
+                                max_attempts=4,
+                                sleep_seconds=4,
+                            )
+                
+                            print("PROVIDER4_FOLIO_DOWNLOAD_OK_SOURCE =", final_link_source, flush=True)
+                            return pdf_bytes
+                
+                        except Exception as folio_exc:
+                            last_folio_error = folio_exc
+                            print("PROVIDER4_FOLIO_DOWNLOAD_SOURCE_FAILED =", {
+                                "source": final_link_source,
+                                "url": final_link,
+                                "error": str(folio_exc),
+                            }, flush=True)
+                            continue
+                
+                    if last_folio_error:
+                        raise RuntimeError(f"PROVIDER4_FOLIO_ALL_DOWNLOADS_FAILED:{term}:{str(last_folio_error)[:250]}")
+                
                     print(f"PROVIDER4_HISTORY_ROW_FOUND_BUT_FOLIO_LINK_MISSING_ATTEMPT_{poll_attempt+1} = {term}", flush=True)
 
                     # Si history ya mostró la fila correcta, ahora sí se permite directo
@@ -1760,29 +1783,48 @@ class Provider4Client:
                 if inc_folio:
                     dphp_link = self._extract_pdf_link(history_html, term, history_tipoa)
                     folio_link = self._extract_folio_link(history_html, term, history_tipoa)
-                    
-                    final_link = folio_link or dphp_link
-                    final_link_source = "ADDFOL" if folio_link else ("DPHP" if dphp_link else "NONE")
-                    
+                
                     print("PROVIDER4_LATE_INC_FOLIO_MODE = TRUE", flush=True)
                     print("PROVIDER4_LATE_INC_FOLIO_DPHP_LINK =", dphp_link, flush=True)
                     print("PROVIDER4_LATE_INC_FOLIO_ADD_FOL_LINK =", folio_link, flush=True)
-                    print("PROVIDER4_LATE_FINAL_FOLIO_LINK_SOURCE =", final_link_source, flush=True)
-                    print("PROVIDER4_LATE_FINAL_FOLIO_LINK =", final_link, flush=True)
-                    
-                    if final_link:
-                        print(f"PROVIDER4_LATE_FOLIO_LINK_FOUND_ATTEMPT_{extra_attempt+1} = {final_link}", flush=True)
-                        pdf_bytes = self._download_and_validate_with_retries(
-                            url=final_link,
-                            term=term,
-                            tipoa=tipoa,
-                            inc_folio=inc_folio,
-                            is_chain=is_chain,
-                            use_folio_downloader=(final_link_source == "ADDFOL"),
-                            max_attempts=4,
-                            sleep_seconds=4,
-                        )
-                        return pdf_bytes
+                
+                    attempts = []
+                
+                    if dphp_link:
+                        attempts.append(("LATE_DPHP_FOLIADO", dphp_link, False))
+                
+                    if folio_link:
+                        attempts.append(("LATE_ADDFOL_FALLBACK", folio_link, True))
+                
+                    last_folio_error = None
+                
+                    for final_link_source, final_link, use_folio_downloader in attempts:
+                        try:
+                            print("PROVIDER4_LATE_FINAL_FOLIO_LINK_SOURCE =", final_link_source, flush=True)
+                            print("PROVIDER4_LATE_FINAL_FOLIO_LINK =", final_link, flush=True)
+                
+                            pdf_bytes = self._download_and_validate_with_retries(
+                                url=final_link,
+                                term=term,
+                                tipoa=tipoa,
+                                inc_folio=inc_folio,
+                                is_chain=is_chain,
+                                use_folio_downloader=use_folio_downloader,
+                                max_attempts=4,
+                                sleep_seconds=4,
+                            )
+                
+                            print("PROVIDER4_LATE_FOLIO_DOWNLOAD_OK_SOURCE =", final_link_source, flush=True)
+                            return pdf_bytes
+                
+                        except Exception as folio_exc:
+                            last_folio_error = folio_exc
+                            print("PROVIDER4_LATE_FOLIO_DOWNLOAD_SOURCE_FAILED =", {
+                                "source": final_link_source,
+                                "url": final_link,
+                                "error": str(folio_exc),
+                            }, flush=True)
+                            continue
                 else:
                     link = self._extract_pdf_link(history_html, term, history_tipoa)
                     if link:
