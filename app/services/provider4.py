@@ -1,6 +1,8 @@
 import re
 import time
 import requests
+import base64
+import json
 from datetime import datetime, timedelta
 from html import unescape
 from urllib.parse import urljoin
@@ -70,6 +72,7 @@ class Provider4Client:
         self.MANUAL_PAGE_URL = f"{self.BASE_URL}/servicio/manual.php?HID={self.HID}"
         self.MANUAL_ENDPOINT = f"{self.BASE_URL}/servicio/vGetOfi2.php"
         self.VGET_URL = f"{self.BASE_URL}/servicio/vGetOfi2.php"
+        self.VGET_OFI_URL = f"{self.BASE_URL}/servicio/vGetOfi.php"
         self.HISTORY_URL = f"{self.BASE_URL}/servicio/vHistory.php?HID={self.HID}"
     
         self.session = requests.Session()
@@ -84,6 +87,50 @@ class Provider4Client:
             "X-Requested-With": "XMLHttpRequest",
             "Referer": self.MANUAL_PAGE_URL,
         })
+
+    def _b64(self, value: str) -> str:
+        return base64.b64encode((value or "").encode("utf-8")).decode("ascii")
+
+    def consultar_por_curp_folio_vgetofi(self, curp: str, tipoa: str = "nacimiento") -> str:
+        curp_clean = (curp or "").strip().upper()
+        tipo_norm = (tipoa or "nacimiento").strip().lower()
+
+        datos_obj = {
+            "curp": curp_clean,
+        }
+
+        data = {
+            "p1": "true",
+            "p4": self._b64(self.HID),
+            "p6": self._b64(curp_clean),
+            "p7": self._b64(tipo_norm),
+            "incF": "true",
+            "cadena": "datos",
+            "datos": self._b64(json.dumps(datos_obj, ensure_ascii=False, separators=(",", ":"))),
+            "valor": self._b64("tramiINE20"),
+            "continuar": "",
+        }
+
+        print("PROVIDER4_VGETOFI_FOLIO_URL =", self.VGET_OFI_URL, flush=True)
+        print("PROVIDER4_VGETOFI_FOLIO_DATA =", data, flush=True)
+
+        r = self.session.post(
+            self.VGET_OFI_URL,
+            data=data,
+            timeout=60,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Referer": self.MANUAL_PAGE_URL,
+                "Origin": self.BASE_URL,
+                "User-Agent": "Mozilla/5.0",
+            },
+        )
+
+        print("PROVIDER4_VGETOFI_FOLIO_STATUS =", r.status_code, flush=True)
+        print("PROVIDER4_VGETOFI_FOLIO_PREVIEW =", (r.text or "")[:500], flush=True)
+
+        r.raise_for_status()
+        return r.text or ""
 
     def _extract_pdf_visible_text(self, pdf_bytes: bytes) -> str:
         parts = []
@@ -1552,11 +1599,17 @@ class Provider4Client:
                 inc_folio=False,
             )
         else:
-            html = self.consultar_por_curp(
-                curp=term,
-                tipoa=tipoa,
-                inc_folio=inc_folio,
-            )
+            if inc_folio:
+                html = self.consultar_por_curp_folio_vgetofi(
+                    curp=term,
+                    tipoa=tipoa,
+                )
+            else:
+                html = self.consultar_por_curp(
+                    curp=term,
+                    tipoa=tipoa,
+                    inc_folio=False,
+                )
     
         print("PROVIDER4_BACKEND_HTML_PREVIEW =", html[:1200], flush=True)
         
