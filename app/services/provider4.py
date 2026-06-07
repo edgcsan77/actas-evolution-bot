@@ -848,34 +848,33 @@ class Provider4Client:
         trami_ine: bool = True,
     ) -> str:
         tipo_norm = (tipoa or "nacimiento").strip().lower()
-
+    
         if inc_folio:
             return self.consultar_por_curp_folio_vgetofi(
                 curp=curp,
                 tipoa=tipoa,
             )
-        else:
-            # NORMAL: conservar compatibilidad con payload viejo + nuevo.
-            data = {
-                "tipoActa": tipo_norm,
-                "tipoa": tipo_norm,
-                "curpID": curp or "",
-                "curp": curp or "",
-                "cadena": cadena or "",
-                "cadenaA": cadena or "",
-                "p1": "RDBjdUV4cHJS",
-                "p2": "",
-                "p3": "NDA=",
-                "p5": "",
-                "p6": "",
-                "p7": self.HID,
-                "p4": self.HID,
-                "hidU": self.HID,
-            }
-        
-            if trami_ine:
-                data["tramiteINE"] = "on"
-                data["tramiINE"] = "true"
+
+        data = {
+            "tipoActa": tipo_norm,
+            "tipoa": tipo_norm,
+            "curpID": curp or "",
+            "curp": curp or "",
+            "cadena": cadena or "",
+            "cadenaA": cadena or "",
+            "p1": "RDBjdUV4cHJS",
+            "p2": "",
+            "p3": "NDA=",
+            "p5": "",
+            "p6": "",
+            "p7": self.HID,
+            "p4": self.HID,
+            "hidU": self.HID,
+        }
+    
+        if trami_ine:
+            data["tramiteINE"] = "on"
+            data["tramiINE"] = "true"
     
         last_error = None
     
@@ -1321,6 +1320,42 @@ class Provider4Client:
             return row_html
     
         return None
+
+    def _history_folio_row_for_term(self, history_html: str, term: str, tipoa: str | None = None) -> str | None:
+        term_up = (term or "").strip().upper()
+        tipoa_up = (tipoa or "").strip().upper()
+    
+        rows = re.findall(r"<tr\b[^>]*>.*?</tr>", history_html or "", flags=re.IGNORECASE | re.DOTALL)
+    
+        for row_html in rows:
+            row_text = unescape(re.sub(r"<[^>]+>", " ", row_html))
+            row_text = re.sub(r"\s+", " ", row_text).strip().upper()
+            row_up = row_html.upper()
+    
+            if term_up not in row_text:
+                continue
+    
+            if tipoa_up:
+                tipo_map = {
+                    "NACIMIENTO": "NACIMIENTO",
+                    "MATRIMONIO": "MATRIMONIO",
+                    "DEFUNCION": "DEFUNCION",
+                    "DIVORCIO": "DIVORCIO",
+                }
+                expected_tipo = tipo_map.get(tipoa_up, tipoa_up)
+                if expected_tipo not in row_text:
+                    continue
+    
+            if "DESCARGAR FOLIADO" not in row_text and "ADDFOL.PHP" not in row_up:
+                continue
+    
+            print("PROVIDER4_HISTORY_FOLIO_ROW_MATCHED_TERM =", term_up, flush=True)
+            print("PROVIDER4_HISTORY_FOLIO_ROW_MATCHED_TIPOA =", tipoa_up, flush=True)
+            print("PROVIDER4_HISTORY_FOLIO_ROW_TEXT =", row_text[:700], flush=True)
+            return row_html
+    
+        print("PROVIDER4_HISTORY_FOLIO_ROW_NOT_FOUND =", term_up, flush=True)
+        return None
     
     def _detect_no_result(self, history_html: str, term: str, tipoa: str | None = None) -> bool:
         row_html = self._history_row_for_term(history_html, term, tipoa)
@@ -1395,6 +1430,29 @@ class Provider4Client:
         print("PROVIDER4_EXTRACT_PDF_LINK_NOT_FOUND =", term_up, flush=True)
         return None
 
+    def _extract_pdf_link_from_folio_row(self, history_html: str, term: str, tipoa: str | None = None) -> str | None:
+        term_up = (term or "").strip().upper()
+    
+        row_html = self._history_folio_row_for_term(history_html, term, tipoa)
+    
+        if not row_html:
+            print("PROVIDER4_FOLIO_ROW_FOR_DPHP_NOT_FOUND =", term_up, flush=True)
+            return None
+    
+        m = re.search(
+            r"""href\s*=\s*["']([^"']*d\.php\?f=[^"']+)["']""",
+            row_html,
+            flags=re.IGNORECASE,
+        )
+    
+        if m:
+            link = urljoin(f"{self.BASE_URL}/servicio/", unescape(m.group(1)))
+            print("PROVIDER4_EXTRACTED_DPHP_FROM_FOLIO_ROW =", link, flush=True)
+            return link
+    
+        print("PROVIDER4_FOLIO_ROW_FOUND_BUT_DPHP_NOT_FOUND =", term_up, flush=True)
+        return None
+
     def _find_pdf_link_in_any_lazaro_history(
         self,
         term: str,
@@ -1438,7 +1496,7 @@ class Provider4Client:
         return None
 
     def _extract_folio_link(self, history_html: str, term: str, tipoa: str | None = None) -> str | None:
-        row_html = self._history_row_for_term(history_html, term, tipoa)
+        row_html = self._history_folio_row_for_term(history_html, term, tipoa)
         if not row_html:
             return None
     
@@ -1698,7 +1756,7 @@ class Provider4Client:
                 )
     
                 if inc_folio:
-                    dphp_link = self._extract_pdf_link(history_html, term, history_tipoa)
+                    dphp_link = self._extract_pdf_link_from_folio_row(history_html, term, history_tipoa)
                     folio_link = self._extract_folio_link(history_html, term, history_tipoa)
                 
                     print("PROVIDER4_INC_FOLIO_MODE = TRUE", flush=True)
@@ -1843,7 +1901,7 @@ class Provider4Client:
             row_html = self._history_row_for_term(history_html, term, history_tipoa)
             if row_html:
                 if inc_folio:
-                    dphp_link = self._extract_pdf_link(history_html, term, history_tipoa)
+                    dphp_link = self._extract_pdf_link_from_folio_row(history_html, term, history_tipoa)
                     folio_link = self._extract_folio_link(history_html, term, history_tipoa)
                 
                     print("PROVIDER4_LATE_INC_FOLIO_MODE = TRUE", flush=True)
