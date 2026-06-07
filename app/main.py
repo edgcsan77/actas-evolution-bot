@@ -7519,14 +7519,24 @@ def _is_hidden_panel_group(gid: str | None, name: str | None) -> bool:
         return True
 
     name_up = (name or "").strip().upper()
-    excluded_words = (
-        "PROV",
-        "PRUEBA",
-        "PRUEBAS",
-        "TEST",
-        "AD",
+
+    # Evita falsos positivos como:
+    # BELLADIRA, NADIA, ADRIANA, RECLUTADOR.
+    excluded_patterns = (
+        r"\bPROV\b",
+        r"\bPROVEEDOR\b",
+        r"\bPROVEEDORES\b",
+        r"\bPRUEBA\b",
+        r"\bPRUEBAS\b",
+        r"\bTEST\b",
+        r"\bSOPORTE\b",
+        r"\bSTAFF\b",
+        r"\bADMIN\b",
+        r"\bADMINISTRACION\b",
+        r"\bADMINISTRACIÓN\b",
     )
-    return any(word in name_up for word in excluded_words)
+
+    return any(re.search(pattern, name_up) for pattern in excluded_patterns)
 
 
 @app.post("/panel/provider-weight")
