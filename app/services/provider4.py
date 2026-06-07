@@ -802,18 +802,38 @@ class Provider4Client:
     ) -> str:
         tipo_norm = (tipoa or "nacimiento").strip().lower()
 
-        data = {
-            "tipoa": tipo_norm,
-            "curp": curp or "",
-            "cadenaA": cadena or "",
-            "hidU": self.HID,
-        }
-        
-        if trami_ine:
-            data["tramiINE"] = "true"
-        
         if inc_folio:
-            data["incFolio"] = "true"
+            # FOLIADA: usar payload nuevo, igual al navegador.
+            data = {
+                "tipoa": tipo_norm,
+                "curp": curp or "",
+                "cadenaA": cadena or "",
+                "hidU": self.HID,
+                "tramiINE": "true" if trami_ine else "false",
+                "incFolio": "true",
+            }
+        else:
+            # NORMAL: conservar compatibilidad con payload viejo + nuevo.
+            data = {
+                "tipoActa": tipo_norm,
+                "tipoa": tipo_norm,
+                "curpID": curp or "",
+                "curp": curp or "",
+                "cadena": cadena or "",
+                "cadenaA": cadena or "",
+                "p1": "RDBjdUV4cHJS",
+                "p2": "",
+                "p3": "NDA=",
+                "p5": "",
+                "p6": "",
+                "p7": self.HID,
+                "p4": self.HID,
+                "hidU": self.HID,
+            }
+        
+            if trami_ine:
+                data["tramiteINE"] = "on"
+                data["tramiINE"] = "true"
     
         last_error = None
     
