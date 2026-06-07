@@ -22,7 +22,7 @@ from app.services.provider7 import (
 
 
 class Provider4Client:
-    BASE_URL = "https://www.tramitanet.org"
+    BASE_URL = "https://www.tramitesfull.net"
     DEFAULT_HID = "D0cuExprR"
 
     HISTORY_MAX_POLLS = 90
