@@ -850,15 +850,10 @@ class Provider4Client:
         tipo_norm = (tipoa or "nacimiento").strip().lower()
 
         if inc_folio:
-            # FOLIADA: usar payload nuevo, igual al navegador.
-            data = {
-                "tipoa": tipo_norm,
-                "curp": curp or "",
-                "cadenaA": cadena or "",
-                "hidU": self.HID,
-                "tramiINE": "true" if trami_ine else "false",
-                "incFolio": "true",
-            }
+            return self.consultar_por_curp_folio_vgetofi(
+                curp=curp,
+                tipoa=tipoa,
+            )
         else:
             # NORMAL: conservar compatibilidad con payload viejo + nuevo.
             data = {
