@@ -801,30 +801,18 @@ class Provider4Client:
         trami_ine: bool = True,
     ) -> str:
         tipo_norm = (tipoa or "nacimiento").strip().lower()
-    
+
         data = {
-            "tipoActa": tipo_norm,
             "tipoa": tipo_norm,
-            "curpID": curp or "",
             "curp": curp or "",
-            "cadena": cadena or "",
             "cadenaA": cadena or "",
-            "p1": "RDBjdUV4cHJS",
-            "p2": "",
-            "p3": "NDA=",
-            "p5": "",
-            "p6": "",
-            "p7": self.HID,
-            "p4": self.HID,
             "hidU": self.HID,
         }
-    
+        
         if trami_ine:
-            data["tramiteINE"] = "on"
             data["tramiINE"] = "true"
         
         if inc_folio:
-            data["incF"] = "on"
             data["incFolio"] = "true"
     
         last_error = None
