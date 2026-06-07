@@ -4184,26 +4184,78 @@ GROUP_CATEGORY_OPTIONS = [
 ]
 
 
-def _get_broadcast_target_groups(db: Session, target_category: str, selected_groups: list[str] | None = None) -> list[str]:
+def _get_broadcast_target_groups(
+    db: Session,
+    target_category: str,
+    selected_groups: list[str] | None = None,
+    instance_name: str = MAIN_PANEL_INSTANCE,
+) -> list[str]:
+
     selected_groups = selected_groups or []
-
-    all_groups = set(GROUP_NAME_MAP.keys())
-    all_groups.update(gid for (gid,) in db.query(GroupAlias.group_jid).all())
-
-    if target_category == "all":
-        return sorted(all_groups)
-
-    if target_category == "manual":
-        return [g for g in selected_groups if g in all_groups]
+    target_category = (target_category or "all").strip().lower()
+    instance_name = (instance_name or MAIN_PANEL_INSTANCE).strip()
 
     rows = (
-        db.query(GroupCategory)
+        db.query(AuthorizedGroup.group_jid)
+        .filter(
+            AuthorizedGroup.owner_instance == instance_name,
+            or_(
+                AuthorizedGroup.is_hidden == False,
+                AuthorizedGroup.is_hidden.is_(None),
+            ),
+            or_(
+                AuthorizedGroup.hidden_in_main == False,
+                AuthorizedGroup.hidden_in_main.is_(None),
+            ),
+        )
+        .all()
+    )
+
+    allowed_groups = set()
+
+    for (gid,) in rows:
+        gid = (gid or "").strip()
+
+        if not gid:
+            continue
+
+        if "@g.us" not in gid:
+            continue
+
+        # Evita mandar a grupos bloqueados / agotados.
+        if is_group_blocked(gid):
+            continue
+
+        group_name = _group_name(gid)
+
+        # Evita proveedores, pruebas, AD, etc.
+        if _is_hidden_panel_group(gid, group_name):
+            continue
+
+        allowed_groups.add(gid)
+
+    if target_category == "all":
+        return sorted(allowed_groups)
+
+    if target_category == "manual":
+        return sorted([
+            g for g in selected_groups
+            if (g or "").strip() in allowed_groups
+        ])
+
+    category_rows = (
+        db.query(GroupCategory.group_jid)
         .filter(GroupCategory.category == target_category)
         .all()
     )
 
-    category_groups = [r.group_jid for r in rows if r.group_jid in all_groups]
-    return sorted(category_groups)
+    category_groups = {
+        (gid or "").strip()
+        for (gid,) in category_rows
+        if (gid or "").strip()
+    }
+
+    return sorted(allowed_groups.intersection(category_groups))
 
 
 @app.post("/panel/group/{group_jid}/category")
@@ -5512,13 +5564,22 @@ def _broadcast_target_groups() -> list[str]:
     return out
 
 
-def _run_broadcast_job(message_text: str, target_groups: list[str]):
+def _run_broadcast_job(
+    message_text: str,
+    target_groups: list[str],
+    instance_name: str = MAIN_PANEL_INSTANCE,
+):
     sent = []
     failed = []
+    instance_name = (instance_name or MAIN_PANEL_INSTANCE).strip()
 
     for gid in target_groups:
         try:
-            send_group_text(gid, message_text)
+            send_group_text(
+                gid,
+                message_text,
+                instance_name=instance_name,
+            )
             sent.append({
                 "group_jid": gid,
                 "group_name": _group_name(gid),
@@ -5533,6 +5594,8 @@ def _run_broadcast_job(message_text: str, target_groups: list[str]):
     print(
         "BROADCAST_FINISHED",
         {
+            "instance_name": instance_name,
+            "target_count": len(target_groups),
             "sent_count": len(sent),
             "failed_count": len(failed),
         },
@@ -5560,7 +5623,12 @@ async def panel_broadcast_activas(
         if not target_groups:
             return {"ok": False, "error": "No hay grupos para esa categoría"}
 
-        background_tasks.add_task(_run_broadcast_job, BROADCAST_ACTIVAS_MSG, target_groups)
+        background_tasks.add_task(
+            _run_broadcast_job,
+            BROADCAST_ACTIVAS_MSG,
+            target_groups,
+            MAIN_PANEL_INSTANCE,
+        )
 
         return {
             "ok": True,
@@ -5593,7 +5661,12 @@ async def panel_broadcast_mantenimiento(
         if not target_groups:
             return {"ok": False, "error": "No hay grupos para esa categoría"}
 
-        background_tasks.add_task(_run_broadcast_job, BROADCAST_RESTABLECIDO_MSG, target_groups)
+        background_tasks.add_task(
+            _run_broadcast_job,
+            BROADCAST_RESTABLECIDO_MSG,
+            target_groups,
+            MAIN_PANEL_INSTANCE,
+        )
 
         return {
             "ok": True,
@@ -5626,7 +5699,12 @@ async def panel_broadcast_suspendido(
         if not target_groups:
             return {"ok": False, "error": "No hay grupos para esa categoría"}
 
-        background_tasks.add_task(_run_broadcast_job, BROADCAST_SUSPENDIDO_MSG, target_groups)
+        background_tasks.add_task(
+            _run_broadcast_job,
+            BROADCAST_SUSPENDIDO_MSG,
+            target_groups,
+            MAIN_PANEL_INSTANCE,
+        )
 
         return {
             "ok": True,
@@ -5659,7 +5737,12 @@ async def panel_broadcast_cerrado(
         if not target_groups:
             return {"ok": False, "error": "No hay grupos para esa categoría"}
 
-        background_tasks.add_task(_run_broadcast_job, BROADCAST_CERRADO_MSG, target_groups)
+        background_tasks.add_task(
+            _run_broadcast_job,
+            BROADCAST_CERRADO_MSG,
+            target_groups,
+            MAIN_PANEL_INSTANCE,
+        )
 
         return {
             "ok": True,
@@ -5788,7 +5871,12 @@ async def panel_broadcast_free(
         if not target_groups:
             return {"ok": False, "error": "No hay grupos para esa categoría"}
 
-        background_tasks.add_task(_run_broadcast_job, message_text, target_groups)
+        background_tasks.add_task(
+            _run_broadcast_job,
+            message_text,
+            target_groups,
+            MAIN_PANEL_INSTANCE,
+        )
 
         return {
             "ok": True,
