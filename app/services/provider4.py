@@ -882,6 +882,15 @@ class Provider4Client:
         for attempt in range(3):
             try:
                 self.warm()
+
+                print("PROVIDER4_REAL_SUBMIT_TO_LAZARO =", {
+                    "curp": curp,
+                    "tipoa_received": tipoa,
+                    "tipo_norm_sent": tipo_norm,
+                    "inc_folio": inc_folio,
+                    "cadena": cadena,
+                    "hid": self.HID,
+                }, flush=True)
     
                 print("PROVIDER4_REQUEST_DATA =", data, flush=True)
                 print(f"PROVIDER4_VGETOFI2_ATTEMPT_{attempt+1}_START", flush=True)
