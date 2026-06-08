@@ -1830,9 +1830,13 @@ class Provider4Client:
 
         r.raise_for_status()
 
-        # Estos 3 NO son fallo fatal: significan pasar a consulta PDF.
-        if "EN_PROCESO_CURP18DIGITOS" in text_up:
-            return {"ok": True, "submitted": True, "code": "EN_PROCESO_CURP18DIGITOS", "raw": text}
+        if text_up.startswith("EN_PROCESO_") or "EN_PROCESO_CURP18DIGITOS" in text_up:
+            return {
+                "ok": True,
+                "submitted": True,
+                "code": text_up,
+                "raw": text,
+            }
 
         if "PDF_EXISTENTE" in text_up:
             return {"ok": True, "submitted": True, "code": "PDF_EXISTENTE", "raw": text}
