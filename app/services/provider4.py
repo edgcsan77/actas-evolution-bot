@@ -1447,8 +1447,9 @@ class Provider4Client:
     
         return False
 
-    def _detect_no_result_loose(self, history_html: str, term: str) -> bool:
+    def _detect_no_result_loose(self, history_html: str, term: str, tipoa: str | None = None) -> bool:
         term_up = (term or "").strip().upper()
+    
         if not history_html or not term_up:
             return False
     
@@ -1461,11 +1462,30 @@ class Provider4Client:
         for row_html in rows:
             row_text = unescape(re.sub(r"<[^>]+>", " ", row_html))
             row_text = re.sub(r"\s+", " ", row_text).strip().upper()
+            row_text_norm = self._strip_accents(row_text)
     
-            if term_up in row_text and "NO_LOCALIZADO" in row_text:
-                print("PROVIDER4_NO_RECORD_DETECTED_LOOSE =", term_up, flush=True)
-                print("PROVIDER4_NO_RECORD_LOOSE_ROW_TEXT =", row_text[:500], flush=True)
-                return True
+            if term_up not in row_text_norm:
+                continue
+    
+            if "NO_LOCALIZADO" not in row_text_norm:
+                continue
+    
+            # MUY IMPORTANTE:
+            # Si se está buscando por tipo específico, no aceptar NO_LOCALIZADO
+            # de otra fila/tipo. Esto evita que NACIMIENTO afecte MATRIMONIO.
+            if tipoa:
+                if not self._row_matches_expected_tipo(row_html, row_text, tipoa):
+                    print("PROVIDER4_NO_RECORD_LOOSE_SKIPPED_WRONG_TIPOA =", {
+                        "term": term_up,
+                        "tipoa": tipoa,
+                        "row_text": row_text[:500],
+                    }, flush=True)
+                    continue
+    
+            print("PROVIDER4_NO_RECORD_DETECTED_LOOSE =", term_up, flush=True)
+            print("PROVIDER4_NO_RECORD_LOOSE_TIPOA =", tipoa, flush=True)
+            print("PROVIDER4_NO_RECORD_LOOSE_ROW_TEXT =", row_text[:500], flush=True)
+            return True
     
         return False
     
@@ -1822,7 +1842,7 @@ class Provider4Client:
                 flush=True,
             )
     
-            if self._detect_no_result(history_html, term, history_tipoa) or self._detect_no_result_loose(history_html, term):
+            if self._detect_no_result(history_html, term, history_tipoa) or self._detect_no_result_loose(history_html, term, history_tipoa):
                 raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
     
             row_html = self._history_row_for_term(history_html, term, history_tipoa)
@@ -2001,7 +2021,7 @@ class Provider4Client:
     
         final_history_html = self.get_history_html()
 
-        if self._detect_no_result(final_history_html, term, history_tipoa) or self._detect_no_result_loose(final_history_html, term):
+        if self._detect_no_result(final_history_html, term, history_tipoa) or self._detect_no_result_loose(final_history_html, term, history_tipoa):
             raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
         
         if not history_confirmed:
@@ -2018,7 +2038,7 @@ class Provider4Client:
         for extra_attempt in range(extra_link_polls):
             history_html = self.get_history_html()
 
-            if self._detect_no_result(history_html, term, history_tipoa) or self._detect_no_result_loose(history_html, term):
+            if self._detect_no_result(history_html, term, history_tipoa) or self._detect_no_result_loose(history_html, term, history_tipoa):
                 raise RuntimeError(f"PROVIDER4_NO_RECORD:{term}")
         
             row_html = self._history_row_for_term(history_html, term, history_tipoa)
