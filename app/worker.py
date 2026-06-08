@@ -1425,35 +1425,70 @@ def _provider3_flags(act_type: str) -> dict:
 
 
 def _provider3_tipo_acta(act_type: str) -> str:
-    act_type = (act_type or "").upper().strip()
+    raw = act_type or ""
 
-    mapping = {
-        "NACIMIENTO": "nacimiento",
-        "NACIMIENTO FOLIO": "nacimiento",
-        "MATRIMONIO": "matrimonio",
-        "MATRIMONIO FOLIO": "matrimonio",
-        "DEFUNCION": "defuncion",
-        "DEFUNCION FOLIO": "defuncion",
-        "DIVORCIO": "divorcio",
-        "DIVORCIO FOLIO": "divorcio",
-    }
-    return mapping.get(act_type, "nacimiento")
+    norm = (
+        raw.upper()
+        .strip()
+        .replace("Á", "A")
+        .replace("É", "E")
+        .replace("Í", "I")
+        .replace("Ó", "O")
+        .replace("Ú", "U")
+        .replace("Ü", "U")
+    )
+
+    norm = re.sub(r"[^A-ZÑ0-9\s]", " ", norm)
+    norm = re.sub(r"\s+", " ", norm).strip()
+
+    if "MATRIMONIO" in norm or "MATRI" in norm:
+        return "matrimonio"
+
+    if "DEFUNCION" in norm or "DEFUN" in norm:
+        return "defuncion"
+
+    if "DIVORCIO" in norm or "DIVOR" in norm:
+        return "divorcio"
+
+    if "NACIMIENTO" in norm or "NACIM" in norm:
+        return "nacimiento"
+
+    raise RuntimeError(f"PROVIDER3_UNKNOWN_ACT_TYPE:{raw}")
 
 
 def _provider4_tipo_acta(act_type: str) -> str:
-    act_type = (act_type or "").upper().strip()
+    raw = act_type or ""
 
-    mapping = {
-        "NACIMIENTO": "nacimiento",
-        "NACIMIENTO FOLIO": "nacimiento",
-        "MATRIMONIO": "matrimonio",
-        "MATRIMONIO FOLIO": "matrimonio",
-        "DEFUNCION": "defuncion",
-        "DEFUNCION FOLIO": "defuncion",
-        "DIVORCIO": "divorcio",
-        "DIVORCIO FOLIO": "divorcio",
-    }
-    return mapping.get(act_type, "nacimiento")
+    norm = (
+        raw.upper()
+        .strip()
+        .replace("Á", "A")
+        .replace("É", "E")
+        .replace("Í", "I")
+        .replace("Ó", "O")
+        .replace("Ú", "U")
+        .replace("Ü", "U")
+    )
+
+    # Limpiar símbolos raros, pero conservar letras y espacios.
+    norm = re.sub(r"[^A-ZÑ0-9\s]", " ", norm)
+    norm = re.sub(r"\s+", " ", norm).strip()
+
+    if "MATRIMONIO" in norm or "MATRI" in norm:
+        return "matrimonio"
+
+    if "DEFUNCION" in norm or "DEFUN" in norm:
+        return "defuncion"
+
+    if "DIVORCIO" in norm or "DIVOR" in norm:
+        return "divorcio"
+
+    if "NACIMIENTO" in norm or "NACIM" in norm:
+        return "nacimiento"
+
+    # MUY IMPORTANTE:
+    # Ya no caer a nacimiento silenciosamente.
+    raise RuntimeError(f"PROVIDER4_UNKNOWN_ACT_TYPE:{raw}")
 
 
 def _process_provider3(req, db):
@@ -1556,6 +1591,10 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
 
     tipoa = _provider4_tipo_acta(req.act_type)
     inc_folio = "FOLIO" in (req.act_type or "").upper().strip()
+
+    print(f"{provider_name}_ACT_TYPE_RAW =", repr(req.act_type), flush=True)
+    print(f"{provider_name}_TIPOA_MAPPED =", tipoa, flush=True)
+    print(f"{provider_name}_INC_FOLIO =", inc_folio, flush=True)
 
     try:
         pdf_bytes = client.process_and_download(
