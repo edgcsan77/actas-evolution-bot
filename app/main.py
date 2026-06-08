@@ -9313,11 +9313,11 @@ def panel_actas(
                         <button class="btn btn-warning" onclick="refreshHID11()">Actualizar HID</button>
                       </div>
                     </div>
-
-                    <div class="status-panel">
-                      <strong>Estado actual</strong><br><br>
-                      {provider_states}
-                    </div>
+                  </div>
+                  
+                  <div class="status-panel">
+                    <strong>Estado actual</strong><br><br>
+                    {provider_states}
                   </div>
                 </div>
         
