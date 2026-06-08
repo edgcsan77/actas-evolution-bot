@@ -5656,6 +5656,94 @@ def panel_api_actas(
     }
 
 
+@app.post("/panel/request/{request_id}/resend-pdf")
+def panel_resend_request_pdf(
+    request_id: int,
+    token: str = "",
+    db: Session = Depends(get_db),
+):
+    if token != PANEL_TOKEN:
+        return {"ok": False, "error": "UNAUTHORIZED"}
+
+    req = db.query(RequestLog).filter(RequestLog.id == request_id).first()
+
+    if not req:
+        return {"ok": False, "error": "REQUEST_NOT_FOUND"}
+
+    if not req.source_group_id:
+        return {"ok": False, "error": "NO_SOURCE_GROUP_ID"}
+
+    instance = (req.instance_name or MAIN_PANEL_INSTANCE or "docifybot8").strip()
+    filename = f"{req.curp or request_id}.pdf"
+
+    pdf_bytes = None
+
+    try:
+        if req.pdf_url:
+            url = generate_r2_presigned_download_url(req.pdf_url)
+            r = requests.get(url, timeout=30)
+            r.raise_for_status()
+            pdf_bytes = r.content
+
+        elif req.provider_media_url and str(req.provider_media_url).startswith("http"):
+            r = requests.get(req.provider_media_url, timeout=30)
+            r.raise_for_status()
+            pdf_bytes = r.content
+
+        else:
+            return {
+                "ok": False,
+                "error": "PDF_NOT_AVAILABLE",
+                "detail": "No hay pdf_url/provider_media_url disponible para reenviar.",
+            }
+
+        pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+
+        caption = "📄 Reenvío de acta generada previamente."
+
+        send_group_document_base64(
+            req.source_group_id,
+            pdf_b64,
+            filename=filename,
+            caption=caption,
+            instance_name=instance,
+        )
+
+        req.status = "DONE"
+        req.error_message = None
+        req.updated_at = _utc_now_naive()
+        db.commit()
+
+        print("MANUAL_RESEND_PDF_OK =", {
+            "req_id": req.id,
+            "curp": req.curp,
+            "act_type": req.act_type,
+            "instance": instance,
+            "source_group_id": req.source_group_id,
+        }, flush=True)
+
+        return {
+            "ok": True,
+            "request_id": req.id,
+            "sent_to": req.source_group_id,
+            "instance": instance,
+        }
+
+    except Exception as e:
+        db.rollback()
+
+        print("MANUAL_RESEND_PDF_ERROR =", {
+            "req_id": request_id,
+            "error": str(e),
+        }, flush=True)
+
+        return {
+            "ok": False,
+            "error": "RESEND_FAILED",
+            "detail": str(e)[:500],
+        }
+
+
 def _broadcast_target_groups() -> list[str]:
     out = []
 
@@ -14952,28 +15040,36 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 total_relay_s = None
                 t4 = time.perf_counter()
                 try:
-                    _deliver_pdf_result(
-                        open_req,
-                        safe_media_b64,
-                        filename=filename or f"{open_req.curp}.pdf",
-                    )
-                    print("T_DELIVER_PDF_RESULT =", round(time.perf_counter() - t4, 3), flush=True)
-
                     try:
                         save_request_pdf_to_r2(
                             open_req,
                             db,
                             pdf_bytes,
                             filename=filename or f"{open_req.curp}.pdf",
-                            origin=f"provider_whatsapp_after_delivery:{open_req.provider_name or ''}",
+                            origin=f"provider_whatsapp_before_delivery:{open_req.provider_name or ''}",
                         )
+                        db.commit()
+                        print("R2_SAVE_BEFORE_DELIVERY_OK =", {
+                            "req_id": getattr(open_req, "id", None),
+                            "provider_name": getattr(open_req, "provider_name", None),
+                            "filename": filename or f"{open_req.curp}.pdf",
+                            "pdf_url": getattr(open_req, "pdf_url", None),
+                        }, flush=True)
+                
                     except Exception as r2_exc:
-                        print("R2_SAVE_AFTER_DELIVERY_ERROR =", {
+                        print("R2_SAVE_BEFORE_DELIVERY_ERROR =", {
                             "req_id": getattr(open_req, "id", None),
                             "provider_name": getattr(open_req, "provider_name", None),
                             "filename": filename,
                             "error": str(r2_exc),
                         }, flush=True)
+                
+                    _deliver_pdf_result(
+                        open_req,
+                        safe_media_b64,
+                        filename=filename or f"{open_req.curp}.pdf",
+                    )
+                    print("T_DELIVER_PDF_RESULT =", round(time.perf_counter() - t4, 3), flush=True)
                 
                 except Exception as delivery_exc:
                     print("DELIVERY_FAILED =", str(delivery_exc), flush=True)
