@@ -26,7 +26,7 @@ from app.services.provider7 import (
 
 class Provider4Client:
     BASE_URL = "https://www.tramitesfull.net"
-    DEFAULT_HID = "D0cuExprR"
+    DEFAULT_HID = "D0cuExServ1"
 
     HISTORY_MAX_POLLS = 90
     HISTORY_POLL_SLEEP = 5
@@ -75,6 +75,9 @@ class Provider4Client:
         self.VGET_URL = f"{self.BASE_URL}/servicio/vGetOfi2.php"
         self.VGET_OFI_URL = f"{self.BASE_URL}/servicio/vGetOfi.php"
         self.HISTORY_URL = f"{self.BASE_URL}/servicio/vHistory.php?HID={self.HID}"
+
+        self.NEW_PETICION_URL = f"{self.BASE_URL}/servicio/peticion.php"
+        self.NEW_VERIFICAR_PDF_URL = f"{self.BASE_URL}/servicio/verificarpdf.php"
     
         self.session = requests.Session()
         self.session.headers.update({
@@ -1761,6 +1764,163 @@ class Provider4Client:
                     time.sleep(4)
     
         raise RuntimeError(f"PROVIDER4_FOLIO_DOWNLOAD_FAILED: {last_error}")
+
+    def _new_tipo_num(self, tipoa: str) -> int:
+        tipo = (tipoa or "").strip().lower()
+
+        if tipo == "nacimiento":
+            return 1
+        if tipo == "defuncion":
+            return 2
+        if tipo == "matrimonio":
+            return 3
+        if tipo == "divorcio":
+            return 4
+
+        raise RuntimeError(f"PROVIDER4_NEW_UNKNOWN_TIPO:{tipoa}")
+
+
+    def submit_peticion_new_api(
+        self,
+        *,
+        curp: str,
+        tipoa: str,
+        inc_folio: bool = False,
+        user: str = "",
+    ) -> dict:
+        """
+        Nuevo flujo Provider4:
+        Solo ingresa la solicitud.
+        No consulta historial.
+        No descarga PDF.
+        """
+        curp_clean = (curp or "").strip().upper()
+        tipo_num = self._new_tipo_num(tipoa)
+        foliado_num = 1 if inc_folio else 0
+
+        params = {
+            "curp": curp_clean,
+            "tipo": str(tipo_num),
+            "foliado": str(foliado_num),
+            "HID": self.HID,
+        }
+
+        if user:
+            params["User"] = user
+
+        print("PROVIDER4_NEW_PETICION_URL =", self.NEW_PETICION_URL, flush=True)
+        print("PROVIDER4_NEW_PETICION_PARAMS =", params, flush=True)
+
+        r = self.session.get(
+            self.NEW_PETICION_URL,
+            params=params,
+            timeout=(8, 30),
+            headers={
+                "User-Agent": self.session.headers.get("User-Agent", "Mozilla/5.0"),
+                "Accept": "*/*",
+                "Referer": self.MANUAL_PAGE_URL,
+            },
+        )
+
+        text = (r.text or "").strip()
+        text_up = text.upper()
+
+        print("PROVIDER4_NEW_PETICION_STATUS =", r.status_code, flush=True)
+        print("PROVIDER4_NEW_PETICION_RESPONSE =", text[:1000], flush=True)
+
+        r.raise_for_status()
+
+        # Estos 3 NO son fallo fatal: significan pasar a consulta PDF.
+        if "EN_PROCESO_CURP18DIGITOS" in text_up:
+            return {"ok": True, "submitted": True, "code": "EN_PROCESO_CURP18DIGITOS", "raw": text}
+
+        if "PDF_EXISTENTE" in text_up:
+            return {"ok": True, "submitted": True, "code": "PDF_EXISTENTE", "raw": text}
+
+        if "ERROR_TRAMITEEXISTENTE" in text_up:
+            return {"ok": True, "submitted": True, "code": "ERROR_TRAMITEEXISTENTE", "raw": text}
+
+        if "CURP_INVALIDA" in text_up:
+            raise RuntimeError(f"PROVIDER4_CURP_INVALIDA:{curp_clean}")
+
+        if "CUENTAINEXISTENTE" in text_up:
+            raise RuntimeError("PROVIDER4_CUENTA_INEXISTENTE")
+
+        raise RuntimeError(f"PROVIDER4_NEW_PETICION_UNKNOWN_RESPONSE:{text[:300]}")
+
+
+    def verificar_pdf_new_api(
+        self,
+        *,
+        curp: str,
+        tipoa: str,
+    ) -> dict:
+        """
+        Nuevo flujo Provider4:
+        Consulta directa por CURP/tipo.
+        Si todavía no está: ARCHIVO NO EXISTE.
+        Si ya está: PDF directo.
+        """
+        curp_clean = (curp or "").strip().upper()
+        tipo_num = self._new_tipo_num(tipoa)
+
+        params = {
+            "curp": curp_clean,
+            "tipo": str(tipo_num),
+        }
+
+        print("PROVIDER4_NEW_VERIFICAR_URL =", self.NEW_VERIFICAR_PDF_URL, flush=True)
+        print("PROVIDER4_NEW_VERIFICAR_PARAMS =", params, flush=True)
+
+        r = self.session.get(
+            self.NEW_VERIFICAR_PDF_URL,
+            params=params,
+            timeout=(8, 40),
+            headers={
+                "User-Agent": self.session.headers.get("User-Agent", "Mozilla/5.0"),
+                "Accept": "application/pdf,*/*",
+                "Referer": self.MANUAL_PAGE_URL,
+            },
+        )
+
+        content_type = (r.headers.get("Content-Type") or "").lower()
+        content = r.content or b""
+
+        try:
+            text_preview = content.decode("utf-8", errors="ignore").strip()
+        except Exception:
+            text_preview = ""
+
+        text_up = (text_preview or "").upper()
+
+        print("PROVIDER4_NEW_VERIFICAR_STATUS =", r.status_code, flush=True)
+        print("PROVIDER4_NEW_VERIFICAR_CONTENT_TYPE =", content_type, flush=True)
+        print("PROVIDER4_NEW_VERIFICAR_LEN =", len(content), flush=True)
+        print("PROVIDER4_NEW_VERIFICAR_TEXT_PREVIEW =", text_preview[:500], flush=True)
+
+        r.raise_for_status()
+
+        # PDF directo.
+        if "application/pdf" in content_type or content.startswith(b"%PDF"):
+            self._assert_pdf_readable(content, curp_clean)
+
+            return {
+                "ready": True,
+                "pdf_bytes": content,
+                "code": "PDF_READY",
+            }
+
+        if "ARCHIVO NO EXISTE" in text_up:
+            return {
+                "ready": False,
+                "code": "ARCHIVO_NO_EXISTE",
+                "reason": "PDF_NOT_READY",
+            }
+
+        if "CURP_INVALIDA" in text_up:
+            raise RuntimeError(f"PROVIDER4_CURP_INVALIDA:{curp_clean}")
+
+        raise RuntimeError(f"PROVIDER4_NEW_VERIFICAR_UNKNOWN_RESPONSE:{text_preview[:300]}")
     
     def process_and_download(
         self,
