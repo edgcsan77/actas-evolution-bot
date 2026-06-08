@@ -1827,12 +1827,16 @@ class Provider4Client:
     
             row_html = self._history_row_for_term(history_html, term, history_tipoa)
 
-            # Fallback: si el PDF ya aparece en el historial, úsalo aunque la fila no se haya parseado bien.
             if not inc_folio:
                 direct_history_link = self._extract_pdf_link(history_html, term, history_tipoa)
+            
                 if direct_history_link:
                     history_confirmed = True
-                    print("PROVIDER4_HISTORY_DIRECT_LINK_WITHOUT_ROW_OK =", direct_history_link, flush=True)
+                    print("PROVIDER4_HISTORY_DIRECT_LINK_OK_TYPE_FILTERED =", {
+                        "term": term,
+                        "tipoa": tipoa,
+                        "link": direct_history_link,
+                    }, flush=True)
                     print("PROVIDER4_FINAL_DOWNLOAD_LINK =", direct_history_link, flush=True)
             
                     pdf_bytes = self._download_and_validate_with_retries(
