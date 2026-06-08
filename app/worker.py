@@ -2744,35 +2744,12 @@ def process_request(request_id: int):
                 p4_err = str(p4_exc)
                 p4_elapsed = time.perf_counter() - provider4_started_ts
                 enabled = _enabled_providers(db)
-            
-                if (
+
+                wrong_pdf_errors = (
                     p4_err.startswith(f"{provider_name}_WRONG_CURP_IN_PDF")
                     or p4_err.startswith(f"{provider_name}_WRONG_ELECTRONIC_ID_OR_CODE_IN_PDF")
                     or p4_err.startswith(f"{provider_name}_WRONG_ACT_TYPE")
-                ):
-                    msg = (
-                        f"⚠️ Solicitud sin éxito en Registro Civil\n"
-                        f"Dato: {req.curp}\n"
-                        f"Tipo: {req.act_type}\n\n"
-                        f"Reenviar nuevamente en unos minutos"
-                    )
-
-                    instance = req.instance_name or "docifybot8"
-
-                    if req.source_group_id:
-                        if should_send_extra_text(req.source_group_id):
-                            send_group_text(req.source_group_id, msg, instance)
-                    else:
-                        from app.services.evolution import send_text
-                        send_text(req.requester_wa_id, msg, instance)
-            
-                    req.status = "ERROR"
-                    req.error_message = p4_err
-                    req.updated_at = _utc_now_naive()
-                    db.commit()
-            
-                    _notify_support_error(req, p4_err, f"PDF cruzado o tipo incorrecto devuelto por {provider_name}")
-                    return
+                )
             
                 fallback_errors = (
                     p4_err.startswith(f"{provider_name}_BACKEND_FAILED:")
@@ -2785,9 +2762,7 @@ def process_request(request_id: int):
                     or p4_err.startswith(f"{provider_name}_NO_FOLIO_LINK_FOR:")
                     or p4_err.startswith(f"{provider_name}_DOWNLOAD_FAILED:")
                     or p4_err.startswith(f"{provider_name}_FOLIO_DOWNLOAD_FAILED:")
-                    or p4_err.startswith(f"{provider_name}_WRONG_ACT_TYPE")
-                    or p4_err.startswith(f"{provider_name}_WRONG_CURP_IN_PDF")
-                    or p4_err.startswith(f"{provider_name}_WRONG_ELECTRONIC_ID_OR_CODE_IN_PDF")
+                    or wrong_pdf_errors
                     or "Read timed out" in p4_err
                 )
             
@@ -2796,6 +2771,7 @@ def process_request(request_id: int):
                     or p4_err.startswith(f"{provider_name}_EMPTY_OR_USELESS_HTML")
                     or p4_err.startswith(f"{provider_name}_BACKEND_FAILED:")
                     or p4_err.startswith(f"{provider_name}_VGET_FAILED:")
+                    or wrong_pdf_errors
                 )
                 
                 should_fallback = (
