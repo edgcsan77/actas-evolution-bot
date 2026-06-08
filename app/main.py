@@ -71,7 +71,7 @@ from app.utils.bot_limits import (
 )
 
 from sqlalchemy import func, case, or_
-from app.broadcast_jobs import botpanel_broadcast_job
+from app.broadcast_jobs import botpanel_broadcast_job, panel_private_bots_broadcast_job
 from app.pdf_storage import save_request_pdf_to_r2, generate_r2_presigned_download_url
 
 app = FastAPI(title=settings.APP_NAME)
@@ -1077,6 +1077,119 @@ def bot_label(inst, db: Session = None):
             return row.label
 
     return inst
+
+
+BOT_PRIVATE_NOTIFY_KEY_PREFIX = "BOT_PRIVATE_NOTIFY_JID:"
+
+
+def _normalize_private_wa_jid(value: str | None) -> str:
+    raw = (value or "").strip()
+
+    if not raw:
+        return ""
+
+    # Si ya viene como JID, lo dejamos.
+    if raw.endswith("@s.whatsapp.net"):
+        return raw
+
+    # Por compatibilidad si alguien pega @c.us
+    if raw.endswith("@c.us"):
+        return raw.replace("@c.us", "@s.whatsapp.net")
+
+    digits = re.sub(r"\D", "", raw)
+
+    if not digits:
+        return ""
+
+    # México: si capturas solo 10 dígitos, le agrega 52.
+    # Ejemplo: 8991234567 -> 528991234567@s.whatsapp.net
+    if len(digits) == 10:
+        digits = "52" + digits
+
+    if len(digits) < 12 or len(digits) > 15:
+        return ""
+
+    return f"{digits}@s.whatsapp.net"
+
+
+def _bot_private_notify_jid(db: Session, instance_name: str) -> str:
+    inst = (instance_name or "").strip()
+    if not inst:
+        return ""
+
+    return _get_app_setting(
+        db,
+        f"{BOT_PRIVATE_NOTIFY_KEY_PREFIX}{inst}",
+        "",
+    )
+
+
+def _set_bot_private_notify_jid(db: Session, instance_name: str, jid: str):
+    inst = (instance_name or "").strip()
+
+    if not inst:
+        raise ValueError("Instancia vacía")
+
+    return _set_app_setting(
+        db,
+        f"{BOT_PRIVATE_NOTIFY_KEY_PREFIX}{inst}",
+        jid,
+    )
+
+
+def _internal_bots_for_private_broadcast(db: Session) -> list[dict]:
+    """
+    Lista bots internos visibles: estáticos + dinámicos BotControl.
+    Excluye MAIN_PANEL_INSTANCE para que el bot principal no se avise a sí mismo.
+    """
+    static_bots = set(BOT_LABELS.keys()) | set(BOT_PANEL_TOKENS.values())
+
+    dynamic_rows = (
+        db.query(BotControl)
+        .filter(BotControl.is_active == True)
+        .all()
+    )
+
+    dynamic_bots = {
+        (r.instance_name or "").strip(): (r.label or "").strip()
+        for r in dynamic_rows
+        if (r.instance_name or "").strip()
+    }
+
+    all_instances = sorted(static_bots | set(dynamic_bots.keys()))
+
+    out = []
+
+    for inst in all_instances:
+        inst = (inst or "").strip()
+
+        if not inst:
+            continue
+
+        # "extra registrado": no mandarse al bot principal.
+        if inst == MAIN_PANEL_INSTANCE:
+            continue
+
+        # Si está oculto/desactivado en BotControl, no lo mostramos.
+        bc = (
+            db.query(BotControl)
+            .filter(BotControl.instance_name == inst)
+            .first()
+        )
+
+        if bc and bc.is_active is False:
+            continue
+
+        jid = _bot_private_notify_jid(db, inst)
+
+        out.append({
+            "instance_name": inst,
+            "label": dynamic_bots.get(inst) or bot_label(inst, db),
+            "jid": jid,
+            "configured": bool(jid),
+        })
+
+    return out
 
 
 def _provider_label(name: str) -> str:
@@ -5887,6 +6000,178 @@ async def panel_broadcast_free(
     except Exception as e:
         print("panel_broadcast_free error:", repr(e), flush=True)
         return {"ok": False, "error": str(e)}
+
+
+@app.get("/panel/broadcast/private-bots/targets")
+def panel_private_bots_targets(
+    token: str = "",
+    db: Session = Depends(get_db),
+):
+    if token != PANEL_TOKEN:
+        return {"ok": False, "error": "UNAUTHORIZED"}
+
+    return {
+        "ok": True,
+        "bots": _internal_bots_for_private_broadcast(db),
+    }
+
+
+@app.post("/panel/bots/{instance_name}/private-target")
+def panel_set_bot_private_target(
+    instance_name: str,
+    payload: dict = Body(...),
+    token: str = "",
+    db: Session = Depends(get_db),
+):
+    if token != PANEL_TOKEN:
+        return {"ok": False, "error": "UNAUTHORIZED"}
+
+    instance_name = (instance_name or "").strip()
+
+    if not instance_name:
+        return {"ok": False, "error": "Instancia vacía"}
+
+    # Seguridad: solo permitir bots existentes internos.
+    allowed = {
+        b["instance_name"]
+        for b in _internal_bots_for_private_broadcast(db)
+    }
+
+    if instance_name not in allowed:
+        return {"ok": False, "error": "Bot no encontrado o no permitido"}
+
+    raw_target = (payload.get("jid") or payload.get("phone") or "").strip()
+    jid = _normalize_private_wa_jid(raw_target)
+
+    if not jid:
+        return {
+            "ok": False,
+            "error": "Número/JID inválido. Usa 10 dígitos, 52 + número, o JID @s.whatsapp.net",
+        }
+
+    _set_bot_private_notify_jid(db, instance_name, jid)
+    _clear_panel_cache()
+
+    return {
+        "ok": True,
+        "instance_name": instance_name,
+        "jid": jid,
+    }
+
+
+@app.post("/panel/broadcast/private-bots")
+async def panel_broadcast_private_bots(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    try:
+        token = (request.query_params.get("token") or "").strip()
+
+        if token != PANEL_TOKEN:
+            return {"ok": False, "error": "UNAUTHORIZED"}
+
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        message = (payload.get("message") or "").strip()
+        selected_instances = payload.get("selected_instances") or []
+
+        if not message:
+            return {"ok": False, "error": "Mensaje vacío"}
+
+        if not isinstance(selected_instances, list):
+            return {"ok": False, "error": "Selección inválida"}
+
+        selected_instances = {
+            str(x).strip()
+            for x in selected_instances
+            if str(x).strip()
+        }
+
+        if not selected_instances:
+            return {"ok": False, "error": "Selecciona al menos un bot"}
+
+        all_bots = _internal_bots_for_private_broadcast(db)
+
+        recipients = []
+
+        for bot in all_bots:
+            inst = bot["instance_name"]
+
+            if inst not in selected_instances:
+                continue
+
+            jid = (bot.get("jid") or "").strip()
+
+            if not jid:
+                continue
+
+            recipients.append({
+                "instance_name": inst,
+                "label": bot.get("label") or inst,
+                "jid": jid,
+            })
+
+        if not recipients:
+            return {
+                "ok": False,
+                "error": "Los bots seleccionados no tienen número privado configurado",
+            }
+
+        job_id = uuid.uuid4().hex
+
+        broadcast_queue.enqueue(
+            panel_private_bots_broadcast_job,
+            job_id,
+            MAIN_PANEL_INSTANCE,
+            message,
+            recipients,
+        )
+
+        return {
+            "ok": True,
+            "queued": True,
+            "job_id": job_id,
+            "instance": MAIN_PANEL_INSTANCE,
+            "total": len(recipients),
+            "message": f"Mensaje privado en cola para {len(recipients)} bot(s)",
+        }
+
+    except Exception as e:
+        print("panel_broadcast_private_bots error:", repr(e), flush=True)
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/panel/broadcast/private-bots/progress/{job_id}")
+def panel_private_bots_broadcast_progress(
+    job_id: str,
+    token: str = "",
+):
+    if token != PANEL_TOKEN:
+        return {"ok": False, "error": "UNAUTHORIZED"}
+
+    key = f"botpanel:broadcast:{job_id}"
+    raw = redis_conn.get(key)
+
+    if not raw:
+        return {
+            "ok": True,
+            "status": "pending",
+            "instance": MAIN_PANEL_INSTANCE,
+            "sent": 0,
+            "errors": 0,
+            "skipped": 0,
+            "total": 0,
+            "current": "",
+            "mode": "private_bots",
+        }
+
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="ignore")
+
+    return json.loads(raw)
         
 
 def _promotion_summary_map(db: Session) -> dict[str, dict]:
@@ -9076,6 +9361,38 @@ def panel_actas(
                       </div>
                     </div>
 
+                    <div class="broadcast-block">
+                      <div class="broadcast-block-title">Mensaje privado a bots internos</div>
+                    
+                      <div style="font-size:12px;color:#64748b;margin-bottom:8px;">
+                        Selecciona qué bots internos recibirán el aviso por privado.
+                      </div>
+                    
+                      <div
+                        id="privateBotTargets"
+                        style="max-height:220px;overflow:auto;border:1px solid #e5e7eb;border-radius:12px;padding:10px;background:#f8fafc;"
+                      >
+                        Cargando bots...
+                      </div>
+                    
+                      <textarea
+                        id="privateBotsBroadcastMessage"
+                        class="broadcast-textarea"
+                        placeholder="Escribe aquí el mensaje privado para los bots seleccionados..."
+                        style="margin-top:10px;"
+                      ></textarea>
+                    
+                      <div
+                        id="privateBotsBroadcastProgress"
+                        style="display:none;margin-top:10px;padding:10px;border-radius:10px;background:#f8fafc;border:1px solid #e5e7eb;font-size:12px;"
+                      ></div>
+                    
+                      <div class="broadcast-actions">
+                        <button class="btn btn-success" onclick="sendPrivateBotsBroadcast()">Enviar privado a seleccionados</button>
+                        <button class="btn btn-light" onclick="document.getElementById('privateBotsBroadcastMessage').value=''">Limpiar</button>
+                      </div>
+                    </div>
+
                     <div class="status-panel">
                       <strong>Estado actual</strong><br><br>
                       {provider_states}
@@ -10391,6 +10708,207 @@ def panel_actas(
         
           broadcastRunning = false;
         }}
+
+        let privateBotsProgressTimer = null;
+
+        async function loadPrivateBotTargets() {{
+          const box = document.getElementById("privateBotTargets");
+          if (!box) return;
+        
+          try {{
+            const res = await fetch("/panel/broadcast/private-bots/targets?token=docifymx2026");
+            const data = await res.json();
+        
+            if (!data.ok) {{
+              box.innerHTML = `<div style="color:#b91c1c;">${{data.error || "No se pudieron cargar los bots"}}</div>`;
+              return;
+            }}
+        
+            const bots = data.bots || [];
+        
+            if (!bots.length) {{
+              box.innerHTML = `<div style="color:#64748b;">No hay bots internos extra registrados.</div>`;
+              return;
+            }}
+        
+            box.innerHTML = bots.map(bot => {{
+              const disabled = bot.configured ? "" : "disabled";
+              const checked = bot.configured ? "" : "";
+              const status = bot.configured
+                ? `<span style="color:#15803d;font-weight:700;">Configurado</span>`
+                : `<span style="color:#b91c1c;font-weight:700;">Sin número privado</span>`;
+        
+              return `
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px;border-bottom:1px solid #e5e7eb;">
+                  <label style="display:flex;align-items:center;gap:8px;flex:1;cursor:pointer;">
+                    <input
+                      type="checkbox"
+                      class="privateBotCheck"
+                      value="${{bot.instance_name}}"
+                      ${{disabled}}
+                      ${{checked}}
+                    >
+                    <span>
+                      <strong>${{bot.label || bot.instance_name}}</strong><br>
+                      <span style="font-size:11px;color:#64748b;">${{bot.instance_name}}</span><br>
+                      <span style="font-size:11px;color:#64748b;">${{bot.jid || "Sin JID"}}</span>
+                    </span>
+                  </label>
+        
+                  <div style="text-align:right;">
+                    <div style="font-size:11px;">${{status}}</div>
+                    <button
+                      class="btn btn-light"
+                      style="font-size:11px;padding:5px 8px;margin-top:4px;"
+                      onclick="setPrivateBotTarget('${{bot.instance_name}}')"
+                    >
+                      Configurar
+                    </button>
+                  </div>
+                </div>
+              `;
+            }}).join("");
+        
+          }} catch (e) {{
+            box.innerHTML = `<div style="color:#b91c1c;">Error cargando bots internos</div>`;
+          }}
+        }}
+        
+        async function setPrivateBotTarget(instanceName) {{
+          const value = prompt(
+            "Ingresa el número privado/JID que recibirá avisos para " + instanceName + "\\n\\nEjemplo: 8991234567, 528991234567 o 528991234567@s.whatsapp.net"
+          );
+        
+          if (value === null) return;
+        
+          const clean = value.trim();
+        
+          if (!clean) {{
+            alert("Número vacío");
+            return;
+          }}
+        
+          try {{
+            const res = await fetch(`/panel/bots/${{encodeURIComponent(instanceName)}}/private-target?token=docifymx2026`, {{
+              method: "POST",
+              headers: {{
+                "Content-Type": "application/json"
+              }},
+              body: JSON.stringify({{
+                jid: clean
+              }})
+            }});
+        
+            const data = await res.json();
+        
+            if (!data.ok) {{
+              alert(data.error || "No se pudo guardar el número privado");
+              return;
+            }}
+        
+            alert("Número privado guardado: " + data.jid);
+            loadPrivateBotTargets();
+        
+          }} catch (e) {{
+            alert("Error de conexión al guardar número privado");
+          }}
+        }}
+        
+        async function sendPrivateBotsBroadcast() {{
+          const textarea = document.getElementById("privateBotsBroadcastMessage");
+          const message = textarea.value.trim();
+        
+          if (!message) {{
+            alert("Escribe un mensaje privado.");
+            return;
+          }}
+        
+          const selected = Array.from(document.querySelectorAll(".privateBotCheck:checked"))
+            .map(x => x.value)
+            .filter(Boolean);
+        
+          if (!selected.length) {{
+            alert("Selecciona al menos un bot interno.");
+            return;
+          }}
+        
+          const ok = confirm(`¿Enviar este mensaje privado a ${{selected.length}} bot(s) interno(s)?`);
+          if (!ok) return;
+        
+          try {{
+            const res = await fetch("/panel/broadcast/private-bots?token=docifymx2026", {{
+              method: "POST",
+              headers: {{
+                "Content-Type": "application/json"
+              }},
+              body: JSON.stringify({{
+                message: message,
+                selected_instances: selected
+              }})
+            }});
+        
+            const data = await res.json();
+        
+            if (!data.ok) {{
+              alert(data.error || "No se pudo enviar el mensaje privado");
+              return;
+            }}
+        
+            alert(data.message || "Mensaje privado en cola");
+            textarea.value = "";
+            startPrivateBotsBroadcastProgress(data.job_id);
+        
+          }} catch (e) {{
+            alert("No se pudo conectar con el servidor");
+          }}
+        }}
+        
+        function startPrivateBotsBroadcastProgress(jobId) {{
+          const box = document.getElementById("privateBotsBroadcastProgress");
+        
+          if (box) {{
+            box.style.display = "block";
+            box.innerHTML = "Enviando privados...";
+          }}
+        
+          if (privateBotsProgressTimer) {{
+            clearInterval(privateBotsProgressTimer);
+          }}
+        
+          privateBotsProgressTimer = setInterval(async () => {{
+            try {{
+              const res = await fetch(`/panel/broadcast/private-bots/progress/${{jobId}}?token=docifymx2026`);
+              const data = await res.json();
+        
+              if (!box) return;
+        
+              box.innerHTML = `
+                Estado: <strong>${{data.status || "pending"}}</strong><br>
+                Enviados: <strong>${{data.sent || 0}}</strong> /
+                Total: <strong>${{data.total || 0}}</strong><br>
+                Errores: <strong>${{data.errors || 0}}</strong> |
+                Saltados: <strong>${{data.skipped || 0}}</strong><br>
+                Actual: ${{data.current || ""}}
+              `;
+        
+              if (data.status === "done" || data.status === "error") {{
+                clearInterval(privateBotsProgressTimer);
+                privateBotsProgressTimer = null;
+              }}
+        
+            }} catch (e) {{
+              if (box) {{
+                box.innerHTML = "No se pudo consultar el progreso.";
+              }}
+              clearInterval(privateBotsProgressTimer);
+              privateBotsProgressTimer = null;
+            }}
+          }}, 2000);
+        }}
+        
+        document.addEventListener("DOMContentLoaded", () => {{
+          loadPrivateBotTargets();
+        }});
     
         function clearBroadcast() {{
           document.getElementById("broadcastMessage").value = "";
