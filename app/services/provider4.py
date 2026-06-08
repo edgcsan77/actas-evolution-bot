@@ -1827,12 +1827,17 @@ class Provider4Client:
     
             row_html = self._history_row_for_term(history_html, term, history_tipoa)
 
-            if not inc_folio:
-                direct_history_link = self._extract_pdf_link(history_html, term, history_tipoa)
+            tipoa_norm = (tipoa or "").strip().lower()
+            is_special_curp_type = (
+                not is_chain
+                and tipoa_norm in {"matrimonio", "defuncion", "divorcio"}
+            )
             
+            if not inc_folio and not is_special_curp_type:
+                direct_history_link = self._extract_pdf_link(history_html, term, history_tipoa)
                 if direct_history_link:
                     history_confirmed = True
-                    print("PROVIDER4_HISTORY_DIRECT_LINK_OK_TYPE_FILTERED =", {
+                    print("PROVIDER4_HISTORY_DIRECT_LINK_OK_NON_SPECIAL =", {
                         "term": term,
                         "tipoa": tipoa,
                         "link": direct_history_link,
@@ -1850,6 +1855,11 @@ class Provider4Client:
                         sleep_seconds=4,
                     )
                     return pdf_bytes
+            elif is_special_curp_type:
+                print("PROVIDER4_HISTORY_DIRECT_LINK_DISABLED_FOR_SPECIAL_CURP_TYPE =", {
+                    "term": term,
+                    "tipoa": tipoa,
+                }, flush=True)
     
             if row_html:
                 history_confirmed = True
@@ -1959,8 +1969,7 @@ class Provider4Client:
                     #    print("PROVIDER4_USING_CONFIRMED_EARLY_DIRECT_PDF = TRUE", flush=True)
                     #    return early_direct_pdf_bytes
 
-            # Fallback cruzado: a veces Lázaro registra el PDF en otro Web/HID.
-            if not inc_folio:
+            if not inc_folio and not is_special_curp_type:
                 cross_link = self._find_pdf_link_in_any_lazaro_history(term, history_tipoa)
                 if cross_link:
                     history_confirmed = True
@@ -1977,6 +1986,12 @@ class Provider4Client:
                         sleep_seconds=4,
                     )
                     return pdf_bytes
+            elif is_special_curp_type:
+                print("PROVIDER4_CROSS_HISTORY_DISABLED_FOR_SPECIAL_CURP_TYPE =", {
+                    "term": term,
+                    "tipoa": tipoa,
+                    "hid": self.HID,
+                }, flush=True)
             
             print(
                 f"PROVIDER4_HISTORY_LINK_NOT_READY_ATTEMPT_{poll_attempt+1} = {term}",
