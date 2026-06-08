@@ -1914,10 +1914,12 @@ class Provider4Client:
                 "code": "PDF_READY",
             }
 
-        if "ARCHIVO NO EXISTE" in text_up:
+        not_ready_values = {"FALSE", "0", "NO", "NULL", "NONE", ""}
+
+        if "ARCHIVO NO EXISTE" in text_up or text_up.strip().upper() in not_ready_values:
             return {
                 "ready": False,
-                "code": "ARCHIVO_NO_EXISTE",
+                "code": text_up.strip().upper() or "PDF_NOT_READY",
                 "reason": "PDF_NOT_READY",
             }
 
