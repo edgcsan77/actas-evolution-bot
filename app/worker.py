@@ -1067,7 +1067,7 @@ def _pick_provider_name(
     if forced_provider:
         print("BOT_PROVIDER_FORCED =", forced_provider, flush=True)
     
-        if forced_provider == "PROVIDER4" and not _is_provider4_eligible(term, act_type):
+        if forced_provider in ("PROVIDER4", "PROVIDER10", "PROVIDER11") and not _is_provider4_eligible(term, act_type):
             raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
     
         if forced_provider == "PROVIDER6" and not _is_provider6_allowed_request(term, act_type):
@@ -1079,6 +1079,9 @@ def _pick_provider_name(
     
             enabled = sorted(_enabled_providers(db))
             enabled = [p for p in enabled if p != "PROVIDER6"]
+
+            if not _is_provider4_eligible(term, act_type):
+                enabled = [p for p in enabled if p not in ("PROVIDER4", "PROVIDER10", "PROVIDER11")]
     
             if not enabled:
                 raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
@@ -2438,28 +2441,49 @@ def process_request(request_id: int):
                     db.commit()
                     return
 
-        provider_name = _pick_provider_name(
-            db,
-            req.id,
-            req.source_group_id,
-            req.curp,
-            req.act_type,
-            req.instance_name,
+        current_queue = _current_queue_name()
+        existing_provider = (req.provider_name or "").strip().upper()
+        
+        reuse_existing_slow_provider = (
+            current_queue == SLOW_PROVIDER_QUEUE_NAME
+            and existing_provider in SLOW_PROVIDERS
         )
-        provider_group_id = _pick_provider_group(provider_name, req.curp, req.act_type, req.id)
-        text_to_provider = _build_provider_message(provider_name, req.curp, req.act_type)
-
-        req.provider_name = provider_name
-        req.provider_group_id = provider_group_id
-        req.provider_message = text_to_provider
-        req.updated_at = _utc_now_naive()
-        db.commit()
-
+        
+        if reuse_existing_slow_provider:
+            # Este job viene de un reroute actas -> actas_slow.
+            # NO volver a sortear proveedor, porque puede cambiar PROVIDER10/11/4
+            # y generar errores falsos o reprocesos raros.
+            provider_name = existing_provider
+            provider_group_id = req.provider_group_id
+            text_to_provider = req.provider_message
+        
+            print("SLOW_QUEUE_REUSING_PROVIDER_FROM_REROUTE =", {
+                "request_id": req.id,
+                "provider_name": provider_name,
+                "queue": current_queue,
+            }, flush=True)
+        
+        else:
+            provider_name = _pick_provider_name(
+                db,
+                req.id,
+                req.source_group_id,
+                req.curp,
+                req.act_type,
+                req.instance_name,
+            )
+            provider_group_id = _pick_provider_group(provider_name, req.curp, req.act_type, req.id)
+            text_to_provider = _build_provider_message(provider_name, req.curp, req.act_type)
+        
+            req.provider_name = provider_name
+            req.provider_group_id = provider_group_id
+            req.provider_message = text_to_provider
+            req.updated_at = _utc_now_naive()
+            db.commit()
+        
         print("WORKER_PROVIDER_NAME =", provider_name, flush=True)
         print("WORKER_PROVIDER_GROUP_ID =", provider_group_id, flush=True)
         print("WORKER_TEXT_TO_PROVIDER =", text_to_provider, flush=True)
-
-        current_queue = _current_queue_name()
 
         print(
             "WORKER_CURRENT_QUEUE =",
