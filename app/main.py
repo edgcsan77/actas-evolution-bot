@@ -9314,6 +9314,10 @@ def panel_actas(
                       </div>
                     </div>
 
+                    <div class="status-panel">
+                      <strong>Estado actual</strong><br><br>
+                      {provider_states}
+                    </div>
                   </div>
                 </div>
         
@@ -9391,11 +9395,6 @@ def panel_actas(
                         <button class="btn btn-success" onclick="sendPrivateBotsBroadcast()">Enviar privado a seleccionados</button>
                         <button class="btn btn-light" onclick="document.getElementById('privateBotsBroadcastMessage').value=''">Limpiar</button>
                       </div>
-                    </div>
-
-                    <div class="status-panel">
-                      <strong>Estado actual</strong><br><br>
-                      {provider_states}
                     </div>
                   </div>
                 </div>
