@@ -3,6 +3,7 @@ import time
 import requests
 import base64
 import json
+import unicodedata
 from datetime import datetime, timedelta
 from html import unescape
 from urllib.parse import urljoin
@@ -1289,71 +1290,137 @@ class Provider4Client:
         }
         code = tipo_map.get((tipoa or "").strip().lower(), "NAC")
         return f"{self.BASE_URL}/servicio/d.php?f={term}_{code}"
+
+    def _strip_accents(self, value: str) -> str:
+        value = value or ""
+        value = unicodedata.normalize("NFD", value)
+        value = "".join(ch for ch in value if unicodedata.category(ch) != "Mn")
+        return value.upper()
+
+    def _expected_tipo_code(self, tipoa: str | None) -> str:
+        tipo = (tipoa or "").strip().lower()
+        return {
+            "nacimiento": "NAC",
+            "matrimonio": "MAT",
+            "defuncion": "DEF",
+            "defunción": "DEF",
+            "divorcio": "DIV",
+        }.get(tipo, "")
+
+    def _expected_tipo_aliases(self, tipoa: str | None) -> list[str]:
+        tipo = self._strip_accents(tipoa or "").strip().lower()
+
+        aliases = {
+            "nacimiento": ["NACIMIENTO", "_NAC", " NAC ", "NAC_"],
+            "matrimonio": ["MATRIMONIO", "_MAT", " MAT ", "MAT_"],
+            "defuncion": ["DEFUNCION", "DEFUNCIÓN", "_DEF", " DEF ", "DEF_"],
+            "divorcio": ["DIVORCIO", "_DIV", " DIV ", "DIV_"],
+        }
+
+        return aliases.get(tipo, [])
+
+    def _row_matches_expected_tipo(self, row_html: str, row_text: str, tipoa: str | None) -> bool:
+        aliases = self._expected_tipo_aliases(tipoa)
+
+        if not aliases:
+            return True
+
+        haystack = self._strip_accents((row_text or "") + " " + (row_html or ""))
+
+        return any(self._strip_accents(alias) in haystack for alias in aliases)
+
+    def _link_matches_expected_tipo(self, link: str, tipoa: str | None) -> bool:
+        code = self._expected_tipo_code(tipoa)
+
+        if not code:
+            return True
+
+        link_up = self._strip_accents(unescape(link or ""))
+
+        # Lázaro normalmente usa:
+        # d.php?f=CURP_NAC
+        # d.php?f=CURP_MAT
+        # d.php?f=CURP_DEF
+        # d.php?f=CURP_DIV
+        # o variantes foliadas.
+        return (
+            f"_{code}" in link_up
+            or f"{code}_FOLIO" in link_up
+            or f"TIPO={code}" in link_up
+            or f"TIPOA={code}" in link_up
+        )
     
     def _history_row_for_term(self, history_html: str, term: str, tipoa: str | None = None) -> str | None:
         term_up = (term or "").strip().upper()
-        tipoa_up = (tipoa or "").strip().upper()
-    
-        rows = re.findall(r"<tr\b[^>]*>.*?</tr>", history_html or "", flags=re.IGNORECASE | re.DOTALL)
-    
+
+        rows = re.findall(
+            r"<tr\b[^>]*>.*?</tr>",
+            history_html or "",
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+
         for row_html in rows:
             row_text = unescape(re.sub(r"<[^>]+>", " ", row_html))
             row_text = re.sub(r"\s+", " ", row_text).strip().upper()
-    
-            if term_up not in row_text:
+
+            row_text_norm = self._strip_accents(row_text)
+
+            if term_up not in row_text_norm:
                 continue
-    
-            if tipoa_up:
-                tipo_map = {
-                    "NACIMIENTO": "NACIMIENTO",
-                    "MATRIMONIO": "MATRIMONIO",
-                    "DEFUNCION": "DEFUNCION",
-                    "DIVORCIO": "DIVORCIO",
-                }
-                expected_tipo = tipo_map.get(tipoa_up, tipoa_up)
-                if expected_tipo not in row_text:
-                    continue
-    
+
+            # IMPORTANTÍSIMO:
+            # Para MAT/DEF/DIV no basta con que aparezca la CURP.
+            # Debe coincidir también el tipo, ya sea por texto visible o por sufijo del link.
+            if not self._row_matches_expected_tipo(row_html, row_text, tipoa):
+                print("PROVIDER4_HISTORY_ROW_SKIPPED_WRONG_TIPOA =", {
+                    "term": term_up,
+                    "tipoa": tipoa,
+                    "row_text": row_text[:500],
+                }, flush=True)
+                continue
+
             print("PROVIDER4_HISTORY_ROW_MATCHED_TERM =", term_up, flush=True)
-            print("PROVIDER4_HISTORY_ROW_MATCHED_TIPOA =", tipoa_up, flush=True)
+            print("PROVIDER4_HISTORY_ROW_MATCHED_TIPOA =", tipoa, flush=True)
             print("PROVIDER4_HISTORY_ROW_TEXT =", row_text[:500], flush=True)
             return row_html
-    
+
         return None
 
     def _history_folio_row_for_term(self, history_html: str, term: str, tipoa: str | None = None) -> str | None:
         term_up = (term or "").strip().upper()
-        tipoa_up = (tipoa or "").strip().upper()
-    
-        rows = re.findall(r"<tr\b[^>]*>.*?</tr>", history_html or "", flags=re.IGNORECASE | re.DOTALL)
-    
+
+        rows = re.findall(
+            r"<tr\b[^>]*>.*?</tr>",
+            history_html or "",
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+
         for row_html in rows:
             row_text = unescape(re.sub(r"<[^>]+>", " ", row_html))
             row_text = re.sub(r"\s+", " ", row_text).strip().upper()
             row_up = row_html.upper()
-    
-            if term_up not in row_text:
+
+            row_text_norm = self._strip_accents(row_text)
+
+            if term_up not in row_text_norm:
                 continue
-    
-            if tipoa_up:
-                tipo_map = {
-                    "NACIMIENTO": "NACIMIENTO",
-                    "MATRIMONIO": "MATRIMONIO",
-                    "DEFUNCION": "DEFUNCION",
-                    "DIVORCIO": "DIVORCIO",
-                }
-                expected_tipo = tipo_map.get(tipoa_up, tipoa_up)
-                if expected_tipo not in row_text:
-                    continue
-    
+
+            if not self._row_matches_expected_tipo(row_html, row_text, tipoa):
+                print("PROVIDER4_HISTORY_FOLIO_ROW_SKIPPED_WRONG_TIPOA =", {
+                    "term": term_up,
+                    "tipoa": tipoa,
+                    "row_text": row_text[:700],
+                }, flush=True)
+                continue
+
             if "DESCARGAR FOLIADO" not in row_text and "ADDFOL.PHP" not in row_up:
                 continue
-    
+
             print("PROVIDER4_HISTORY_FOLIO_ROW_MATCHED_TERM =", term_up, flush=True)
-            print("PROVIDER4_HISTORY_FOLIO_ROW_MATCHED_TIPOA =", tipoa_up, flush=True)
+            print("PROVIDER4_HISTORY_FOLIO_ROW_MATCHED_TIPOA =", tipoa, flush=True)
             print("PROVIDER4_HISTORY_FOLIO_ROW_TEXT =", row_text[:700], flush=True)
             return row_html
-    
+
         print("PROVIDER4_HISTORY_FOLIO_ROW_NOT_FOUND =", term_up, flush=True)
         return None
     
@@ -1396,38 +1463,66 @@ class Provider4Client:
     def _extract_pdf_link(self, history_html: str, term: str, tipoa: str | None = None) -> str | None:
         html = history_html or ""
         term_up = (term or "").strip().upper()
-    
-        # 1) Intento normal: buscar primero en la fila exacta
+
+        # 1) Buscar en fila exacta por CURP + tipo.
         row_html = self._history_row_for_term(html, term, tipoa)
+
         if row_html:
-            m = re.search(
+            matches = re.findall(
                 r"""href\s*=\s*["']([^"']*d\.php\?f=[^"']+)["']""",
                 row_html,
                 flags=re.IGNORECASE,
             )
-            if m:
-                link = urljoin(f"{self.BASE_URL}/servicio/", unescape(m.group(1)))
+
+            for raw_link in matches:
+                link = urljoin(f"{self.BASE_URL}/servicio/", unescape(raw_link))
+
+                if not self._link_matches_expected_tipo(link, tipoa):
+                    print("PROVIDER4_ROW_LINK_SKIPPED_WRONG_TIPOA =", {
+                        "term": term_up,
+                        "tipoa": tipoa,
+                        "link": link,
+                    }, flush=True)
+                    continue
+
                 print("PROVIDER4_EXTRACTED_PDF_LINK =", link, flush=True)
                 return link
-    
-            print("PROVIDER4_ROW_FOUND_BUT_DPHP_NOT_FOUND =", term_up, flush=True)
-    
-        # 2) Fallback flexible: buscar en TODO el historial,
-        # aunque _history_row_for_term no haya reconocido la fila.
+
+            print("PROVIDER4_ROW_FOUND_BUT_VALID_DPHP_NOT_FOUND =", {
+                "term": term_up,
+                "tipoa": tipoa,
+            }, flush=True)
+
+        # 2) Fallback global, pero ahora AMARRADO al tipo.
+        # Antes aquí estaba el bug: agarraba cualquier d.php?f=*CURP* aunque fuera NAC.
         if term_up:
-            pattern = (
+            all_links = re.findall(
                 r"""href\s*=\s*["']([^"']*d\.php\?f=[^"']*"""
                 + re.escape(term_up)
-                + r"""[^"']*)["']"""
+                + r"""[^"']*)["']""",
+                html,
+                flags=re.IGNORECASE,
             )
-    
-            m = re.search(pattern, html, flags=re.IGNORECASE)
-            if m:
-                link = urljoin(f"{self.BASE_URL}/servicio/", unescape(m.group(1)))
+
+            for raw_link in all_links:
+                link = urljoin(f"{self.BASE_URL}/servicio/", unescape(raw_link))
+
+                if not self._link_matches_expected_tipo(link, tipoa):
+                    print("PROVIDER4_HISTORY_PDF_REGEX_SKIPPED_WRONG_TIPOA =", {
+                        "term": term_up,
+                        "tipoa": tipoa,
+                        "link": link,
+                    }, flush=True)
+                    continue
+
                 print("PROVIDER4_HISTORY_PDF_FOUND_REGEX =", link, flush=True)
                 return link
-    
-        print("PROVIDER4_EXTRACT_PDF_LINK_NOT_FOUND =", term_up, flush=True)
+
+        print("PROVIDER4_EXTRACT_PDF_LINK_NOT_FOUND =", {
+            "term": term_up,
+            "tipoa": tipoa,
+        }, flush=True)
+
         return None
 
     def _extract_pdf_link_from_folio_row(self, history_html: str, term: str, tipoa: str | None = None) -> str | None:
