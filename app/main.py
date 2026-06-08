@@ -9364,13 +9364,13 @@ def panel_actas(
                     <div class="broadcast-block">
                       <div class="broadcast-block-title">Mensaje privado a bots internos</div>
                     
-                      <div style="font-size:12px;color:#64748b;margin-bottom:8px;">
+                      <div style="font-size:12px;color:#d1d5db;margin-bottom:8px;font-weight:600;">
                         Selecciona qué bots internos recibirán el aviso por privado.
                       </div>
                     
                       <div
                         id="privateBotTargets"
-                        style="max-height:220px;overflow:auto;border:1px solid #e5e7eb;border-radius:12px;padding:10px;background:#f8fafc;"
+                        style="max-height:220px;overflow:auto;border:1px solid #e5e7eb;border-radius:12px;padding:10px;background:#f8fafc;color:#111827;"
                       >
                         Cargando bots...
                       </div>
@@ -9384,7 +9384,7 @@ def panel_actas(
                     
                       <div
                         id="privateBotsBroadcastProgress"
-                        style="display:none;margin-top:10px;padding:10px;border-radius:10px;background:#f8fafc;border:1px solid #e5e7eb;font-size:12px;"
+                        style="display:none;margin-top:10px;padding:10px;border-radius:10px;background:#f8fafc;border:1px solid #e5e7eb;font-size:12px;color:#111827;font-weight:600;"
                       ></div>
                     
                       <div class="broadcast-actions">
