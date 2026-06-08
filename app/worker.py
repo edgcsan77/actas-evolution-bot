@@ -2,6 +2,7 @@ import base64
 import time
 import threading
 import re
+import json
 import random
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
@@ -33,6 +34,10 @@ PROVIDER7_TEST_GROUPS = set()
 SLOW_PROVIDER_QUEUE_NAME = "actas_slow"
 SLOW_PROVIDERS = {"PROVIDER4", "PROVIDER10", "PROVIDER11"}
 
+PROVIDER4_NEW_FLOW_TTL_SEC = 60 * 20
+PROVIDER4_NEW_CHECK_DELAY_SEC = 5
+PROVIDER4_NEW_MAX_CHECK_ATTEMPTS = 90
+
 
 def _current_queue_name() -> str:
     try:
@@ -45,6 +50,101 @@ def _current_queue_name() -> str:
 
 def _should_reroute_to_slow(provider_name: str | None) -> bool:
     return (provider_name or "").strip().upper() in SLOW_PROVIDERS
+
+
+def _provider4_new_flow_key(request_id: int) -> str:
+    return f"provider4_new_flow:{request_id}"
+
+
+def _provider4_new_get_flow(request_id: int) -> dict:
+    try:
+        raw = redis_conn.get(_provider4_new_flow_key(request_id))
+        if not raw:
+            return {}
+
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="ignore")
+
+        return json.loads(raw or "{}")
+
+    except Exception as e:
+        print("PROVIDER4_NEW_FLOW_GET_ERROR =", {
+            "request_id": request_id,
+            "error": str(e),
+        }, flush=True)
+        return {}
+
+
+def _provider4_new_set_flow(request_id: int, data: dict):
+    try:
+        redis_conn.setex(
+            _provider4_new_flow_key(request_id),
+            PROVIDER4_NEW_FLOW_TTL_SEC,
+            json.dumps(data or {}, ensure_ascii=False),
+        )
+
+    except Exception as e:
+        print("PROVIDER4_NEW_FLOW_SET_ERROR =", {
+            "request_id": request_id,
+            "error": str(e),
+        }, flush=True)
+
+
+def _provider4_new_clear_flow(request_id: int):
+    try:
+        redis_conn.delete(_provider4_new_flow_key(request_id))
+    except Exception as e:
+        print("PROVIDER4_NEW_FLOW_CLEAR_ERROR =", {
+            "request_id": request_id,
+            "error": str(e),
+        }, flush=True)
+
+
+def _provider_is_enabled(db, provider_name: str | None) -> bool:
+    p = (provider_name or "").strip().upper()
+    if not p:
+        return False
+
+    row = (
+        db.query(ProviderSetting)
+        .filter(ProviderSetting.provider_name == p)
+        .first()
+    )
+
+    return bool(row and row.is_enabled)
+
+
+def _enqueue_provider4_new_check(request_id: int, delay_sec: int = PROVIDER4_NEW_CHECK_DELAY_SEC):
+    try:
+        job = slow_request_queue.enqueue_in(
+            timedelta(seconds=delay_sec),
+            process_request,
+            request_id,
+        )
+
+        print("PROVIDER4_NEW_CHECK_ENQUEUED_IN =", {
+            "request_id": request_id,
+            "delay_sec": delay_sec,
+            "job_id": job.id,
+        }, flush=True)
+
+        return job
+
+    except Exception as e:
+        print("PROVIDER4_NEW_ENQUEUE_IN_FAILED_NORMAL_FALLBACK =", {
+            "request_id": request_id,
+            "delay_sec": delay_sec,
+            "error": str(e),
+        }, flush=True)
+
+        job = slow_request_queue.enqueue(process_request, request_id)
+
+        print("PROVIDER4_NEW_CHECK_ENQUEUED_NORMAL =", {
+            "request_id": request_id,
+            "job_id": job.id,
+        }, flush=True)
+
+        return job
     
 
 BOT_PROVIDER_MODE_KEY_PREFIX = "BOT_PROVIDER_MODE:"
@@ -1582,73 +1682,163 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
 
     provider_name = (provider_name or "PROVIDER4").strip().upper()
 
-    term = (req.curp or "").strip()
+    term = (req.curp or "").strip().upper()
     chain_mode = is_chain(term) or bool(re.fullmatch(r"\d{15,25}", term))
 
-    print(f"{provider_name}_PROCESS_TERM =", term, flush=True)
-    print(f"{provider_name}_PROCESS_CHAIN_MODE =", chain_mode, flush=True)
+    print(f"{provider_name}_NEW_PROCESS_TERM =", term, flush=True)
+    print(f"{provider_name}_NEW_PROCESS_CHAIN_MODE =", chain_mode, flush=True)
 
-    if not _is_curp_term(term) and not chain_mode:
-        raise RuntimeError(f"{provider_name}_NOT_CURP_OR_CHAIN")
+    # Provider dijo que cadena será después. Por ahora solo CURP.
+    if chain_mode:
+        raise RuntimeError(f"{provider_name}_NEW_API_CHAIN_NOT_SUPPORTED_YET")
 
-    # La restricción de grupos test solo aplica al Provider4 original.
+    if not _is_curp_term(term):
+        raise RuntimeError(f"{provider_name}_NOT_CURP")
+
     if provider_name == "PROVIDER4" and PROVIDER4_TEST_GROUPS and req.source_group_id not in PROVIDER4_TEST_GROUPS:
         raise RuntimeError("PROVIDER4_NOT_ALLOWED_GROUP")
 
-    hid_key = f"{provider_name}_HID"
+    # Si apagaste Provider4/10/11 en panel, no dejes que un job viejo lo use.
+    if not _provider_is_enabled(db, provider_name):
+        _provider4_new_clear_flow(req.id)
+        raise RuntimeError(f"{provider_name}_DISABLED_BEFORE_PROCESSING")
 
     setting = (
         db.query(ProviderSetting)
-        .filter(ProviderSetting.provider_name == hid_key)
+        .filter(ProviderSetting.provider_name == f"{provider_name}_HID")
         .first()
     )
 
     default_hid_map = {
-        "PROVIDER10": "D0cuExprRServ2",
-        "PROVIDER11": "D0cuExprRServ3",
+        "PROVIDER4": "D0cuExServ1",
+        "PROVIDER10": "D0cuExServ2",
+        "PROVIDER11": "D0cuExServ3",
     }
-    
-    default_hid = default_hid_map.get(provider_name)
-    hid = setting.value if setting and setting.value else default_hid
 
-    print(f"{provider_name}_HID_KEY =", hid_key, flush=True)
-    print(f"{provider_name}_HID_USING =", hid, flush=True)
+    hid = setting.value if setting and setting.value else default_hid_map.get(provider_name)
+
+    print(f"{provider_name}_NEW_HID_USING =", hid, flush=True)
 
     client = Provider4Client(hid=hid)
 
-    if chain_mode:
-        tipoa = "nacimiento"
-        inc_folio = False
-    else:
-        tipoa = _provider4_tipo_acta(req.act_type)
-        inc_folio = "FOLIO" in (req.act_type or "").upper().strip()
+    tipoa = _provider4_tipo_acta(req.act_type)
+    inc_folio = "FOLIO" in (req.act_type or "").upper().strip()
 
-    print(f"{provider_name}_ACT_TYPE_RAW =", repr(req.act_type), flush=True)
-    print(f"{provider_name}_TIPOA_MAPPED =", tipoa, flush=True)
-    print(f"{provider_name}_INC_FOLIO =", inc_folio, flush=True)
+    # User opcional; si luego te da User, lo guardas en app_settings.
+    user_key = f"{provider_name}_USER"
+    user_value = _get_app_setting(db, user_key, "")
+
+    print(f"{provider_name}_NEW_ACT_TYPE_RAW =", repr(req.act_type), flush=True)
+    print(f"{provider_name}_NEW_TIPOA_MAPPED =", tipoa, flush=True)
+    print(f"{provider_name}_NEW_INC_FOLIO =", inc_folio, flush=True)
+    print(f"{provider_name}_NEW_USER_CONFIGURED =", bool(user_value), flush=True)
+
+    flow = _provider4_new_get_flow(req.id)
+    phase = (flow.get("phase") or "").strip().upper()
+    attempts = int(flow.get("attempts") or 0)
+
+    print(f"{provider_name}_NEW_FLOW =", {
+        "request_id": req.id,
+        "phase": phase,
+        "attempts": attempts,
+    }, flush=True)
 
     try:
-        pdf_bytes = client.process_and_download(
-            term=term,
+        # ==========================
+        # PASO 1: PETICIÓN
+        # ==========================
+        if phase != "SUBMITTED":
+            submit_result = client.submit_peticion_new_api(
+                curp=term,
+                tipoa=tipoa,
+                inc_folio=inc_folio,
+                user=user_value,
+            )
+
+            flow = {
+                "phase": "SUBMITTED",
+                "provider_name": provider_name,
+                "term": term,
+                "tipoa": tipoa,
+                "inc_folio": bool(inc_folio),
+                "attempts": 0,
+                "submitted_code": submit_result.get("code"),
+                "submitted_at": _utc_now_naive().isoformat(),
+            }
+
+            _provider4_new_set_flow(req.id, flow)
+
+            req.status = "PROCESSING"
+            req.error_message = f"{provider_name}_NEW_SUBMITTED:{submit_result.get('code')}"
+            req.updated_at = _utc_now_naive()
+            db.commit()
+
+            _enqueue_provider4_new_check(req.id, PROVIDER4_NEW_CHECK_DELAY_SEC)
+
+            return {
+                "pending": True,
+                "reason": req.error_message,
+            }
+
+        # ==========================
+        # PASO 2: CONSULTA PDF
+        # ==========================
+        attempts += 1
+
+        if attempts > PROVIDER4_NEW_MAX_CHECK_ATTEMPTS:
+            _provider4_new_clear_flow(req.id)
+            raise RuntimeError(f"{provider_name}_NEW_TIMEOUT_WAITING_PDF:{term}")
+
+        check_result = client.verificar_pdf_new_api(
+            curp=term,
             tipoa=tipoa,
-            inc_folio=inc_folio,
-            is_chain=chain_mode,
         )
+
+        if not check_result.get("ready"):
+            flow["attempts"] = attempts
+            flow["last_check_at"] = _utc_now_naive().isoformat()
+            flow["last_code"] = check_result.get("code") or ""
+            flow["last_reason"] = check_result.get("reason") or "NOT_READY"
+
+            _provider4_new_set_flow(req.id, flow)
+
+            req.status = "PROCESSING"
+            req.error_message = f"{provider_name}_NEW_PDF_NOT_READY_ATTEMPT_{attempts}:{flow['last_code']}"
+            req.updated_at = _utc_now_naive()
+            db.commit()
+
+            _enqueue_provider4_new_check(req.id, PROVIDER4_NEW_CHECK_DELAY_SEC)
+
+            return {
+                "pending": True,
+                "reason": req.error_message,
+            }
+
+        pdf_bytes = check_result.get("pdf_bytes")
+
+        if not pdf_bytes:
+            raise RuntimeError(f"{provider_name}_NEW_READY_BUT_EMPTY_PDF:{term}")
+
+        _provider4_new_clear_flow(req.id)
+
+        print(f"{provider_name}_NEW_DOWNLOAD_OK =", {
+            "request_id": req.id,
+            "attempts": attempts,
+            "pdf_bytes": len(pdf_bytes),
+        }, flush=True)
+
+        return {
+            "pdf_bytes": pdf_bytes,
+        }
 
     except Exception as e:
         err = str(e)
 
-        # Provider4Client internamente todavía puede lanzar errores PROVIDER4_*.
-        # Si quien está procesando es PROVIDER10, normalizamos el prefijo
-        # para que el fallback y los logs lo reconozcan como PROVIDER10.
+        # Normalizar errores para PROVIDER10/11.
         if provider_name != "PROVIDER4" and err.startswith("PROVIDER4_"):
             err = f"{provider_name}_{err[len('PROVIDER4_'):]}"
 
         raise RuntimeError(err) from e
-
-    return {
-        "pdf_bytes": pdf_bytes,
-    }
     
 
 def _process_provider7(req, db):
