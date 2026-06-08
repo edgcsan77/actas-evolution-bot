@@ -15763,7 +15763,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 error_existing.source_chat_id = source_chat_id
                 error_existing.source_group_id = source_group_id
                 error_existing.instance_name = instance_name
-                error_existing.provider_name = None
+                #error_existing.provider_name = None
                 #error_existing.provider_group_id = None
                 error_existing.provider_message = None
                 
