@@ -1589,8 +1589,12 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
 
     client = Provider4Client(hid=hid)
 
-    tipoa = _provider4_tipo_acta(req.act_type)
-    inc_folio = "FOLIO" in (req.act_type or "").upper().strip()
+    if chain_mode:
+        tipoa = "nacimiento"
+        inc_folio = False
+    else:
+        tipoa = _provider4_tipo_acta(req.act_type)
+        inc_folio = "FOLIO" in (req.act_type or "").upper().strip()
 
     print(f"{provider_name}_ACT_TYPE_RAW =", repr(req.act_type), flush=True)
     print(f"{provider_name}_TIPOA_MAPPED =", tipoa, flush=True)
