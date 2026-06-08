@@ -1071,14 +1071,36 @@ def _pick_provider_name(
             raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
     
         if forced_provider == "PROVIDER6" and not _is_provider6_allowed_request(term, act_type):
-            raise RuntimeError("PROVIDER6_ACT_TYPE_NOT_ALLOWED")
+            print("BOT_PROVIDER_FORCED_PROVIDER6_NOT_ALLOWED_FALLBACK_TO_GLOBAL =", {
+                "term": term,
+                "act_type": act_type,
+                "instance_name": instance_name,
+            }, flush=True)
+    
+            enabled = sorted(_enabled_providers(db))
+            enabled = [p for p in enabled if p != "PROVIDER6"]
+    
+            if not enabled:
+                raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
+    
+            print("PICK_PROVIDER_ENABLED_FINAL_AFTER_FORCED_PROVIDER6_BLOCK =", enabled, flush=True)
+    
+            weighted_chosen = _pick_provider_by_weight(db, enabled)
+            if weighted_chosen:
+                print("PICK_PROVIDER_WEIGHTED_CHOSEN_AFTER_FORCED_PROVIDER6_BLOCK =", weighted_chosen, flush=True)
+                return weighted_chosen
+    
+            idx = (request_id - 1) % len(enabled)
+            chosen = enabled[idx]
+            print("PICK_PROVIDER_NORMAL_CHOSEN_AFTER_FORCED_PROVIDER6_BLOCK =", chosen, flush=True)
+            return chosen
     
         return forced_provider
 
     # GLOBAL_POOL => usa el pool normal del panel principal y SÍ cuenta
     enabled = sorted(_enabled_providers(db))
 
-    print("PICK_PROVIDER_ENABLED =", enabled, flush=True)
+    print("PICK_PROVIDER_ENABLED_RAW =", enabled, flush=True)
     print("PICK_PROVIDER_SOURCE_GROUP_ID =", repr(source_group_id), flush=True)
     print("PICK_PROVIDER_TERM =", repr(term), flush=True)
     print("PICK_PROVIDER_ACT_TYPE =", repr(act_type), flush=True)
@@ -1115,6 +1137,8 @@ def _pick_provider_name(
     
         if not enabled:
             raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
+
+    print("PICK_PROVIDER_ENABLED_FINAL =", enabled, flush=True)
 
     # PROVIDER4 forzado solo en grupos test
     if PROVIDER4_TEST_GROUPS:
@@ -3161,7 +3185,7 @@ def process_request(request_id: int):
 
                 msg = (
                     "⚠️ *Formato no disponible actualmente*\n\n"
-                    "Las consultas por *cadena o código de verificación* "
+                    "Las consultas por *curp, cadena o código de verificación* "
                     "no están disponibles en este momento.\n\n"
                     "Intenta nuevamente más tarde o realiza la búsqueda por *CURP*."
                 )
@@ -3184,7 +3208,7 @@ def process_request(request_id: int):
 
                 msg = (
                     "⚠️ *Formato no disponible actualmente*\n\n"
-                    "Las consultas por *cadena o código de verificación* "
+                    "Las consultas por *curp, cadena o código de verificación* "
                     "no están disponibles en este momento.\n\n"
                     "Intenta nuevamente más tarde o realiza la búsqueda por *CURP*."
                 )
@@ -3312,7 +3336,15 @@ def process_request(request_id: int):
                 "Si el detalle menciona sendMedia / Connection Closed, el PDF pudo haberse generado "
                 "pero falló la entrega por la instancia del bot."
             )
-
+            
+            if err.startswith("PROVIDER6_ACT_TYPE_NOT_ALLOWED"):
+                extra_soporte = (
+                    "El sistema detectó que ACTAS ESCALANTE no acepta este tipo de acta. "
+                    "No debe enviarse MATRIMONIO, DEFUNCIÓN ni DIVORCIO a Escalante. "
+                    "Revisar el selector de proveedor, modo forzado del bot o pesos del proveedor. "
+                    "La solución correcta es excluir PROVIDER6 antes del sorteo para estos tipos."
+                )
+            
             _notify_support_error(req, err, extra_soporte)
         raise
         
