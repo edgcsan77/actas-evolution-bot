@@ -2640,6 +2640,21 @@ def process_request(request_id: int):
         )
         
         if reuse_existing_slow_provider:
+            if not _provider_is_enabled(db, existing_provider):
+                print("SLOW_QUEUE_EXISTING_PROVIDER_DISABLED_STOP =", {
+                    "request_id": req.id,
+                    "old_provider": existing_provider,
+                    "queue": current_queue,
+                }, flush=True)
+        
+                _provider4_new_clear_flow(req.id)
+        
+                req.status = "ERROR"
+                req.error_message = f"{existing_provider}_DISABLED_BEFORE_PROCESSING"
+                req.updated_at = _utc_now_naive()
+                db.commit()
+                return
+        
             # Este job viene de un reroute actas -> actas_slow.
             # NO volver a sortear proveedor, porque puede cambiar PROVIDER10/11/4
             # y generar errores falsos o reprocesos raros.
@@ -2977,7 +2992,15 @@ def process_request(request_id: int):
         
             try:
                 provider4_result = _process_provider4(req, db, provider_name=provider_name)
-
+        
+                if isinstance(provider4_result, dict) and provider4_result.get("pending"):
+                    print("PROCESS_REQUEST_PROVIDER4_PENDING_RETURN =", {
+                        "request_id": req.id,
+                        "provider_name": provider_name,
+                        "reason": provider4_result.get("reason"),
+                    }, flush=True)
+                    return
+        
                 pdf_bytes = provider4_result["pdf_bytes"]
 
                 term = (req.curp or "").strip()
