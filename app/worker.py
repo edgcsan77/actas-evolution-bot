@@ -2373,12 +2373,24 @@ def process_request(request_id: int):
         req = db.query(RequestLog).filter(RequestLog.id == request_id).first()
         if not req:
             return
-
+        
+        current_status = (req.status or "").strip().upper()
+        
+        if current_status == "DONE":
+            print("PROCESS_REQUEST_ALREADY_DONE_SKIP =", {
+                "request_id": req.id,
+                "curp": req.curp,
+                "act_type": req.act_type,
+                "provider_name": req.provider_name,
+                "status": req.status,
+            }, flush=True)
+            return
+        
         print("REQ_INSTANCE_NAME =", req.instance_name, flush=True)
         print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
-
+        
         process_started_ts = time.perf_counter()
-
+        
         req.status = "PROCESSING"
         req.updated_at = _utc_now_naive()
         db.commit()
