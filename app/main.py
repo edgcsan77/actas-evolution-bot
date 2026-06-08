@@ -70,7 +70,7 @@ from app.utils.bot_limits import (
     unblock_instance,
 )
 
-from sqlalchemy import func, case, or_
+from sqlalchemy import func, case, or_, and_
 from app.broadcast_jobs import botpanel_broadcast_job, panel_private_bots_broadcast_job
 from app.pdf_storage import save_request_pdf_to_r2, generate_r2_presigned_download_url
 
@@ -12738,14 +12738,22 @@ def _pdf_matches_req_type(pdf_bytes: bytes, req: RequestLog) -> bool:
 
 
 def _provider_pdf_match_status_filter():
-    recent_limit = _utc_now_naive() - timedelta(minutes=5)
+    # Antes estaba en 5 minutos. Era muy poco para PDFs de proveedores WhatsApp.
+    # Si el proveedor manda el PDF después del timeout, aún debe poder recuperarse.
+    recent_limit = _utc_now_naive() - timedelta(minutes=15)
 
     return or_(
         RequestLog.status == "PROCESSING",
-        (
-            (RequestLog.status == "ERROR")
-            & (RequestLog.error_message.ilike("%Timeout automático%"))
-            & (RequestLog.updated_at >= recent_limit)
+        and_(
+            RequestLog.status == "ERROR",
+            RequestLog.updated_at >= recent_limit,
+            or_(
+                RequestLog.error_message.ilike("%Timeout automático%"),
+                RequestLog.error_message.ilike("%DELIVERY_FAILED%"),
+                RequestLog.error_message.ilike("%Connection Closed%"),
+                RequestLog.error_message.ilike("%SEND_FAILED%"),
+                RequestLog.error_message.ilike("%sendMedia%"),
+            ),
         ),
     )
 
@@ -12797,18 +12805,39 @@ def _pick_matching_processing_req_for_pdf(
         )
 
     if not candidates and lookup_id:
+        today_limit = _utc_now_naive() - timedelta(hours=18)
+    
         candidates = (
             db.query(RequestLog)
             .filter(
                 RequestLog.curp == lookup_id,
+                RequestLog.created_at >= today_limit,
                 status_filter,
             )
             .order_by(
                 case((RequestLog.status == "PROCESSING", 0), else_=1),
-                RequestLog.created_at.asc(),
+                RequestLog.created_at.desc(),
             )
+            .limit(20)
             .all()
         )
+    
+        print("PROVIDER_PDF_MATCH_STAGE_ANY_GROUP =", [
+            {
+                "id": r.id,
+                "curp": r.curp,
+                "act_type": r.act_type,
+                "status": r.status,
+                "error_message": r.error_message,
+                "provider_name": r.provider_name,
+                "provider_group_id": r.provider_group_id,
+                "source_group_id": r.source_group_id,
+                "instance_name": r.instance_name,
+                "created_at": str(r.created_at),
+                "updated_at": str(r.updated_at),
+            }
+            for r in candidates
+        ], flush=True)
 
     print("PROVIDER_PDF_MATCH_CANDIDATES =", [
         {
@@ -12993,6 +13022,25 @@ def _pick_matching_processing_req_for_pdf(
         }, flush=True)
         return None
 
+    debug_rows = []
+
+    if lookup_id:
+        try:
+            today_limit = _utc_now_naive() - timedelta(hours=18)
+    
+            debug_rows = (
+                db.query(RequestLog)
+                .filter(
+                    RequestLog.curp == lookup_id,
+                    RequestLog.created_at >= today_limit,
+                )
+                .order_by(RequestLog.created_at.desc())
+                .limit(10)
+                .all()
+            )
+        except Exception as dbg_exc:
+            print("PROVIDER_PDF_UNMATCHED_DB_DEBUG_ERROR =", str(dbg_exc), flush=True)
+    
     print("PROVIDER_PDF_NO_SAFE_TYPE_MATCH =", {
         "lookup_id": lookup_id,
         "source_chat_id": source_chat_id,
@@ -13000,7 +13048,24 @@ def _pick_matching_processing_req_for_pdf(
         "webhook_instance_name": instance_name,
         "candidates": len(candidates),
     }, flush=True)
-
+    
+    print("PROVIDER_PDF_UNMATCHED_DB_DEBUG =", [
+        {
+            "id": r.id,
+            "curp": r.curp,
+            "act_type": r.act_type,
+            "provider_name": r.provider_name,
+            "status": r.status,
+            "error_message": r.error_message,
+            "provider_group_id": r.provider_group_id,
+            "source_group_id": r.source_group_id,
+            "instance_name": r.instance_name,
+            "created_at": str(r.created_at),
+            "updated_at": str(r.updated_at),
+        }
+        for r in debug_rows
+    ], flush=True)
+    
     return None
 
 
@@ -15699,7 +15764,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 error_existing.source_group_id = source_group_id
                 error_existing.instance_name = instance_name
                 error_existing.provider_name = None
-                error_existing.provider_group_id = None
+                #error_existing.provider_group_id = None
                 error_existing.provider_message = None
                 
                 now_utc = _utc_now_naive()
@@ -15707,7 +15772,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 error_existing.provider_media_url = None
                 error_existing.pdf_url = None
                 
-                error_existing.created_at = now_utc
+                #error_existing.created_at = now_utc
                 error_existing.updated_at = now_utc
                 error_existing.expires_at = now_utc + timedelta(days=settings.HISTORY_DAYS)
                 
