@@ -35,7 +35,7 @@ SLOW_PROVIDER_QUEUE_NAME = "actas_slow"
 SLOW_PROVIDERS = {"PROVIDER4", "PROVIDER10", "PROVIDER11"}
 
 PROVIDER4_NEW_FLOW_TTL_SEC = 60 * 20
-PROVIDER4_NEW_CHECK_DELAY_SEC = 5
+PROVIDER4_NEW_CHECK_DELAY_SEC = 30
 PROVIDER4_NEW_MAX_CHECK_ATTEMPTS = 90
 
 
@@ -288,7 +288,8 @@ def providers_status_loop():
             print("PROVIDERS_STATUS_LOOP_ERROR =", str(e), flush=True)
         time.sleep(600)
 
-threading.Thread(target=providers_status_loop, daemon=True).start()
+# DISABLED: no iniciar refresh_providers_status en cada worker
+# threading.Thread(target=providers_status_loop, daemon=True).start()
 
 
 PROVIDER_LABELS_SUPPORT = {

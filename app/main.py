@@ -84,12 +84,13 @@ PANEL_HTML_TTL = 180
 PANEL_RECENT_TTL = 60
 PANEL_GROUP_DETAIL_TTL = 180
 GROUP_NAME_CACHE_TTL = 300
+EVOLUTION_STATE_CACHE_TTL = 60  # consultar estado WhatsApp máximo cada 60s por instancia
 PANEL_STREAM_SLEEP = 5
 PANEL_STREAM_ENABLED = True
 
-EVOLUTION_BASE_URL = "http://127.0.0.1:8080"
-EVOLUTION_APIKEY = "DOCIFY_EVOLUTION_KEY_2026"
-PANEL_TOKEN = "docifymx2026"
+EVOLUTION_BASE_URL = settings.EVOLUTION_BASE_URL.rstrip("/")
+EVOLUTION_APIKEY = settings.EVOLUTION_API_KEY
+PANEL_TOKEN = settings.ADMIN_PANEL_TOKEN
 MAIN_PANEL_INSTANCE = "docifybot8"
 
 BOT_PROVIDER_MODE_KEY_PREFIX = "BOT_PROVIDER_MODE:"
@@ -247,47 +248,29 @@ def _evolution_get(path: str, timeout: int = 8):
 
 
 def _evolution_instance_state(instance_name: str) -> dict:
-    try:
-        url = f"{EVOLUTION_BASE_URL}/instance/connectionState/{instance_name}"
+    """
+    Panel rápido: solo lee estado desde Redis.
+    NO consulta Evolution en vivo para no colgar /panel.
+    El cache lo actualiza un script externo cada cierto tiempo.
+    """
+    inst = (instance_name or "").strip()
+    if not inst:
+        return {"ok": False, "state": "unknown", "cached": True, "error": "empty_instance"}
 
-        r = requests.get(
-            url,
-            headers={"apikey": EVOLUTION_APIKEY},
-            timeout=8,
-        )
+    cache_key = f"panel:evolution_state:{inst}"
+    cached = _cache_get_json(cache_key)
 
-        try:
-            data = r.json()
-        except Exception:
-            data = {"raw": r.text}
+    if isinstance(cached, dict) and cached.get("state"):
+        cached["cached"] = True
+        return cached
 
-        print("EVOLUTION_STATE_DEBUG =", instance_name, r.status_code, data, flush=True)
+    return {
+        "ok": False,
+        "state": "unknown",
+        "cached": True,
+        "error": "not_cached_yet",
+    }
 
-        state = "unknown"
-
-        if isinstance(data, dict):
-            state = (
-                data.get("instance", {}).get("state")
-                or data.get("state")
-                or data.get("connectionState")
-                or data.get("status")
-                or "unknown"
-            )
-
-        return {
-            "ok": r.status_code < 400,
-            "state": str(state or "unknown").lower(),
-            "raw": data,
-        }
-
-    except Exception as e:
-        print("EVOLUTION_STATE_ERROR =", instance_name, repr(e), flush=True)
-        return {
-            "ok": False,
-            "state": "unknown",
-            "error": str(e),
-        }
-        
 
 def _evolution_connect_qr(instance_name: str) -> dict:
     try:
@@ -380,6 +363,7 @@ def _bot_status_rows(db: Session) -> list[dict]:
         
         limit_value = get_bot_limit(db, inst)
         blocked = is_instance_blocked(inst)
+        # DESACTIVADO: no consultar Evolution por cada bot al cargar panel; saturaba Evolution y hacía lento webhook/sendText
         ev = _evolution_instance_state(inst)
 
         out.append({

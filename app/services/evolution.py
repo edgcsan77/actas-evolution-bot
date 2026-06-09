@@ -35,7 +35,7 @@ def _normalize_number(number: str) -> str:
     return number
 
 
-def _post_send_media_with_retries(url: str, payload: dict, *, label: str, max_attempts: int = 3):
+def _post_send_media_with_retries(url: str, payload: dict, *, label: str, max_attempts: int = 1):
     last_error = None
 
     for attempt in range(1, max_attempts + 1):
@@ -46,7 +46,7 @@ def _post_send_media_with_retries(url: str, payload: dict, *, label: str, max_at
                 url,
                 headers=_headers(),
                 json=payload,
-                timeout=180,
+                timeout=(5, 45),
             )
 
             print(f"{label}_STATUS =", resp.status_code, flush=True)
@@ -73,12 +73,12 @@ def _post_send_media_with_retries(url: str, payload: dict, *, label: str, max_at
             print(f"{label}_ERROR_ATTEMPT_{attempt} =", str(e), flush=True)
 
         if attempt < max_attempts:
-            time.sleep(5 * attempt)
+            time.sleep(2)
 
     raise last_error
 
 
-def _post_send_text_with_retries(url: str, payload: dict, *, label: str, max_attempts: int = 3):
+def _post_send_text_with_retries(url: str, payload: dict, *, label: str, max_attempts: int = 1):
     last_error = None
 
     for attempt in range(1, max_attempts + 1):
@@ -89,7 +89,7 @@ def _post_send_text_with_retries(url: str, payload: dict, *, label: str, max_att
                 url,
                 headers=_headers(),
                 json=payload,
-                timeout=30,
+                timeout=(5, 20),
             )
 
             print(f"{label}_STATUS =", resp.status_code, flush=True)
@@ -116,7 +116,7 @@ def _post_send_text_with_retries(url: str, payload: dict, *, label: str, max_att
             print(f"{label}_ERROR_ATTEMPT_{attempt} =", str(e), flush=True)
 
         if attempt < max_attempts:
-            time.sleep(5 * attempt)
+            time.sleep(2)
 
     raise last_error
 
@@ -140,7 +140,7 @@ def send_text(number: str, text: str, instance_name: str = None):
         url,
         payload,
         label="SEND_TEXT",
-        max_attempts=3,
+        max_attempts=1,
     )
 
 
@@ -148,7 +148,7 @@ def send_document(number: str, pdf_url: str, filename: str = "acta.pdf", caption
     instance = instance_name or settings.EVOLUTION_INSTANCE
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{instance}"
 
-    r = requests.get(pdf_url, timeout=60)
+    r = requests.get(pdf_url, timeout=(3, 10))
     r.raise_for_status()
 
     if b"%PDF" not in r.content[:20]:
@@ -165,7 +165,7 @@ def send_document(number: str, pdf_url: str, filename: str = "acta.pdf", caption
         "media": media_b64
     }
 
-    resp = requests.post(url, headers=_headers(), json=payload, timeout=60)
+    resp = requests.post(url, headers=_headers(), json=payload, timeout=(5, 45))
 
     print("SEND_DOCUMENT_URL =", url, flush=True)
     print("SEND_DOCUMENT_STATUS =", resp.status_code, flush=True)
@@ -195,7 +195,7 @@ def send_group_text(group_jid: str, text: str, instance_name: str = None):
         url,
         payload,
         label="SEND_GROUP_TEXT",
-        max_attempts=3,
+        max_attempts=1,
     )
 
 
@@ -207,7 +207,7 @@ def send_group_document(group_jid: str, pdf_url: str, filename: str = "acta.pdf"
     instance = instance_name or settings.EVOLUTION_INSTANCE
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{instance}"
 
-    r = requests.get(pdf_url, timeout=60)
+    r = requests.get(pdf_url, timeout=(3, 10))
     r.raise_for_status()
 
     if b"%PDF" not in r.content[:20]:
@@ -224,7 +224,7 @@ def send_group_document(group_jid: str, pdf_url: str, filename: str = "acta.pdf"
         "media": media_b64
     }
 
-    resp = requests.post(url, headers=_headers(), json=payload, timeout=60)
+    resp = requests.post(url, headers=_headers(), json=payload, timeout=(5, 45))
 
     print("SEND_GROUP_DOCUMENT_URL =", url, flush=True)
     print("SEND_GROUP_DOCUMENT_STATUS =", resp.status_code, flush=True)
@@ -255,7 +255,7 @@ def get_media_base64(media_type: str, message_id: str, instance_name: str = None
 
     last_error = None
 
-    for attempt in range(1, 4):
+    for attempt in range(1, 3):
         try:
             print("GET_MEDIA_BASE64_ATTEMPT =", attempt, flush=True)
 
@@ -263,11 +263,23 @@ def get_media_base64(media_type: str, message_id: str, instance_name: str = None
                 url,
                 headers=_headers(),
                 json=payload,
-                timeout=180
+                timeout=(3, 20)
             )
 
             print("GET_MEDIA_BASE64_STATUS =", resp.status_code, flush=True)
-            print("GET_MEDIA_BASE64_BODY =", resp.text[:1000], flush=True)
+            try:
+                _j = resp.json()
+                _safe = {
+                    "mediaType": _j.get("mediaType"),
+                    "fileName": _j.get("fileName"),
+                    "mimetype": _j.get("mimetype"),
+                    "has_base64": bool(_j.get("base64")),
+                    "base64_len": len(_j.get("base64") or ""),
+                    "size": _j.get("size"),
+                }
+                print("GET_MEDIA_BASE64_BODY_SAFE =", _safe, flush=True)
+            except Exception:
+                print("GET_MEDIA_BASE64_BODY_SAFE_TEXT =", (resp.text or "")[:300], flush=True)
 
             resp.raise_for_status()
             return resp.json()
@@ -281,8 +293,8 @@ def get_media_base64(media_type: str, message_id: str, instance_name: str = None
                 "error": str(e),
             }, flush=True)
 
-            if attempt < 3:
-                time.sleep(3)
+            if attempt < 2:
+                time.sleep(2)
 
     raise last_error
 
@@ -315,7 +327,7 @@ def send_document_base64(number: str, media_b64: str, filename: str = "acta.pdf"
         url,
         payload,
         label="SEND_DOCUMENT_BASE64",
-        max_attempts=3,
+        max_attempts=1,
     )
 
 
@@ -351,5 +363,5 @@ def send_group_document_base64(group_jid: str, media_b64: str, filename: str = "
         url,
         payload,
         label="SEND_GROUP_DOCUMENT_BASE64",
-        max_attempts=3,
+        max_attempts=1,
     )
