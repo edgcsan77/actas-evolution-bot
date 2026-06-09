@@ -37,3 +37,10 @@ temp/
 
 # Sistema
 .DS_Store
+
+# Backups manuales con sufijos
+*.bak_*
+*.py.bak*
+*.py.bak_*
+app/**/*.bak*
+app/**/*.bak_*
