@@ -17,6 +17,7 @@ from collections import Counter, defaultdict
 
 from fastapi import FastAPI, Depends, Body, Request, BackgroundTasks, Header, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse, Response
+from starlette.middleware.gzip import GZipMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -75,6 +76,37 @@ from app.broadcast_jobs import botpanel_broadcast_job, panel_private_bots_broadc
 from app.pdf_storage import save_request_pdf_to_r2, generate_r2_presigned_download_url
 
 app = FastAPI(title=settings.APP_NAME)
+
+# Comprime HTML/JS/CSS grandes del panel y mini panel.
+# Esto ayuda mucho cuando 20+ personas abren paneles desde internet.
+app.add_middleware(
+    GZipMiddleware,
+    minimum_size=1000,
+    compresslevel=5,
+)
+
+
+@app.middleware("http")
+async def panel_request_timing_middleware(request: Request, call_next):
+    start = time.perf_counter()
+    path = request.url.path
+
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        if path.startswith("/panel") or path.startswith("/botpanel"):
+            elapsed = round(time.perf_counter() - start, 3)
+            print(
+                "PANEL_HTTP_TIMING =",
+                {
+                    "path": path,
+                    "method": request.method,
+                    "elapsed_s": elapsed,
+                },
+                flush=True,
+            )
+
 PANEL_TZ = "America/Monterrey"
 BLOCKED_GROUPS_KEY = "blocked_groups_no_response"
 BLOCKED_INSTANCES_KEY = "blocked_instances_no_response"
@@ -86,7 +118,7 @@ PANEL_GROUP_DETAIL_TTL = 180
 GROUP_NAME_CACHE_TTL = 300
 EVOLUTION_STATE_CACHE_TTL = 60  # consultar estado WhatsApp máximo cada 60s por instancia
 PANEL_STREAM_SLEEP = 5
-PANEL_STREAM_ENABLED = True
+PANEL_STREAM_ENABLED = False
 
 EVOLUTION_BASE_URL = settings.EVOLUTION_BASE_URL.rstrip("/")
 EVOLUTION_APIKEY = settings.EVOLUTION_API_KEY
@@ -249,28 +281,72 @@ def _evolution_get(path: str, timeout: int = 8):
 
 def _evolution_instance_state(instance_name: str) -> dict:
     """
-    Panel rápido: solo lee estado desde Redis.
-    NO consulta Evolution en vivo para no colgar /panel.
-    El cache lo actualiza un script externo cada cierto tiempo.
+    Estado de Evolution con cache corto para acelerar panel principal y mini panel.
+    No depende de update_evolution_state_cache.py.
+    Si no hay cache, consulta directo al Evolution nuevo y guarda por 25 segundos.
     """
     inst = (instance_name or "").strip()
+
     if not inst:
-        return {"ok": False, "state": "unknown", "cached": True, "error": "empty_instance"}
+        return {
+            "ok": False,
+            "state": "unknown",
+            "error": "empty_instance",
+        }
 
     cache_key = f"panel:evolution_state:{inst}"
-    cached = _cache_get_json(cache_key)
 
+    cached = _cache_get_json(cache_key)
     if isinstance(cached, dict) and cached.get("state"):
         cached["cached"] = True
         return cached
 
-    return {
-        "ok": False,
-        "state": "unknown",
-        "cached": True,
-        "error": "not_cached_yet",
-    }
+    try:
+        url = f"{EVOLUTION_BASE_URL}/instance/connectionState/{inst}"
 
+        r = requests.get(
+            url,
+            headers={"apikey": EVOLUTION_APIKEY},
+            timeout=2.5,
+        )
+
+        try:
+            data = r.json()
+        except Exception:
+            data = {"raw": (r.text or "")[:300]}
+
+        state = "unknown"
+
+        if isinstance(data, dict):
+            state = (
+                data.get("instance", {}).get("state")
+                or data.get("state")
+                or data.get("connectionState")
+                or data.get("status")
+                or "unknown"
+            )
+
+        result = {
+            "ok": r.status_code < 400,
+            "state": str(state or "unknown").strip().lower(),
+            "direct": True,
+        }
+
+        _cache_set_json(cache_key, result, ttl=25)
+        return result
+
+    except Exception as e:
+        print("EVOLUTION_STATE_ERROR =", inst, repr(e), flush=True)
+
+        result = {
+            "ok": False,
+            "state": "unknown",
+            "error": str(e),
+            "direct": True,
+        }
+
+        _cache_set_json(cache_key, result, ttl=8)
+        return result
 
 def _evolution_connect_qr(instance_name: str) -> dict:
     try:
@@ -303,7 +379,7 @@ def _evolution_connect_qr(instance_name: str) -> dict:
         }
 
 
-def _bot_status_rows(db: Session) -> list[dict]:
+def _bot_status_rows_uncached(db: Session) -> list[dict]:
     static_bots = set(BOT_LABELS.keys()) | set(BOT_PANEL_TOKENS.values())
 
     dynamic_rows = (
@@ -388,6 +464,28 @@ def _bot_status_rows(db: Session) -> list[dict]:
 
     return out
 
+
+
+def _bot_status_rows(db: Session) -> list[dict]:
+    """
+    Cache corto para acelerar panel principal.
+    Evita recalcular conteos por bot en cada refresh/cambio.
+    TTL bajo para que bloqueos, recargas y usos se reflejen rápido.
+    """
+    cache_key = "panel:bot_status_rows:v3"
+
+    cached = _cache_get_json(cache_key)
+    if isinstance(cached, list):
+        return cached
+
+    rows = _bot_status_rows_uncached(db)
+
+    try:
+        _cache_set_json(cache_key, rows, ttl=5)
+    except Exception:
+        pass
+
+    return rows
 
 @app.get("/panel/instance/{instance_name}/qr")
 def panel_instance_qr(instance_name: str):
@@ -11254,44 +11352,31 @@ def panel_actas(
           }}
         }}
         
-        let recentRequestsEventSource = null;
-        
-        function startRecentRequestsStream() {{
-          if (!PANEL_STREAM_ENABLED) return;
+        let recentRequestsTimer = null;
 
-          if (recentRequestsEventSource) {{
-            recentRequestsEventSource.close();
+        function startRecentRequestsStream() {{
+          /*
+            Antes: EventSource permanente a /panel/recent-requests/stream.
+            Ahora: polling ligero cada 10 segundos.
+            Mantiene historial reciente actualizado sin dejar conexiones vivas ocupando el panel.
+          */
+
+          if (recentRequestsTimer) {{
+            clearInterval(recentRequestsTimer);
           }}
-        
-          recentRequestsEventSource = new EventSource("/panel/recent-requests/stream");
-        
-          recentRequestsEventSource.onmessage = async function(event) {{
-            try {{
-              const data = JSON.parse(event.data || "{{}}");
-              if (data.error) {{
-                console.error("RECENT_REQUESTS_STREAM_ERROR =", data.error);
-                return;
-              }}
-        
-              if (!document.hidden) {{
-                await refreshRecentRequests();
-              }}
-            }} catch (e) {{
-              console.error("RECENT_REQUESTS_STREAM_PARSE_ERROR =", e);
+
+          const runRefresh = async () => {{
+            if (document.hidden) return;
+            await refreshRecentRequests();
+          }};
+
+          recentRequestsTimer = setInterval(runRefresh, 10000);
+
+          document.addEventListener("visibilitychange", () => {{
+            if (!document.hidden) {{
+              runRefresh();
             }}
-          }};
-        
-          recentRequestsEventSource.onerror = function(err) {{
-            console.error("RECENT_REQUESTS_STREAM_CONNECTION_ERROR =", err);
-        
-            try {{
-              recentRequestsEventSource.close();
-            }} catch (_) {{}}
-        
-            setTimeout(() => {{
-              startRecentRequestsStream();
-            }}, 5000);
-          }};
+          }});
         }}
 
       </script>

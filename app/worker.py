@@ -11,7 +11,7 @@ from app.db import SessionLocal
 from sqlalchemy.orm import Session
 
 from app.models import RequestLog, ProviderSetting, AppSetting, GroupPromotion, ApiClient, ApiCreditLog
-from app.services.evolution import send_group_text, send_document_base64, send_group_document_base64
+from app.services.evolution import send_group_text, send_text, send_document_base64, send_group_document_base64
 from app.config import settings
 from app.utils.curp import provider_label_for_type, is_chain
 from app.services.provider3 import Provider3Client, decode_pdf_base64
@@ -44,6 +44,59 @@ def _current_queue_name() -> str:
         job = get_current_job(connection=redis_conn)
         return (getattr(job, "origin", "") or "").strip()
     except Exception as e:
+        # NO_LOCALIZADO_EXCEPTION_SAFETY_OK:
+        # Seguridad extra: si provider4/provider10/provider11 todavía lanza
+        # *_NEW_VERIFICAR_UNKNOWN_RESPONSE:NO_LOCALIZADO, tratarlo como SIN REGISTRO
+        # y NO mandarlo a soporte como error del sistema.
+        try:
+            _err_txt = str(e or "").strip()
+            _err_up = _err_txt.upper().replace(" ", "_")
+
+            if (
+                "NEW_VERIFICAR_UNKNOWN_RESPONSE" in _err_up
+                and (
+                    "NO_LOCALIZADO" in _err_up
+                    or "NO_REGISTRO" in _err_up
+                    or "SIN_REGISTRO" in _err_up
+                )
+            ):
+                try:
+                    _provider4_new_clear_flow(req.id)
+                except Exception:
+                    pass
+
+                req.status = "ERROR"
+                req.error_message = "SIN REGISTRO | CLIENT_NOTIFIED_FAIL"
+                req.updated_at = _utc_now_naive()
+                db.commit()
+
+                print(f"{provider_name}_NO_LOCALIZADO_EXCEPTION_SAFETY_DETECTED = {{'request_id': {req.id}, 'term': '{term}', 'error': {_err_txt!r}}}", flush=True)
+
+                msg = (
+                    "❌ No hay registros disponibles.\n"
+                    f"Dato: {term}\n"
+                    f"Tipo: {req.act_type}\n\n"
+                    "Verificar que la CURP esté certificada en RENAPO"
+                )
+
+                try:
+                    instance = req.instance_name or settings.EVOLUTION_INSTANCE
+                    if req.source_group_id:
+                        send_group_text(req.source_group_id, msg, instance_name=instance)
+                    elif getattr(req, "requester_wa_id", None):
+                        send_text(req.requester_wa_id, msg, instance_name=instance)
+
+                    print(f"{provider_name}_NO_LOCALIZADO_EXCEPTION_SAFETY_CLIENT_SENT = {{'request_id': {req.id}}}", flush=True)
+                except Exception as send_err:
+                    print(f"{provider_name}_NO_LOCALIZADO_EXCEPTION_SAFETY_CLIENT_SEND_ERROR = {{'request_id': {req.id}, 'error': {str(send_err)!r}}}", flush=True)
+
+                return {
+                    "pending": False,
+                    "error": "SIN REGISTRO",
+                }
+        except Exception as safety_err:
+            print(f"NO_LOCALIZADO_EXCEPTION_SAFETY_ERROR = {str(safety_err)!r}", flush=True)
+
         print("CURRENT_QUEUE_NAME_ERROR =", str(e), flush=True)
         return ""
 
@@ -114,8 +167,114 @@ def _provider_is_enabled(db, provider_name: str | None) -> bool:
     return bool(row and row.is_enabled)
 
 
-def _enqueue_provider4_new_check(request_id: int, delay_sec: int = PROVIDER4_NEW_CHECK_DELAY_SEC):
+def _provider4_adaptive_delay(request_id: int, requested_delay: int) -> tuple[int, str, int]:
+    """
+    Ajusta reintentos de Lazaro/Provider4/10/11:
+    - PDF_EXISTENTE: inmediato.
+    - EN_PROCESO: primeros checks más rápidos.
+    - false: un poco más rápido que 30, pero sin saturar.
+    """
+    reason = ""
+    attempts = 0
+
     try:
+        _db_fast = SessionLocal()
+        try:
+            _req_fast = (
+                _db_fast.query(RequestLog)
+                .filter(RequestLog.id == request_id)
+                .first()
+            )
+            if _req_fast is not None:
+                reason = (getattr(_req_fast, "error_message", "") or "").upper()
+        finally:
+            _db_fast.close()
+    except Exception as e:
+        print("PROVIDER4_ADAPTIVE_DELAY_DB_ERROR =", {
+            "request_id": request_id,
+            "error": str(e),
+        }, flush=True)
+
+    try:
+        counter_key = f"provider4:adaptive_attempts:{request_id}"
+        attempts = int(redis_conn.incr(counter_key) or 1)
+        redis_conn.expire(counter_key, 60 * 60)
+    except Exception as e:
+        print("PROVIDER4_ADAPTIVE_DELAY_REDIS_ERROR =", {
+            "request_id": request_id,
+            "error": str(e),
+        }, flush=True)
+        attempts = 1
+
+    new_delay = requested_delay
+
+    if "PDF_EXISTENTE" in reason:
+        new_delay = 0
+
+    elif "EN_PROCESO" in reason:
+        if attempts <= 1:
+            new_delay = 10
+        elif attempts == 2:
+            new_delay = 15
+        elif attempts == 3:
+            new_delay = 20
+        else:
+            new_delay = 30
+
+    elif "FALSE" in reason or reason.endswith(":FALSE"):
+        new_delay = 25
+
+    else:
+        new_delay = requested_delay
+
+    print("PROVIDER4_ADAPTIVE_DELAY_DECISION =", {
+        "request_id": request_id,
+        "reason": reason[:180],
+        "attempts": attempts,
+        "requested_delay": requested_delay,
+        "new_delay": new_delay,
+    }, flush=True)
+
+    return new_delay, reason, attempts
+
+
+def _enqueue_provider4_new_check(request_id: int, delay_sec: int = PROVIDER4_NEW_CHECK_DELAY_SEC):
+    """
+    Reprograma revisión de Lázaro.
+    EN_PROCESO y false usan delay adaptativo.
+    PDF_EXISTENTE entra inmediato.
+    """
+    try:
+        old_delay_sec = delay_sec
+
+        try:
+            delay_sec, _fast_reason, _adaptive_attempts = _provider4_adaptive_delay(
+                request_id,
+                delay_sec,
+            )
+        except Exception as e:
+            print("PROVIDER4_ADAPTIVE_DELAY_ERROR =", {
+                "request_id": request_id,
+                "old_delay_sec": old_delay_sec,
+                "error": str(e),
+            }, flush=True)
+
+        if delay_sec <= 0:
+            job = slow_request_queue.enqueue(
+                process_request,
+                request_id,
+                at_front=True,
+            )
+
+            print("PROVIDER4_NEW_CHECK_ENQUEUED_IMMEDIATE =", {
+                "request_id": request_id,
+                "old_delay_sec": old_delay_sec,
+                "delay_sec": delay_sec,
+                "job_id": job.id,
+            }, flush=True)
+
+            return job
+
         job = slow_request_queue.enqueue_in(
             timedelta(seconds=delay_sec),
             process_request,
@@ -124,6 +283,7 @@ def _enqueue_provider4_new_check(request_id: int, delay_sec: int = PROVIDER4_NEW
 
         print("PROVIDER4_NEW_CHECK_ENQUEUED_IN =", {
             "request_id": request_id,
+            "old_delay_sec": old_delay_sec,
             "delay_sec": delay_sec,
             "job_id": job.id,
         }, flush=True)
@@ -145,7 +305,7 @@ def _enqueue_provider4_new_check(request_id: int, delay_sec: int = PROVIDER4_NEW
         }, flush=True)
 
         return job
-    
+
 
 BOT_PROVIDER_MODE_KEY_PREFIX = "BOT_PROVIDER_MODE:"
 DEFAULT_BOT_PROVIDER_MODE = {
@@ -1790,12 +1950,171 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
             _provider4_new_clear_flow(req.id)
             raise RuntimeError(f"{provider_name}_NEW_TIMEOUT_WAITING_PDF:{term}")
 
-        check_result = client.verificar_pdf_new_api(
-            curp=term,
-            tipoa=tipoa,
-        )
+        try:
+            check_result = client.verificar_pdf_new_api(
+                curp=term,
+                tipoa=tipoa,
+            )
+        except Exception as e:
+            # NO_LOCALIZADO_VERIFICAR_CALL_SAFETY_OK:
+            # Seguridad directa en la consulta PDF: si la API responde NO_LOCALIZADO
+            # pero alguna capa lo lanza como UNKNOWN_RESPONSE, convertirlo en SIN REGISTRO.
+            _err_txt = str(e or "").strip()
+            _err_up = _err_txt.upper().replace(" ", "_")
+
+            if (
+                "NEW_VERIFICAR_UNKNOWN_RESPONSE" in _err_up
+                and (
+                    "NO_LOCALIZADO" in _err_up
+                    or "NO_REGISTRO" in _err_up
+                    or "SIN_REGISTRO" in _err_up
+                )
+            ):
+                _provider4_new_clear_flow(req.id)
+
+                req.status = "ERROR"
+                req.error_message = "SIN REGISTRO | CLIENT_NOTIFIED_FAIL"
+                req.updated_at = _utc_now_naive()
+                db.commit()
+
+                print(f"{provider_name}_NO_LOCALIZADO_VERIFICAR_CALL_SAFETY_DETECTED = {{'request_id': {req.id}, 'term': '{term}', 'error': {_err_txt!r}}}", flush=True)
+
+                msg = (
+                    "❌ No hay registros disponibles.\n"
+                    f"Dato: {term}\n"
+                    f"Tipo: {req.act_type}\n\n"
+                    "Verificar que la CURP esté certificada en RENAPO"
+                )
+
+                try:
+                    instance = req.instance_name or settings.EVOLUTION_INSTANCE
+                    if req.source_group_id:
+                        send_group_text(req.source_group_id, msg, instance_name=instance)
+                    elif getattr(req, "requester_wa_id", None):
+                        send_text(req.requester_wa_id, msg, instance_name=instance)
+
+                    print(f"{provider_name}_NO_LOCALIZADO_VERIFICAR_CALL_SAFETY_CLIENT_SENT = {{'request_id': {req.id}}}", flush=True)
+                except Exception as send_err:
+                    print(f"{provider_name}_NO_LOCALIZADO_VERIFICAR_CALL_SAFETY_CLIENT_SEND_ERROR = {{'request_id': {req.id}, 'error': {str(send_err)!r}}}", flush=True)
+
+                return {
+                    "pending": False,
+                    "error": "SIN REGISTRO",
+                }
+
+            raise
+
+        # NO_LOCALIZADO_READY_WITHOUT_PDF_SAFETY_OK:
+        # Si por alguna razón el parser marca ready=True pero no trae bytes de PDF,
+        # no debe caer como KeyError ni como error de sistema. Primero revisamos si realmente era NO_LOCALIZADO.
+        if check_result.get("ready") and not (
+            check_result.get("pdf_bytes")
+            or check_result.get("pdf bytes")
+            or check_result.get("pdf")
+        ):
+            web_code_raw = str(
+                check_result.get("code")
+                or check_result.get("reason")
+                or check_result.get("text")
+                or check_result.get("raw")
+                or check_result
+                or ""
+            ).strip()
+            web_code_upper = web_code_raw.upper().replace(" ", "_")
+
+            if "NO_LOCALIZADO" in web_code_upper or "NO_REGISTRO" in web_code_upper or "SIN_REGISTRO" in web_code_upper:
+                _provider4_new_clear_flow(req.id)
+
+                req.status = "ERROR"
+                req.error_message = "SIN REGISTRO | CLIENT_NOTIFIED_FAIL"
+                req.updated_at = _utc_now_naive()
+                db.commit()
+
+                print(f"{provider_name}_READY_WITHOUT_PDF_NO_LOCALIZADO_DETECTED = {{'request_id': {req.id}, 'term': '{term}', 'check_result': {str(check_result)[:300]!r}}}", flush=True)
+
+                msg = (
+                    "❌ No hay registros disponibles.\n"
+                    f"Dato: {term}\n"
+                    f"Tipo: {req.act_type}\n\n"
+                    "Verificar que la CURP esté certificada en RENAPO"
+                )
+
+                try:
+                    instance = req.instance_name or settings.EVOLUTION_INSTANCE
+                    if req.source_group_id:
+                        send_group_text(req.source_group_id, msg, instance_name=instance)
+                    elif getattr(req, "requester_wa_id", None):
+                        send_text(req.requester_wa_id, msg, instance_name=instance)
+
+                    print(f"{provider_name}_READY_WITHOUT_PDF_NO_LOCALIZADO_CLIENT_SENT = {{'request_id': {req.id}}}", flush=True)
+                except Exception as send_err:
+                    print(f"{provider_name}_READY_WITHOUT_PDF_NO_LOCALIZADO_CLIENT_SEND_ERROR = {{'request_id': {req.id}, 'error': {str(send_err)!r}}}", flush=True)
+
+                return {
+                    "pending": False,
+                    "error": "SIN REGISTRO",
+                }
+
+            raise RuntimeError(f"{provider_name}_READY_WITHOUT_PDF_BYTES:{web_code_raw[:300]}")
 
         if not check_result.get("ready"):
+            # Si la API ya distingue NO_LOCALIZADO, aquí sí es SIN REGISTRO real.
+            web_code_raw = str(check_result.get("code") or check_result.get("reason") or "").strip()
+            web_code_upper = web_code_raw.upper().replace(" ", "_")
+
+            if "NO_LOCALIZADO" in web_code_upper or "NO_REGISTRO" in web_code_upper or "SIN_REGISTRO" in web_code_upper:
+                _provider4_new_clear_flow(req.id)
+
+                req.status = "ERROR"
+                req.error_message = "SIN REGISTRO | CLIENT_NOTIFIED_FAIL"
+                req.updated_at = _utc_now_naive()
+                db.commit()
+
+                print(f"{provider_name}_WEB_NO_LOCALIZADO_DETECTED = {{'request_id': {req.id}, 'term': '{term}', 'code': {web_code_raw!r}}}", flush=True)
+
+                msg = (
+                    "❌ No hay registros disponibles.\n"
+                    f"Dato: {term}\n"
+                    f"Tipo: {req.act_type}\n\n"
+                    "Verificar que la CURP esté certificada en RENAPO"
+                )
+
+                try:
+                    instance = req.instance_name or settings.EVOLUTION_INSTANCE
+                    if req.source_group_id:
+                        send_group_text(req.source_group_id, msg, instance_name=instance)
+                    elif getattr(req, "requester_wa_id", None):
+                        send_text(req.requester_wa_id, msg, instance_name=instance)
+
+                    print(f"{provider_name}_WEB_NO_LOCALIZADO_CLIENT_SENT = {{'request_id': {req.id}}}", flush=True)
+                except Exception as e:
+                    print(f"{provider_name}_WEB_NO_LOCALIZADO_CLIENT_SEND_ERROR = {{'request_id': {req.id}, 'error': {str(e)!r}}}", flush=True)
+
+                return {
+                    "pending": False,
+                    "error": "SIN REGISTRO",
+                }
+
+            # Timeout real por tiempo para Lázaro Web Provider4/10/11.
+            # false / ARCHIVO NO EXISTE significa "PDF aún no listo",
+            # pero no debe quedarse PROCESSING infinito.
+            try:
+                created_at = getattr(req, "created_at", None)
+                web_elapsed_sec = 0.0
+                if created_at:
+                    if getattr(created_at, "tzinfo", None) is not None:
+                        created_at = created_at.replace(tzinfo=None)
+                    web_elapsed_sec = (_utc_now_naive() - created_at).total_seconds()
+
+                if web_elapsed_sec >= 11 * 60:
+                    _provider4_new_clear_flow(req.id)
+                    print(f"{provider_name}_NEW_TIMEOUT_BY_AGE = {{'request_id': {req.id}, 'elapsed_sec': {web_elapsed_sec}, 'attempts': {attempts}, 'last_code': {check_result.get('code')!r}}}", flush=True)
+                    raise RuntimeError(f"{provider_name}_NEW_TIMEOUT_WAITING_PDF:{term}")
+            except RuntimeError:
+                raise
+            except Exception as e:
+                print(f"{provider_name}_NEW_TIMEOUT_BY_AGE_CHECK_ERROR = {{'request_id': {req.id}, 'error': {str(e)!r}}}", flush=True)
+
             flow["attempts"] = attempts
             flow["last_check_at"] = _utc_now_naive().isoformat()
             flow["last_code"] = check_result.get("code") or ""
@@ -3574,6 +3893,84 @@ def process_request(request_id: int):
 
                 _notify_support_error(req, err, msg)
                 return
+
+            # PDF_BYTES_GENERAL_NO_LOCALIZADO_SAFETY_OK:
+            # Si cayó al except general con KeyError('pdf bytes'), pero el web provider realmente
+            # responde NO_LOCALIZADO, no debe mandar soporte. Debe avisar al cliente como SIN REGISTRO.
+            try:
+                _err_pdf_txt = str(err or "").strip()
+                _err_pdf_up = _err_pdf_txt.upper().replace(" ", "_")
+                _prov_pdf_up = (getattr(req, "provider_name", "") or "").strip().upper()
+
+                if (
+                    _prov_pdf_up in ("PROVIDER4", "PROVIDER10", "PROVIDER11")
+                    and "PDF" in _err_pdf_up
+                    and "BYTES" in _err_pdf_up
+                ):
+                    # PDF_BYTES_DIRECT_SIN_REGISTRO_OK:
+                    # En Lázaro Web, este error aparece cuando el panel/verificarpdf ya trae NO_LOCALIZADO
+                    # pero alguna capa intentó leer pdf_bytes inexistente.
+                    # Para evitar falso soporte, se cierra como SIN REGISTRO y se avisa al cliente.
+                    _no_loc_detected = True
+                    _check_debug = "PDF_BYTES_DIRECT_SIN_REGISTRO"
+
+                    try:
+                        _tipo_retry = _map_act_type_to_provider4_tipo(req.act_type)
+                    except Exception:
+                        _tipo_retry = tipoa if "tipoa" in locals() else ""
+
+                    try:
+                        _client_retry = client if "client" in locals() else None
+                        if _client_retry is not None:
+                            _chk_retry = _client_retry.verificar_pdf_new_api(
+                                curp=(getattr(req, "curp", "") or "").strip().upper(),
+                                tipoa=_tipo_retry,
+                            )
+                            _check_debug = str(_chk_retry)
+                            _chk_up = _check_debug.upper().replace(" ", "_")
+                            if "NO_LOCALIZADO" in _chk_up or "NO_REGISTRO" in _chk_up or "SIN_REGISTRO" in _chk_up:
+                                _no_loc_detected = True
+                    except Exception as _chk_e:
+                        _check_debug = str(_chk_e)
+                        _chk_up = _check_debug.upper().replace(" ", "_")
+                        if "NO_LOCALIZADO" in _chk_up or "NO_REGISTRO" in _chk_up or "SIN_REGISTRO" in _chk_up:
+                            _no_loc_detected = True
+
+                    if _no_loc_detected:
+                        try:
+                            _provider4_new_clear_flow(req.id)
+                        except Exception:
+                            pass
+
+                        req.status = "ERROR"
+                        req.error_message = "SIN REGISTRO | CLIENT_NOTIFIED_FAIL"
+                        req.updated_at = _utc_now_naive()
+                        db.commit()
+
+                        print(f"{_prov_pdf_up}_PDF_BYTES_GENERAL_NO_LOCALIZADO_DETECTED = {{'request_id': {req.id}, 'curp': {getattr(req, 'curp', '')!r}, 'error': {_err_pdf_txt!r}, 'check': {_check_debug[:300]!r}}}", flush=True)
+
+                        msg = (
+                            "❌ No hay registros disponibles.\n"
+                            f"Dato: {getattr(req, 'curp', '')}\n"
+                            f"Tipo: {getattr(req, 'act_type', '')}\n\n"
+                            "Verificar que la CURP esté certificada en RENAPO"
+                        )
+
+                        try:
+                            instance = req.instance_name or settings.EVOLUTION_INSTANCE
+                            if req.source_group_id:
+                                send_group_text(req.source_group_id, msg, instance_name=instance)
+                            elif getattr(req, "requester_wa_id", None):
+                                send_text(req.requester_wa_id, msg, instance_name=instance)
+
+                            print(f"{_prov_pdf_up}_PDF_BYTES_GENERAL_NO_LOCALIZADO_CLIENT_SENT = {{'request_id': {req.id}}}", flush=True)
+                        except Exception as _send_e:
+                            print(f"{_prov_pdf_up}_PDF_BYTES_GENERAL_NO_LOCALIZADO_CLIENT_SEND_ERROR = {{'request_id': {req.id}, 'error': {str(_send_e)!r}}}", flush=True)
+
+                        return
+
+            except Exception as _pdfbytes_general_safety_e:
+                print(f"PDF_BYTES_GENERAL_NO_LOCALIZADO_SAFETY_ERROR = {str(_pdfbytes_general_safety_e)!r}", flush=True)
 
             req.status = "ERROR"
             req.error_message = err
