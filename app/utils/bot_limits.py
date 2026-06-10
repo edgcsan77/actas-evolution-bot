@@ -83,6 +83,11 @@ def get_bot_used(db: Session, instance_name: str) -> int:
         return 0
 
     try:
+        value = _app_setting_get(db, _bot_used_key(instance_name), None)
+
+        if value is not None and str(value).strip() != "":
+            return max(0, int(value or 0))
+
         total_done = (
             db.query(RequestLog)
             .filter(
@@ -150,12 +155,22 @@ def increment_bot_used_and_maybe_block(
     instance_name: str
 ) -> tuple[int, int, bool]:
 
+    instance_name = (instance_name or "").strip()
+
     used = get_bot_used(db, instance_name)
     limit_value = get_bot_limit(db, instance_name)
 
+    new_used = used + 1
+
+    _app_setting_set(
+        db,
+        _bot_used_key(instance_name),
+        str(new_used),
+    )
+
     blocked_now = False
-    if limit_value > 0 and used >= limit_value:
+    if limit_value > 0 and new_used >= limit_value:
         block_instance(instance_name)
         blocked_now = True
 
-    return used, limit_value, blocked_now
+    return new_used, limit_value, blocked_now
