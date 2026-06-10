@@ -6588,25 +6588,12 @@ def _bot_recharge_history(db: Session, instance_name: str, limit: int = 30):
 
 def _bot_credit_stats(db: Session, instance_name: str):
     try:
+        instance_name = (instance_name or "").strip()
+
         limit_value = get_bot_limit(db, instance_name)
+        used_value = get_bot_used(db, instance_name)
 
-        personal_provider = _personal_provider_filter_for_instance(db, instance_name)
-
-        if personal_provider:
-            q_used = (
-                db.query(RequestLog)
-                .filter(
-                    RequestLog.instance_name == instance_name,
-                    RequestLog.status == "DONE",
-                )
-            )
-
-            q_used = _exclude_private_provider_query(q_used, db, instance_name)
-            used_value = q_used.count()
-        else:
-            used_value = get_bot_used(db, instance_name)
-
-        available = max(limit_value - used_value, 0)
+        available = max(int(limit_value or 0) - int(used_value or 0), 0)
 
         recharge_count = (
             db.query(BotRechargeLog)
@@ -6621,14 +6608,15 @@ def _bot_credit_stats(db: Session, instance_name: str):
             "recharges": int(recharge_count or 0),
         }
 
-    except Exception:
+    except Exception as e:
+        print("BOT_CREDIT_STATS_ERROR =", instance_name, repr(e), flush=True)
         return {
             "limit": 0,
             "used": 0,
             "available": 0,
             "recharges": 0,
         }
-
+        
 
 @app.post("/botpanel/{token}/group/{group_jid}/block")
 def panel_bot_block_group(token: str, group_jid: str, db: Session = Depends(get_db)):
