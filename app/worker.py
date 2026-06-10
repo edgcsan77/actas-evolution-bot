@@ -360,10 +360,28 @@ def _provider_from_mode(mode: str | None) -> str | None:
     return None
 
 
-def _request_is_no_accounting(req, db) -> bool:
-    provider_name = (getattr(req, "provider_name", "") or "").strip().upper()
+def _maya_provider_group_ids() -> set[str]:
+    return {
+        g.strip()
+        for g in [
+            getattr(settings, "MAYAPROVIDER_GROUP_1", ""),
+            getattr(settings, "MAYAPROVIDER_GROUP_2", ""),
+        ]
+        if (g or "").strip()
+    }
 
+
+def _request_is_no_accounting(req, db) -> bool:
+    instance_name = _norm_instance(getattr(req, "instance_name", None))
+    provider_name = (getattr(req, "provider_name", "") or "").strip().upper()
+    provider_group_id = (getattr(req, "provider_group_id", "") or "").strip()
+
+    # MAYAPROVIDER jamás consume límite ni promociones.
     if provider_name == "MAYAPROVIDER":
+        return True
+
+    # Blindaje por grupo privado, aunque provider_name venga vacío o mal.
+    if instance_name == "docifybot8maya" and provider_group_id in _maya_provider_group_ids():
         return True
 
     mode = _bot_provider_mode(db, getattr(req, "instance_name", None))
@@ -2920,7 +2938,7 @@ def process_request(request_id: int):
         req.updated_at = _utc_now_naive()
         db.commit()
 
-        if req.source_group_id and not _current_mode_is_personal(db, req.instance_name):
+        if req.source_group_id and not _request_is_no_accounting(req, db):
             promo_row = (
                 db.query(GroupPromotion)
                 .filter(
