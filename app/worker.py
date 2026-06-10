@@ -512,6 +512,18 @@ SUPPORT_ERROR_LABELS_ES = {
         "La solicitud debe reintentarse automáticamente con otro proveedor; "
         "no significa que el acta quedó perdida definitivamente."
     ),
+    "PROVIDER4_NEW_TIMEOUT_WAITING_PDF": (
+        "LAZARO WEB 1 no entregó el PDF dentro del tiempo máximo. "
+        "La solicitud debe reenviarse automáticamente a un proveedor WhatsApp disponible antes de avisar fallo al cliente."
+    ),
+    "PROVIDER10_NEW_TIMEOUT_WAITING_PDF": (
+        "LAZARO WEB 2 no entregó el PDF dentro del tiempo máximo. "
+        "La solicitud debe reenviarse automáticamente a un proveedor WhatsApp disponible antes de avisar fallo al cliente."
+    ),
+    "PROVIDER11_NEW_TIMEOUT_WAITING_PDF": (
+        "LAZARO WEB 3 no entregó el PDF dentro del tiempo máximo. "
+        "La solicitud debe reenviarse automáticamente a un proveedor WhatsApp disponible antes de avisar fallo al cliente."
+    ),
     "PROVIDER4_EMPTY_OR_USELESS_HTML": (
         "LAZARO WEB 1 respondió vacío o con HTML inútil. "
         "La solicitud debe reintentarse automáticamente con otro proveedor; "
@@ -3398,8 +3410,14 @@ def process_request(request_id: int):
                     or p4_err.startswith(f"{provider_name}_NO_FOLIO_LINK_FOR:")
                     or p4_err.startswith(f"{provider_name}_DOWNLOAD_FAILED:")
                     or p4_err.startswith(f"{provider_name}_FOLIO_DOWNLOAD_FAILED:")
+                    or p4_err.startswith(f"{provider_name}_NEW_TIMEOUT_WAITING_PDF:")
+                    or p4_err.startswith(f"{provider_name}_READY_WITHOUT_PDF_BYTES:")
+                    or p4_err.startswith(f"{provider_name}_NEW_PETICION_UNKNOWN_RESPONSE:")
+                    or p4_err.startswith(f"{provider_name}_NEW_VERIFICAR_UNKNOWN_RESPONSE:")
                     or wrong_pdf_errors
                     or "Read timed out" in p4_err
+                    or "READ TIMED OUT" in p4_err.upper()
+                    or "TIMEOUT" in p4_err.upper()
                 )
             
                 immediate_fallback_errors = (
@@ -3407,6 +3425,10 @@ def process_request(request_id: int):
                     or p4_err.startswith(f"{provider_name}_EMPTY_OR_USELESS_HTML")
                     or p4_err.startswith(f"{provider_name}_BACKEND_FAILED:")
                     or p4_err.startswith(f"{provider_name}_VGET_FAILED:")
+                    or p4_err.startswith(f"{provider_name}_NEW_TIMEOUT_WAITING_PDF:")
+                    or p4_err.startswith(f"{provider_name}_READY_WITHOUT_PDF_BYTES:")
+                    or p4_err.startswith(f"{provider_name}_NEW_PETICION_UNKNOWN_RESPONSE:")
+                    or p4_err.startswith(f"{provider_name}_NEW_VERIFICAR_UNKNOWN_RESPONSE:")
                     or wrong_pdf_errors
                 )
                 
@@ -3432,6 +3454,7 @@ def process_request(request_id: int):
                             "PROVIDER12",
                         }
                         and p != provider_name
+                        and not (p == "PROVIDER6" and not _is_provider6_allowed_request(req.curp, req.act_type))
                     ]
                 
                     if whatsapp_fallbacks:
