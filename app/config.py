@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     PROVIDER_GROUP_NACIMIENTO_1: str = ""
     PROVIDER_GROUP_NACIMIENTO_2: str = ""
     PROVIDER_GROUP_NACIMIENTO_3: str = ""
+    PROVIDER_GROUP_NACIMIENTO_4: str = ""
     PROVIDER_GROUP_ESPECIALES: str = ""
     PROVIDER_GROUP_FOLIADAS: str = ""
 
