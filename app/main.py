@@ -9562,6 +9562,33 @@ def panel_actas(
                       <div style="font-size:12px;color:#d1d5db;margin-bottom:8px;font-weight:600;">
                         Selecciona qué bots internos recibirán el aviso por privado.
                       </div>
+
+                      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+                        <button
+                          type="button"
+                          class="btn btn-light"
+                          style="font-size:11px;padding:6px 9px;"
+                          onclick="selectAllPrivateBots(true)"
+                        >
+                          Seleccionar todos configurados
+                        </button>
+                    
+                        <button
+                          type="button"
+                          class="btn btn-light"
+                          style="font-size:11px;padding:6px 9px;"
+                          onclick="selectAllPrivateBots(false)"
+                        >
+                          Quitar selección
+                        </button>
+                    
+                        <span
+                          id="privateBotSelectedCount"
+                          style="font-size:11px;color:#d1d5db;font-weight:700;"
+                        >
+                          0 seleccionados
+                        </span>
+                      </div>
                     
                       <div
                         id="privateBotTargets"
@@ -10901,6 +10928,33 @@ def panel_actas(
 
         let privateBotsProgressTimer = null;
 
+        function getPrivateBotChecks() {{
+          return Array.from(document.querySelectorAll(".privateBotCheck"));
+        }}
+        
+        function syncPrivateBotSelectCounter() {{
+          const counter = document.getElementById("privateBotSelectedCount");
+          if (!counter) return;
+        
+          const checks = getPrivateBotChecks();
+          const enabled = checks.filter(x => !x.disabled);
+          const selected = enabled.filter(x => x.checked);
+        
+          counter.textContent = `${{selected.length}} de ${{enabled.length}} configurados seleccionados`;
+        }}
+        
+        function selectAllPrivateBots(checked) {{
+          const checks = getPrivateBotChecks();
+        
+          checks.forEach(chk => {{
+            if (!chk.disabled) {{
+              chk.checked = checked;
+            }}
+          }});
+        
+          syncPrivateBotSelectCounter();
+        }}
+
         async function loadPrivateBotTargets() {{
           const box = document.getElementById("privateBotTargets");
           if (!box) return;
@@ -10935,6 +10989,7 @@ def panel_actas(
                       type="checkbox"
                       class="privateBotCheck"
                       value="${{bot.instance_name}}"
+                      onchange="syncPrivateBotSelectCounter()"
                       ${{disabled}}
                       ${{checked}}
                     >
@@ -10958,6 +11013,8 @@ def panel_actas(
                 </div>
               `;
             }}).join("");
+
+            syncPrivateBotSelectCounter();
         
           }} catch (e) {{
             box.innerHTML = `<div style="color:#b91c1c;">Error cargando bots internos</div>`;
