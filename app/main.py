@@ -193,9 +193,31 @@ def _provider_from_mode(mode: str | None) -> str | None:
     return None
 
 
+def _maya_provider_group_ids() -> set[str]:
+    return {
+        g.strip()
+        for g in [
+            getattr(settings, "MAYAPROVIDER_GROUP_1", ""),
+            getattr(settings, "MAYAPROVIDER_GROUP_2", ""),
+        ]
+        if (g or "").strip()
+    }
+
+
 def _request_is_no_accounting_main(db: Session, req) -> bool:
-    instance_name = getattr(req, "instance_name", None)
+    instance_name = _norm_instance(getattr(req, "instance_name", None))
     provider_name = (getattr(req, "provider_name", "") or "").strip().upper()
+    provider_group_id = (getattr(req, "provider_group_id", "") or "").strip()
+
+    # MAYAPROVIDER jamás debe consumir límite, promo ni contador,
+    # aunque el bot cambie después de modo privado a global.
+    if provider_name == "MAYAPROVIDER":
+        return True
+
+    # Seguridad extra: si el PDF vino desde los grupos privados de Maya,
+    # también se considera privado aunque provider_name venga vacío/mal.
+    if instance_name == "docifybot8maya" and provider_group_id in _maya_provider_group_ids():
+        return True
 
     personal_provider = _personal_provider_filter_for_instance(db, instance_name)
 
@@ -415,25 +437,23 @@ def _bot_status_rows_uncached(db: Session) -> list[dict]:
         
         personal_provider = _personal_provider_filter_for_instance(db, inst)
         if personal_provider:
-            q_total = q_total.filter(RequestLog.provider_name != personal_provider)
+            q_total = _exclude_private_provider_query(q_total, db, inst)
         
         total = q_total.count()
 
         personal_provider = _personal_provider_filter_for_instance(db, inst)
 
         if personal_provider:
-            used = (
+            q_used = (
                 db.query(RequestLog)
                 .filter(
                     RequestLog.instance_name == inst,
                     RequestLog.status == "DONE",
-                    or_(
-                        RequestLog.provider_name != personal_provider,
-                        RequestLog.provider_name == None,
-                    ),
                 )
-                .count()
             )
+        
+            q_used = _exclude_private_provider_query(q_used, db, inst)
+            used = q_used.count()
         else:
             used = get_bot_used(db, inst)
         
@@ -898,10 +918,21 @@ def _get_bot_group_name(db: Session, group_jid: str) -> str:
 
 
 def _exclude_private_provider_query(q, db: Session, instance_name: str):
+    inst = _norm_instance(instance_name)
     personal_provider = _personal_provider_filter_for_instance(db, instance_name)
 
+    private_conditions = []
+
     if personal_provider:
-        q = q.filter(RequestLog.provider_name != personal_provider)
+        private_conditions.append(RequestLog.provider_name == personal_provider)
+
+    if inst == "docifybot8maya":
+        maya_groups = _maya_provider_group_ids()
+        if maya_groups:
+            private_conditions.append(RequestLog.provider_group_id.in_(maya_groups))
+
+    if private_conditions:
+        q = q.filter(~or_(*private_conditions))
 
     return q
 
@@ -6552,17 +6583,18 @@ def _bot_credit_stats(db: Session, instance_name: str):
         limit_value = get_bot_limit(db, instance_name)
 
         personal_provider = _personal_provider_filter_for_instance(db, instance_name)
-        
+
         if personal_provider:
-            used_value = (
+            q_used = (
                 db.query(RequestLog)
                 .filter(
                     RequestLog.instance_name == instance_name,
                     RequestLog.status == "DONE",
-                    RequestLog.provider_name != personal_provider,
                 )
-                .count()
             )
+
+            q_used = _exclude_private_provider_query(q_used, db, instance_name)
+            used_value = q_used.count()
         else:
             used_value = get_bot_used(db, instance_name)
 
