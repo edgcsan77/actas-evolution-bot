@@ -1125,7 +1125,7 @@ def _bot_group_stats(db: Session, instance_name: str):
         if row.group_jid and row.custom_name
     }
 
-    blocked_set = set(get_blocked_groups())
+    blocked_set = set(list_blocked_groups())
 
     out = []
     for g in groups:
