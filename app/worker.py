@@ -1489,6 +1489,8 @@ def _pick_provider1_group(term: str | None, act_type: str, request_id: int) -> s
 
     nacimiento_group_1 = (settings.PROVIDER_GROUP_NACIMIENTO_1 or "").strip()
     nacimiento_group_2 = (settings.PROVIDER_GROUP_NACIMIENTO_2 or "").strip()
+    nacimiento_group_3 = (settings.PROVIDER_GROUP_NACIMIENTO_3 or "").strip()
+    nacimiento_group_4 = (settings.PROVIDER_GROUP_NACIMIENTO_4 or "").strip()
 
     especiales_group = (settings.PROVIDER_GROUP_ESPECIALES or "").strip()
     foliadas_group = (settings.PROVIDER_GROUP_FOLIADAS or "").strip()
@@ -1514,7 +1516,12 @@ def _pick_provider1_group(term: str | None, act_type: str, request_id: int) -> s
     if is_nacimiento and is_curp_req:
         nacimiento_groups = [
             group
-            for group in (nacimiento_group_1, nacimiento_group_2)
+            for group in (
+                nacimiento_group_1,
+                nacimiento_group_2,
+                nacimiento_group_3,
+                nacimiento_group_4,
+            )
             if group
         ]
 
