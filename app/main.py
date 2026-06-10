@@ -2042,16 +2042,17 @@ def panel_instances(db: Session = Depends(get_db)):
     items = []
     for instance_name, total in rows:
         name = instance_name or "docifybot8"
-        used = get_bot_used(db, name)
-        limit_value = get_bot_limit(db, name)
+        credit = _bot_credit_stats(db, name)
+        used = credit["used"]
+        limit_value = credit["limit"]
         blocked = is_instance_blocked(name)
-
+        
         items.append({
             "instance_name": name,
             "total_requests": int(total or 0),
             "used": used,
             "limit": limit_value,
-            "available": max(0, limit_value - used) if limit_value > 0 else None,
+            "available": credit["available"] if limit_value > 0 else None,
             "blocked": blocked,
         })
 
@@ -9904,9 +9905,12 @@ def panel_actas(
 
         for r in by_instance:
             inst = (r["instance_name"] or "").strip()
-            bot_used = get_bot_used(db, inst)
-            bot_limit = get_bot_limit(db, inst)
-            bot_available = max(0, bot_limit - bot_used) if bot_limit > 0 else "∞"
+        
+            bot_credit = _bot_credit_stats(db, inst)
+            bot_used = bot_credit["used"]
+            bot_limit = bot_credit["limit"]
+            bot_available = bot_credit["available"] if bot_limit > 0 else "∞"
+        
             bot_blocked = is_instance_blocked(inst)
         
             status_badge = (
