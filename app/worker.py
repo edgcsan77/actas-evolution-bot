@@ -1512,7 +1512,7 @@ def _pick_provider1_group(term: str | None, act_type: str, request_id: int) -> s
             raise RuntimeError("NO_FOLIADAS_PROVIDER_GROUP_CONFIGURED")
         return foliadas_group
 
-    # 3. NACIMIENTO POR CURP -> repartir entre grupo 1 y grupo 2
+    # 3. NACIMIENTO POR CURP -> repartir entre grupos nacimiento 1, 2, 3 y 4
     if is_nacimiento and is_curp_req:
         nacimiento_groups = [
             group
