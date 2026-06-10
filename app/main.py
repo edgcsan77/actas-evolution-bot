@@ -441,21 +441,7 @@ def _bot_status_rows_uncached(db: Session) -> list[dict]:
         
         total = q_total.count()
 
-        personal_provider = _personal_provider_filter_for_instance(db, inst)
-
-        if personal_provider:
-            q_used = (
-                db.query(RequestLog)
-                .filter(
-                    RequestLog.instance_name == inst,
-                    RequestLog.status == "DONE",
-                )
-            )
-        
-            q_used = _exclude_private_provider_query(q_used, db, inst)
-            used = q_used.count()
-        else:
-            used = get_bot_used(db, inst)
+        used = get_bot_used(db, inst)
         
         limit_value = get_bot_limit(db, inst)
         blocked = is_instance_blocked(inst)
