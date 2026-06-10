@@ -1059,76 +1059,96 @@ def _bot_group_stats(db: Session, instance_name: str):
     start_prev_month, end_prev_month = _bot_prev_month_bounds()
 
     groups = _bot_groups_for_instance(db, instance_name)
+    if not groups:
+        return []
+
+    group_ids = [g.group_jid for g in groups if getattr(g, "group_jid", None)]
+    if not group_ids:
+        return []
+
+    def _count_map(start_utc, end_utc):
+        q = (
+            db.query(
+                RequestLog.source_group_id,
+                func.count(RequestLog.id).label("total"),
+            )
+            .filter(
+                RequestLog.instance_name == instance_name,
+                RequestLog.source_group_id.in_(group_ids),
+                RequestLog.status == "DONE",
+                RequestLog.created_at >= start_utc,
+                RequestLog.created_at < end_utc,
+            )
+        )
+
+        q = _exclude_private_provider_query(q, db, instance_name)
+
+        rows = (
+            q.group_by(RequestLog.source_group_id)
+            .all()
+        )
+
+        return {
+            row.source_group_id: int(row.total or 0)
+            for row in rows
+        }
+
+    today_map = _count_map(start_day, end_day)
+    d30_map = _count_map(start_30d, end_30d)
+    month_map = _count_map(start_month, end_month)
+    prev_month_map = _count_map(start_prev_month, end_prev_month)
+
+    # Cargar promociones de todos los grupos en una sola consulta.
+    promo_rows = (
+        db.query(GroupPromotion)
+        .filter(GroupPromotion.group_jid.in_(group_ids))
+        .order_by(GroupPromotion.updated_at.desc(), GroupPromotion.id.desc())
+        .all()
+    )
+
+    promo_by_group = {}
+    for promo in promo_rows:
+        gid = promo.group_jid
+        if gid and gid not in promo_by_group:
+            promo_by_group[gid] = promo
+
+    # Cargar alias de todos los grupos en una sola consulta.
+    alias_rows = (
+        db.query(GroupAlias.group_jid, GroupAlias.custom_name)
+        .filter(GroupAlias.group_jid.in_(group_ids))
+        .all()
+    )
+
+    alias_by_group = {
+        row.group_jid: row.custom_name
+        for row in alias_rows
+        if row.group_jid and row.custom_name
+    }
+
+    blocked_set = set(get_blocked_groups())
+
     out = []
-
     for g in groups:
-        q_today = (
-            db.query(RequestLog)
-            .filter(
-                RequestLog.instance_name == instance_name,
-                RequestLog.source_group_id == g.group_jid,
-                RequestLog.status == "DONE",
-                RequestLog.created_at >= start_day,
-                RequestLog.created_at < end_day,
-            )
-        )
-        
-        q_today = _exclude_private_provider_query(q_today, db, instance_name)
-        
-        today_done = q_today.count()
+        gid = g.group_jid
 
-        q_30d = (
-            db.query(RequestLog)
-            .filter(
-                RequestLog.instance_name == instance_name,
-                RequestLog.source_group_id == g.group_jid,
-                RequestLog.status == "DONE",
-                RequestLog.created_at >= start_30d,
-                RequestLog.created_at < end_30d,
-            )
+        # Evita _get_bot_group_name(db, gid) aquí porque hacía consulta por grupo.
+        group_name = (
+            alias_by_group.get(gid)
+            or getattr(g, "group_name", None)
+            or getattr(g, "name", None)
+            or gid
         )
-        
-        q_30d = _exclude_private_provider_query(q_30d, db, instance_name)
-        done_30d = q_30d.count()
-        
-        q_month = (
-            db.query(RequestLog)
-            .filter(
-                RequestLog.instance_name == instance_name,
-                RequestLog.source_group_id == g.group_jid,
-                RequestLog.status == "DONE",
-                RequestLog.created_at >= start_month,
-                RequestLog.created_at < end_month,
-            )
-        )
-        
-        q_month = _exclude_private_provider_query(q_month, db, instance_name)
-        month_done = q_month.count()
-        
-        q_prev_month = (
-            db.query(RequestLog)
-            .filter(
-                RequestLog.instance_name == instance_name,
-                RequestLog.source_group_id == g.group_jid,
-                RequestLog.status == "DONE",
-                RequestLog.created_at >= start_prev_month,
-                RequestLog.created_at < end_prev_month,
-            )
-        )
-        
-        q_prev_month = _exclude_private_provider_query(q_prev_month, db, instance_name)
-        prev_month_done = q_prev_month.count()
 
-        promo = db.query(GroupPromotion).filter_by(group_jid=g.group_jid).first()
+        promo = promo_by_group.get(gid)
 
         out.append({
-            "group_jid": g.group_jid,
-            "group_name": _get_bot_group_name(db, g.group_jid),
-            "today_done": today_done,
-            "done_30d": done_30d,
-            "month_done": month_done,
-            "prev_month_done": prev_month_done,
-            "blocked": is_group_blocked(g.group_jid),
+            "group_jid": gid,
+            "group_name": group_name,
+            "today_done": today_map.get(gid, 0),
+            "done_30d": d30_map.get(gid, 0),
+            "month_done": month_map.get(gid, 0),
+            "prev_month_done": prev_month_map.get(gid, 0),
+            "blocked": gid in blocked_set,
             "promo_total": int(promo.total_actas or 0) if promo else 0,
             "promo_used": int(promo.used_actas or 0) if promo else 0,
             "promo_active": bool(promo.is_active) if promo else False,
@@ -1136,6 +1156,7 @@ def _bot_group_stats(db: Session, instance_name: str):
 
     out.sort(key=lambda x: (-x["done_30d"], x["group_name"].lower()))
     return out
+
 
 
 def bot_label(inst, db: Session = None):
