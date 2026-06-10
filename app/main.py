@@ -924,12 +924,19 @@ def _exclude_private_provider_query(q, db: Session, instance_name: str):
     private_conditions = []
 
     if personal_provider:
-        private_conditions.append(RequestLog.provider_name == personal_provider)
+        private_conditions.append(
+            func.coalesce(RequestLog.provider_name, "") == personal_provider
+        )
 
     if inst == "docifybot8maya":
         maya_groups = _maya_provider_group_ids()
         if maya_groups:
-            private_conditions.append(RequestLog.provider_group_id.in_(maya_groups))
+            private_conditions.append(
+                and_(
+                    RequestLog.provider_group_id.isnot(None),
+                    RequestLog.provider_group_id.in_(maya_groups),
+                )
+            )
 
     if private_conditions:
         q = q.filter(~or_(*private_conditions))
