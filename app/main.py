@@ -1557,6 +1557,17 @@ def _panel_error_bucket(error_message: str | None, status: str | None = None) ->
         return "Bug interno: variable local no inicializada"
 
     # ==========================================================
+
+    if "CUENTA_INEXISTENTE" in up:
+        return "Cuenta del proveedor inexistente/inválida"
+    
+    if "FRAME_FAILED" in up:
+        return "Falla en marco/consulta secundaria del proveedor"
+    
+    if "FOLIO_DOWNLOAD_FAILED" in up:
+        return "Falló descarga de folio del proveedor"
+
+    # ==========================================================
     # 10) Inválidos / falla general
     # ==========================================================
 
