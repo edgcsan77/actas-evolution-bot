@@ -1379,6 +1379,8 @@ def _panel_error_bucket(error_message: str | None, status: str | None = None) ->
         or "NO REGISTRO" in up
         or "NO HAY REGISTRO" in up
         or "NO HAY REGISTROS" in up
+        or "NO_RECORD" in up
+        or "NO RECORD" in up
     ):
         return "Sin registro en sistema"
 
@@ -1394,8 +1396,14 @@ def _panel_error_bucket(error_message: str | None, status: str | None = None) ->
     if "TRAMITEEXISTENTE" in up or "TRAMITE EXISTENTE" in up or "DUPLIC" in up:
         return "Duplicada / trámite existente"
 
-    if "TIMEOUT" in up or "TIMED OUT" in up or "READ TIMED OUT" in up:
-        return "Timeout / proveedor tardó demasiado"
+    if (
+        "TIMEOUT" in up
+        or "TIMED OUT" in up
+        or "READ TIMED OUT" in up
+        or "AUTO-CIERRE" in up
+        or "AUTO CIERRE" in up
+    ):
+        return "Timeout / auto-cierre por espera"
 
     if (
         "SENDMEDIA" in up
@@ -1481,6 +1489,8 @@ def _provider_accounting_data(
             err_txt.ilike("%NO REGISTRO%"),
             err_txt.ilike("%NO HAY REGISTRO%"),
             err_txt.ilike("%NO HAY REGISTROS%"),
+            err_txt.ilike("%NO_RECORD%"),
+            err_txt.ilike("%NO RECORD%"),
         ),
     )
 
