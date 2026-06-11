@@ -1390,6 +1390,15 @@ def _panel_error_bucket(error_message: str | None, status: str | None = None) ->
     ):
         return "Sin registro en sistema"
 
+    has_identifier = bool(re.search(r"[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d", up))
+
+    if has_identifier and (
+        " SIN" in up
+        or "SSIN" in up
+        or "SINI" in up
+    ):
+        return "Sin registro en sistema"
+
     if "WRONG_ACT_TYPE" in code or "PDF DE OTRO TIPO" in up:
         return "PDF de otro tipo de acta"
 
@@ -1440,6 +1449,35 @@ def _panel_error_bucket(error_message: str | None, status: str | None = None) ->
 
     if "INVALID" in code:
         return "Dato o respuesta inválida"
+
+    if "NO_PROVIDER_FOR_SPECIAL_FORMAT" in up:
+        return "Formato especial sin proveedor compatible"
+
+    if "FALLBACK_NO_PROVIDER3" in up:
+        return "Fallback sin Austram / Provider3 disponible"
+
+    if "DISABLED_BEFORE_PROCESSING" in up:
+        return "Proveedor deshabilitado antes de procesar"
+
+    if "EMPTY_OR_USELESS_HTML" in up:
+        return "Respuesta vacía/inútil del proveedor web"
+
+    if (
+        "403 CLIENT ERROR" in up
+        or "500 SERVER ERROR" in up
+        or "503 SERVER ERROR" in up
+        or "CONNECTION ABORTED" in up
+        or "CONNECTIONRESETERROR" in up
+        or "REMOTEDISCONNECTED" in up
+        or "HTTPSCONNECTIONPOOL" in up
+    ):
+        return "Error de conexión / servidor del proveedor"
+
+    if "'PDF_BYTES'" in up or "PDF_BYTES" in up:
+        return "Bug interno: pdf_bytes faltante"
+    
+    if "LOCAL VARIABLE 'FILENAME'" in up:
+        return "Bug interno: filename no inicializado"
 
     return code[:100] if code else "Error no clasificado"
 
