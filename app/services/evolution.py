@@ -35,51 +35,101 @@ def _normalize_number(number: str) -> str:
     return number
 
 
-def _post_send_media_with_retries(url: str, payload: dict, *, label: str, max_attempts: int = 1):
+def _is_retryable_evolution_error(status_code: int | None, body_text: str = "", exc: Exception | None = None) -> bool:
+    body_up = (body_text or "").upper()
+    exc_up = str(exc or "").upper()
+
+    if status_code in (408, 425, 429, 500, 502, 503, 504):
+        return True
+
+    retry_texts = (
+        "CONNECTION CLOSED",
+        "SERVICE-UNAVAILABLE",
+        "ECONNRESET",
+        "ECONNREFUSED",
+        "ETIMEDOUT",
+        "SOCKET",
+        "TIMEOUT",
+        "PRISMACLIENTKNOWNREQUESTERROR",
+        "FAILED TO ESTABLISH A NEW CONNECTION",
+        "REMOTE END CLOSED CONNECTION",
+        "CONNECTION ABORTED",
+    )
+
+    return any(t in body_up or t in exc_up for t in retry_texts)
+
+
+def _post_send_media_with_retries(url: str, payload: dict, *, label: str, max_attempts: int = 4):
     last_error = None
+    delays = [2, 5, 10]
+
+    media_len = len((payload or {}).get("media") or "")
+    number = (payload or {}).get("number") or ""
+    filename = (payload or {}).get("fileName") or ""
+
+    if not number:
+        raise ValueError(f"{label}_EMPTY_NUMBER")
+
+    if not media_len:
+        raise ValueError(f"{label}_EMPTY_MEDIA")
 
     for attempt in range(1, max_attempts + 1):
         try:
             print(f"{label}_ATTEMPT =", attempt, flush=True)
+            print(f"{label}_TARGET =", {"number": number, "fileName": filename, "media_len": media_len}, flush=True)
 
             resp = requests.post(
                 url,
                 headers=_headers(),
                 json=payload,
-                timeout=(5, 45),
-            )
-
-            print(f"{label}_STATUS =", resp.status_code, flush=True)
-            print(f"{label}_BODY =", resp.text[:1000], flush=True)
-
-            if resp.status_code in (200, 201):
-                return resp.json()
-
-            last_error = requests.HTTPError(
-                f"{resp.status_code} Server Error for url: {url} | body={resp.text[:1000]}",
-                response=resp,
+                timeout=(8, 90),
             )
 
             body_text = resp.text or ""
-            connection_closed = "Connection Closed" in body_text or "CONNECTION CLOSED" in body_text.upper()
-            
-            # Reintentar errores temporales/server.
-            # Evolution a veces responde 400 aunque el problema real sea Connection Closed.
-            if resp.status_code not in (408, 429, 500, 502, 503, 504) and not connection_closed:
+
+            print(f"{label}_STATUS =", resp.status_code, flush=True)
+            print(f"{label}_BODY =", body_text[:1000], flush=True)
+
+            if resp.status_code in (200, 201):
+                try:
+                    return resp.json()
+                except Exception:
+                    return {"ok": True, "raw": body_text[:1000]}
+
+            last_error = requests.HTTPError(
+                f"{resp.status_code} Server Error for url: {url} | body={body_text[:1000]}",
+                response=resp,
+            )
+
+            if not _is_retryable_evolution_error(resp.status_code, body_text):
                 raise last_error
 
         except Exception as e:
             last_error = e
             print(f"{label}_ERROR_ATTEMPT_{attempt} =", str(e), flush=True)
 
+            if attempt >= max_attempts:
+                break
+
+            if not _is_retryable_evolution_error(None, "", e):
+                break
+
         if attempt < max_attempts:
-            time.sleep(2)
+            delay = delays[min(attempt - 1, len(delays) - 1)]
+            print(f"{label}_RETRY_SLEEP =", delay, flush=True)
+            time.sleep(delay)
 
     raise last_error
 
 
-def _post_send_text_with_retries(url: str, payload: dict, *, label: str, max_attempts: int = 1):
+def _post_send_text_with_retries(url: str, payload: dict, *, label: str, max_attempts: int = 2):
     last_error = None
+    delays = [2, 5]
+
+    number = (payload or {}).get("number") or ""
+
+    if not number:
+        raise ValueError(f"{label}_EMPTY_NUMBER")
 
     for attempt in range(1, max_attempts + 1):
         try:
@@ -89,34 +139,42 @@ def _post_send_text_with_retries(url: str, payload: dict, *, label: str, max_att
                 url,
                 headers=_headers(),
                 json=payload,
-                timeout=(5, 20),
-            )
-
-            print(f"{label}_STATUS =", resp.status_code, flush=True)
-            print(f"{label}_BODY =", resp.text[:1000], flush=True)
-
-            if resp.status_code in (200, 201):
-                return resp.json()
-
-            last_error = requests.HTTPError(
-                f"{resp.status_code} Server Error for url: {url} | body={resp.text[:1000]}",
-                response=resp,
+                timeout=(5, 35),
             )
 
             body_text = resp.text or ""
-            connection_closed = "Connection Closed" in body_text or "CONNECTION CLOSED" in body_text.upper()
-            
-            # Reintentar errores temporales/server.
-            # Evolution a veces responde 400 aunque el problema real es socket/conexión cerrada.
-            if resp.status_code not in (408, 429, 500, 502, 503, 504) and not connection_closed:
+
+            print(f"{label}_STATUS =", resp.status_code, flush=True)
+            print(f"{label}_BODY =", body_text[:1000], flush=True)
+
+            if resp.status_code in (200, 201):
+                try:
+                    return resp.json()
+                except Exception:
+                    return {"ok": True, "raw": body_text[:1000]}
+
+            last_error = requests.HTTPError(
+                f"{resp.status_code} Server Error for url: {url} | body={body_text[:1000]}",
+                response=resp,
+            )
+
+            if not _is_retryable_evolution_error(resp.status_code, body_text):
                 raise last_error
 
         except Exception as e:
             last_error = e
             print(f"{label}_ERROR_ATTEMPT_{attempt} =", str(e), flush=True)
 
+            if attempt >= max_attempts:
+                break
+
+            if not _is_retryable_evolution_error(None, "", e):
+                break
+
         if attempt < max_attempts:
-            time.sleep(2)
+            delay = delays[min(attempt - 1, len(delays) - 1)]
+            print(f"{label}_RETRY_SLEEP =", delay, flush=True)
+            time.sleep(delay)
 
     raise last_error
 
@@ -140,7 +198,7 @@ def send_text(number: str, text: str, instance_name: str = None):
         url,
         payload,
         label="SEND_TEXT",
-        max_attempts=1,
+        max_attempts=2,
     )
 
 
@@ -195,7 +253,7 @@ def send_group_text(group_jid: str, text: str, instance_name: str = None):
         url,
         payload,
         label="SEND_GROUP_TEXT",
-        max_attempts=1,
+        max_attempts=2,
     )
 
 
@@ -327,7 +385,7 @@ def send_document_base64(number: str, media_b64: str, filename: str = "acta.pdf"
         url,
         payload,
         label="SEND_DOCUMENT_BASE64",
-        max_attempts=1,
+        max_attempts=4,
     )
 
 
@@ -363,5 +421,5 @@ def send_group_document_base64(group_jid: str, media_b64: str, filename: str = "
         url,
         payload,
         label="SEND_GROUP_DOCUMENT_BASE64",
-        max_attempts=1,
+        max_attempts=4,
     )
