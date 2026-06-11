@@ -8645,6 +8645,18 @@ def panel_actas(
         
         by_provider = list(provider_map.values())
         by_provider.sort(key=lambda x: (-x["total"], x["provider_name"]))
+
+        provider_accounting = _provider_accounting_data(
+            db,
+            time_min=time_min,
+            time_max=time_max,
+            group_jid=group_jid,
+            provider_name=provider_name,
+            act_type=act_type,
+        )
+
+        provider_control_rows = provider_accounting["provider_control_rows"]
+        provider_control_totals = provider_accounting["provider_control_totals"]
         
         by_type_raw = (
             base_q.with_entities(
@@ -10389,14 +10401,69 @@ def panel_actas(
         <div class="box">
           <div class="head">
             <div>
-              <strong>Auditoría de proveedores</strong>
+              <strong>Control contable por proveedor</strong>
               <div class="small">
-                Control contable, errores por proveedor, proveedor + bot y pendientes críticas.
+                Cuadre global de actas recibidas/procesadas por todos los bots en el periodo: {_esc(period_label)}.
               </div>
             </div>
+
             <a class="btn btn-primary" href="{_esc(audit_url)}">
               📊 Ver auditoría completa
             </a>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr style="background:#fff200;">
+                  <th>Proveedor</th>
+                  <th class="right">Total con éxito</th>
+                  <th class="right">Actas sin registro en sistema</th>
+                  <th class="right">Actas erróneas / duplicadas</th>
+                  <th class="right">Otros errores</th>
+                  <th class="right">Pendientes</th>
+                  <th class="right">Total de solicitudes</th>
+                </tr>
+              </thead>
+              <tbody>
+        """
+
+        if provider_control_rows:
+            for r in provider_control_rows:
+                html += f"""
+                <tr>
+                  <td><strong>{_esc(_provider_label(r["provider_name"]))}</strong></td>
+                  <td class="right">{r["total_exito"]}</td>
+                  <td class="right">{r["sin_registro"]}</td>
+                  <td class="right">{r["actas_erroneas"]}</td>
+                  <td class="right">{r["otros_errores"]}</td>
+                  <td class="right">{r["pendientes"]}</td>
+                  <td class="right"><strong>{r["total_solicitudes"]}</strong></td>
+                </tr>
+                """
+
+            html += f"""
+                <tr style="background:#f1f5f9;font-weight:900;">
+                  <td>TOTAL GENERAL</td>
+                  <td class="right">{provider_control_totals["total_exito"]}</td>
+                  <td class="right">{provider_control_totals["sin_registro"]}</td>
+                  <td class="right">{provider_control_totals["actas_erroneas"]}</td>
+                  <td class="right">{provider_control_totals["otros_errores"]}</td>
+                  <td class="right">{provider_control_totals["pendientes"]}</td>
+                  <td class="right">{provider_control_totals["total_solicitudes"]}</td>
+                </tr>
+            """
+        else:
+            html += '<tr><td colspan="7">Sin datos para este periodo.</td></tr>'
+
+        html += """
+              </tbody>
+            </table>
+          </div>
+
+          <div class="small" style="margin-top:10px;color:#64748b;">
+            Fórmula de cuadre:
+            Total de solicitudes = Total con éxito + Sin registro + Actas erróneas/duplicadas + Otros errores + Pendientes.
           </div>
         </div>
         """
