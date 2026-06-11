@@ -1613,17 +1613,26 @@ def _provider_accounting_data(
         RequestLog.status == "ERROR",
         ~err_txt.ilike("NO_PROVIDER_ENABLED%"),
         ~err_txt.ilike("%SESSION_INVALID_OR_EXPIRED%"),
+        ~err_txt.ilike("%SID CAIDO%"),
+        ~err_txt.ilike("%SID CAÍDO%"),
+        ~err_txt.ilike("%NO AUTORIZADO%"),
         or_(
             err_txt.ilike("%SIN REGISTRO%"),
             err_txt.ilike("%SIN_REGISTRO%"),
             err_txt.ilike("%NO_LOCALIZADO%"),
             err_txt.ilike("%NO LOCALIZADO%"),
+            err_txt.ilike("%NO_RECORD%"),
+            err_txt.ilike("%NO RECORD%"),
             err_txt.ilike("%NO_REGISTRO%"),
             err_txt.ilike("%NO REGISTRO%"),
             err_txt.ilike("%NO HAY REGISTRO%"),
             err_txt.ilike("%NO HAY REGISTROS%"),
-            err_txt.ilike("%NO_RECORD%"),
-            err_txt.ilike("%NO RECORD%"),
+            err_txt.ilike("%ACTA NO LOCALIZADA%"),
+    
+            # Respuestas mal escritas de proveedores WhatsApp:
+            err_txt.op("~")("[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[A-Z0-9][0-9].*\\sSIN\\b"),
+            err_txt.op("~")("[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[A-Z0-9][0-9].*SSIN"),
+            err_txt.op("~")("[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[A-Z0-9][0-9].*SINI"),
         ),
     )
 
