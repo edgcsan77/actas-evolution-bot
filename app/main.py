@@ -13901,7 +13901,7 @@ def _provider_negative_response_info(text_body: str | None) -> dict:
 
     has_long_negative = any(re.search(p, up) for p in long_negative_patterns)
 
-    short_tokens = {"SIN", "SIN.", "SIN,", "S/N", "SN", "-", ".", "N/A", "NA", "NB", "VERI", "VERIFICAR"}
+    short_tokens = {"SIN", "SIN.", "SIN,", "S/N", "SN", "-", "N/A", "NA", "NB", "VERI", "VERIFICAR"}
 
     clean_short = up.strip()
     is_short_negative_alone = clean_short in short_tokens
