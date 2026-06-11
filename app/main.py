@@ -3235,8 +3235,6 @@ def panel_audit_group(
     if not _is_valid_admin_panel_token(request):
         return HTMLResponse("No autorizado", status_code=403)
 
-    current_token = (request.query_params.get("token") or "").strip()
-
     period_view = range or view
     time_min, time_max, view = _panel_period_bounds(period_view, date_from, date_to)
 
@@ -8416,6 +8414,8 @@ def panel_actas(
 ):
     if not _is_valid_admin_panel_token(request):
         return HTMLResponse("No autorizado", status_code=403)
+
+    current_token = (request.query_params.get("token") or "").strip()
 
     try:
         cache_key = _panel_cache_key(
