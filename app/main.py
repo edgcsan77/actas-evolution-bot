@@ -36,6 +36,7 @@ from app.worker import (
     _handle_api_charge_after_done,
     _detect_pdf_act_type,
     _expected_act_type_group,
+    retry_pdf_delivery,
 )
 from app.services.provider3 import Provider3Client
 from app.services.provider4 import Provider4Client
@@ -16322,9 +16323,32 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     print("DELIVERY_FAILED =", str(delivery_exc), flush=True)
                 
                     open_req.status = "ERROR"
-                    open_req.error_message = f"DELIVERY_FAILED: {str(delivery_exc)[:300]}"
+                    open_req.error_message = f"DELIVERY_FAILED_PENDING_RETRY: {str(delivery_exc)[:300]}"
                     open_req.updated_at = _utc_now_naive()
                     db.commit()
+                
+                    try:
+                        if getattr(open_req, "pdf_url", None):
+                            request_queue.enqueue_in(
+                                timedelta(seconds=30),
+                                retry_pdf_delivery,
+                                open_req.id,
+                                1,
+                            )
+                
+                            print("MAIN_DELIVERY_FAILED_RETRY_SCHEDULED =", {
+                                "req_id": open_req.id,
+                                "pdf_url": open_req.pdf_url,
+                                "instance": open_req.instance_name,
+                                "source_group_id": open_req.source_group_id,
+                            }, flush=True)
+                        else:
+                            print("MAIN_DELIVERY_FAILED_NO_PDF_URL_FOR_RETRY =", {
+                                "req_id": open_req.id,
+                                "provider_media_url": open_req.provider_media_url,
+                            }, flush=True)
+                    except Exception as retry_exc:
+                        print("MAIN_DELIVERY_FAILED_RETRY_SCHEDULE_ERROR =", str(retry_exc), flush=True)
                 
                     try:
                         redis_conn.delete(pdf_dedupe_key)
