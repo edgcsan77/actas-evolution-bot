@@ -96,6 +96,7 @@ class Settings(BaseSettings):
         "NO ESTA|"
         "SIN|"
         "ERROR! CURP INVALIDA|"
+        "ERROR!|"
         "NO SE HA ENCONTRADO INFORMACION|"
         "LO SIENTO, NO SE HA ENCONTRADO INFORMACION|"
         "NO SE ENCONTRARON REGISTROS"
