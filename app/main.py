@@ -1630,9 +1630,15 @@ def _provider_accounting_data(
             err_txt.ilike("%ACTA NO LOCALIZADA%"),
     
             # Respuestas mal escritas de proveedores WhatsApp:
-            err_txt.op("~")("[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[A-Z0-9][0-9].*\\sSIN\\b"),
-            err_txt.op("~")("[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[A-Z0-9][0-9].*SSIN"),
-            err_txt.op("~")("[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[A-Z0-9][0-9].*SINI"),
+            err_txt.op("~")(
+                "[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[A-Z0-9][0-9].*[[:space:]]SIN([[:space:][:punct:]]|$)"
+            ),
+            err_txt.op("~")(
+                "[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[A-Z0-9][0-9].*SSIN"
+            ),
+            err_txt.op("~")(
+                "[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[A-Z0-9][0-9].*SINI"
+            ),
         ),
     )
 
