@@ -4,6 +4,7 @@ import threading
 import re
 import json
 import random
+import requests
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
@@ -21,7 +22,7 @@ from rq import get_current_job
 from app.queue import redis_conn, request_queue, slow_request_queue
 from app.provider_status_cache import refresh_providers_status
 from app.utils.bot_limits import increment_bot_used_and_maybe_block
-from app.pdf_storage import save_request_pdf_to_r2
+from app.pdf_storage import save_request_pdf_to_r2, generate_r2_presigned_download_url
 
 from zoneinfo import ZoneInfo
 
@@ -967,25 +968,21 @@ def _fallback_to_provider3_web(req, db, process_started_ts):
     if _store_api_pdf_result(req, db, safe_media_b64, filename, "BASE64_PROVIDER3_API"):
         return
 
-    if req.source_group_id:
-        send_group_document_base64(
-            req.source_group_id,
-            safe_media_b64,
-            filename=filename,
-            caption=caption_text,
-            instance_name=instance
-        )
-    else:
-        send_document_base64(
-            req.requester_wa_id,
-            safe_media_b64,
-            filename=filename,
-            caption=caption_text,
-            instance_name=instance
-        )
+    delivered = _deliver_pdf_base64_with_retries(
+        req,
+        db,
+        safe_media_b64,
+        filename,
+        caption_text,
+        instance,
+        label="PROVIDER3_FALLBACK",
+    )
+    
+    if not delivered:
+        return
 
     req.provider_media_url = "BASE64_PROVIDER3"
-    req.pdf_url = None
+    #req.pdf_url = None
     req.status = "DONE"
     req.error_message = None
     req.updated_at = _utc_now_naive()
@@ -1246,6 +1243,195 @@ def _require_pdf_bytes(result, provider_name: str, req) -> bytes:
         raise RuntimeError(f"{provider}_PDF_BYTES_NOT_PDF")
 
     return pdf_bytes
+
+
+def _send_pdf_base64_to_client_once(req, safe_media_b64: str, filename: str, caption_text: str, instance: str):
+    if req.source_group_id:
+        return send_group_document_base64(
+            req.source_group_id,
+            safe_media_b64,
+            filename=filename,
+            caption=caption_text,
+            instance_name=instance,
+        )
+
+    return send_document_base64(
+        req.requester_wa_id,
+        safe_media_b64,
+        filename=filename,
+        caption=caption_text,
+        instance_name=instance,
+    )
+
+
+def _schedule_delivery_retry(request_id: int, attempt: int = 1, delay_sec: int = 30):
+    try:
+        request_queue.enqueue_in(
+            timedelta(seconds=delay_sec),
+            retry_pdf_delivery,
+            request_id,
+            attempt,
+        )
+
+        print("PDF_DELIVERY_RETRY_SCHEDULED =", {
+            "request_id": request_id,
+            "attempt": attempt,
+            "delay_sec": delay_sec,
+        }, flush=True)
+
+    except Exception as e:
+        print("PDF_DELIVERY_RETRY_SCHEDULE_ERROR =", {
+            "request_id": request_id,
+            "attempt": attempt,
+            "error": str(e),
+        }, flush=True)
+
+
+def _deliver_pdf_base64_with_retries(
+    req,
+    db,
+    safe_media_b64: str,
+    filename: str,
+    caption_text: str,
+    instance: str,
+    *,
+    label: str,
+) -> bool:
+    last_error = None
+
+    for attempt in range(1, 4):
+        try:
+            _send_pdf_base64_to_client_once(
+                req,
+                safe_media_b64,
+                filename,
+                caption_text,
+                instance,
+            )
+
+            print(f"{label}_DELIVERY_OK_ATTEMPT_{attempt} =", req.id, flush=True)
+            return True
+
+        except Exception as e:
+            last_error = e
+            print(f"{label}_DELIVERY_ERROR_ATTEMPT_{attempt} =", str(e), flush=True)
+
+            if attempt < 3:
+                time.sleep(3 * attempt)
+
+    # Si llegó aquí, falló la entrega. No perder PDF.
+    req.status = "ERROR"
+    req.error_message = f"DELIVERY_FAILED_PENDING_RETRY: {str(last_error)[:300]}"
+    req.updated_at = _utc_now_naive()
+    db.commit()
+
+    if getattr(req, "pdf_url", None):
+        _schedule_delivery_retry(req.id, attempt=1, delay_sec=30)
+    else:
+        print("PDF_DELIVERY_FAILED_NO_R2_URL =", {
+            "request_id": req.id,
+            "curp": req.curp,
+            "provider": req.provider_name,
+        }, flush=True)
+
+    try:
+        _notify_support_error(
+            req,
+            "DELIVERY_FAILED_PENDING_RETRY",
+            f"PDF generado, pero falló entrega WhatsApp. Se programó reintento automático. error={str(last_error)[:500]}"
+        )
+    except Exception as support_exc:
+        print("DELIVERY_FAILED_PENDING_RETRY_SUPPORT_ERROR =", str(support_exc), flush=True)
+
+    return False
+
+
+def retry_pdf_delivery(request_id: int, attempt: int = 1):
+    db = SessionLocal()
+
+    try:
+        req = db.query(RequestLog).filter(RequestLog.id == request_id).first()
+
+        if not req:
+            print("RETRY_PDF_DELIVERY_REQUEST_NOT_FOUND =", request_id, flush=True)
+            return
+
+        if req.status == "DONE":
+            print("RETRY_PDF_DELIVERY_ALREADY_DONE =", request_id, flush=True)
+            return
+
+        if not req.pdf_url:
+            print("RETRY_PDF_DELIVERY_NO_PDF_URL =", {
+                "request_id": request_id,
+                "status": req.status,
+                "error_message": req.error_message,
+            }, flush=True)
+            return
+
+        instance = req.instance_name or settings.EVOLUTION_INSTANCE or "docifybot8"
+        filename = _default_pdf_filename(req)
+
+        url = generate_r2_presigned_download_url(req.pdf_url)
+        r = requests.get(url, timeout=(5, 45))
+        r.raise_for_status()
+
+        pdf_bytes = r.content
+
+        if b"%PDF" not in pdf_bytes[:30]:
+            raise RuntimeError("RETRY_PDF_DELIVERY_NOT_PDF")
+
+        safe_media_b64 = base64.b64encode(pdf_bytes).decode()
+
+        caption_text = "📄 Reenvío automático de acta generada previamente."
+
+        _send_pdf_base64_to_client_once(
+            req,
+            safe_media_b64,
+            filename,
+            caption_text,
+            instance,
+        )
+
+        req.status = "DONE"
+        req.error_message = None
+        req.updated_at = _utc_now_naive()
+        db.commit()
+
+        try:
+            _after_done_accounting(req, db)
+        except Exception as accounting_exc:
+            print("RETRY_PDF_DELIVERY_ACCOUNTING_ERROR =", str(accounting_exc), flush=True)
+
+        print("RETRY_PDF_DELIVERY_OK =", {
+            "request_id": request_id,
+            "attempt": attempt,
+            "instance": instance,
+            "source_group_id": req.source_group_id,
+        }, flush=True)
+
+    except Exception as e:
+        print("RETRY_PDF_DELIVERY_ERROR =", {
+            "request_id": request_id,
+            "attempt": attempt,
+            "error": str(e),
+        }, flush=True)
+
+        try:
+            req = db.query(RequestLog).filter(RequestLog.id == request_id).first()
+            if req:
+                req.status = "ERROR"
+                req.error_message = f"DELIVERY_FAILED_RETRY_{attempt}: {str(e)[:300]}"
+                req.updated_at = _utc_now_naive()
+                db.commit()
+        except Exception as db_exc:
+            print("RETRY_PDF_DELIVERY_DB_ERROR =", str(db_exc), flush=True)
+
+        if attempt < 5:
+            next_delay = [60, 180, 300, 600][min(attempt - 1, 3)]
+            _schedule_delivery_retry(request_id, attempt=attempt + 1, delay_sec=next_delay)
+
+    finally:
+        db.close()
 
 
 def _get_or_create_provider(db, provider_name: str, default_enabled: bool):
@@ -3354,42 +3540,23 @@ def process_request(request_id: int):
             print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
             print("PROVIDER3_SEND_INSTANCE =", instance, flush=True)
         
-            for attempt in range(3):
-                try:
-                    if req.source_group_id:
-                        send_group_document_base64(
-                            req.source_group_id,
-                            safe_media_b64,
-                            filename=filename,
-                            caption=caption_text,
-                            instance_name=instance
-                        )
-                    else:
-                        send_document_base64(
-                            req.requester_wa_id,
-                            safe_media_b64,
-                            filename=filename,
-                            caption=caption_text,
-                            instance_name=instance
-                        )
-        
-                    send_ok = True
-                    print(f"PROVIDER3_SEND_OK_ATTEMPT_{attempt+1} =", req.id, flush=True)
-                    break
-        
-                except Exception as e:
-                    print(f"PDF_SEND_ATTEMPT_{attempt+1}_ERROR =", str(e), flush=True)
-                    if attempt == 2:
-                        raise
-                    time.sleep(2)
-        
-            if not send_ok:
-                raise RuntimeError("PROVIDER3_PDF_SEND_FAILED")
+            delivered = _deliver_pdf_base64_with_retries(
+                req,
+                db,
+                safe_media_b64,
+                filename,
+                caption_text,
+                instance,
+                label="PROVIDER3",
+            )
+            
+            if not delivered:
+                return
         
             redis_conn.set(delivery_key, "1", ex=3600)
         
             req.provider_media_url = "BASE64_PROVIDER3"
-            req.pdf_url = None
+            #req.pdf_url = None
             req.status = "DONE"
             req.error_message = None
             req.updated_at = _utc_now_naive()
@@ -3672,43 +3839,23 @@ def process_request(request_id: int):
             print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
             print(f"{provider_name}_SEND_INSTANCE =", instance, flush=True)
         
-            for attempt in range(3):
-                try:
-                    if req.source_group_id:
-                        send_group_document_base64(
-                            req.source_group_id,
-                            safe_media_b64,
-                            filename=filename,
-                            caption=caption_text,
-                            instance_name=instance
-                        )
-                    else:
-                        send_document_base64(
-                            req.requester_wa_id,
-                            safe_media_b64,
-                            filename=filename,
-                            caption=caption_text,
-                            instance_name=instance
-                        )
-        
-                    send_ok = True
-                    print(f"{provider_name}_SEND_OK_ATTEMPT_{attempt+1} =", req.id, flush=True)
-                    print(f"{provider_name}_SEND_INSTANCE =", instance, flush=True)
-                    break
-        
-                except Exception as e:
-                    print(f"{provider_name}_SEND_ATTEMPT_{attempt+1}_ERROR =", str(e), flush=True)
-                    if attempt == 2:
-                        raise
-                    time.sleep(2)
-        
-            if not send_ok:
-                raise RuntimeError(f"{provider_name}_PDF_SEND_FAILED")
+            delivered = _deliver_pdf_base64_with_retries(
+                req,
+                db,
+                safe_media_b64,
+                filename,
+                caption_text,
+                instance,
+                label=provider_name,
+            )
+            
+            if not delivered:
+                return
         
             redis_conn.set(delivery_key, "1", ex=3600)
         
             req.provider_media_url = f"BASE64_{provider_name}"
-            req.pdf_url = None
+            #req.pdf_url = None
             req.status = "DONE"
             req.error_message = None
             req.updated_at = _utc_now_naive()
@@ -3813,25 +3960,21 @@ def process_request(request_id: int):
             print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
             print("PROVIDER7_SEND_INSTANCE =", instance, flush=True)
         
-            if req.source_group_id:
-                send_group_document_base64(
-                    req.source_group_id,
-                    safe_media_b64,
-                    filename=filename,
-                    caption=caption_text,
-                    instance_name=instance
-                )
-            else:
-                send_document_base64(
-                    req.requester_wa_id,
-                    safe_media_b64,
-                    filename=filename,
-                    caption=caption_text,
-                    instance_name=instance
-                )
+            delivered = _deliver_pdf_base64_with_retries(
+                req,
+                db,
+                safe_media_b64,
+                filename,
+                caption_text,
+                instance,
+                label="PROVIDER7",
+            )
+            
+            if not delivered:
+                return
         
             req.provider_media_url = "BASE64_PROVIDER7"
-            req.pdf_url = None
+            #req.pdf_url = None
             req.status = "DONE"
             req.error_message = None
             req.updated_at = _utc_now_naive()
