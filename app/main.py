@@ -10153,7 +10153,7 @@ def panel_actas(
           <div class="head">
             <strong>Control contable por proveedor</strong>
             <span class="small">
-              Cuadre de actas recibidas/procesadas por docifybot8 en el periodo: {_esc(period_label)}.
+              Cuadre global de actas recibidas/procesadas por todos los bots en el periodo: {_esc(period_label)}.
             </span>
           </div>
 
