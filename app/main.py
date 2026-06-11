@@ -1359,6 +1359,7 @@ def _panel_error_bucket(error_message: str | None, status: str | None = None) ->
     if not raw:
         return "Error sin detalle"
 
+    # Código corto para errores tipo PROVIDER4_NO_RECORD:CURP
     code = up
 
     if ":" in code:
@@ -1367,14 +1368,38 @@ def _panel_error_bucket(error_message: str | None, status: str | None = None) ->
     if " | " in code:
         code = code.split(" | ", 1)[0].strip()
 
-    code = re.sub(r"^PROVIDER(?:10|11|[1-9])_", "", code)
+    code = re.sub(r"^PROVIDER(?:10|11|12|[1-9])_", "", code)
     code = re.sub(r"^MAYAPROVIDER_", "", code)
+
+    # ==========================================================
+    # 1) Sin proveedor / sesión / configuración
+    # ==========================================================
+
+    if "NO_PROVIDER_FOR_SPECIAL_FORMAT" in up:
+        return "Formato especial sin proveedor compatible"
 
     if "NO_PROVIDER_ENABLED" in up:
         return "Sin proveedor habilitado / sesión caída"
-    
-    if "SESSION_INVALID_OR_EXPIRED" in up or "SID CAIDO" in up or "NO AUTORIZADO" in up:
+
+    if (
+        "SESSION_INVALID_OR_EXPIRED" in up
+        or "SID CAIDO" in up
+        or "SID CAÍDO" in up
+        or "NO AUTORIZADO" in up
+        or '"ERROR":"NO AUTORIZADO"' in up
+        or "NO AUTORIZADO" in code
+    ):
         return "Sesión/SID del proveedor caído"
+
+    if "NOT_CONFIGURED" in code or "GROUPS_NOT_CONFIGURED" in code:
+        return "Falta configuración del proveedor/grupo"
+
+    if "DISABLED_BEFORE_PROCESSING" in up:
+        return "Proveedor deshabilitado antes de procesar"
+
+    # ==========================================================
+    # 2) Sin registro / no localizado
+    # ==========================================================
 
     if (
         "SIN REGISTRO" in up
@@ -1387,29 +1412,49 @@ def _panel_error_bucket(error_message: str | None, status: str | None = None) ->
         or "NO HAY REGISTROS" in up
         or "NO_RECORD" in up
         or "NO RECORD" in up
+        or "ACTA NO LOCALIZADA" in up
     ):
         return "Sin registro en sistema"
 
-    has_identifier = bool(re.search(r"[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d", up))
+    has_identifier = bool(
+        re.search(r"[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d", up)
+    )
 
     if has_identifier and (
         " SIN" in up
         or "SSIN" in up
         or "SINI" in up
+        or " SIN " in up
     ):
         return "Sin registro en sistema"
 
-    if "WRONG_ACT_TYPE" in code or "PDF DE OTRO TIPO" in up:
+    # ==========================================================
+    # 3) Acta/PDF incorrecto o duplicado
+    # ==========================================================
+
+    if "WRONG_ACT_TYPE" in up or "PDF DE OTRO TIPO" in up:
         return "PDF de otro tipo de acta"
 
-    if "WRONG_CURP_IN_PDF" in code or "NO CORRESPONDE" in up:
+    if "WRONG_CURP_IN_PDF" in up or "NO CORRESPONDE" in up:
         return "PDF no corresponde al dato solicitado"
 
-    if "WRONG_ELECTRONIC" in code:
+    if "WRONG_ELECTRONIC" in up:
         return "PDF no corresponde a cadena/folio"
 
-    if "TRAMITEEXISTENTE" in up or "TRAMITE EXISTENTE" in up or "DUPLIC" in up:
+    if (
+        "TRAMITEEXISTENTE" in up
+        or "TRAMITE EXISTENTE" in up
+        or "DUPLICADO_IGNORADO" in up
+        or "DUPLIC" in up
+    ):
         return "Duplicada / trámite existente"
+
+    if "ACT_TYPE_NOT_ALLOWED" in code:
+        return "Tipo de acta no permitido para proveedor"
+
+    # ==========================================================
+    # 4) Timeout / auto-cierre
+    # ==========================================================
 
     if (
         "TIMEOUT" in up
@@ -1417,50 +1462,72 @@ def _panel_error_bucket(error_message: str | None, status: str | None = None) ->
         or "READ TIMED OUT" in up
         or "AUTO-CIERRE" in up
         or "AUTO CIERRE" in up
+        or "TASK EXCEEDED MAXIMUM TIMEOUT" in up
+        or "ESPERA MAYOR" in up
     ):
         return "Timeout / auto-cierre por espera"
 
+    # ==========================================================
+    # 5) Falla WhatsApp / Evolution local
+    # ==========================================================
+
     if (
         "SENDMEDIA" in up
+        or "SENDTEXT" in up
+        or "MESSAGE/SENDMEDIA" in up
+        or "MESSAGE/SENDTEXT" in up
+        or "127.0.0.1" in up
+        or "PORT=8080" in up
         or "CONNECTION CLOSED" in up
-        or "PDF_SEND_FAILED" in code
-        or "DELIVERY_FAILED" in code
-        or "SEND_FAILED" in code
+        or "SERVICE-UNAVAILABLE" in up
+        or "PDF_SEND_FAILED" in up
+        or "DELIVERY_FAILED" in up
+        or "SEND_FAILED" in up
+        or "PRISMACLIENTKNOWNREQUESTERROR" in up
     ):
         return "Falla de envío / entrega WhatsApp"
+
+    # ==========================================================
+    # 6) Respuesta web/proveedor incompleta
+    # ==========================================================
 
     if "NO_PDF" in code or "NO PDF" in up:
         return "Proveedor no devolvió PDF"
 
-    if "NOT_CONFIGURED" in code or "GROUPS_NOT_CONFIGURED" in code:
-        return "Falta configuración del proveedor/grupo"
+    if "EMPTY_OR_USELESS_HTML" in up:
+        return "Respuesta vacía/inútil del proveedor web"
 
-    if "ACT_TYPE_NOT_ALLOWED" in code:
-        return "Tipo de acta no permitido para proveedor"
+    if "FINAL_PDF_INCOMPLETE" in up:
+        return "PDF final incompleto"
 
-    if "FAILED_FALLBACK_TO_" in code:
-        return "Falló proveedor inicial y pasó a fallback"
+    if "PDF_NOT_READABLE" in up:
+        return "PDF no legible"
 
-    if "FALLBACK_NO_PROVIDER_AVAILABLE" in code:
-        return "Falló y no hubo proveedor de respaldo"
+    if "NEW_VERIFICAR_UNKNOWN_RESPONSE" in up:
+        return "Respuesta desconocida al verificar PDF"
 
-    if "FAILED" in code:
-        return "Falla general del proveedor/sistema"
+    if "NEW_PETICION_UNKNOWN_RESPONSE" in up:
+        return "Respuesta desconocida al crear petición"
 
-    if "INVALID" in code:
-        return "Dato o respuesta inválida"
+    if "NEW_API_CHAIN_NOT_SUPPORTED_YET" in up:
+        return "Cadena no soportada por API nueva"
 
-    if "NO_PROVIDER_FOR_SPECIAL_FORMAT" in up:
-        return "Formato especial sin proveedor compatible"
+    # ==========================================================
+    # 7) Fallbacks
+    # ==========================================================
 
     if "FALLBACK_NO_PROVIDER3" in up:
         return "Fallback sin Austram / Provider3 disponible"
 
-    if "DISABLED_BEFORE_PROCESSING" in up:
-        return "Proveedor deshabilitado antes de procesar"
+    if "FALLBACK_NO_PROVIDER_AVAILABLE" in up:
+        return "Falló y no hubo proveedor de respaldo"
 
-    if "EMPTY_OR_USELESS_HTML" in up:
-        return "Respuesta vacía/inútil del proveedor web"
+    if "FAILED_FALLBACK_TO_" in up:
+        return "Falló proveedor inicial y pasó a fallback"
+
+    # ==========================================================
+    # 8) Errores de conexión externa del proveedor web
+    # ==========================================================
 
     if (
         "403 CLIENT ERROR" in up
@@ -1470,14 +1537,34 @@ def _panel_error_bucket(error_message: str | None, status: str | None = None) ->
         or "CONNECTIONRESETERROR" in up
         or "REMOTEDISCONNECTED" in up
         or "HTTPSCONNECTIONPOOL" in up
+        or "MAX RETRIES EXCEEDED" in up
+        or "CONNECTION RESET BY PEER" in up
+        or "REMOTE END CLOSED CONNECTION" in up
     ):
         return "Error de conexión / servidor del proveedor"
 
+    # ==========================================================
+    # 9) Bugs internos
+    # ==========================================================
+
     if "'PDF_BYTES'" in up or "PDF_BYTES" in up:
         return "Bug interno: pdf_bytes faltante"
-    
+
     if "LOCAL VARIABLE 'FILENAME'" in up:
         return "Bug interno: filename no inicializado"
+
+    if "CANNOT ACCESS LOCAL VARIABLE" in up:
+        return "Bug interno: variable local no inicializada"
+
+    # ==========================================================
+    # 10) Inválidos / falla general
+    # ==========================================================
+
+    if "INVALID" in code or "CURP INVALIDA" in up or "CURP INVÁLIDA" in up:
+        return "Dato o respuesta inválida"
+
+    if "FAILED" in code or "FAILED" in up:
+        return "Falla general del proveedor/sistema"
 
     return code[:100] if code else "Error no clasificado"
 
