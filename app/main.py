@@ -261,6 +261,17 @@ def should_send_extra_text(group_id: str | None) -> bool:
 
 SLOW_REQUEST_PROVIDERS = {"PROVIDER4", "PROVIDER10", "PROVIDER11"}
 
+WHATSAPP_TEXT_PROVIDERS = [
+    "PROVIDER1",   # ADMIN DIGITAL
+    "PROVIDER2",
+    "PROVIDER5",   # LUIS SID
+    "PROVIDER6",   # ACTAS ESCALANTE
+    "PROVIDER8",
+    "PROVIDER9",
+    "PROVIDER12",
+    "MAYAPROVIDER",
+]
+
 
 def _enqueue_process_request(req, reason: str = ""):
     provider = (getattr(req, "provider_name", None) or "").strip().upper()
@@ -13844,6 +13855,271 @@ def _extract_provider_no_record_identifiers(text_body: str | None) -> list[str]:
 
     return found
 
+
+def _provider_negative_response_info(text_body: str | None) -> dict:
+    """
+    Detecta respuestas negativas de proveedores WhatsApp en 2 formas:
+
+    1) Respuesta/reply al mensaje del bot:
+       SIN
+       -
+       No hay registros disponibles
+
+    2) Respuesta mencionando el dato:
+       MAXV471219MPLRXC02 No hay registros disponibles
+       COLJ740826MSRRPQ04 SIN
+       COLJ740826MSRRPQ04 -
+    """
+    raw = (text_body or "").replace("\u00A0", " ").strip()
+    norm = normalize_text(raw)
+    up = norm.upper()
+
+    identifiers = _extract_provider_no_record_identifiers(raw)
+
+    loose_id = _extract_provider_identifier_loose(raw)
+    if loose_id and loose_id not in identifiers:
+        identifiers.append(loose_id)
+
+    long_negative_patterns = [
+        r"\bNO\s+HAY\s+REGISTROS?\s+DISPONIBLES?\b",
+        r"\bNO\s+HAY\s+REGISTROS?\b",
+        r"\bNO\s+SE\s+ENCONTRO\b",
+        r"\bNO\s+SE\s+ENCONTR[ÓO]\b",
+        r"\bNO\s+SE\s+ENCUENTRA\b",
+        r"\bNO\s+LOCALIZAD[OA]\b",
+        r"\bNO\s+EXISTE\b",
+        r"\bNO\s+EST[ÁA]\b",
+        r"\bSIN\s+REGISTROS?\b",
+        r"\bSIN\s+RESULTADOS?\b",
+        r"\bSIN\s+DATOS\b",
+        r"\bACTA\s+NO\s+ENCONTRADA\b",
+        r"\bDOCUMENTO\s+NO\s+ENCONTRADO\b",
+        r"\bERROR!?\s+CURP\s+INV[ÁA]LIDA\b",
+        r"\bNO\s+SE\s+HA\s+ENCONTRADO\b",
+        r"\bNO\s+SE\s+ENCONTRARON\b",
+    ]
+
+    has_long_negative = any(re.search(p, up) for p in long_negative_patterns)
+
+    short_tokens = {"SIN", "SIN.", "SIN,", "S/N", "SN", "-", ".", "N/A", "NA", "NB", "VERI", "VERIFICAR"}
+
+    clean_short = up.strip()
+    is_short_negative_alone = clean_short in short_tokens
+
+    curp_pat = r"[A-Z][AEIOUX][A-Z]{2}\d{6}[HM][A-Z]{5}[A-Z0-9]\d"
+    chain_pat = r"\d{18,25}"
+    id_pat = rf"(?:{curp_pat}|{chain_pat})"
+
+    is_identifier_plus_short_negative = bool(
+        re.search(
+            rf"\b(?P<id>{id_pat})\b\s*(?:[-:|,;]*)\s*(?:SIN|SIN\.|SIN,|S/N|SN|-|\.|N/A|NA|NB|VERI|VERIFICAR)\s*$",
+            up,
+            re.IGNORECASE,
+        )
+    )
+
+    if is_identifier_plus_short_negative:
+        m = re.search(rf"\b(?P<id>{id_pat})\b", up, re.IGNORECASE)
+        if m:
+            ident = re.sub(r"[^A-Z0-9]", "", m.group("id").upper())
+            if ident and ident not in identifiers:
+                identifiers.append(ident)
+
+    is_negative = bool(
+        has_long_negative
+        or is_short_negative_alone
+        or is_identifier_plus_short_negative
+    )
+
+    return {
+        "is_negative": is_negative,
+        "identifiers": identifiers,
+        "is_short_negative_alone": is_short_negative_alone,
+        "has_long_negative": has_long_negative,
+        "raw": raw,
+        "norm": up,
+    }
+
+
+def _notify_client_no_record(open_req: RequestLog):
+    msg = (
+        f"❌ No hay registros disponibles.\n"
+        f"Dato: {open_req.curp}\n"
+        f"Tipo: {open_req.act_type}\n\n"
+        f"Verificar que la CURP esté certificada en RENAPO"
+    )
+
+    _deliver_text_result(open_req, msg)
+
+
+def _close_provider_negative_response(
+    db: Session,
+    *,
+    source_chat_id: str,
+    quoted_msg_id: str | None,
+    text_body: str | None,
+) -> dict:
+    """
+    Cierra solicitudes PROCESSING/QUEUED cuando proveedor WhatsApp responde negativo.
+
+    Orden seguro:
+    1) Si viene quoted_msg_id, cerrar por provider_message_id.
+    2) Si viene CURP/cadena en texto, cerrar por provider_group_id + curp.
+    3) Si no encontró por grupo, cerrar por CURP solo si hay match único reciente.
+    """
+    info = _provider_negative_response_info(text_body)
+
+    if not info["is_negative"]:
+        return {"closed": False, "reason": "not_negative"}
+
+    text_norm = info["norm"]
+    negative_act_group = _text_mentions_act_type_group(text_norm)
+
+    def _pick_by_type(rows):
+        if not rows:
+            return None
+
+        if negative_act_group:
+            typed = [
+                r for r in rows
+                if _expected_act_type_group(r.act_type) == negative_act_group
+            ]
+
+            print("NEGATIVE_PICK_BY_TYPE =", {
+                "negative_act_group": negative_act_group,
+                "candidate_ids": [r.id for r in rows],
+                "candidate_types": [r.act_type for r in rows],
+                "typed_ids": [r.id for r in typed],
+            }, flush=True)
+
+            if len(typed) == 1:
+                return typed[0]
+
+            return None
+
+        if len(rows) == 1:
+            return rows[0]
+
+        print("NEGATIVE_AMBIGUOUS_WITHOUT_TYPE =", {
+            "candidate_ids": [r.id for r in rows],
+            "candidate_types": [r.act_type for r in rows],
+            "text": info["raw"][:180],
+        }, flush=True)
+
+        return None
+
+    open_req = None
+    match_mode = ""
+
+    # 1) Forma reply/cita: proveedor responde "SIN", "-", "No hay registros..."
+    if quoted_msg_id:
+        rows = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.provider_group_id == source_chat_id,
+                RequestLog.provider_message_id == quoted_msg_id,
+                RequestLog.status.in_(["QUEUED", "PROCESSING"]),
+                RequestLog.provider_name.in_(WHATSAPP_TEXT_PROVIDERS),
+            )
+            .order_by(RequestLog.created_at.desc())
+            .all()
+        )
+
+        open_req = _pick_by_type(rows)
+        match_mode = "quoted_msg_id"
+
+    # 2) Forma con CURP/cadena en el texto.
+    if not open_req:
+        for ident in info["identifiers"]:
+            rows = (
+                db.query(RequestLog)
+                .filter(
+                    RequestLog.provider_group_id == source_chat_id,
+                    RequestLog.curp == ident,
+                    RequestLog.status.in_(["QUEUED", "PROCESSING"]),
+                    RequestLog.provider_name.in_(WHATSAPP_TEXT_PROVIDERS),
+                )
+                .order_by(RequestLog.created_at.desc())
+                .all()
+            )
+
+            open_req = _pick_by_type(rows)
+            match_mode = "provider_group_id_curp"
+
+            if open_req:
+                break
+
+    # 3) Último fallback: por CURP/cadena sin grupo, solo si hay match único reciente.
+    # Esto ayuda si provider_group_id quedó raro, pero evita cerrar solicitudes equivocadas.
+    if not open_req:
+        recent_limit = _utc_now_naive() - timedelta(hours=18)
+
+        for ident in info["identifiers"]:
+            rows = (
+                db.query(RequestLog)
+                .filter(
+                    RequestLog.curp == ident,
+                    RequestLog.status.in_(["QUEUED", "PROCESSING"]),
+                    RequestLog.provider_name.in_(WHATSAPP_TEXT_PROVIDERS),
+                    RequestLog.created_at >= recent_limit,
+                )
+                .order_by(RequestLog.created_at.desc())
+                .limit(20)
+                .all()
+            )
+
+            open_req = _pick_by_type(rows)
+            match_mode = "curp_recent_unique"
+
+            if open_req:
+                break
+
+    if not open_req:
+        print("PROVIDER_NEGATIVE_WITHOUT_MATCH =", {
+            "source_chat_id": source_chat_id,
+            "quoted_msg_id": quoted_msg_id,
+            "identifiers": info["identifiers"],
+            "text": info["raw"][:250],
+        }, flush=True)
+
+        return {
+            "closed": False,
+            "reason": "negative_without_match",
+            "identifiers": info["identifiers"],
+        }
+
+    open_req.status = "ERROR"
+    open_req.error_message = f"SIN REGISTRO | PROVIDER_NEGATIVE_TEXT: {info['raw'][:180]}"
+    open_req.updated_at = _utc_now_naive()
+    db.commit()
+
+    try:
+        _notify_client_no_record(open_req)
+    except Exception as notify_exc:
+        print("PROVIDER_NEGATIVE_NOTIFY_ERROR =", {
+            "request_id": open_req.id,
+            "error": str(notify_exc),
+        }, flush=True)
+
+    print("PROVIDER_NEGATIVE_CLOSED =", {
+        "request_id": open_req.id,
+        "curp": open_req.curp,
+        "act_type": open_req.act_type,
+        "provider_name": open_req.provider_name,
+        "provider_group_id": open_req.provider_group_id,
+        "match_mode": match_mode,
+        "quoted_msg_id": quoted_msg_id,
+        "identifiers": info["identifiers"],
+        "text": info["raw"][:250],
+    }, flush=True)
+
+    return {
+        "closed": True,
+        "request_id": open_req.id,
+        "match_mode": match_mode,
+    }
+
+
 def _extract_identifier_from_filename_local(filename: str) -> str | None:
     return extract_identifier_from_filename(filename)
 
@@ -15606,6 +15882,27 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             print("MEDIA_MESSAGE_ID_USED =", media_message_id, flush=True)
 
             # =========================
+            # NEGATIVOS DE PROVEEDOR WHATSAPP
+            # Cubre:
+            # 1) reply/cita al mensaje del bot: "SIN", "-", "No hay registros..."
+            # 2) texto mencionando CURP/cadena: "CURP No hay registros disponibles", "CURP SIN"
+            # =========================
+            if not doc:
+                negative_close = _close_provider_negative_response(
+                    db,
+                    source_chat_id=source_chat_id,
+                    quoted_msg_id=quoted_msg_id,
+                    text_body=text_body,
+                )
+
+                if negative_close.get("closed"):
+                    return {
+                        "ok": True,
+                        "provider_result": "provider_negative_closed",
+                        **negative_close,
+                    }
+
+            # =========================
             # MATCH ESPECIAL: RESPUESTAS NEGATIVAS
             # 1) reply id
             # 2) fallback por CURP en texto
@@ -15679,7 +15976,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             RequestLog.provider_group_id == source_chat_id,
                             RequestLog.provider_message_id == quoted_msg_id,
                             RequestLog.status == "PROCESSING",
-                            RequestLog.provider_name.in_(["PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9", "MAYAPROVIDER"]),
+                            RequestLog.provider_name.in_(WHATSAPP_TEXT_PROVIDERS),
                         )
                         .order_by(RequestLog.created_at.desc())
                         .first()
@@ -15737,7 +16034,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             RequestLog.provider_group_id == source_chat_id,
                             RequestLog.curp == provider_id,
                             RequestLog.status == "PROCESSING",
-                            RequestLog.provider_name.in_(["PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9", "MAYAPROVIDER"]),
+                            RequestLog.provider_name.in_(WHATSAPP_TEXT_PROVIDERS),
                         )
                         .order_by(RequestLog.created_at.desc())
                         .all()
