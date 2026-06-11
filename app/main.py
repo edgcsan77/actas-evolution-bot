@@ -14,6 +14,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from collections import Counter, defaultdict
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Depends, Body, Request, BackgroundTasks, Header, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse, Response
@@ -1323,6 +1324,340 @@ def _provider_label(name: str) -> str:
     if not name:
         return ""
     return PROVIDER_LABELS.get(name, name)
+
+
+def _panel_period_label(view: str, time_min=None, time_max=None) -> str:
+    view = (view or "day").strip().lower()
+
+    if view == "custom" and time_min and time_max:
+        start_local = _to_panel_tz(time_min)
+        end_local = _to_panel_tz(time_max)
+
+        if start_local and end_local:
+            end_show = end_local - timedelta(days=1)
+            return (
+                f"Rango personalizado: "
+                f"{start_local.strftime('%Y-%m-%d')} a {end_show.strftime('%Y-%m-%d')}"
+            )
+
+    return {
+        "day": "Hoy",
+        "30d": "Últimos 30 días",
+        "month": "Mes actual",
+        "prev_month": "Mes anterior",
+        "custom": "Rango personalizado",
+    }.get(view, view)
+
+
+def _panel_error_bucket(error_message: str | None, status: str | None = None) -> str:
+    raw = (error_message or "").strip()
+    up = raw.upper()
+
+    if (status or "").upper() in {"QUEUED", "PROCESSING"}:
+        return "Pendiente / en proceso"
+
+    if not raw:
+        return "Error sin detalle"
+
+    code = up
+
+    if ":" in code:
+        code = code.split(":", 1)[0].strip()
+
+    if " | " in code:
+        code = code.split(" | ", 1)[0].strip()
+
+    code = re.sub(r"^PROVIDER(?:10|11|[1-9])_", "", code)
+    code = re.sub(r"^MAYAPROVIDER_", "", code)
+
+    if (
+        "SIN REGISTRO" in up
+        or "SIN_REGISTRO" in up
+        or "NO_LOCALIZADO" in up
+        or "NO LOCALIZADO" in up
+        or "NO_REGISTRO" in up
+        or "NO REGISTRO" in up
+        or "NO HAY REGISTRO" in up
+        or "NO HAY REGISTROS" in up
+    ):
+        return "Sin registro en sistema"
+
+    if "WRONG_ACT_TYPE" in code or "PDF DE OTRO TIPO" in up:
+        return "PDF de otro tipo de acta"
+
+    if "WRONG_CURP_IN_PDF" in code or "NO CORRESPONDE" in up:
+        return "PDF no corresponde al dato solicitado"
+
+    if "WRONG_ELECTRONIC" in code:
+        return "PDF no corresponde a cadena/folio"
+
+    if "TRAMITEEXISTENTE" in up or "TRAMITE EXISTENTE" in up or "DUPLIC" in up:
+        return "Duplicada / trámite existente"
+
+    if "TIMEOUT" in up or "TIMED OUT" in up or "READ TIMED OUT" in up:
+        return "Timeout / proveedor tardó demasiado"
+
+    if (
+        "SENDMEDIA" in up
+        or "CONNECTION CLOSED" in up
+        or "PDF_SEND_FAILED" in code
+        or "DELIVERY_FAILED" in code
+        or "SEND_FAILED" in code
+    ):
+        return "Falla de envío / entrega WhatsApp"
+
+    if "NO_PDF" in code or "NO PDF" in up:
+        return "Proveedor no devolvió PDF"
+
+    if "NOT_CONFIGURED" in code or "GROUPS_NOT_CONFIGURED" in code:
+        return "Falta configuración del proveedor/grupo"
+
+    if "ACT_TYPE_NOT_ALLOWED" in code:
+        return "Tipo de acta no permitido para proveedor"
+
+    if "FAILED_FALLBACK_TO_" in code:
+        return "Falló proveedor inicial y pasó a fallback"
+
+    if "FALLBACK_NO_PROVIDER_AVAILABLE" in code:
+        return "Falló y no hubo proveedor de respaldo"
+
+    if "FAILED" in code:
+        return "Falla general del proveedor/sistema"
+
+    if "INVALID" in code:
+        return "Dato o respuesta inválida"
+
+    return code[:100] if code else "Error no clasificado"
+
+
+def _provider_accounting_query(
+    db: Session,
+    *,
+    time_min,
+    time_max,
+    group_jid: str = "",
+    provider_name: str = "",
+    act_type: str = "",
+):
+    return _query_requests_for_panel(
+        db=db,
+        time_min=time_min,
+        time_max=time_max,
+        group_jid=group_jid or None,
+        provider_name=provider_name or None,
+        status=None,
+        act_type=act_type or None,
+    )
+
+
+def _provider_accounting_data(
+    db: Session,
+    *,
+    time_min,
+    time_max,
+    group_jid: str = "",
+    provider_name: str = "",
+    act_type: str = "",
+):
+    q = _provider_accounting_query(
+        db,
+        time_min=time_min,
+        time_max=time_max,
+        group_jid=group_jid,
+        provider_name=provider_name,
+        act_type=act_type,
+    )
+
+    err_txt = func.upper(func.coalesce(RequestLog.error_message, ""))
+
+    sin_registro_cond = and_(
+        RequestLog.status == "ERROR",
+        or_(
+            err_txt.ilike("%SIN REGISTRO%"),
+            err_txt.ilike("%SIN_REGISTRO%"),
+            err_txt.ilike("%NO_LOCALIZADO%"),
+            err_txt.ilike("%NO LOCALIZADO%"),
+            err_txt.ilike("%NO_REGISTRO%"),
+            err_txt.ilike("%NO REGISTRO%"),
+            err_txt.ilike("%NO HAY REGISTRO%"),
+            err_txt.ilike("%NO HAY REGISTROS%"),
+        ),
+    )
+
+    acta_erronea_cond = and_(
+        RequestLog.status == "ERROR",
+        or_(
+            err_txt.ilike("%WRONG_ACT_TYPE%"),
+            err_txt.ilike("%WRONG ACT TYPE%"),
+            err_txt.ilike("%WRONG_CURP_IN_PDF%"),
+            err_txt.ilike("%WRONG ELECTRONIC%"),
+            err_txt.ilike("%WRONG_ELECTRONIC%"),
+            err_txt.ilike("%PDF_PENDING_RETRY%"),
+            err_txt.ilike("%TRAMITEEXISTENTE%"),
+            err_txt.ilike("%TRAMITE EXISTENTE%"),
+            err_txt.ilike("%DUPLIC%"),
+            err_txt.ilike("%PDF DE OTRO TIPO%"),
+            err_txt.ilike("%NO CORRESPONDE%"),
+        ),
+    )
+
+    provider_control_raw = (
+        q.with_entities(
+            RequestLog.provider_name.label("provider_name"),
+            func.count(RequestLog.id).label("total_solicitudes"),
+            func.sum(case((RequestLog.status == "DONE", 1), else_=0)).label("total_exito"),
+            func.sum(case((sin_registro_cond, 1), else_=0)).label("sin_registro"),
+            func.sum(case((acta_erronea_cond, 1), else_=0)).label("actas_erroneas"),
+            func.sum(case((RequestLog.status.in_(["QUEUED", "PROCESSING"]), 1), else_=0)).label("pendientes"),
+            func.sum(
+                case(
+                    (
+                        and_(
+                            RequestLog.status == "ERROR",
+                            ~sin_registro_cond,
+                            ~acta_erronea_cond,
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("otros_errores"),
+        )
+        .group_by(RequestLog.provider_name)
+        .all()
+    )
+
+    provider_control_rows = []
+    provider_control_totals = {
+        "total_exito": 0,
+        "sin_registro": 0,
+        "actas_erroneas": 0,
+        "otros_errores": 0,
+        "pendientes": 0,
+        "total_solicitudes": 0,
+    }
+
+    for row in provider_control_raw:
+        item = {
+            "provider_name": row.provider_name or "NO IDENTIFICADO",
+            "total_exito": int(row.total_exito or 0),
+            "sin_registro": int(row.sin_registro or 0),
+            "actas_erroneas": int(row.actas_erroneas or 0),
+            "otros_errores": int(row.otros_errores or 0),
+            "pendientes": int(row.pendientes or 0),
+            "total_solicitudes": int(row.total_solicitudes or 0),
+        }
+
+        for k in provider_control_totals:
+            provider_control_totals[k] += item[k]
+
+        provider_control_rows.append(item)
+
+    provider_control_rows.sort(
+        key=lambda x: (-x["total_solicitudes"], x["provider_name"])
+    )
+
+    error_detail_raw = (
+        q.with_entities(
+            RequestLog.provider_name.label("provider_name"),
+            RequestLog.status.label("status"),
+            RequestLog.error_message.label("error_message"),
+            func.count(RequestLog.id).label("total"),
+        )
+        .filter(RequestLog.status == "ERROR")
+        .group_by(
+            RequestLog.provider_name,
+            RequestLog.status,
+            RequestLog.error_message,
+        )
+        .all()
+    )
+
+    error_bucket_map = {}
+
+    for row in error_detail_raw:
+        provider = row.provider_name or "NO IDENTIFICADO"
+        bucket = _panel_error_bucket(row.error_message, row.status)
+        key = (provider, bucket)
+
+        if key not in error_bucket_map:
+            error_bucket_map[key] = {
+                "provider_name": provider,
+                "error_type": bucket,
+                "total": 0,
+                "examples": [],
+            }
+
+        error_bucket_map[key]["total"] += int(row.total or 0)
+
+        example = (row.error_message or "").strip()
+        if example and len(error_bucket_map[key]["examples"]) < 2:
+            error_bucket_map[key]["examples"].append(example[:220])
+
+    error_detail_rows = list(error_bucket_map.values())
+    error_detail_rows.sort(
+        key=lambda x: (-x["total"], x["provider_name"], x["error_type"])
+    )
+
+    provider_bot_raw = (
+        q.with_entities(
+            RequestLog.provider_name.label("provider_name"),
+            RequestLog.instance_name.label("instance_name"),
+            func.count(RequestLog.id).label("total_solicitudes"),
+            func.sum(case((RequestLog.status == "DONE", 1), else_=0)).label("total_exito"),
+            func.sum(case((sin_registro_cond, 1), else_=0)).label("sin_registro"),
+            func.sum(case((acta_erronea_cond, 1), else_=0)).label("actas_erroneas"),
+            func.sum(case((RequestLog.status.in_(["QUEUED", "PROCESSING"]), 1), else_=0)).label("pendientes"),
+            func.sum(
+                case(
+                    (
+                        and_(
+                            RequestLog.status == "ERROR",
+                            ~sin_registro_cond,
+                            ~acta_erronea_cond,
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("otros_errores"),
+        )
+        .group_by(RequestLog.provider_name, RequestLog.instance_name)
+        .all()
+    )
+
+    provider_bot_rows = []
+
+    for row in provider_bot_raw:
+        provider_bot_rows.append({
+            "provider_name": row.provider_name or "NO IDENTIFICADO",
+            "instance_name": row.instance_name or MAIN_PANEL_INSTANCE,
+            "total_exito": int(row.total_exito or 0),
+            "sin_registro": int(row.sin_registro or 0),
+            "actas_erroneas": int(row.actas_erroneas or 0),
+            "otros_errores": int(row.otros_errores or 0),
+            "pendientes": int(row.pendientes or 0),
+            "total_solicitudes": int(row.total_solicitudes or 0),
+        })
+
+    provider_bot_rows.sort(
+        key=lambda x: (-x["total_solicitudes"], x["provider_name"], x["instance_name"])
+    )
+
+    pending_rows = (
+        q.filter(RequestLog.status.in_(["QUEUED", "PROCESSING"]))
+        .order_by(RequestLog.created_at.asc())
+        .limit(80)
+        .all()
+    )
+
+    return {
+        "provider_control_rows": provider_control_rows,
+        "provider_control_totals": provider_control_totals,
+        "error_detail_rows": error_detail_rows,
+        "provider_bot_rows": provider_bot_rows,
+        "pending_rows": pending_rows,
+    }
 
 
 def _day_name_es_from_date(day_str: str) -> str:
@@ -8310,116 +8645,6 @@ def panel_actas(
         
         by_provider = list(provider_map.values())
         by_provider.sort(key=lambda x: (-x["total"], x["provider_name"]))
-
-        # ==========================================================
-        # CONTROL CONTABLE POR PROVEEDOR
-        # Tabla tipo Excel:
-        # - Total con éxito = DONE
-        # - Sin registro = ERROR con SIN REGISTRO / NO_LOCALIZADO / NO HAY REGISTRO
-        # - Actas erróneas enviadas = errores por PDF/tipo/dato/duplicado
-        # - Otros errores = ERROR que no cae en las categorías anteriores
-        # - Pendientes = QUEUED / PROCESSING
-        # - Total solicitudes = todo lo registrado en RequestLog
-        # ==========================================================
-
-        provider_control_q = _query_requests_for_panel(
-            db=db,
-            time_min=time_min,
-            time_max=time_max,
-            group_jid=group_jid or None,
-            provider_name=provider_name or None,
-            status=None,  # NO filtrar por status aquí; debe cuadrar todo
-            act_type=act_type or None,
-        )
-
-        err_txt = func.upper(func.coalesce(RequestLog.error_message, ""))
-
-        sin_registro_cond = and_(
-            RequestLog.status == "ERROR",
-            or_(
-                err_txt.ilike("%SIN REGISTRO%"),
-                err_txt.ilike("%SIN_REGISTRO%"),
-                err_txt.ilike("%NO_LOCALIZADO%"),
-                err_txt.ilike("%NO LOCALIZADO%"),
-                err_txt.ilike("%NO_REGISTRO%"),
-                err_txt.ilike("%NO REGISTRO%"),
-                err_txt.ilike("%NO HAY REGISTRO%"),
-                err_txt.ilike("%NO HAY REGISTROS%"),
-            ),
-        )
-
-        acta_erronea_cond = and_(
-            RequestLog.status == "ERROR",
-            or_(
-                err_txt.ilike("%WRONG_ACT_TYPE%"),
-                err_txt.ilike("%WRONG ACT TYPE%"),
-                err_txt.ilike("%WRONG_CURP_IN_PDF%"),
-                err_txt.ilike("%WRONG ELECTRONIC%"),
-                err_txt.ilike("%WRONG_ELECTRONIC%"),
-                err_txt.ilike("%PDF_PENDING_RETRY%"),
-                err_txt.ilike("%TRAMITEEXISTENTE%"),
-                err_txt.ilike("%TRAMITE EXISTENTE%"),
-                err_txt.ilike("%DUPLIC%"),
-                err_txt.ilike("%PDF DE OTRO TIPO%"),
-                err_txt.ilike("%NO CORRESPONDE%"),
-            ),
-        )
-
-        provider_control_raw = (
-            provider_control_q.with_entities(
-                RequestLog.provider_name.label("provider_name"),
-                func.count(RequestLog.id).label("total_solicitudes"),
-                func.sum(case((RequestLog.status == "DONE", 1), else_=0)).label("total_exito"),
-                func.sum(case((sin_registro_cond, 1), else_=0)).label("sin_registro"),
-                func.sum(case((acta_erronea_cond, 1), else_=0)).label("actas_erroneas"),
-                func.sum(case((RequestLog.status.in_(["QUEUED", "PROCESSING"]), 1), else_=0)).label("pendientes"),
-                func.sum(
-                    case(
-                        (
-                            and_(
-                                RequestLog.status == "ERROR",
-                                ~sin_registro_cond,
-                                ~acta_erronea_cond,
-                            ),
-                            1,
-                        ),
-                        else_=0,
-                    )
-                ).label("otros_errores"),
-            )
-            .group_by(RequestLog.provider_name)
-            .all()
-        )
-
-        provider_control_rows = []
-        provider_control_totals = {
-            "total_exito": 0,
-            "sin_registro": 0,
-            "actas_erroneas": 0,
-            "otros_errores": 0,
-            "pendientes": 0,
-            "total_solicitudes": 0,
-        }
-
-        for row in provider_control_raw:
-            item = {
-                "provider_name": row.provider_name or "NO IDENTIFICADO",
-                "total_exito": int(row.total_exito or 0),
-                "sin_registro": int(row.sin_registro or 0),
-                "actas_erroneas": int(row.actas_erroneas or 0),
-                "otros_errores": int(row.otros_errores or 0),
-                "pendientes": int(row.pendientes or 0),
-                "total_solicitudes": int(row.total_solicitudes or 0),
-            }
-
-            for k in provider_control_totals:
-                provider_control_totals[k] += item[k]
-
-            provider_control_rows.append(item)
-
-        provider_control_rows.sort(
-            key=lambda x: (-x["total_solicitudes"], x["provider_name"])
-        )
         
         by_type_raw = (
             base_q.with_entities(
@@ -10148,67 +10373,30 @@ def panel_actas(
         </div>
         """
 
+        audit_params = {
+            "token": current_token,
+            "view": view,
+            "group_jid": group_jid or "",
+            "provider_name": provider_name or "",
+            "act_type": act_type or "",
+            "date_from": date_from or "",
+            "date_to": date_to or "",
+        }
+
+        audit_url = "/panel/auditoria-proveedores?" + urlencode(audit_params)
+
         html += f"""
         <div class="box">
           <div class="head">
-            <strong>Control contable por proveedor</strong>
-            <span class="small">
-              Cuadre global de actas recibidas/procesadas por todos los bots en el periodo: {_esc(period_label)}.
-            </span>
-          </div>
-
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr style="background:#fff200;">
-                  <th>Proveedor</th>
-                  <th class="right">Total con éxito</th>
-                  <th class="right">Actas sin registro en sistema</th>
-                  <th class="right">Actas erróneas / duplicadas</th>
-                  <th class="right">Otros errores</th>
-                  <th class="right">Pendientes</th>
-                  <th class="right">Total de solicitudes</th>
-                </tr>
-              </thead>
-              <tbody>
-        """
-
-        if provider_control_rows:
-            for r in provider_control_rows:
-                html += f"""
-                <tr>
-                  <td><strong>{_esc(_provider_label(r["provider_name"]))}</strong></td>
-                  <td class="right">{r["total_exito"]}</td>
-                  <td class="right">{r["sin_registro"]}</td>
-                  <td class="right">{r["actas_erroneas"]}</td>
-                  <td class="right">{r["otros_errores"]}</td>
-                  <td class="right">{r["pendientes"]}</td>
-                  <td class="right"><strong>{r["total_solicitudes"]}</strong></td>
-                </tr>
-                """
-
-            html += f"""
-                <tr style="background:#f1f5f9;font-weight:900;">
-                  <td>TOTAL GENERAL</td>
-                  <td class="right">{provider_control_totals["total_exito"]}</td>
-                  <td class="right">{provider_control_totals["sin_registro"]}</td>
-                  <td class="right">{provider_control_totals["actas_erroneas"]}</td>
-                  <td class="right">{provider_control_totals["otros_errores"]}</td>
-                  <td class="right">{provider_control_totals["pendientes"]}</td>
-                  <td class="right">{provider_control_totals["total_solicitudes"]}</td>
-                </tr>
-            """
-        else:
-            html += '<tr><td colspan="7">Sin datos para este periodo.</td></tr>'
-
-        html += """
-              </tbody>
-            </table>
-          </div>
-
-          <div class="small" style="margin-top:10px;color:#64748b;">
-            Fórmula de cuadre:
-            Total de solicitudes = Total con éxito + Sin registro + Actas erróneas/duplicadas + Otros errores + Pendientes.
+            <div>
+              <strong>Auditoría de proveedores</strong>
+              <div class="small">
+                Control contable, errores por proveedor, proveedor + bot y pendientes críticas.
+              </div>
+            </div>
+            <a class="btn btn-primary" href="{_esc(audit_url)}">
+              📊 Ver auditoría completa
+            </a>
           </div>
         </div>
         """
@@ -11664,6 +11852,422 @@ def panel_actas(
         print("panel_actas error:", repr(e), flush=True)
         return HTMLResponse(
             content=f"<pre>Error en /panel: {str(e)}</pre>",
+            status_code=500,
+        )
+
+
+@app.get("/panel/auditoria-proveedores", response_class=HTMLResponse)
+def panel_auditoria_proveedores(
+    request: Request,
+    view: str = "day",
+    group_jid: str = "",
+    provider_name: str = "",
+    act_type: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    db: Session = Depends(get_db),
+):
+    if not _is_valid_admin_panel_token(request):
+        return HTMLResponse("No autorizado", status_code=403)
+
+    try:
+        time_min, time_max, view = _panel_period_bounds(view, date_from, date_to)
+        period_label = _panel_period_label(view, time_min, time_max)
+        current_token = (request.query_params.get("token") or "").strip()
+
+        data = _provider_accounting_data(
+            db,
+            time_min=time_min,
+            time_max=time_max,
+            group_jid=group_jid,
+            provider_name=provider_name,
+            act_type=act_type,
+        )
+
+        provider_control_rows = data["provider_control_rows"]
+        provider_control_totals = data["provider_control_totals"]
+        error_detail_rows = data["error_detail_rows"]
+        provider_bot_rows = data["provider_bot_rows"]
+        pending_rows = data["pending_rows"]
+
+        panel_params = {
+            "token": current_token,
+            "view": view,
+            "group_jid": group_jid or "",
+            "provider_name": provider_name or "",
+            "act_type": act_type or "",
+            "date_from": date_from or "",
+            "date_to": date_to or "",
+        }
+
+        panel_url = "/panel?" + urlencode(panel_params)
+
+        def _audit_link(new_view: str):
+            params = dict(panel_params)
+            params["view"] = new_view
+            return "/panel/auditoria-proveedores?" + urlencode(params)
+
+        html = f"""
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Auditoría de proveedores</title>
+          <style>
+            body {{
+              font-family: Arial, sans-serif;
+              background:#f3f4f6;
+              margin:0;
+              padding:22px;
+              color:#0f172a;
+            }}
+            .wrap {{
+              max-width:1500px;
+              margin:0 auto;
+            }}
+            .box {{
+              background:white;
+              border-radius:16px;
+              padding:16px;
+              margin-bottom:16px;
+              box-shadow:0 8px 22px rgba(15,23,42,.08);
+            }}
+            .head {{
+              display:flex;
+              align-items:center;
+              justify-content:space-between;
+              gap:12px;
+              flex-wrap:wrap;
+            }}
+            h2 {{
+              margin:0;
+            }}
+            .small {{
+              font-size:12px;
+              color:#64748b;
+              line-height:1.35;
+            }}
+            .btn {{
+              display:inline-block;
+              padding:8px 12px;
+              border-radius:10px;
+              text-decoration:none;
+              background:#2563eb;
+              color:white;
+              font-size:13px;
+              font-weight:700;
+              margin:3px;
+              border:0;
+              cursor:pointer;
+            }}
+            .btn-secondary {{
+              background:#64748b;
+            }}
+            .table-wrap {{
+              overflow-x:auto;
+              margin-top:12px;
+            }}
+            table {{
+              width:100%;
+              border-collapse:collapse;
+              background:white;
+            }}
+            th, td {{
+              padding:10px 12px;
+              border-bottom:1px solid #e5e7eb;
+              font-size:13px;
+              vertical-align:top;
+            }}
+            th {{
+              text-align:left;
+              background:#1f2937;
+              color:white;
+              white-space:nowrap;
+            }}
+            .right {{
+              text-align:right;
+            }}
+            .mono {{
+              font-family:Consolas, monospace;
+              font-size:12px;
+            }}
+            .total-row {{
+              background:#f1f5f9;
+              font-weight:900;
+            }}
+            .badge {{
+              display:inline-block;
+              padding:4px 8px;
+              border-radius:999px;
+              font-size:12px;
+              font-weight:800;
+            }}
+            .status-d {{ color:#15803d;font-weight:bold; }}
+            .status-e {{ color:#b91c1c;font-weight:bold; }}
+            .status-q {{ color:#92400e;font-weight:bold; }}
+            .status-p {{ color:#1d4ed8;font-weight:bold; }}
+          </style>
+        </head>
+        <body>
+          <div class="wrap">
+            <div class="box">
+              <div class="head">
+                <div>
+                  <h2>Auditoría de proveedores</h2>
+                  <div class="small">
+                    Periodo: <strong>{_esc(period_label)}</strong>
+                    · Vista global de todos los bots
+                  </div>
+                </div>
+                <div>
+                  <a class="btn btn-secondary" href="{_esc(panel_url)}">← Volver al panel principal</a>
+                </div>
+              </div>
+
+              <div style="margin-top:12px;">
+                <a class="btn" href="{_esc(_audit_link("day"))}">Hoy</a>
+                <a class="btn" href="{_esc(_audit_link("30d"))}">30 días</a>
+                <a class="btn" href="{_esc(_audit_link("month"))}">Mes actual</a>
+                <a class="btn" href="{_esc(_audit_link("prev_month"))}">Mes anterior</a>
+              </div>
+            </div>
+        """
+
+        html += """
+            <div class="box">
+              <div class="head">
+                <div>
+                  <strong>Control contable por proveedor</strong>
+                  <div class="small">
+                    Fórmula: Total = Éxito + Sin registro + Erróneas/duplicadas + Otros errores + Pendientes.
+                  </div>
+                </div>
+              </div>
+
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Proveedor</th>
+                      <th class="right">Total con éxito</th>
+                      <th class="right">Sin registro</th>
+                      <th class="right">Erróneas / duplicadas</th>
+                      <th class="right">Otros errores</th>
+                      <th class="right">Pendientes</th>
+                      <th class="right">Total solicitudes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+        """
+
+        if provider_control_rows:
+            for r in provider_control_rows:
+                html += f"""
+                    <tr>
+                      <td><strong>{_esc(_provider_label(r["provider_name"]))}</strong></td>
+                      <td class="right">{r["total_exito"]}</td>
+                      <td class="right">{r["sin_registro"]}</td>
+                      <td class="right">{r["actas_erroneas"]}</td>
+                      <td class="right">{r["otros_errores"]}</td>
+                      <td class="right">{r["pendientes"]}</td>
+                      <td class="right"><strong>{r["total_solicitudes"]}</strong></td>
+                    </tr>
+                """
+
+            html += f"""
+                    <tr class="total-row">
+                      <td>TOTAL GENERAL</td>
+                      <td class="right">{provider_control_totals["total_exito"]}</td>
+                      <td class="right">{provider_control_totals["sin_registro"]}</td>
+                      <td class="right">{provider_control_totals["actas_erroneas"]}</td>
+                      <td class="right">{provider_control_totals["otros_errores"]}</td>
+                      <td class="right">{provider_control_totals["pendientes"]}</td>
+                      <td class="right">{provider_control_totals["total_solicitudes"]}</td>
+                    </tr>
+            """
+        else:
+            html += '<tr><td colspan="7">Sin datos para este periodo.</td></tr>'
+
+        html += """
+                  </tbody>
+                </table>
+              </div>
+            </div>
+        """
+
+        html += """
+            <div class="box">
+              <div class="head">
+                <div>
+                  <strong>Detalle de errores por proveedor</strong>
+                  <div class="small">
+                    Agrupa los mensajes técnicos de error en categorías entendibles.
+                  </div>
+                </div>
+              </div>
+
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Proveedor</th>
+                      <th>Tipo de error</th>
+                      <th class="right">Cantidad</th>
+                      <th>Ejemplo técnico</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+        """
+
+        if error_detail_rows:
+            for r in error_detail_rows:
+                examples_html = "<br>".join(_esc(x) for x in r.get("examples", []))
+
+                html += f"""
+                    <tr>
+                      <td><strong>{_esc(_provider_label(r["provider_name"]))}</strong></td>
+                      <td>{_esc(r["error_type"])}</td>
+                      <td class="right"><strong>{r["total"]}</strong></td>
+                      <td class="small mono">{examples_html}</td>
+                    </tr>
+                """
+        else:
+            html += '<tr><td colspan="4">Sin errores registrados para este periodo.</td></tr>'
+
+        html += """
+                  </tbody>
+                </table>
+              </div>
+            </div>
+        """
+
+        html += """
+            <div class="box">
+              <div class="head">
+                <div>
+                  <strong>Proveedor + bot</strong>
+                  <div class="small">
+                    Sirve para detectar si el problema viene de un proveedor completo o de una combinación proveedor/bot.
+                  </div>
+                </div>
+              </div>
+
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Proveedor</th>
+                      <th>Bot</th>
+                      <th class="right">Éxito</th>
+                      <th class="right">Sin registro</th>
+                      <th class="right">Erróneas</th>
+                      <th class="right">Otros errores</th>
+                      <th class="right">Pendientes</th>
+                      <th class="right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+        """
+
+        if provider_bot_rows:
+            for r in provider_bot_rows:
+                html += f"""
+                    <tr>
+                      <td><strong>{_esc(_provider_label(r["provider_name"]))}</strong></td>
+                      <td>{_esc(bot_label(r["instance_name"], db))}<br><span class="small mono">{_esc(r["instance_name"])}</span></td>
+                      <td class="right">{r["total_exito"]}</td>
+                      <td class="right">{r["sin_registro"]}</td>
+                      <td class="right">{r["actas_erroneas"]}</td>
+                      <td class="right">{r["otros_errores"]}</td>
+                      <td class="right">{r["pendientes"]}</td>
+                      <td class="right"><strong>{r["total_solicitudes"]}</strong></td>
+                    </tr>
+                """
+        else:
+            html += '<tr><td colspan="8">Sin datos para este periodo.</td></tr>'
+
+        html += """
+                  </tbody>
+                </table>
+              </div>
+            </div>
+        """
+
+        html += """
+            <div class="box">
+              <div class="head">
+                <div>
+                  <strong>Pendientes críticas</strong>
+                  <div class="small">
+                    Muestra las solicitudes más viejas que siguen en QUEUED o PROCESSING.
+                  </div>
+                </div>
+              </div>
+
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Dato</th>
+                      <th>Tipo</th>
+                      <th>Bot</th>
+                      <th>Proveedor</th>
+                      <th>Estado</th>
+                      <th>Creado</th>
+                      <th>Tiempo esperando</th>
+                      <th>Último error</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+        """
+
+        if pending_rows:
+            now_utc = _utc_now_naive()
+
+            for r in pending_rows:
+                try:
+                    waiting = _fmt_duration_seconds((now_utc - r.created_at).total_seconds()) if r.created_at else ""
+                except Exception:
+                    waiting = ""
+
+                status_class = {
+                    "QUEUED": "status-q",
+                    "PROCESSING": "status-p",
+                }.get(r.status, "")
+
+                html += f"""
+                    <tr>
+                      <td>{r.id}</td>
+                      <td class="mono">{_esc(r.curp)}</td>
+                      <td>{_esc(r.act_type)}</td>
+                      <td>{_esc(bot_label(r.instance_name or MAIN_PANEL_INSTANCE, db))}<br><span class="small mono">{_esc(r.instance_name or MAIN_PANEL_INSTANCE)}</span></td>
+                      <td>{_esc(_provider_label(r.provider_name))}</td>
+                      <td class="{status_class}">{_esc(r.status)}</td>
+                      <td>{_esc(_fmt_dt(r.created_at))}</td>
+                      <td><strong>{_esc(waiting)}</strong></td>
+                      <td class="small mono">{_esc((r.error_message or "")[:220])}</td>
+                    </tr>
+                """
+        else:
+            html += '<tr><td colspan="9">No hay pendientes en este periodo.</td></tr>'
+
+        html += """
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+        </body>
+        </html>
+        """
+
+        return HTMLResponse(content=html)
+
+    except Exception as e:
+        print("panel_auditoria_proveedores error:", repr(e), flush=True)
+        return HTMLResponse(
+            content=f"<pre>Error en /panel/auditoria-proveedores: {str(e)}</pre>",
             status_code=500,
         )
 
