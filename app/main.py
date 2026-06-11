@@ -1370,6 +1370,12 @@ def _panel_error_bucket(error_message: str | None, status: str | None = None) ->
     code = re.sub(r"^PROVIDER(?:10|11|[1-9])_", "", code)
     code = re.sub(r"^MAYAPROVIDER_", "", code)
 
+    if "NO_PROVIDER_ENABLED" in up:
+        return "Sin proveedor habilitado / sesión caída"
+    
+    if "SESSION_INVALID_OR_EXPIRED" in up or "SID CAIDO" in up or "NO AUTORIZADO" in up:
+        return "Sesión/SID del proveedor caído"
+
     if (
         "SIN REGISTRO" in up
         or "SIN_REGISTRO" in up
@@ -1480,6 +1486,8 @@ def _provider_accounting_data(
 
     sin_registro_cond = and_(
         RequestLog.status == "ERROR",
+        ~err_txt.ilike("NO_PROVIDER_ENABLED%"),
+        ~err_txt.ilike("%SESSION_INVALID_OR_EXPIRED%"),
         or_(
             err_txt.ilike("%SIN REGISTRO%"),
             err_txt.ilike("%SIN_REGISTRO%"),
