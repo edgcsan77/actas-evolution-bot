@@ -950,7 +950,7 @@ def _fallback_to_provider3_web(req, db, process_started_ts):
 
     provider3_result = _process_provider3(req, db)
 
-    pdf_bytes = provider3_result["pdf_bytes"]
+    pdf_bytes = _require_pdf_bytes(provider3_result, "PROVIDER3", req)
     safe_media_b64 = base64.b64encode(pdf_bytes).decode()
 
     total_seconds = _request_total_seconds(req, process_started_ts)
@@ -1193,6 +1193,59 @@ def _store_api_pdf_result(req, db, safe_media_b64: str, filename: str, provider_
     }, flush=True)
 
     return True
+
+
+def _default_pdf_filename(req) -> str:
+    curp = (getattr(req, "curp", "") or getattr(req, "id", "") or "acta")
+    act_type = (getattr(req, "act_type", "") or "").upper()
+
+    if "FOLIO" in act_type:
+        return f"{curp}_FOLIO.pdf"
+
+    return f"{curp}.pdf"
+
+
+def _require_pdf_bytes(result, provider_name: str, req) -> bytes:
+    provider = (provider_name or getattr(req, "provider_name", "") or "PROVIDER").strip().upper()
+
+    if not isinstance(result, dict):
+        raise RuntimeError(f"{provider}_INVALID_RESULT_NO_DICT")
+
+    pdf_bytes = result.get("pdf_bytes")
+
+    if not pdf_bytes:
+        err = result.get("error") or result.get("message") or result.get("status") or ""
+        err_up = str(err).upper()
+
+        if (
+            "NO_LOCALIZADO" in err_up
+            or "NO REGISTRO" in err_up
+            or "NO_RECORD" in err_up
+            or "SIN REGISTRO" in err_up
+        ):
+            raise RuntimeError(f"{provider}_NO_RECORD:{getattr(req, 'curp', '')}")
+
+        raise RuntimeError(f"{provider}_NO_PDF_BYTES:{str(result)[:300]}")
+
+    if isinstance(pdf_bytes, str):
+        raw = pdf_bytes.strip()
+        if raw.startswith("data:"):
+            raw = raw.split(",", 1)[1]
+        raw = raw.replace("\n", "").replace("\r", "").strip()
+        try:
+            pdf_bytes = base64.b64decode(raw)
+        except Exception as e:
+            raise RuntimeError(f"{provider}_PDF_BYTES_BASE64_INVALID:{str(e)[:200]}")
+
+    if not isinstance(pdf_bytes, (bytes, bytearray)):
+        raise RuntimeError(f"{provider}_PDF_BYTES_INVALID_TYPE:{type(pdf_bytes).__name__}")
+
+    pdf_bytes = bytes(pdf_bytes)
+
+    if b"%PDF" not in pdf_bytes[:30]:
+        raise RuntimeError(f"{provider}_PDF_BYTES_NOT_PDF")
+
+    return pdf_bytes
 
 
 def _get_or_create_provider(db, provider_name: str, default_enabled: bool):
@@ -2923,6 +2976,8 @@ def process_request(request_id: int):
         req = db.query(RequestLog).filter(RequestLog.id == request_id).first()
         if not req:
             return
+
+        filename = _default_pdf_filename(req)
         
         current_status = (req.status or "").strip().upper()
         
@@ -3239,7 +3294,7 @@ def process_request(request_id: int):
                 )
                 return
         
-            pdf_bytes = provider3_result["pdf_bytes"]
+            pdf_bytes = _require_pdf_bytes(provider3_result, "PROVIDER3", req)
             safe_media_b64 = base64.b64encode(pdf_bytes).decode()
         
             total_seconds = _request_total_seconds(req, process_started_ts)
@@ -3358,7 +3413,7 @@ def process_request(request_id: int):
                     }, flush=True)
                     return
         
-                pdf_bytes = provider4_result["pdf_bytes"]
+                pdf_bytes = _require_pdf_bytes(provider4_result, provider_name, req)
 
                 term = (req.curp or "").strip()
                 chain_mode = is_chain(term) or bool(re.fullmatch(r"\d{15,25}", term))
@@ -3725,7 +3780,7 @@ def process_request(request_id: int):
                 _notify_support_error(req, "PROVIDER7_ERROR", err)
                 return
         
-            pdf_bytes = provider7_result["pdf_bytes"]
+            pdf_bytes = _require_pdf_bytes(provider7_result, "PROVIDER7", req)
             safe_media_b64 = base64.b64encode(pdf_bytes).decode()
         
             total_seconds = _request_total_seconds(req, process_started_ts)
