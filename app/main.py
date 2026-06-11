@@ -8310,6 +8310,116 @@ def panel_actas(
         
         by_provider = list(provider_map.values())
         by_provider.sort(key=lambda x: (-x["total"], x["provider_name"]))
+
+        # ==========================================================
+        # CONTROL CONTABLE POR PROVEEDOR
+        # Tabla tipo Excel:
+        # - Total con éxito = DONE
+        # - Sin registro = ERROR con SIN REGISTRO / NO_LOCALIZADO / NO HAY REGISTRO
+        # - Actas erróneas enviadas = errores por PDF/tipo/dato/duplicado
+        # - Otros errores = ERROR que no cae en las categorías anteriores
+        # - Pendientes = QUEUED / PROCESSING
+        # - Total solicitudes = todo lo registrado en RequestLog
+        # ==========================================================
+
+        provider_control_q = _query_requests_for_panel(
+            db=db,
+            time_min=time_min,
+            time_max=time_max,
+            group_jid=group_jid or None,
+            provider_name=provider_name or None,
+            status=None,  # NO filtrar por status aquí; debe cuadrar todo
+            act_type=act_type or None,
+        )
+
+        err_txt = func.upper(func.coalesce(RequestLog.error_message, ""))
+
+        sin_registro_cond = and_(
+            RequestLog.status == "ERROR",
+            or_(
+                err_txt.ilike("%SIN REGISTRO%"),
+                err_txt.ilike("%SIN_REGISTRO%"),
+                err_txt.ilike("%NO_LOCALIZADO%"),
+                err_txt.ilike("%NO LOCALIZADO%"),
+                err_txt.ilike("%NO_REGISTRO%"),
+                err_txt.ilike("%NO REGISTRO%"),
+                err_txt.ilike("%NO HAY REGISTRO%"),
+                err_txt.ilike("%NO HAY REGISTROS%"),
+            ),
+        )
+
+        acta_erronea_cond = and_(
+            RequestLog.status == "ERROR",
+            or_(
+                err_txt.ilike("%WRONG_ACT_TYPE%"),
+                err_txt.ilike("%WRONG ACT TYPE%"),
+                err_txt.ilike("%WRONG_CURP_IN_PDF%"),
+                err_txt.ilike("%WRONG ELECTRONIC%"),
+                err_txt.ilike("%WRONG_ELECTRONIC%"),
+                err_txt.ilike("%PDF_PENDING_RETRY%"),
+                err_txt.ilike("%TRAMITEEXISTENTE%"),
+                err_txt.ilike("%TRAMITE EXISTENTE%"),
+                err_txt.ilike("%DUPLIC%"),
+                err_txt.ilike("%PDF DE OTRO TIPO%"),
+                err_txt.ilike("%NO CORRESPONDE%"),
+            ),
+        )
+
+        provider_control_raw = (
+            provider_control_q.with_entities(
+                RequestLog.provider_name.label("provider_name"),
+                func.count(RequestLog.id).label("total_solicitudes"),
+                func.sum(case((RequestLog.status == "DONE", 1), else_=0)).label("total_exito"),
+                func.sum(case((sin_registro_cond, 1), else_=0)).label("sin_registro"),
+                func.sum(case((acta_erronea_cond, 1), else_=0)).label("actas_erroneas"),
+                func.sum(case((RequestLog.status.in_(["QUEUED", "PROCESSING"]), 1), else_=0)).label("pendientes"),
+                func.sum(
+                    case(
+                        (
+                            and_(
+                                RequestLog.status == "ERROR",
+                                ~sin_registro_cond,
+                                ~acta_erronea_cond,
+                            ),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ).label("otros_errores"),
+            )
+            .group_by(RequestLog.provider_name)
+            .all()
+        )
+
+        provider_control_rows = []
+        provider_control_totals = {
+            "total_exito": 0,
+            "sin_registro": 0,
+            "actas_erroneas": 0,
+            "otros_errores": 0,
+            "pendientes": 0,
+            "total_solicitudes": 0,
+        }
+
+        for row in provider_control_raw:
+            item = {
+                "provider_name": row.provider_name or "NO IDENTIFICADO",
+                "total_exito": int(row.total_exito or 0),
+                "sin_registro": int(row.sin_registro or 0),
+                "actas_erroneas": int(row.actas_erroneas or 0),
+                "otros_errores": int(row.otros_errores or 0),
+                "pendientes": int(row.pendientes or 0),
+                "total_solicitudes": int(row.total_solicitudes or 0),
+            }
+
+            for k in provider_control_totals:
+                provider_control_totals[k] += item[k]
+
+            provider_control_rows.append(item)
+
+        provider_control_rows.sort(
+            key=lambda x: (-x["total_solicitudes"], x["provider_name"])
+        )
         
         by_type_raw = (
             base_q.with_entities(
@@ -10037,7 +10147,72 @@ def panel_actas(
           </div>
         </div>
         """
-    
+
+        html += f"""
+        <div class="box">
+          <div class="head">
+            <strong>Control contable por proveedor</strong>
+            <span class="small">
+              Cuadre de actas recibidas/procesadas por docifybot8 en el periodo: {_esc(period_label)}.
+            </span>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr style="background:#fff200;">
+                  <th>Proveedor</th>
+                  <th class="right">Total con éxito</th>
+                  <th class="right">Actas sin registro en sistema</th>
+                  <th class="right">Actas erróneas / duplicadas</th>
+                  <th class="right">Otros errores</th>
+                  <th class="right">Pendientes</th>
+                  <th class="right">Total de solicitudes</th>
+                </tr>
+              </thead>
+              <tbody>
+        """
+
+        if provider_control_rows:
+            for r in provider_control_rows:
+                html += f"""
+                <tr>
+                  <td><strong>{_esc(_provider_label(r["provider_name"]))}</strong></td>
+                  <td class="right">{r["total_exito"]}</td>
+                  <td class="right">{r["sin_registro"]}</td>
+                  <td class="right">{r["actas_erroneas"]}</td>
+                  <td class="right">{r["otros_errores"]}</td>
+                  <td class="right">{r["pendientes"]}</td>
+                  <td class="right"><strong>{r["total_solicitudes"]}</strong></td>
+                </tr>
+                """
+
+            html += f"""
+                <tr style="background:#f1f5f9;font-weight:900;">
+                  <td>TOTAL GENERAL</td>
+                  <td class="right">{provider_control_totals["total_exito"]}</td>
+                  <td class="right">{provider_control_totals["sin_registro"]}</td>
+                  <td class="right">{provider_control_totals["actas_erroneas"]}</td>
+                  <td class="right">{provider_control_totals["otros_errores"]}</td>
+                  <td class="right">{provider_control_totals["pendientes"]}</td>
+                  <td class="right">{provider_control_totals["total_solicitudes"]}</td>
+                </tr>
+            """
+        else:
+            html += '<tr><td colspan="7">Sin datos para este periodo.</td></tr>'
+
+        html += """
+              </tbody>
+            </table>
+          </div>
+
+          <div class="small" style="margin-top:10px;color:#64748b;">
+            Fórmula de cuadre:
+            Total de solicitudes = Total con éxito + Sin registro + Actas erróneas/duplicadas + Otros errores + Pendientes.
+          </div>
+        </div>
+        """
+
         html += """
         <div class="box">
           <div class="head"><strong>Resumen por tipo de acta</strong></div>
