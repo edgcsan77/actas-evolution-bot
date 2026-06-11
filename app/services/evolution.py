@@ -223,14 +223,14 @@ def send_document(number: str, pdf_url: str, filename: str = "acta.pdf", caption
         "media": media_b64
     }
 
-    resp = requests.post(url, headers=_headers(), json=payload, timeout=(5, 45))
-
     print("SEND_DOCUMENT_URL =", url, flush=True)
-    print("SEND_DOCUMENT_STATUS =", resp.status_code, flush=True)
-    print("SEND_DOCUMENT_BODY =", resp.text, flush=True)
 
-    resp.raise_for_status()
-    return resp.json()
+    return _post_send_media_with_retries(
+        url,
+        payload,
+        label="SEND_DOCUMENT",
+        max_attempts=4,
+    )
 
 
 def send_group_text(group_jid: str, text: str, instance_name: str = None):
@@ -282,14 +282,14 @@ def send_group_document(group_jid: str, pdf_url: str, filename: str = "acta.pdf"
         "media": media_b64
     }
 
-    resp = requests.post(url, headers=_headers(), json=payload, timeout=(5, 45))
-
     print("SEND_GROUP_DOCUMENT_URL =", url, flush=True)
-    print("SEND_GROUP_DOCUMENT_STATUS =", resp.status_code, flush=True)
-    print("SEND_GROUP_DOCUMENT_BODY =", resp.text, flush=True)
 
-    resp.raise_for_status()
-    return resp.json()
+    return _post_send_media_with_retries(
+        url,
+        payload,
+        label="SEND_GROUP_DOCUMENT",
+        max_attempts=4,
+    )
 
 
 def get_media_base64(media_type: str, message_id: str, instance_name: str = None):
