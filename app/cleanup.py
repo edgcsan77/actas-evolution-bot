@@ -41,36 +41,76 @@ def cleanup_expired_and_mark_pending():
 
         print("CLEANUP_DELETED_EXPIRED =", deleted_count, flush=True)
 
-        # 2) marcar PROCESSING vencidos como ERROR a los 8 minutos
-        timeout_minutes = int(getattr(settings, "REQUEST_TIMEOUT_MINUTES", 8) or 8)
-        limit = now - timedelta(minutes=timeout_minutes)
-        
-        whatsapp_providers = ["PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9", "PROVIDER12"]
-        
-        rows = (
+        # 2) marcar WHATSAPP vencidos a los 8 minutos y WEB vencidos a los 11 minutos.
+        whatsapp_timeout_minutes = int(getattr(settings, "REQUEST_TIMEOUT_MINUTES", 8) or 8)
+        web_timeout_minutes = int(getattr(settings, "WEB_REQUEST_TIMEOUT_MINUTES", 11) or 11)
+
+        whatsapp_limit = now - timedelta(minutes=whatsapp_timeout_minutes)
+        web_limit = now - timedelta(minutes=web_timeout_minutes)
+
+        whatsapp_providers = [
+            "PROVIDER1",
+            "PROVIDER2",
+            "PROVIDER5",
+            "PROVIDER6",
+            "PROVIDER8",
+            "PROVIDER9",
+            "PROVIDER12",
+            "MAYAPROVIDER",
+        ]
+
+        web_providers = [
+            "PROVIDER3",
+            "PROVIDER4",
+            "PROVIDER10",
+            "PROVIDER11",
+        ]
+
+        rows_whatsapp = (
             db.query(RequestLog)
             .filter(
-                RequestLog.status == "PROCESSING",
+                RequestLog.status.in_(["QUEUED", "PROCESSING"]),
                 RequestLog.api_client_id.is_(None),
-                RequestLog.updated_at.is_not(None),
-                RequestLog.updated_at <= limit,
+                RequestLog.created_at.is_not(None),
+                RequestLog.created_at <= whatsapp_limit,
                 RequestLog.provider_name.in_(whatsapp_providers),
             )
             .all()
         )
 
-        print("CLEANUP_TIMEOUT_LIMIT =", limit, flush=True)
-        print("CLEANUP_TIMEOUT_ROWS =", len(rows), flush=True)
+        rows_web = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.status.in_(["QUEUED", "PROCESSING"]),
+                RequestLog.api_client_id.is_(None),
+                RequestLog.created_at.is_not(None),
+                RequestLog.created_at <= web_limit,
+                RequestLog.provider_name.in_(web_providers),
+            )
+            .all()
+        )
 
+        print("CLEANUP_WHATSAPP_TIMEOUT_LIMIT =", whatsapp_limit, flush=True)
+        print("CLEANUP_WEB_TIMEOUT_LIMIT =", web_limit, flush=True)
+        print("CLEANUP_WHATSAPP_TIMEOUT_ROWS =", len(rows_whatsapp), flush=True)
+        print("CLEANUP_WEB_TIMEOUT_ROWS =", len(rows_web), flush=True)
+
+        rows = rows_whatsapp + rows_web
         changed_ids = []
 
         for r in rows:
+            provider = (r.provider_name or "").upper()
+
+            if provider in web_providers:
+                minutes = web_timeout_minutes
+                label = f"Auto-cierre (>{minutes} min) WEB cleanup"
+            else:
+                minutes = whatsapp_timeout_minutes
+                label = f"Auto-cierre (>{minutes} min) WHATSAPP cleanup"
+
             r.status = "ERROR"
             r.updated_at = now
-            r.error_message = (
-                f"Timeout automático a los "
-                f"{timeout_minutes} minutos"
-            )
+            r.error_message = label
             changed_ids.append(r.id)
 
         db.commit()
