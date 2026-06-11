@@ -1434,6 +1434,81 @@ def retry_pdf_delivery(request_id: int, attempt: int = 1):
         db.close()
 
 
+def sweep_stuck_requests(max_age_minutes: int = 20, limit: int = 80):
+    db = SessionLocal()
+
+    try:
+        cutoff = _utc_now_naive() - timedelta(minutes=max_age_minutes)
+
+        rows = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.status.in_(["QUEUED", "PROCESSING"]),
+                RequestLog.updated_at < cutoff,
+            )
+            .order_by(RequestLog.updated_at.asc())
+            .limit(limit)
+            .all()
+        )
+
+        print("SWEEP_STUCK_REQUESTS_FOUND =", {
+            "count": len(rows),
+            "max_age_minutes": max_age_minutes,
+        }, flush=True)
+
+        for req in rows:
+            try:
+                err = (req.error_message or "").upper()
+
+                # Si ya tiene PDF guardado, intentar entregar.
+                if req.pdf_url:
+                    req.status = "ERROR"
+                    req.error_message = "DELIVERY_FAILED_PENDING_RETRY: sweep detected stored PDF"
+                    req.updated_at = _utc_now_naive()
+                    db.commit()
+
+                    _schedule_delivery_retry(req.id, attempt=1, delay_sec=10)
+                    continue
+
+                # Si sigue QUEUED, reencolar.
+                if req.status == "QUEUED":
+                    req.updated_at = _utc_now_naive()
+                    db.commit()
+
+                    queue = slow_request_queue if (req.provider_name or "").upper() in SLOW_PROVIDERS else request_queue
+                    queue.enqueue(process_request, req.id)
+
+                    print("SWEEP_REQUEUED_QUEUED_REQUEST =", {
+                        "request_id": req.id,
+                        "provider": req.provider_name,
+                    }, flush=True)
+                    continue
+
+                # Si está PROCESSING demasiado viejo, cerrarlo como timeout recuperable.
+                # Si el PDF llega tarde por WhatsApp, main.py todavía puede empatarlo porque filtra ERROR reciente con TIMEOUT.
+                req.status = "ERROR"
+                req.error_message = f"TIMEOUT_8MIN_CANCELLED: auto-cierre por sweep > {max_age_minutes} min sin PDF útil"
+                req.updated_at = _utc_now_naive()
+                db.commit()
+
+                print("SWEEP_CLOSED_PROCESSING_TIMEOUT =", {
+                    "request_id": req.id,
+                    "provider": req.provider_name,
+                    "curp": req.curp,
+                    "act_type": req.act_type,
+                }, flush=True)
+
+            except Exception as one_exc:
+                db.rollback()
+                print("SWEEP_STUCK_ONE_ERROR =", {
+                    "request_id": getattr(req, "id", None),
+                    "error": str(one_exc),
+                }, flush=True)
+
+    finally:
+        db.close()
+
+
 def _get_or_create_provider(db, provider_name: str, default_enabled: bool):
     row = db.query(ProviderSetting).filter(ProviderSetting.provider_name == provider_name).first()
     if row:
@@ -3756,20 +3831,45 @@ def process_request(request_id: int):
                         return
                 
                     if "PROVIDER3" not in enabled:
+                        retry_count_key = f"fallback:no_provider_available:{req.id}"
+                        retry_count = int(redis_conn.incr(retry_count_key) or 1)
+                        redis_conn.expire(retry_count_key, 3600)
+                    
+                        if retry_count <= 3:
+                            req.status = "QUEUED"
+                            req.error_message = f"{provider_name}_WAITING_FALLBACK_PROVIDER_AVAILABLE_ATTEMPT_{retry_count}:{p4_err[:300]}"
+                            req.updated_at = _utc_now_naive()
+                            db.commit()
+                    
+                            slow_request_queue.enqueue_in(
+                                timedelta(seconds=120 * retry_count),
+                                process_request,
+                                req.id,
+                            )
+                    
+                            print("FALLBACK_NO_PROVIDER_AVAILABLE_REQUEUED =", {
+                                "req_id": req.id,
+                                "attempt": retry_count,
+                                "delay_sec": 120 * retry_count,
+                                "provider": provider_name,
+                                "err": p4_err[:300],
+                            }, flush=True)
+                    
+                            return
+                    
                         msg = (
                             "⚠️ *Proveedor temporalmente no disponible*\n\n"
                             "La búsqueda no pudo completarse correctamente en este momento.\n\n"
                             "Intenta nuevamente más tarde."
                         )
-                
+                    
                         instance = req.instance_name or "docifybot8"
                         if req.source_group_id:
                             if should_send_extra_text(req.source_group_id):
                                 send_group_text(req.source_group_id, msg, instance)
                         else:
-                            from app.services.evolution import send_text
                             send_text(req.requester_wa_id, msg, instance)
-                
+                    
                         req.status = "ERROR"
                         req.error_message = f"{provider_name}_FALLBACK_NO_PROVIDER_AVAILABLE:{p4_err}"
                         req.updated_at = _utc_now_naive()
@@ -4040,8 +4140,33 @@ def process_request(request_id: int):
                 return
 
             if err.startswith("NO_PROVIDER_ENABLED"):
+                retry_count_key = f"no_provider_enabled_retry:{req.id}"
+                retry_count = int(redis_conn.incr(retry_count_key) or 1)
+                redis_conn.expire(retry_count_key, 1800)
+            
+                if retry_count <= 3:
+                    req.status = "QUEUED"
+                    req.error_message = f"NO_PROVIDER_ENABLED_RETRY_{retry_count}"
+                    req.updated_at = _utc_now_naive()
+                    db.commit()
+            
+                    request_queue.enqueue_in(
+                        timedelta(seconds=60 * retry_count),
+                        process_request,
+                        req.id,
+                    )
+            
+                    print("NO_PROVIDER_ENABLED_REQUEUED =", {
+                        "request_id": req.id,
+                        "attempt": retry_count,
+                        "delay_sec": 60 * retry_count,
+                    }, flush=True)
+            
+                    return
+            
                 req.status = "ERROR"
                 req.error_message = err
+                req.updated_at = _utc_now_naive()
                 db.commit()
 
                 msg = (
