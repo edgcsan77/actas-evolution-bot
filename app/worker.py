@@ -1175,7 +1175,7 @@ def _store_api_pdf_result(req, db, safe_media_b64: str, filename: str, provider_
     req.api_result_base64 = raw
     req.api_result_filename = filename or f"{req.curp}.pdf"
     req.provider_media_url = provider_media_label
-    req.pdf_url = None
+    #req.pdf_url = None
     req.status = "DONE"
     req.error_message = None
     req.updated_at = _utc_now_naive()
