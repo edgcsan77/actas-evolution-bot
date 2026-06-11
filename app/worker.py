@@ -1299,7 +1299,7 @@ def _deliver_pdf_base64_with_retries(
 ) -> bool:
     last_error = None
 
-    for attempt in range(1, 4):
+    for attempt in range(1, 2):
         try:
             _send_pdf_base64_to_client_once(
                 req,
