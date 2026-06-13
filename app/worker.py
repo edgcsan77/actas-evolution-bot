@@ -2024,9 +2024,17 @@ def _pick_provider_group(
 
 def _build_provider_message(provider_name: str, term: str, act_type: str) -> str | None:
     if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9", "PROVIDER12", "MAYAPROVIDER"):
-        if is_chain(term):
-            return f"{term}"
         provider_type = provider_label_for_type(act_type)
+
+        if is_chain(term):
+            act_up = (act_type or "").upper().strip()
+            provider_type_up = (provider_type or "").upper().strip()
+
+            if "FOLIO" in act_up or "FOLI" in act_up or "FOLIO" in provider_type_up or "FOLI" in provider_type_up:
+                return f"{term} FOLIO"
+
+            return f"{term}"
+
         return f"{term} {provider_type}"
 
     if provider_name == "PROVIDER3":
