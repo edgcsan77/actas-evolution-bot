@@ -1767,6 +1767,7 @@ def _provider_accounting_data(
                 "error_type": bucket,
                 "total": 0,
                 "examples": [],
+                "items": [],
             }
 
         error_bucket_map[key]["total"] += int(row.total or 0)
@@ -1774,6 +1775,42 @@ def _provider_accounting_data(
         example = (row.error_message or "").strip()
         if example and len(error_bucket_map[key]["examples"]) < 2:
             error_bucket_map[key]["examples"].append(example[:220])
+
+    # Detalle real de cada solicitud con error:
+    # sirve para comparar contra WhatsApp: ID, CURP/dato, tipo, bot, grupo, solicitante y error técnico.
+    error_items_raw = (
+        q.filter(RequestLog.status == "ERROR")
+        .order_by(RequestLog.created_at.desc(), RequestLog.id.desc())
+        .all()
+    )
+
+    for req in error_items_raw:
+        provider = req.provider_name or "NO IDENTIFICADO"
+        bucket = _panel_error_bucket(req.error_message, req.status)
+        key = (provider, bucket)
+
+        if key not in error_bucket_map:
+            error_bucket_map[key] = {
+                "provider_name": provider,
+                "error_type": bucket,
+                "total": 0,
+                "examples": [],
+                "items": [],
+            }
+
+        created_local = _to_panel_tz(req.created_at)
+        created_txt = created_local.strftime("%Y-%m-%d %H:%M:%S") if created_local else ""
+
+        error_bucket_map[key]["items"].append({
+            "id": req.id,
+            "created_at": created_txt,
+            "curp": getattr(req, "curp", "") or "",
+            "act_type": getattr(req, "act_type", "") or "",
+            "instance_name": getattr(req, "instance_name", "") or MAIN_PANEL_INSTANCE,
+            "source_group_id": getattr(req, "source_group_id", "") or "",
+            "requester_wa_id": getattr(req, "requester_wa_id", "") or "",
+            "error_message": getattr(req, "error_message", "") or "",
+        })
 
     error_detail_rows = list(error_bucket_map.values())
     error_detail_rows.sort(
@@ -12240,6 +12277,15 @@ def panel_auditoria_proveedores(
               font-family:Consolas, monospace;
               font-size:12px;
             }}
+            details summary {{
+              cursor:pointer;
+              font-weight:800;
+              color:#1d4ed8;
+            }}
+            details table {{
+              margin-top:6px;
+              background:white;
+            }}
             .total-row {{
               background:#f1f5f9;
               font-weight:900;
@@ -12363,6 +12409,7 @@ def panel_auditoria_proveedores(
                       <th>Tipo de error</th>
                       <th class="right">Cantidad</th>
                       <th>Ejemplo técnico</th>
+                      <th>Solicitudes / CURP</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -12372,17 +12419,62 @@ def panel_auditoria_proveedores(
             for r in error_detail_rows:
                 examples_html = "<br>".join(_esc(x) for x in r.get("examples", []))
 
+                item_rows_html = ""
+
+                for item in r.get("items", []):
+                    item_rows_html += f"""
+                        <tr>
+                          <td class="mono">{item["id"]}</td>
+                          <td class="mono">{_esc(item["created_at"])}</td>
+                          <td class="mono">{_esc(item["curp"])}</td>
+                          <td>{_esc(item["act_type"])}</td>
+                          <td>{_esc(bot_label(item["instance_name"], db))}<br><span class="small mono">{_esc(item["instance_name"])}</span></td>
+                          <td class="mono">{_esc(item["source_group_id"])}</td>
+                          <td class="mono">{_esc(item["requester_wa_id"])}</td>
+                          <td class="small mono">{_esc(item["error_message"][:260])}</td>
+                        </tr>
+                    """
+
+                if item_rows_html:
+                    items_html = f"""
+                        <details>
+                          <summary>Ver {len(r.get("items", []))} solicitud(es)</summary>
+                          <div style="margin-top:8px; max-height:360px; overflow:auto;">
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>ID</th>
+                                  <th>Fecha MTY</th>
+                                  <th>CURP / dato</th>
+                                  <th>Tipo</th>
+                                  <th>Bot</th>
+                                  <th>Grupo origen</th>
+                                  <th>Solicitante</th>
+                                  <th>Error técnico</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {item_rows_html}
+                              </tbody>
+                            </table>
+                          </div>
+                        </details>
+                    """
+                else:
+                    items_html = '<span class="small">Sin detalle.</span>'
+
                 html += f"""
                     <tr>
                       <td><strong>{_esc(_provider_label(r["provider_name"]))}</strong></td>
                       <td>{_esc(r["error_type"])}</td>
                       <td class="right"><strong>{r["total"]}</strong></td>
                       <td class="small mono">{examples_html}</td>
+                      <td>{items_html}</td>
                     </tr>
                 """
         else:
-            html += '<tr><td colspan="4">Sin errores registrados para este periodo.</td></tr>'
-
+            html += '<tr><td colspan="5">Sin errores registrados para este periodo.</td></tr>'
+            
         html += """
                   </tbody>
                 </table>
