@@ -49,6 +49,11 @@ def detect_act_type(text: str) -> str:
         ]):
             return "NACIMIENTO FOLIO"
 
+        # Si viene cadena + folio sin tipo específico,
+        # no lo fuerces a NACIMIENTO FOLIO.
+        if re.search(rf"\b{NUM20_REGEX}\b", t):
+            return "FOLIO"
+
         return "NACIMIENTO FOLIO"
 
     if any(x in t_nospace for x in [
@@ -86,6 +91,7 @@ def provider_label_for_type(act_type: str) -> str:
         "MATRIMONIO FOLIO": "matrimonio folio",
         "DEFUNCION FOLIO": "defuncion folio",
         "DIVORCIO FOLIO": "divorcio folio",
+        "FOLIO": "folio",
     }
     return mapping.get(act_type, "nacimiento")
 
