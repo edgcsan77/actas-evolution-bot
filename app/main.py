@@ -17257,6 +17257,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         
             if error_existing:
                 error_existing.request_key = request_key
+                error_existing.curp = term
+                error_existing.act_type = act_type
                 error_existing.status = "QUEUED"
                 error_existing.updated_at = _utc_now_naive()
                 error_existing.error_message = None
