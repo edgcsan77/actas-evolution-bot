@@ -2031,7 +2031,7 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
             provider_type_up = (provider_type or "").upper().strip()
 
             if "FOLIO" in act_up or "FOLI" in act_up or "FOLIO" in provider_type_up or "FOLI" in provider_type_up:
-                return f"{term} FOLIO"
+                return f"{term} folio"
 
             return f"{term}"
 
