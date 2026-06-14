@@ -2160,6 +2160,76 @@ def botpanel_audit_all_groups(
         "processing": sum(1 for r in rows if r.status == "PROCESSING"),
     }
 
+    # ==========================================================
+    # CORTE DIARIO + CORTE SEMANAL
+    # Aplica al filtro actual:
+    # - Si group_jid viene seleccionado, suma solo ese grupo.
+    # - Si group_jid viene vacío, suma todos los grupos del mini panel.
+    # - Si status=DONE, suma solo vendidas/hechas para cobranza.
+    # ==========================================================
+    daily_cut_map = {}
+
+    start_local = _to_panel_tz(time_min)
+    end_local = _to_panel_tz(time_max)
+
+    # Crear todos los días del periodo aunque estén en cero.
+    if start_local and end_local:
+        current_day = start_local.date()
+        last_day = (end_local - timedelta(days=1)).date()
+
+        while current_day <= last_day:
+            day_key = current_day.strftime("%Y-%m-%d")
+
+            daily_cut_map[day_key] = {
+                "date": day_key,
+                "day_name": _day_name_es_from_date(day_key),
+                "total": 0,
+                "done": 0,
+                "error": 0,
+                "queued": 0,
+                "processing": 0,
+            }
+
+            current_day = current_day + timedelta(days=1)
+
+    # Sumar movimientos reales sobre esos días.
+    for r in rows:
+        local_dt = _to_panel_tz(r.created_at)
+        if not local_dt:
+            continue
+
+        day_key = local_dt.strftime("%Y-%m-%d")
+
+        if day_key not in daily_cut_map:
+            daily_cut_map[day_key] = {
+                "date": day_key,
+                "day_name": _day_name_es_from_date(day_key),
+                "total": 0,
+                "done": 0,
+                "error": 0,
+                "queued": 0,
+                "processing": 0,
+            }
+
+        item = daily_cut_map[day_key]
+        item["total"] += 1
+
+        st = (r.status or "").upper()
+
+        if st == "DONE":
+            item["done"] += 1
+        elif st == "ERROR":
+            item["error"] += 1
+        elif st == "QUEUED":
+            item["queued"] += 1
+        elif st == "PROCESSING":
+            item["processing"] += 1
+
+    daily_cut_rows = sorted(
+        daily_cut_map.values(),
+        key=lambda x: x["date"]
+    )
+
     by_group = {}
 
     for r in rows:
@@ -2365,9 +2435,97 @@ def botpanel_audit_all_groups(
             <div class="stat"><span>QUEUED</span><strong>{totals["queued"]}</strong></div>
           </div>
         </div>
+    """
+
+    html += """
+        <div class="box">
+          <h3>Corte diario y semanal</h3>
+          <p class="small">
+            Suma diaria del periodo seleccionado y corte automático de lunes a domingo.
+            Si filtras un grupo, el corte es solo de ese grupo. Si no filtras grupo, suma todos los grupos del mini panel.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Día</th>
+                <th>Fecha</th>
+                <th>Total</th>
+                <th>DONE</th>
+                <th>ERROR</th>
+                <th>PROCESSING</th>
+                <th>QUEUED</th>
+              </tr>
+            </thead>
+            <tbody>
+    """
+
+    if daily_cut_rows:
+        weekly_total = 0
+        weekly_done = 0
+        weekly_error = 0
+        weekly_processing = 0
+        weekly_queued = 0
+        weekly_start = None
+
+        for idx, d in enumerate(daily_cut_rows):
+            if weekly_start is None:
+                weekly_start = d["date"]
+
+            weekly_total += int(d["total"] or 0)
+            weekly_done += int(d["done"] or 0)
+            weekly_error += int(d["error"] or 0)
+            weekly_processing += int(d["processing"] or 0)
+            weekly_queued += int(d["queued"] or 0)
+
+            html += f"""
+              <tr>
+                <td>{_esc(d["day_name"])}</td>
+                <td>{_esc(d["date"])}</td>
+                <td>{int(d["total"] or 0)}</td>
+                <td>{int(d["done"] or 0)}</td>
+                <td>{int(d["error"] or 0)}</td>
+                <td>{int(d["processing"] or 0)}</td>
+                <td>{int(d["queued"] or 0)}</td>
+              </tr>
+            """
+
+            is_sunday = (d["day_name"] or "").upper() == "DOMINGO"
+            is_last_day = idx == len(daily_cut_rows) - 1
+
+            if is_sunday or is_last_day:
+                html += f"""
+                  <tr class="weekly-row">
+                    <td>CORTE SEMANAL</td>
+                    <td>{_esc(weekly_start)} a {_esc(d["date"])}</td>
+                    <td>{weekly_total}</td>
+                    <td>{weekly_done}</td>
+                    <td>{weekly_error}</td>
+                    <td>{weekly_processing}</td>
+                    <td>{weekly_queued}</td>
+                  </tr>
+                """
+
+                weekly_total = 0
+                weekly_done = 0
+                weekly_error = 0
+                weekly_processing = 0
+                weekly_queued = 0
+                weekly_start = None
+    else:
+        html += """
+              <tr>
+                <td colspan="7">Sin movimientos en este periodo.</td>
+              </tr>
+        """
+
+    html += """
+            </tbody>
+          </table>
+        </div>
 
         <div class="box">
           <h3>Resumen por grupo</h3>
+          
           <table>
             <thead>
               <tr>
@@ -12664,6 +12822,13 @@ def panel_auditoria_proveedores(
             .status-e {{ color:#b91c1c;font-weight:bold; }}
             .status-q {{ color:#92400e;font-weight:bold; }}
             .status-p {{ color:#1d4ed8;font-weight:bold; }}
+            .weekly-row {{
+              background:#dbeafe;
+              font-weight:800;
+            }}
+            .weekly-row td {{
+              border-top:2px solid #93c5fd;
+            }}
           </style>
         </head>
         <body>
