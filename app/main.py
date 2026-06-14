@@ -12118,7 +12118,7 @@ def panel_actas(
               }},
               body: JSON.stringify({{
                 message: message,
-                audios_base64: audioBase64,
+                audio_base64: audioBase64,
                 selected_instances: selected
               }})
             }});
