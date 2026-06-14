@@ -6446,26 +6446,103 @@ def _broadcast_target_groups() -> list[str]:
     return out
 
 
+def _clean_audio_base64(audio_base64: str | None) -> str:
+    raw = (audio_base64 or "").strip()
+
+    if not raw:
+        return ""
+
+    # El navegador normalmente manda:
+    # data:audio/webm;codecs=opus;base64,AAAA...
+    # Evolution acepta base64 limpio; por eso quitamos el encabezado.
+    if "," in raw and raw.lower().startswith("data:"):
+        raw = raw.split(",", 1)[1].strip()
+
+    return raw
+
+
+def _send_whatsapp_audio(
+    number: str,
+    audio_base64: str,
+    instance_name: str = MAIN_PANEL_INSTANCE,
+    delay: int = 1200,
+):
+    number = (number or "").strip()
+    instance_name = (instance_name or MAIN_PANEL_INSTANCE).strip()
+    audio_base64 = _clean_audio_base64(audio_base64)
+
+    if not number:
+        raise ValueError("Destino vacío para audio")
+
+    if not audio_base64:
+        raise ValueError("Audio vacío")
+
+    url = f"{EVOLUTION_BASE_URL}/message/sendWhatsAppAudio/{instance_name}"
+
+    payload = {
+        "number": number,
+        "audio": audio_base64,
+        "delay": delay,
+    }
+
+    r = requests.post(
+        url,
+        headers={
+            "apikey": EVOLUTION_APIKEY,
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=45,
+    )
+
+    if r.status_code >= 400:
+        raise RuntimeError(
+            f"sendWhatsAppAudio/{instance_name} -> {r.status_code}: {r.text[:500]}"
+        )
+
+    try:
+        return r.json()
+    except Exception:
+        return {"raw": r.text}
+
+
 def _run_broadcast_job(
     message_text: str,
     target_groups: list[str],
     instance_name: str = MAIN_PANEL_INSTANCE,
+    audio_base64: str = "",
 ):
     sent = []
     failed = []
     instance_name = (instance_name or MAIN_PANEL_INSTANCE).strip()
+    message_text = (message_text or "").strip()
+    audio_base64 = _clean_audio_base64(audio_base64)
 
     for gid in target_groups:
         try:
-            send_group_text(
-                gid,
-                message_text,
-                instance_name=instance_name,
-            )
+            # Si capturaste texto, manda primero texto.
+            if message_text:
+                send_group_text(
+                    gid,
+                    message_text,
+                    instance_name=instance_name,
+                )
+
+            # Si grabaste audio, manda después audio como nota de voz.
+            if audio_base64:
+                _send_whatsapp_audio(
+                    gid,
+                    audio_base64,
+                    instance_name=instance_name,
+                )
+
             sent.append({
                 "group_jid": gid,
                 "group_name": _group_name(gid),
             })
+
+            time.sleep(0.6)
+
         except Exception as e:
             failed.append({
                 "group_jid": gid,
@@ -6480,6 +6557,8 @@ def _run_broadcast_job(
             "target_count": len(target_groups),
             "sent_count": len(sent),
             "failed_count": len(failed),
+            "has_text": bool(message_text),
+            "has_audio": bool(audio_base64),
         },
         flush=True,
     )
@@ -6742,11 +6821,12 @@ async def panel_broadcast_free(
             payload = {}
 
         message_text = (payload.get("message") or "").strip()
+        audio_base64 = _clean_audio_base64(payload.get("audio_base64") or "")
         target_category = (payload.get("category") or "all").strip().lower()
         selected_groups = payload.get("selected_groups") or []
-
-        if not message_text:
-            return {"ok": False, "error": "Mensaje vacío"}
+        
+        if not message_text and not audio_base64:
+            return {"ok": False, "error": "Mensaje/audio vacío"}
 
         target_groups = _get_broadcast_target_groups(db, target_category, selected_groups)
 
@@ -6758,12 +6838,15 @@ async def panel_broadcast_free(
             message_text,
             target_groups,
             MAIN_PANEL_INSTANCE,
+            audio_base64,
         )
+
+        tipo_envio = "audio" if audio_base64 and not message_text else "mensaje/audio" if audio_base64 else "mensaje"
 
         return {
             "ok": True,
             "queued": True,
-            "message": f"Envío masivo iniciado para {len(target_groups)} grupos",
+            "message": f"Envío masivo de {tipo_envio} iniciado para {len(target_groups)} grupos",
         }
 
     except Exception as e:
@@ -6828,9 +6911,101 @@ def panel_set_bot_private_target(
     }
 
 
+def _run_private_bots_broadcast_job(
+    job_id: str,
+    instance_name: str,
+    message_text: str,
+    recipients: list[dict],
+    audio_base64: str = "",
+):
+    key = f"botpanel:broadcast:{job_id}"
+    instance_name = (instance_name or MAIN_PANEL_INSTANCE).strip()
+    message_text = (message_text or "").strip()
+    audio_base64 = _clean_audio_base64(audio_base64)
+
+    total = len(recipients or [])
+    sent = 0
+    errors = 0
+    skipped = 0
+
+    def save_progress(status: str, current: str = ""):
+        redis_conn.setex(
+            key,
+            60 * 30,
+            json.dumps(
+                {
+                    "ok": True,
+                    "status": status,
+                    "instance": instance_name,
+                    "sent": sent,
+                    "errors": errors,
+                    "skipped": skipped,
+                    "total": total,
+                    "current": current,
+                    "mode": "private_bots",
+                    "has_text": bool(message_text),
+                    "has_audio": bool(audio_base64),
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+    try:
+        save_progress("running", "")
+
+        for item in recipients or []:
+            jid = (item.get("jid") or "").strip()
+            label = (item.get("label") or item.get("instance_name") or jid).strip()
+
+            if not jid:
+                skipped += 1
+                save_progress("running", f"{label}: sin JID")
+                continue
+
+            try:
+                save_progress("running", label)
+
+                if message_text:
+                    send_text(
+                        jid,
+                        message_text,
+                        instance_name=instance_name,
+                    )
+
+                if audio_base64:
+                    _send_whatsapp_audio(
+                        jid,
+                        audio_base64,
+                        instance_name=instance_name,
+                    )
+
+                sent += 1
+                time.sleep(0.6)
+
+            except Exception as e:
+                errors += 1
+                print(
+                    "PRIVATE_BOTS_BROADCAST_SEND_ERROR =",
+                    {
+                        "job_id": job_id,
+                        "jid": jid,
+                        "label": label,
+                        "error": str(e),
+                    },
+                    flush=True,
+                )
+
+        save_progress("done", "")
+
+    except Exception as e:
+        print("PRIVATE_BOTS_BROADCAST_JOB_ERROR =", repr(e), flush=True)
+        save_progress("error", str(e))
+
+
 @app.post("/panel/broadcast/private-bots")
 async def panel_broadcast_private_bots(
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     try:
@@ -6845,10 +7020,11 @@ async def panel_broadcast_private_bots(
             payload = {}
 
         message = (payload.get("message") or "").strip()
+        audio_base64 = _clean_audio_base64(payload.get("audio_base64") or "")
         selected_instances = payload.get("selected_instances") or []
-
-        if not message:
-            return {"ok": False, "error": "Mensaje vacío"}
+        
+        if not message and not audio_base64:
+            return {"ok": False, "error": "Mensaje/audio vacío"}
 
         if not isinstance(selected_instances, list):
             return {"ok": False, "error": "Selección inválida"}
@@ -6891,12 +7067,13 @@ async def panel_broadcast_private_bots(
 
         job_id = uuid.uuid4().hex
 
-        broadcast_queue.enqueue(
-            panel_private_bots_broadcast_job,
+        background_tasks.add_task(
+            _run_private_bots_broadcast_job,
             job_id,
             MAIN_PANEL_INSTANCE,
             message,
             recipients,
+            audio_base64,
         )
 
         return {
@@ -10130,6 +10307,32 @@ def panel_actas(
                         class="broadcast-textarea"
                         placeholder="Escribe aquí el mensaje que deseas enviar..."
                       ></textarea>
+
+                      <div style="margin-top:10px;padding:10px;border:1px dashed #e5e7eb;border-radius:12px;background:rgba(255,255,255,.08);">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:8px;">
+                          Audio opcional
+                        </div>
+                    
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                          <button type="button" class="btn btn-warning" onclick="startPanelAudioRecording('free')">
+                            Grabar audio
+                          </button>
+                    
+                          <button type="button" class="btn btn-danger" onclick="stopPanelAudioRecording()" disabled id="freeAudioStopBtn">
+                            Detener
+                          </button>
+                    
+                          <button type="button" class="btn btn-light" onclick="clearPanelAudio('free')">
+                            Quitar audio
+                          </button>
+                    
+                          <span id="freeAudioStatus" style="font-size:12px;color:#d1d5db;font-weight:700;">
+                            Sin audio
+                          </span>
+                        </div>
+                    
+                        <audio id="freeAudioPreview" controls style="display:none;width:100%;margin-top:8px;"></audio>
+                      </div>
                 
                       <div class="broadcast-actions">
                         <button class="btn btn-success" onclick="sendFreeBroadcast()">Enviar mensaje libre</button>
@@ -10184,6 +10387,32 @@ def panel_actas(
                         placeholder="Escribe aquí el mensaje privado para los bots seleccionados..."
                         style="margin-top:10px;"
                       ></textarea>
+
+                      <div style="margin-top:10px;padding:10px;border:1px dashed #e5e7eb;border-radius:12px;background:#f8fafc;color:#111827;">
+                        <div style="font-size:12px;font-weight:800;margin-bottom:8px;">
+                          Audio opcional
+                        </div>
+                    
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                          <button type="button" class="btn btn-warning" onclick="startPanelAudioRecording('private')">
+                            Grabar audio
+                          </button>
+                    
+                          <button type="button" class="btn btn-danger" onclick="stopPanelAudioRecording()" disabled id="privateAudioStopBtn">
+                            Detener
+                          </button>
+                    
+                          <button type="button" class="btn btn-light" onclick="clearPanelAudio('private')">
+                            Quitar audio
+                          </button>
+                    
+                          <span id="privateAudioStatus" style="font-size:12px;color:#64748b;font-weight:800;">
+                            Sin audio
+                          </span>
+                        </div>
+                    
+                        <audio id="privateAudioPreview" controls style="display:none;width:100%;margin-top:8px;"></audio>
+                      </div>
                     
                       <div
                         id="privateBotsBroadcastProgress"
@@ -10985,6 +11214,134 @@ def panel_actas(
       <script>
         const PANEL_STREAM_ENABLED = {json.dumps(PANEL_STREAM_ENABLED)};
         let broadcastRunning = false;
+
+        let panelAudioRecorder = null;
+        let panelAudioChunks = [];
+        let panelAudioTarget = null;
+        
+        let panelAudioBase64 = {{
+          free: "",
+          private: ""
+        }};
+        
+        function setPanelAudioStatus(target, text) {{
+          const id = target === "private" ? "privateAudioStatus" : "freeAudioStatus";
+          const el = document.getElementById(id);
+          if (el) el.textContent = text;
+        }}
+        
+        function setPanelAudioStopEnabled(target, enabled) {{
+          const id = target === "private" ? "privateAudioStopBtn" : "freeAudioStopBtn";
+          const btn = document.getElementById(id);
+          if (btn) btn.disabled = !enabled;
+        }}
+        
+        function setPanelAudioPreview(target, blob) {{
+          const id = target === "private" ? "privateAudioPreview" : "freeAudioPreview";
+          const audio = document.getElementById(id);
+          if (!audio) return;
+        
+          if (!blob) {{
+            audio.style.display = "none";
+            audio.removeAttribute("src");
+            return;
+          }}
+        
+          audio.src = URL.createObjectURL(blob);
+          audio.style.display = "block";
+        }}
+        
+        function blobToDataUrl(blob) {{
+          return new Promise((resolve, reject) => {{
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result || "");
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          }});
+        }}
+        
+        async function startPanelAudioRecording(target) {{
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {{
+            alert("Tu navegador no permite grabar audio aquí.");
+            return;
+          }}
+        
+          if (panelAudioRecorder && panelAudioRecorder.state === "recording") {{
+            alert("Ya hay una grabación activa.");
+            return;
+          }}
+        
+          panelAudioTarget = target;
+          panelAudioChunks = [];
+        
+          try {{
+            const stream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
+        
+            let options = {{}};
+        
+            if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {{
+              options = {{ mimeType: "audio/webm;codecs=opus" }};
+            }} else if (MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")) {{
+              options = {{ mimeType: "audio/ogg;codecs=opus" }};
+            }}
+        
+            panelAudioRecorder = new MediaRecorder(stream, options);
+        
+            panelAudioRecorder.ondataavailable = (event) => {{
+              if (event.data && event.data.size > 0) {{
+                panelAudioChunks.push(event.data);
+              }}
+            }};
+        
+            panelAudioRecorder.onstop = async () => {{
+              try {{
+                const blob = new Blob(panelAudioChunks, {{
+                  type: panelAudioRecorder.mimeType || "audio/webm"
+                }});
+        
+                const dataUrl = await blobToDataUrl(blob);
+        
+                panelAudioBase64[panelAudioTarget] = dataUrl;
+        
+                setPanelAudioPreview(panelAudioTarget, blob);
+                setPanelAudioStatus(panelAudioTarget, "Audio listo para enviar");
+              }} catch (e) {{
+                console.error(e);
+                setPanelAudioStatus(panelAudioTarget, "Error preparando audio");
+              }}
+        
+              try {{
+                stream.getTracks().forEach(track => track.stop());
+              }} catch (e) {{}}
+        
+              setPanelAudioStopEnabled(panelAudioTarget, false);
+              panelAudioRecorder = null;
+            }};
+        
+            panelAudioRecorder.start();
+            panelAudioBase64[target] = "";
+            setPanelAudioPreview(target, null);
+            setPanelAudioStatus(target, "Grabando...");
+            setPanelAudioStopEnabled(target, true);
+        
+          }} catch (e) {{
+            console.error(e);
+            alert("No se pudo acceder al micrófono.");
+            setPanelAudioStopEnabled(target, false);
+          }}
+        }}
+        
+        function stopPanelAudioRecording() {{
+          if (panelAudioRecorder && panelAudioRecorder.state === "recording") {{
+            panelAudioRecorder.stop();
+          }}
+        }}
+        
+        function clearPanelAudio(target) {{
+          panelAudioBase64[target] = "";
+          setPanelAudioPreview(target, null);
+          setPanelAudioStatus(target, "Sin audio");
+        }}
     
         async function toggleProvider(provider, action) {{
           const url = `/panel/provider/${{provider}}/${{action}}`;
@@ -11553,10 +11910,11 @@ def panel_actas(
         async function sendFreeBroadcast() {{
           const textarea = document.getElementById("broadcastMessage");
           const message = textarea.value.trim();
+          const audioBase64 = panelAudioBase64.free || "";
           const category = document.getElementById("broadcastCategory")?.value || "all";
         
-          if (!message) {{
-            alert("Escribe un mensaje");
+          if (!message && !audioBase64) {{
+            alert("Escribe un mensaje o graba un audio");
             return;
           }}
         
@@ -11574,6 +11932,7 @@ def panel_actas(
               }},
               body: JSON.stringify({{
                 message: message,
+                audio_base64: audioBase64,
                 category: category
               }})
             }});
@@ -11583,6 +11942,7 @@ def panel_actas(
             if (data.ok) {{
               alert(data.message || "Envío iniciado");
               textarea.value = "";
+              clearPanelAudio("free");
             }} else {{
               alert(data.error || "Error en envío masivo");
             }}
@@ -11731,9 +12091,10 @@ def panel_actas(
         async function sendPrivateBotsBroadcast() {{
           const textarea = document.getElementById("privateBotsBroadcastMessage");
           const message = textarea.value.trim();
+          const audioBase64 = panelAudioBase64.private || "";
         
-          if (!message) {{
-            alert("Escribe un mensaje privado.");
+          if (!message && !audioBase64) {{
+            alert("Escribe un mensaje privado o graba un audio.");
             return;
           }}
         
@@ -11757,6 +12118,7 @@ def panel_actas(
               }},
               body: JSON.stringify({{
                 message: message,
+                audios_base64: audioBase64,
                 selected_instances: selected
               }})
             }});
@@ -11770,6 +12132,7 @@ def panel_actas(
         
             alert(data.message || "Mensaje privado en cola");
             textarea.value = "";
+            clearPanelAudio("private");
             startPrivateBotsBroadcastProgress(data.job_id);
         
           }} catch (e) {{
