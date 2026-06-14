@@ -2358,6 +2358,13 @@ def botpanel_audit_all_groups(
         .status-e {{ color:#b91c1c;font-weight:bold; }}
         .status-q {{ color:#92400e;font-weight:bold; }}
         .status-p {{ color:#1d4ed8;font-weight:bold; }}
+        .weekly-row {{
+          background:#dbeafe;
+          font-weight:800;
+        }}
+        .weekly-row td {{
+          border-top:2px solid #93c5fd;
+        }}
         select {{
           padding:8px;
           border-radius:10px;
