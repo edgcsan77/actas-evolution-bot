@@ -1931,11 +1931,8 @@ class Provider4Client:
         # NO_LOCALIZADO_VERIFICAR_PDF_OK:
         # La API de verificarpdf.php puede responder NO_LOCALIZADO cuando el trámite ya quedó sin registro.
         # Esto NO es respuesta desconocida ni espera; el worker lo convertirá en "No hay registros disponibles".
-        try:
-            _txt_no_loc = str(text or "").strip().upper().replace(" ", "_")
-        except Exception:
-            _txt_no_loc = ""
-
+        _txt_no_loc = (text_preview or "").strip().upper().replace(" ", "_")
+        
         if (
             "NO_LOCALIZADO" in _txt_no_loc
             or "NO_REGISTRO" in _txt_no_loc
@@ -1945,6 +1942,7 @@ class Provider4Client:
                 "ready": False,
                 "code": "NO_LOCALIZADO",
                 "reason": "NO_LOCALIZADO",
+                "raw": text_preview,
             }
 
         raise RuntimeError(f"PROVIDER4_NEW_VERIFICAR_UNKNOWN_RESPONSE:{text_preview[:300]}")
