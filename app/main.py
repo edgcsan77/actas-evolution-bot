@@ -14293,10 +14293,32 @@ def is_authorized_group(db: Session, group_jid: str) -> bool:
 def _deliver_text_result(req: RequestLog, text: str, instance_name: str = None):
     instance = req.instance_name or instance_name or "docifybot8"
 
+    text_up = (text or "").upper()
+
+    if (
+        getattr(req, "id", None)
+        and "NO HAY REGISTROS DISPONIBLES" in text_up
+    ):
+        dedupe_key = f"no_record_notified:{req.id}"
+
+        try:
+            first_notify = redis_conn.set(dedupe_key, "1", nx=True, ex=86400)
+        except Exception as dedupe_exc:
+            print("NO_RECORD_WEB_DEDUPE_REDIS_ERROR =", str(dedupe_exc), flush=True)
+            first_notify = True
+
+        if not first_notify:
+            print("NO_RECORD_WEB_DUPLICATE_IGNORED =", dedupe_key, flush=True)
+            return False
+
+        print("NO_RECORD_WEB_NOTIFIED_ONCE =", dedupe_key, flush=True)
+
     if req.source_group_id:
         send_group_text(req.source_group_id, text, instance)
     else:
         send_text(req.requester_wa_id, text, instance)
+
+    return True
 
 
 def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = None, instance_name: str = None):
@@ -15653,10 +15675,23 @@ def webhook_msg_seen(msg_id: str, instance_name: str | None = None) -> bool:
     if not msg_id:
         return False
 
-    inst = (instance_name or "default").strip()
-    key = f"wa:webhook:msg:{inst}:{msg_id}"
-    created = redis_conn.set(key, "1", ex=300, nx=True)
-    return not bool(created)
+    # Dedupe global por msg_id.
+    # Antes usaba instance_name + msg_id, pero Evolution puede mandar
+    # el mismo mensaje por más de una instancia y eso duplicaba procesos.
+    global_key = f"wa:webhook:msg:{msg_id}"
+    created_global = redis_conn.set(global_key, "1", ex=300, nx=True)
+
+    if not created_global:
+        return True
+
+    # Llave secundaria solo para diagnóstico/compatibilidad.
+    try:
+        inst = (instance_name or "default").strip()
+        redis_conn.set(f"wa:webhook:msg_instance:{inst}:{msg_id}", "1", ex=300, nx=True)
+    except Exception:
+        pass
+
+    return False
 
 
 def block_all_client_groups():
@@ -16640,12 +16675,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                         try:
                             client_instance = open_req.instance_name or "docifybot8"
-                            if open_req.source_group_id:
-                                send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
-                            else:
-                                send_text(open_req.requester_wa_id, msg, instance_name=client_instance)
+                        
+                            if not _deliver_text_result(open_req, msg, instance_name=client_instance):
+                                return {"ok": True, "ignored": "no_record_duplicate"}
+                        
                         except Exception as notify_exc:
-                            print("PROVIDER5_SIN_NOTIFY_ERROR =", str(notify_exc), flush=True)
+                            print("PROVIDER_NEGATIVE_NOTIFY_ERROR =", str(notify_exc), flush=True)
 
                         return {"ok": True, "provider_result": "provider_negative_matched_by_reply_id"}
 
@@ -16710,12 +16745,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                         try:
                             client_instance = open_req.instance_name or "docifybot8"
-                            if open_req.source_group_id:
-                                send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
-                            else:
-                                send_text(open_req.requester_wa_id, msg, instance_name=client_instance)
+                        
+                            if not _deliver_text_result(open_req, msg, instance_name=client_instance):
+                                return {"ok": True, "ignored": "no_record_duplicate"}
+                        
                         except Exception as notify_exc:
-                            print("PROVIDER5_FALLBACK_NOTIFY_ERROR =", str(notify_exc), flush=True)
+                            print("PROVIDER_NEGATIVE_NOTIFY_ERROR =", str(notify_exc), flush=True)
 
                         return {"ok": True, "provider_result": "provider5_fallback_matched_by_curp"}
 
@@ -16752,13 +16787,13 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 
                         try:
                             client_instance = open_req.instance_name or "docifybot8"
-                            if open_req.source_group_id:
-                                send_group_text(open_req.source_group_id, msg, instance_name=client_instance)
-                            else:
-                                send_text(open_req.requester_wa_id, msg, instance_name=client_instance)
+                        
+                            if not _deliver_text_result(open_req, msg, instance_name=client_instance):
+                                return {"ok": True, "ignored": "no_record_duplicate"}
+                        
                         except Exception as notify_exc:
-                            print("PROVIDER8_SIN_FALLBACK_NOTIFY_ERROR =", str(notify_exc), flush=True)
-                
+                            print("PROVIDER_NEGATIVE_NOTIFY_ERROR =", str(notify_exc), flush=True)
+                                        
                         return {"ok": True, "provider_result": "provider8_sin_fallback_last_processing"}
                 
                     print("PROVIDER8_SIN_FALLBACK_WITHOUT_MATCH =", source_chat_id, flush=True)
