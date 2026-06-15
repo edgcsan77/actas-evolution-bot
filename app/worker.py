@@ -4225,6 +4225,44 @@ def process_request(request_id: int):
 
                 _notify_support_error(req, err, msg)
                 return
+
+            if "DISABLED_BEFORE_PROCESSING" in err:
+                old_provider = (req.provider_name or "").strip().upper()
+
+                print("PROVIDER_DISABLED_BEFORE_PROCESSING_REQUEUE =", {
+                    "request_id": req.id,
+                    "curp": req.curp,
+                    "act_type": req.act_type,
+                    "old_provider": old_provider,
+                    "err": err,
+                }, flush=True)
+
+                try:
+                    if old_provider in {"PROVIDER4", "PROVIDER10", "PROVIDER11"}:
+                        _provider4_new_clear_flow(req.id)
+                except Exception as clear_exc:
+                    print("PROVIDER_DISABLED_CLEAR_FLOW_ERROR =", {
+                        "request_id": req.id,
+                        "old_provider": old_provider,
+                        "error": str(clear_exc),
+                    }, flush=True)
+
+                req.provider_name = ""
+                req.provider_group_id = None
+                req.status = "QUEUED"
+                req.error_message = f"REQUEUED_AFTER_{old_provider}_DISABLED"
+                req.updated_at = _utc_now_naive()
+                db.commit()
+
+                request_queue.enqueue(process_request, req.id)
+
+                print("PROVIDER_DISABLED_REQUEUED =", {
+                    "request_id": req.id,
+                    "old_provider": old_provider,
+                    "queue": "actas",
+                }, flush=True)
+
+                return
     
             if (
                 err.startswith("PROVIDER3_NO_RECORD")
