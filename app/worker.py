@@ -45,62 +45,8 @@ def _current_queue_name() -> str:
         job = get_current_job(connection=redis_conn)
         return (getattr(job, "origin", "") or "").strip()
     except Exception as e:
-        # NO_LOCALIZADO_EXCEPTION_SAFETY_OK:
-        # Seguridad extra: si provider4/provider10/provider11 todavía lanza
-        # *_NEW_VERIFICAR_UNKNOWN_RESPONSE:NO_LOCALIZADO, tratarlo como SIN REGISTRO
-        # y NO mandarlo a soporte como error del sistema.
-        try:
-            _err_txt = str(e or "").strip()
-            _err_up = _err_txt.upper().replace(" ", "_")
-
-            if (
-                "NEW_VERIFICAR_UNKNOWN_RESPONSE" in _err_up
-                and (
-                    "NO_LOCALIZADO" in _err_up
-                    or "NO_REGISTRO" in _err_up
-                    or "SIN_REGISTRO" in _err_up
-                )
-            ):
-                try:
-                    _provider4_new_clear_flow(req.id)
-                except Exception:
-                    pass
-
-                req.status = "ERROR"
-                req.error_message = "SIN REGISTRO | CLIENT_NOTIFIED_FAIL"
-                req.updated_at = _utc_now_naive()
-                db.commit()
-
-                print(f"{provider_name}_NO_LOCALIZADO_EXCEPTION_SAFETY_DETECTED = {{'request_id': {req.id}, 'term': '{term}', 'error': {_err_txt!r}}}", flush=True)
-
-                msg = (
-                    "❌ No hay registros disponibles.\n"
-                    f"Dato: {term}\n"
-                    f"Tipo: {req.act_type}\n\n"
-                    "Verificar que la CURP esté certificada en RENAPO"
-                )
-
-                try:
-                    instance = req.instance_name or settings.EVOLUTION_INSTANCE
-                    if req.source_group_id:
-                        send_group_text(req.source_group_id, msg, instance_name=instance)
-                    elif getattr(req, "requester_wa_id", None):
-                        send_text(req.requester_wa_id, msg, instance_name=instance)
-
-                    print(f"{provider_name}_NO_LOCALIZADO_EXCEPTION_SAFETY_CLIENT_SENT = {{'request_id': {req.id}}}", flush=True)
-                except Exception as send_err:
-                    print(f"{provider_name}_NO_LOCALIZADO_EXCEPTION_SAFETY_CLIENT_SEND_ERROR = {{'request_id': {req.id}, 'error': {str(send_err)!r}}}", flush=True)
-
-                return {
-                    "pending": False,
-                    "error": "SIN REGISTRO",
-                }
-        except Exception as safety_err:
-            print(f"NO_LOCALIZADO_EXCEPTION_SAFETY_ERROR = {str(safety_err)!r}", flush=True)
-
         print("CURRENT_QUEUE_NAME_ERROR =", str(e), flush=True)
         return ""
-
 
 def _should_reroute_to_slow(provider_name: str | None) -> bool:
     return (provider_name or "").strip().upper() in SLOW_PROVIDERS
@@ -2392,36 +2338,14 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
 
             if "NO_LOCALIZADO" in web_code_upper or "NO_REGISTRO" in web_code_upper or "SIN_REGISTRO" in web_code_upper:
                 _provider4_new_clear_flow(req.id)
-
-                req.status = "ERROR"
-                req.error_message = "SIN REGISTRO | CLIENT_NOTIFIED_FAIL"
-                req.updated_at = _utc_now_naive()
-                db.commit()
-
-                print(f"{provider_name}_READY_WITHOUT_PDF_NO_LOCALIZADO_DETECTED = {{'request_id': {req.id}, 'term': '{term}', 'check_result': {str(check_result)[:300]!r}}}", flush=True)
-
-                msg = (
-                    "❌ No hay registros disponibles.\n"
-                    f"Dato: {term}\n"
-                    f"Tipo: {req.act_type}\n\n"
-                    "Verificar que la CURP esté certificada en RENAPO"
-                )
-
-                try:
-                    instance = req.instance_name or settings.EVOLUTION_INSTANCE
-                    if req.source_group_id:
-                        send_group_text(req.source_group_id, msg, instance_name=instance)
-                    elif getattr(req, "requester_wa_id", None):
-                        send_text(req.requester_wa_id, msg, instance_name=instance)
-
-                    print(f"{provider_name}_READY_WITHOUT_PDF_NO_LOCALIZADO_CLIENT_SENT = {{'request_id': {req.id}}}", flush=True)
-                except Exception as send_err:
-                    print(f"{provider_name}_READY_WITHOUT_PDF_NO_LOCALIZADO_CLIENT_SEND_ERROR = {{'request_id': {req.id}, 'error': {str(send_err)!r}}}", flush=True)
-
-                return {
-                    "pending": False,
-                    "error": "SIN REGISTRO",
-                }
+            
+                print(f"{provider_name}_WEB_NO_LOCALIZADO_DETECTED =", {
+                    "request_id": req.id,
+                    "term": term,
+                    "code": web_code_raw,
+                }, flush=True)
+            
+                raise RuntimeError(f"{provider_name}_NO_RECORD:{term}")
 
             raise RuntimeError(f"{provider_name}_READY_WITHOUT_PDF_BYTES:{web_code_raw[:300]}")
 
@@ -3352,18 +3276,37 @@ def process_request(request_id: int):
         
         if reuse_existing_slow_provider:
             if not _provider_is_enabled(db, existing_provider):
-                print("SLOW_QUEUE_EXISTING_PROVIDER_DISABLED_STOP =", {
+                print("SLOW_QUEUE_EXISTING_PROVIDER_DISABLED_REQUEUE =", {
                     "request_id": req.id,
                     "old_provider": existing_provider,
                     "queue": current_queue,
                 }, flush=True)
         
-                _provider4_new_clear_flow(req.id)
+                try:
+                    _provider4_new_clear_flow(req.id)
+                except Exception as clear_exc:
+                    print("SLOW_QUEUE_DISABLED_CLEAR_FLOW_ERROR =", {
+                        "request_id": req.id,
+                        "old_provider": existing_provider,
+                        "error": str(clear_exc),
+                    }, flush=True)
         
-                req.status = "ERROR"
-                req.error_message = f"{existing_provider}_DISABLED_BEFORE_PROCESSING"
+                req.provider_name = ""
+                req.provider_group_id = None
+                req.provider_message = None
+                req.status = "QUEUED"
+                req.error_message = f"REQUEUED_AFTER_{existing_provider}_DISABLED"
                 req.updated_at = _utc_now_naive()
                 db.commit()
+        
+                request_queue.enqueue(process_request, req.id)
+        
+                print("SLOW_QUEUE_DISABLED_REQUEUED_TO_NORMAL =", {
+                    "request_id": req.id,
+                    "old_provider": existing_provider,
+                    "queue": "actas",
+                }, flush=True)
+        
                 return
         
             # Este job viene de un reroute actas -> actas_slow.
