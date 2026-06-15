@@ -2506,15 +2506,36 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
 
         if not pdf_bytes:
             raise RuntimeError(f"{provider_name}_NEW_READY_BUT_EMPTY_PDF:{term}")
-
+        
+        # PROTECCIÓN:
+        # verificarpdf.php puede devolver PDF prematuro/sin marco.
+        # Lo pasamos por el reparador de Provider4 antes de entregarlo.
+        try:
+            pdf_bytes = client._repair_pdf_if_needed(
+                pdf_bytes,
+                term,
+                inc_folio=inc_folio,
+            )
+        except Exception as repair_exc:
+            print(f"{provider_name}_NEW_VERIFICAR_REPAIR_FAILED =", {
+                "request_id": req.id,
+                "term": term,
+                "error": str(repair_exc),
+            }, flush=True)
+            raise RuntimeError(f"{provider_name}_NEW_VERIFICAR_PDF_INCOMPLETE_OR_FRAMELESS:{term}:{str(repair_exc)[:250]}")
+        
+        if not client._pdf_has_two_pages(pdf_bytes):
+            raise RuntimeError(f"{provider_name}_NEW_VERIFICAR_REPAIRED_STILL_INCOMPLETE:{term}")
+        
         _provider4_new_clear_flow(req.id)
-
+        
         print(f"{provider_name}_NEW_DOWNLOAD_OK =", {
             "request_id": req.id,
             "attempts": attempts,
             "pdf_bytes": len(pdf_bytes),
+            "repaired": True,
         }, flush=True)
-
+        
         return {
             "pdf_bytes": pdf_bytes,
         }
