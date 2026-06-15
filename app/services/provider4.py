@@ -1904,14 +1904,16 @@ class Provider4Client:
 
         r.raise_for_status()
 
-        # PDF directo.
+        # PDF directo desde verificarpdf.php.
+        # OJO: puede venir prematuro/sin marco/sin reverso.
         if "application/pdf" in content_type or content.startswith(b"%PDF"):
             self._assert_pdf_readable(content, curp_clean)
-
+        
             return {
                 "ready": True,
                 "pdf_bytes": content,
                 "code": "PDF_READY",
+                "source": "verificarpdf",
             }
 
         not_ready_values = {"FALSE", "0", "NO", "NULL", "NONE", ""}
