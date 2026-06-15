@@ -4214,11 +4214,25 @@ def process_request(request_id: int):
                 )
 
                 instance = req.instance_name or "docifybot8"
-                if req.source_group_id:
-                    send_group_text(req.source_group_id, msg, instance)
+
+                dedupe_key = f"no_record_notified:{req.id}"
+                
+                try:
+                    first_notify = redis_conn.set(dedupe_key, "1", nx=True, ex=86400)
+                except Exception as dedupe_exc:
+                    print("NO_RECORD_DEDUPE_REDIS_ERROR =", str(dedupe_exc), flush=True)
+                    first_notify = True
+                
+                if first_notify:
+                    if req.source_group_id:
+                        send_group_text(req.source_group_id, msg, instance)
+                    else:
+                        from app.services.evolution import send_text
+                        send_text(req.requester_wa_id, msg, instance)
+                
+                    print("NO_RECORD_NOTIFIED_ONCE =", dedupe_key, flush=True)
                 else:
-                    from app.services.evolution import send_text
-                    send_text(req.requester_wa_id, msg, instance)
+                    print("NO_RECORD_DUPLICATE_IGNORED =", dedupe_key, flush=True)
 
                 #_notify_support_error(req, err, msg)
                 return
