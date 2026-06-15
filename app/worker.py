@@ -2286,35 +2286,13 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
             ):
                 _provider4_new_clear_flow(req.id)
 
-                req.status = "ERROR"
-                req.error_message = "SIN REGISTRO | CLIENT_NOTIFIED_FAIL"
-                req.updated_at = _utc_now_naive()
-                db.commit()
+                print(f"{provider_name}_NO_LOCALIZADO_VERIFICAR_CALL_SAFETY_DETECTED =", {
+                    "request_id": req.id,
+                    "term": term,
+                    "error": _err_txt,
+                }, flush=True)
 
-                print(f"{provider_name}_NO_LOCALIZADO_VERIFICAR_CALL_SAFETY_DETECTED = {{'request_id': {req.id}, 'term': '{term}', 'error': {_err_txt!r}}}", flush=True)
-
-                msg = (
-                    "❌ No hay registros disponibles.\n"
-                    f"Dato: {term}\n"
-                    f"Tipo: {req.act_type}\n\n"
-                    "Verificar que la CURP esté certificada en RENAPO"
-                )
-
-                try:
-                    instance = req.instance_name or settings.EVOLUTION_INSTANCE
-                    if req.source_group_id:
-                        send_group_text(req.source_group_id, msg, instance_name=instance)
-                    elif getattr(req, "requester_wa_id", None):
-                        send_text(req.requester_wa_id, msg, instance_name=instance)
-
-                    print(f"{provider_name}_NO_LOCALIZADO_VERIFICAR_CALL_SAFETY_CLIENT_SENT = {{'request_id': {req.id}}}", flush=True)
-                except Exception as send_err:
-                    print(f"{provider_name}_NO_LOCALIZADO_VERIFICAR_CALL_SAFETY_CLIENT_SEND_ERROR = {{'request_id': {req.id}, 'error': {str(send_err)!r}}}", flush=True)
-
-                return {
-                    "pending": False,
-                    "error": "SIN REGISTRO",
-                }
+                raise RuntimeError(f"{provider_name}_NO_RECORD:{term}")
 
             raise
 
