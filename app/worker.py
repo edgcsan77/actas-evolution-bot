@@ -364,6 +364,57 @@ def should_send_extra_text(group_id: str | None) -> bool:
     if not group_id:
         return True
     return group_id not in NO_EXTRA_TEXT_GROUPS
+
+
+def _no_record_client_msg(req) -> str:
+    return (
+        "❌ No hay registros disponibles.\n"
+        f"Dato: {getattr(req, 'curp', '')}\n"
+        f"Tipo: {getattr(req, 'act_type', '')}\n\n"
+        "Verificar que la CURP esté certificada en RENAPO"
+    )
+
+
+def _notify_client_no_record_once(req, label: str = "NO_RECORD") -> bool:
+    """
+    Blindaje global:
+    una solicitud solo puede avisar 'No hay registros disponibles' una vez.
+    Usa la misma llave que main.py: no_record_notified:{req.id}
+    """
+    req_id = getattr(req, "id", None)
+    dedupe_key = f"no_record_notified:{req_id}"
+
+    first_notify = True
+
+    if req_id:
+        try:
+            first_notify = redis_conn.set(dedupe_key, "1", nx=True, ex=86400)
+        except Exception as dedupe_exc:
+            print(f"{label}_DEDUPE_REDIS_ERROR =", str(dedupe_exc), flush=True)
+            first_notify = True
+
+    if not first_notify:
+        print(f"{label}_DUPLICATE_IGNORED =", dedupe_key, flush=True)
+        return False
+
+    msg = _no_record_client_msg(req)
+    instance = getattr(req, "instance_name", None) or settings.EVOLUTION_INSTANCE or "docifybot8"
+
+    try:
+        if getattr(req, "source_group_id", None):
+            send_group_text(req.source_group_id, msg, instance)
+        elif getattr(req, "requester_wa_id", None):
+            send_text(req.requester_wa_id, msg, instance_name=instance)
+
+        print(f"{label}_CLIENT_NOTIFIED_ONCE =", dedupe_key, flush=True)
+        return True
+
+    except Exception as send_exc:
+        print(f"{label}_CLIENT_NOTIFY_ERROR =", {
+            "request_id": req_id,
+            "error": str(send_exc),
+        }, flush=True)
+        return False
     
 
 def _utc_now_naive():
@@ -1628,7 +1679,35 @@ def _pick_provider_name(
         print("BOT_PROVIDER_FORCED =", forced_provider, flush=True)
     
         if forced_provider in ("PROVIDER4", "PROVIDER10", "PROVIDER11") and not _is_provider4_eligible(term, act_type):
-            raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
+            print("BOT_PROVIDER_FORCED_LAZARO_NOT_ALLOWED_FALLBACK_TO_GLOBAL =", {
+                "forced_provider": forced_provider,
+                "term": term,
+                "act_type": act_type,
+                "instance_name": instance_name,
+            }, flush=True)
+        
+            enabled = sorted(_enabled_providers(db))
+            enabled = [p for p in enabled if p not in ("PROVIDER4", "PROVIDER10", "PROVIDER11")]
+        
+            if "PROVIDER6" in enabled and not _is_provider6_allowed_request(term, act_type):
+                enabled = [p for p in enabled if p != "PROVIDER6"]
+        
+            if not enabled:
+                raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
+        
+            print("PICK_PROVIDER_ENABLED_FINAL_AFTER_FORCED_LAZARO_BLOCK =", enabled, flush=True)
+        
+            weighted_chosen = _pick_provider_by_weight(db, enabled)
+        
+            if weighted_chosen:
+                print("PICK_PROVIDER_WEIGHTED_CHOSEN_AFTER_FORCED_LAZARO_BLOCK =", weighted_chosen, flush=True)
+                return weighted_chosen
+        
+            idx = (request_id - 1) % len(enabled)
+            chosen = enabled[idx]
+        
+            print("PICK_PROVIDER_NORMAL_CHOSEN_AFTER_FORCED_LAZARO_BLOCK =", chosen, flush=True)
+            return chosen
     
         if forced_provider == "PROVIDER6" and not _is_provider6_allowed_request(term, act_type):
             print("BOT_PROVIDER_FORCED_PROVIDER6_NOT_ALLOWED_FALLBACK_TO_GLOBAL =", {
@@ -3169,6 +3248,27 @@ def process_request(request_id: int):
                 "status": req.status,
             }, flush=True)
             return
+
+        terminal_error = (getattr(req, "error_message", "") or "").upper()
+
+        if current_status == "ERROR" and (
+            "CLIENT_NOTIFIED_FAIL" in terminal_error
+            or "SIN REGISTRO" in terminal_error
+            or "SIN_REGISTRO" in terminal_error
+            or "_NO_RECORD" in terminal_error
+            or "NO_RECORD" in terminal_error
+            or "NO_LOCALIZADO" in terminal_error
+            or "NO HAY REGISTROS" in terminal_error
+        ):
+            print("PROCESS_REQUEST_ALREADY_TERMINAL_NO_RECORD_SKIP =", {
+                "request_id": req.id,
+                "curp": req.curp,
+                "act_type": req.act_type,
+                "provider_name": req.provider_name,
+                "status": req.status,
+                "error_message": req.error_message,
+            }, flush=True)
+            return
         
         print("REQ_INSTANCE_NAME =", req.instance_name, flush=True)
         print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
@@ -3231,6 +3331,42 @@ def process_request(request_id: int):
         )
         
         if reuse_existing_slow_provider:
+            if existing_provider in SLOW_PROVIDERS and not _is_provider4_eligible(req.curp, req.act_type):
+                print("SLOW_QUEUE_LAZARO_NOT_ELIGIBLE_REQUEUE_NORMAL =", {
+                    "request_id": req.id,
+                    "curp": req.curp,
+                    "act_type": req.act_type,
+                    "old_provider": existing_provider,
+                    "queue": current_queue,
+                }, flush=True)
+        
+                try:
+                    _provider4_new_clear_flow(req.id)
+                except Exception as clear_exc:
+                    print("SLOW_QUEUE_LAZARO_NOT_ELIGIBLE_CLEAR_FLOW_ERROR =", {
+                        "request_id": req.id,
+                        "old_provider": existing_provider,
+                        "error": str(clear_exc),
+                    }, flush=True)
+        
+                req.provider_name = ""
+                req.provider_group_id = None
+                req.provider_message = None
+                req.status = "QUEUED"
+                req.error_message = f"REQUEUED_LAZARO_NOT_ELIGIBLE:{existing_provider}"
+                req.updated_at = _utc_now_naive()
+                db.commit()
+        
+                request_queue.enqueue(process_request, req.id)
+        
+                print("SLOW_QUEUE_LAZARO_NOT_ELIGIBLE_REQUEUED_TO_NORMAL =", {
+                    "request_id": req.id,
+                    "old_provider": existing_provider,
+                    "queue": "actas",
+                }, flush=True)
+        
+                return
+            
             if not _provider_is_enabled(db, existing_provider):
                 print("SLOW_QUEUE_EXISTING_PROVIDER_DISABLED_REQUEUE =", {
                     "request_id": req.id,
@@ -4271,8 +4407,11 @@ def process_request(request_id: int):
                     # En Lázaro Web, este error aparece cuando el panel/verificarpdf ya trae NO_LOCALIZADO
                     # pero alguna capa intentó leer pdf_bytes inexistente.
                     # Para evitar falso soporte, se cierra como SIN REGISTRO y se avisa al cliente.
-                    _no_loc_detected = True
-                    _check_debug = "PDF_BYTES_DIRECT_SIN_REGISTRO"
+                    _no_loc_detected = any(
+                        token in _err_pdf_up
+                        for token in ("NO_LOCALIZADO", "NO_REGISTRO", "SIN_REGISTRO", "NO_RECORD")
+                    )
+                    _check_debug = "PDF_BYTES_CHECK_STARTED"
 
                     try:
                         _tipo_retry = _map_act_type_to_provider4_tipo(req.act_type)
@@ -4309,24 +4448,10 @@ def process_request(request_id: int):
 
                         print(f"{_prov_pdf_up}_PDF_BYTES_GENERAL_NO_LOCALIZADO_DETECTED = {{'request_id': {req.id}, 'curp': {getattr(req, 'curp', '')!r}, 'error': {_err_pdf_txt!r}, 'check': {_check_debug[:300]!r}}}", flush=True)
 
-                        msg = (
-                            "❌ No hay registros disponibles.\n"
-                            f"Dato: {getattr(req, 'curp', '')}\n"
-                            f"Tipo: {getattr(req, 'act_type', '')}\n\n"
-                            "Verificar que la CURP esté certificada en RENAPO"
+                        _notify_client_no_record_once(
+                            req,
+                            label=f"{_prov_pdf_up}_PDF_BYTES_GENERAL_NO_LOCALIZADO"
                         )
-
-                        try:
-                            instance = req.instance_name or settings.EVOLUTION_INSTANCE
-                            if req.source_group_id:
-                                send_group_text(req.source_group_id, msg, instance_name=instance)
-                            elif getattr(req, "requester_wa_id", None):
-                                send_text(req.requester_wa_id, msg, instance_name=instance)
-
-                            print(f"{_prov_pdf_up}_PDF_BYTES_GENERAL_NO_LOCALIZADO_CLIENT_SENT = {{'request_id': {req.id}}}", flush=True)
-                        except Exception as _send_e:
-                            print(f"{_prov_pdf_up}_PDF_BYTES_GENERAL_NO_LOCALIZADO_CLIENT_SEND_ERROR = {{'request_id': {req.id}, 'error': {str(_send_e)!r}}}", flush=True)
-
                         return
 
             except Exception as _pdfbytes_general_safety_e:
