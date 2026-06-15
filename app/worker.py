@@ -902,16 +902,25 @@ def _is_curp_term(value: str | None) -> bool:
 
 
 def _is_provider4_eligible(term: str | None, act_type: str | None) -> bool:
-    term = (term or "").strip()
+
+    term = (term or "").strip().upper()
     act_type_up = (act_type or "").upper().strip()
 
-    if _is_curp_term(term):
-        return True
-
     if is_chain(term) or bool(re.fullmatch(r"\d{15,25}", term)):
-        return True
+        print("LAZARO_REMOVED_CHAIN_NOT_SUPPORTED =", {
+            "term": term,
+            "act_type": act_type_up,
+        }, flush=True)
+        return False
 
-    return False
+    if "CADENA" in act_type_up:
+        print("LAZARO_REMOVED_ACT_TYPE_CADENA =", {
+            "term": term,
+            "act_type": act_type_up,
+        }, flush=True)
+        return False
+
+    return _is_curp_term(term)
 
 
 def _group_individual_limit_reached(row: GroupPromotion | None) -> bool:
