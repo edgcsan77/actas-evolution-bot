@@ -666,11 +666,17 @@ class Provider4Client:
         # Si ya trae marco, _enmarcar_pdf_frente devuelve solo página 1 original.
         # Si no trae marco, aplica marco local.
         try:
-            framed_front = _enmarcar_pdf_frente(
-                original_pdf_bytes,
-                f"{term}.pdf",
-                folio=inc_folio,
-            )
+            if front_has_frame:
+                # Si Lázaro ya entregó el frente con marco verde,
+                # NO volver a enmarcar porque puede achicar el contenido central.
+                framed_front = _solo_pagina_pdf(original_pdf_bytes, 0)
+                print("PROVIDER4_FRONT_ALREADY_FRAMED_KEEP_RAW_PAGE = TRUE", flush=True)
+            else:
+                framed_front = _enmarcar_pdf_frente(
+                    original_pdf_bytes,
+                    f"{term}.pdf",
+                    folio=inc_folio,
+                )
         except Exception as e:
             print("LOCAL_FRAME_FAILED_NO_SEND =", str(e), flush=True)
             raise RuntimeError(f"LOCAL_FRAME_FAILED:{term}:{str(e)[:300]}")
@@ -787,11 +793,15 @@ class Provider4Client:
         # Si ya trae marco, _enmarcar_pdf_frente devuelve solo página 1 original.
         # Si no trae marco, aplica marco local.
         try:
-            framed_front = _enmarcar_pdf_frente(
-                original_pdf_bytes,
-                f"{term}.pdf",
-                folio=False,
-            )
+            if front_has_frame:
+                framed_front = _solo_pagina_pdf(original_pdf_bytes, 0)
+                print("PROVIDER4_CHAIN_FRONT_ALREADY_FRAMED_KEEP_RAW_PAGE = TRUE", flush=True)
+            else:
+                framed_front = _enmarcar_pdf_frente(
+                    original_pdf_bytes,
+                    f"{term}.pdf",
+                    folio=False,
+                )
         except Exception as e:
             print("PROVIDER4_CHAIN_LOCAL_FRAME_FAILED_NO_SEND =", str(e), flush=True)
             raise RuntimeError(f"PROVIDER4_CHAIN_LOCAL_FRAME_FAILED:{term}:{str(e)[:300]}")
