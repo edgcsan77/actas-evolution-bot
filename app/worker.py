@@ -2357,35 +2357,13 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
             if "NO_LOCALIZADO" in web_code_upper or "NO_REGISTRO" in web_code_upper or "SIN_REGISTRO" in web_code_upper:
                 _provider4_new_clear_flow(req.id)
 
-                req.status = "ERROR"
-                req.error_message = "SIN REGISTRO | CLIENT_NOTIFIED_FAIL"
-                req.updated_at = _utc_now_naive()
-                db.commit()
+                print(f"{provider_name}_WEB_NO_LOCALIZADO_DETECTED =", {
+                    "request_id": req.id,
+                    "term": term,
+                    "code": web_code_raw,
+                }, flush=True)
 
-                print(f"{provider_name}_WEB_NO_LOCALIZADO_DETECTED = {{'request_id': {req.id}, 'term': '{term}', 'code': {web_code_raw!r}}}", flush=True)
-
-                msg = (
-                    "❌ No hay registros disponibles.\n"
-                    f"Dato: {term}\n"
-                    f"Tipo: {req.act_type}\n\n"
-                    "Verificar que la CURP esté certificada en RENAPO"
-                )
-
-                try:
-                    instance = req.instance_name or settings.EVOLUTION_INSTANCE
-                    if req.source_group_id:
-                        send_group_text(req.source_group_id, msg, instance_name=instance)
-                    elif getattr(req, "requester_wa_id", None):
-                        send_text(req.requester_wa_id, msg, instance_name=instance)
-
-                    print(f"{provider_name}_WEB_NO_LOCALIZADO_CLIENT_SENT = {{'request_id': {req.id}}}", flush=True)
-                except Exception as e:
-                    print(f"{provider_name}_WEB_NO_LOCALIZADO_CLIENT_SEND_ERROR = {{'request_id': {req.id}, 'error': {str(e)!r}}}", flush=True)
-
-                return {
-                    "pending": False,
-                    "error": "SIN REGISTRO",
-                }
+                raise RuntimeError(f"{provider_name}_NO_RECORD:{term}")
 
             # Timeout real por tiempo para Lázaro Web Provider4/10/11.
             # false / ARCHIVO NO EXISTE significa "PDF aún no listo",
