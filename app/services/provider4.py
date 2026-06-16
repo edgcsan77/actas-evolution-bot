@@ -9,7 +9,7 @@ from html import unescape
 from urllib.parse import urljoin
 
 from io import BytesIO
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter, Transformation, PageObject
 from pathlib import Path
 
 from app.services.provider7 import (
@@ -372,6 +372,116 @@ class Provider4Client:
             print("PROVIDER4_PDF_NOT_READABLE =", term, str(e), flush=True)
             raise RuntimeError(f"PROVIDER4_PDF_NOT_READABLE:{term}:{str(e)[:300]}")
 
+    def _normalize_pdf_pages_to_letter(
+        self,
+        pdf_bytes: bytes,
+        term: str = "",
+        label: str = "PDF",
+    ) -> bytes:
+        """
+        Normaliza páginas a Letter 8.5x11 pulgadas = 612x792 pts.
+
+        Esto corrige PDFs de Lázaro que vienen en A4/mediaBox raro.
+        Importante:
+        - NO estira el contenido.
+        - Mantiene proporción.
+        - Centra la página.
+        - Evita que _enmarcar_pdf_frente o _unir_pdfs_bytes
+          achiquen/aplasten algunas actas.
+        """
+        LETTER_W = 612.0
+        LETTER_H = 792.0
+        TOL = 2.0
+
+        try:
+            reader = PdfReader(BytesIO(pdf_bytes))
+            writer = PdfWriter()
+            changed = False
+
+            for idx, page in enumerate(reader.pages):
+                try:
+                    page.transfer_rotation_to_content()
+                except Exception:
+                    pass
+
+                try:
+                    w = float(page.mediabox.width)
+                    h = float(page.mediabox.height)
+                except Exception:
+                    writer.add_page(page)
+                    continue
+
+                print(
+                    "PROVIDER4_PDF_PAGE_SIZE =",
+                    {
+                        "label": label,
+                        "term": term,
+                        "page": idx + 1,
+                        "width": round(w, 2),
+                        "height": round(h, 2),
+                    },
+                    flush=True,
+                )
+
+                # Ya está en Letter.
+                if abs(w - LETTER_W) <= TOL and abs(h - LETTER_H) <= TOL:
+                    writer.add_page(page)
+                    continue
+
+                if w <= 0 or h <= 0:
+                    writer.add_page(page)
+                    continue
+
+                # Escalado proporcional. Nunca usar sx/sy separados porque eso deforma.
+                scale = min(LETTER_W / w, LETTER_H / h)
+                tx = (LETTER_W - (w * scale)) / 2.0
+                ty = (LETTER_H - (h * scale)) / 2.0
+
+                blank = PageObject.create_blank_page(
+                    width=LETTER_W,
+                    height=LETTER_H,
+                )
+
+                transform = Transformation().scale(scale).translate(tx, ty)
+                blank.merge_transformed_page(page, transform, expand=False)
+
+                writer.add_page(blank)
+                changed = True
+
+                print(
+                    "PROVIDER4_PDF_NORMALIZED_TO_LETTER =",
+                    {
+                        "label": label,
+                        "term": term,
+                        "page": idx + 1,
+                        "old_width": round(w, 2),
+                        "old_height": round(h, 2),
+                        "scale": round(scale, 6),
+                        "tx": round(tx, 2),
+                        "ty": round(ty, 2),
+                    },
+                    flush=True,
+                )
+
+            if not changed:
+                return pdf_bytes
+
+            out = BytesIO()
+            writer.write(out)
+            return out.getvalue()
+
+        except Exception as e:
+            print(
+                "PROVIDER4_NORMALIZE_TO_LETTER_FAILED =",
+                {
+                    "label": label,
+                    "term": term,
+                    "error": str(e),
+                },
+                flush=True,
+            )
+            return pdf_bytes
+
     def _estado_desde_curp(self, curp: str) -> str:
         curp = (curp or "").strip().upper()
         if len(curp) < 13:
@@ -666,16 +776,31 @@ class Provider4Client:
         # Si ya trae marco, _enmarcar_pdf_frente devuelve solo página 1 original.
         # Si no trae marco, aplica marco local.
         try:
+            raw_front = _solo_pagina_pdf(original_pdf_bytes, 0)
+            raw_front = self._normalize_pdf_pages_to_letter(
+                raw_front,
+                term=term,
+                label="PROVIDER4_FRONT_BEFORE_FRAME",
+            )
+
             if front_has_frame:
                 # Si Lázaro ya entregó el frente con marco verde,
                 # NO volver a enmarcar porque puede achicar el contenido central.
-                framed_front = _solo_pagina_pdf(original_pdf_bytes, 0)
-                print("PROVIDER4_FRONT_ALREADY_FRAMED_KEEP_RAW_PAGE = TRUE", flush=True)
+                # Pero sí normalizamos a Letter para evitar mezcla A4/Letter.
+                framed_front = raw_front
+                print("PROVIDER4_FRONT_ALREADY_FRAMED_KEEP_RAW_PAGE_LETTER = TRUE", flush=True)
             else:
+                # Enmarcar solo después de normalizar a Letter.
                 framed_front = _enmarcar_pdf_frente(
-                    original_pdf_bytes,
+                    raw_front,
                     f"{term}.pdf",
                     folio=inc_folio,
+                )
+
+                framed_front = self._normalize_pdf_pages_to_letter(
+                    framed_front,
+                    term=term,
+                    label="PROVIDER4_FRONT_AFTER_FRAME",
                 )
         except Exception as e:
             print("LOCAL_FRAME_FAILED_NO_SEND =", str(e), flush=True)
@@ -694,6 +819,11 @@ class Provider4Client:
     
             try:
                 original_rear = _solo_pagina_pdf(original_pdf_bytes, 1)
+                original_rear = self._normalize_pdf_pages_to_letter(
+                    original_rear,
+                    term=term,
+                    label="PROVIDER4_ORIGINAL_REAR",
+                )
                 repaired_pdf = _unir_pdfs_bytes_raw(framed_front, original_rear)
             except Exception as e:
                 print("PROVIDER4_ORIGINAL_REAR_JOIN_FAILED =", str(e), flush=True)
@@ -793,14 +923,27 @@ class Provider4Client:
         # Si ya trae marco, _enmarcar_pdf_frente devuelve solo página 1 original.
         # Si no trae marco, aplica marco local.
         try:
+            raw_front = _solo_pagina_pdf(original_pdf_bytes, 0)
+            raw_front = self._normalize_pdf_pages_to_letter(
+                raw_front,
+                term=term,
+                label="PROVIDER4_CHAIN_FRONT_BEFORE_FRAME",
+            )
+
             if front_has_frame:
-                framed_front = _solo_pagina_pdf(original_pdf_bytes, 0)
-                print("PROVIDER4_CHAIN_FRONT_ALREADY_FRAMED_KEEP_RAW_PAGE = TRUE", flush=True)
+                framed_front = raw_front
+                print("PROVIDER4_CHAIN_FRONT_ALREADY_FRAMED_KEEP_RAW_PAGE_LETTER = TRUE", flush=True)
             else:
                 framed_front = _enmarcar_pdf_frente(
-                    original_pdf_bytes,
+                    raw_front,
                     f"{term}.pdf",
                     folio=False,
+                )
+
+                framed_front = self._normalize_pdf_pages_to_letter(
+                    framed_front,
+                    term=term,
+                    label="PROVIDER4_CHAIN_FRONT_AFTER_FRAME",
                 )
         except Exception as e:
             print("PROVIDER4_CHAIN_LOCAL_FRAME_FAILED_NO_SEND =", str(e), flush=True)
@@ -819,6 +962,11 @@ class Provider4Client:
     
             try:
                 original_rear = _solo_pagina_pdf(original_pdf_bytes, 1)
+                original_rear = self._normalize_pdf_pages_to_letter(
+                    original_rear,
+                    term=term,
+                    label="PROVIDER4_CHAIN_ORIGINAL_REAR",
+                )
                 repaired_pdf = _unir_pdfs_bytes_raw(framed_front, original_rear)
             except Exception as e:
                 print("PROVIDER4_CHAIN_ORIGINAL_REAR_JOIN_FAILED =", str(e), flush=True)
