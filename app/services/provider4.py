@@ -13,7 +13,7 @@ from pypdf import PdfReader, PdfWriter, Transformation, PageObject
 from pathlib import Path
 
 from app.services.provider7 import (
-    _enmarcar_pdf_frente,
+    _enmarcar_pdf_frente as _enmarcar_pdf_frente_provider7,
     _unir_pdfs_bytes,
     _unir_pdfs_bytes_raw,
     _resolver_reverso_por_estado,
@@ -482,6 +482,130 @@ class Provider4Client:
             )
             return pdf_bytes
 
+    def _enmarcar_pdf_frente_lazaro_suave(
+        self,
+        pdf_bytes: bytes,
+        filename: str,
+        folio: bool = False,
+    ) -> bytes:
+        """
+        Enmarcado especial para Provider4/10/11.
+
+        Motivo:
+        - Lázaro a veces entrega frente Letter 612x792 sin marco verde detectable.
+        - El helper general de Provider7 lo reduce demasiado; logs: scale 0.7475.
+        - Aquí usamos una escala más suave para que el acta no quede tan chica.
+
+        Importante:
+        - Solo se usa para Provider4/10/11.
+        - Mantiene Letter 612x792.
+        - No deforma.
+        - Centra el contenido.
+        """
+        LETTER_W = 612.0
+        LETTER_H = 792.0
+
+        # Ajuste principal:
+        # 0.7475 era demasiado pequeño.
+        # 0.84 deja margen para el marco, pero no achica tanto el acta.
+        CONTENT_SCALE = 0.84
+
+        try:
+            base_dir = Path(__file__).resolve().parent.parent
+            frame_path = base_dir / "assets" / "MARCO-ACTA-DE-NACIMIENTO.pdf"
+
+            frame_reader = PdfReader(str(frame_path))
+            src_reader = PdfReader(BytesIO(pdf_bytes))
+
+            frame_page = frame_reader.pages[0]
+            src_page = src_reader.pages[0]
+
+            try:
+                src_page.transfer_rotation_to_content()
+            except Exception:
+                pass
+
+            try:
+                sw = float(src_page.mediabox.width)
+                sh = float(src_page.mediabox.height)
+            except Exception:
+                sw = LETTER_W
+                sh = LETTER_H
+
+            # Asegurar que el frente entra en Letter antes del marco.
+            if abs(sw - LETTER_W) > 2 or abs(sh - LETTER_H) > 2:
+                pdf_bytes = self._normalize_pdf_pages_to_letter(
+                    pdf_bytes,
+                    term=filename,
+                    label="PROVIDER4_LAZARO_SOFT_FRAME_PRE_NORMALIZE",
+                )
+                src_reader = PdfReader(BytesIO(pdf_bytes))
+                src_page = src_reader.pages[0]
+                sw = float(src_page.mediabox.width)
+                sh = float(src_page.mediabox.height)
+
+            # Página base siempre Letter.
+            out_page = PageObject.create_blank_page(
+                width=LETTER_W,
+                height=LETTER_H,
+            )
+
+            # Primero ponemos el marco.
+            out_page.merge_page(frame_page)
+
+            scale = CONTENT_SCALE
+            tx = (LETTER_W - (sw * scale)) / 2.0
+            ty = (LETTER_H - (sh * scale)) / 2.0
+
+            transform = Transformation().scale(scale).translate(tx, ty)
+
+            # Luego ponemos el acta encima, más grande que antes.
+            out_page.merge_transformed_page(
+                src_page,
+                transform,
+                expand=False,
+            )
+
+            writer = PdfWriter()
+            writer.add_page(out_page)
+
+            out = BytesIO()
+            writer.write(out)
+
+            print(
+                "PROVIDER4_LAZARO_SOFT_FRAME_OK =",
+                {
+                    "filename": filename,
+                    "folio": bool(folio),
+                    "frame": str(frame_path),
+                    "scale": scale,
+                    "tx": round(tx, 2),
+                    "ty": round(ty, 2),
+                    "src_width": round(sw, 2),
+                    "src_height": round(sh, 2),
+                },
+                flush=True,
+            )
+
+            return out.getvalue()
+
+        except Exception as e:
+            print(
+                "PROVIDER4_LAZARO_SOFT_FRAME_FAILED_FALLBACK_PROVIDER7 =",
+                {
+                    "filename": filename,
+                    "error": str(e),
+                },
+                flush=True,
+            )
+
+            # Fallback al método anterior si algo falla.
+            return _enmarcar_pdf_frente_provider7(
+                pdf_bytes,
+                filename,
+                folio=folio,
+            )
+
     def _estado_desde_curp(self, curp: str) -> str:
         curp = (curp or "").strip().upper()
         if len(curp) < 13:
@@ -790,12 +914,21 @@ class Provider4Client:
                 framed_front = raw_front
                 print("PROVIDER4_FRONT_ALREADY_FRAMED_KEEP_RAW_PAGE_LETTER = TRUE", flush=True)
             else:
-                # Enmarcar solo después de normalizar a Letter.
-                framed_front = _enmarcar_pdf_frente(
-                    raw_front,
-                    f"{term}.pdf",
-                    folio=inc_folio,
-                )
+                # Enmarcado especial para Lázaro.
+                # Si NO es foliada, usamos escala suave para evitar actas muy reducidas.
+                # Si es foliada, dejamos Provider7 como fallback para no romper folios.
+                if inc_folio:
+                    framed_front = _enmarcar_pdf_frente_provider7(
+                        raw_front,
+                        f"{term}.pdf",
+                        folio=inc_folio,
+                    )
+                else:
+                    framed_front = self._enmarcar_pdf_frente_lazaro_suave(
+                        raw_front,
+                        f"{term}.pdf",
+                        folio=inc_folio,
+                    )
 
                 framed_front = self._normalize_pdf_pages_to_letter(
                     framed_front,
@@ -934,7 +1067,7 @@ class Provider4Client:
                 framed_front = raw_front
                 print("PROVIDER4_CHAIN_FRONT_ALREADY_FRAMED_KEEP_RAW_PAGE_LETTER = TRUE", flush=True)
             else:
-                framed_front = _enmarcar_pdf_frente(
+                framed_front = self._enmarcar_pdf_frente_lazaro_suave(
                     raw_front,
                     f"{term}.pdf",
                     folio=False,
