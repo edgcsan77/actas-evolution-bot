@@ -537,6 +537,122 @@ class Provider4Client:
             )
             return False
 
+    def _enmarcar_pdf_frente_lazaro_letter_casi_entero(
+        self,
+        pdf_bytes: bytes,
+        filename: str,
+        folio: bool = False,
+    ) -> bytes:
+        """
+        Para Provider4/10/11 cuando Lázaro devuelve frente Letter 612x792
+        sin marco verde detectable.
+
+        Objetivo:
+        - Poner marco verde.
+        - NO achicar como antes.
+        - Mantener casi todo el tamaño original.
+        """
+        LETTER_W = 612.0
+        LETTER_H = 792.0
+
+        # 0.84 quedó chico.
+        # 0.96 deja visible el marco, pero conserva el acta casi completa.
+        CONTENT_SCALE = 0.96
+
+        try:
+            base_dir = Path(__file__).resolve().parent.parent
+            frame_path = base_dir / "assets" / "MARCO-ACTA-DE-NACIMIENTO.pdf"
+
+            frame_reader = PdfReader(str(frame_path))
+            src_reader = PdfReader(BytesIO(pdf_bytes))
+
+            frame_page = frame_reader.pages[0]
+            src_page = src_reader.pages[0]
+
+            try:
+                src_page.transfer_rotation_to_content()
+            except Exception:
+                pass
+
+            try:
+                sw = float(src_page.mediabox.width)
+                sh = float(src_page.mediabox.height)
+            except Exception:
+                sw = LETTER_W
+                sh = LETTER_H
+
+            # Si por alguna razón no viene Letter, normalizar antes.
+            if abs(sw - LETTER_W) > 2 or abs(sh - LETTER_H) > 2:
+                pdf_bytes = self._normalize_pdf_pages_to_letter(
+                    pdf_bytes,
+                    term=filename,
+                    label="PROVIDER4_LAZARO_LETTER_FRAME_PRE_NORMALIZE",
+                )
+                src_reader = PdfReader(BytesIO(pdf_bytes))
+                src_page = src_reader.pages[0]
+                sw = float(src_page.mediabox.width)
+                sh = float(src_page.mediabox.height)
+
+            out_page = PageObject.create_blank_page(
+                width=LETTER_W,
+                height=LETTER_H,
+            )
+
+            # Marco primero.
+            out_page.merge_page(frame_page)
+
+            scale = CONTENT_SCALE
+            tx = (LETTER_W - (sw * scale)) / 2.0
+            ty = (LETTER_H - (sh * scale)) / 2.0
+
+            transform = Transformation().scale(scale).translate(tx, ty)
+
+            # Acta encima, casi completa, dejando visible el marco.
+            out_page.merge_transformed_page(
+                src_page,
+                transform,
+                expand=False,
+            )
+
+            writer = PdfWriter()
+            writer.add_page(out_page)
+
+            out = BytesIO()
+            writer.write(out)
+
+            print(
+                "PROVIDER4_LAZARO_LETTER_FRAME_OK =",
+                {
+                    "filename": filename,
+                    "folio": bool(folio),
+                    "frame": str(frame_path),
+                    "scale": scale,
+                    "tx": round(tx, 2),
+                    "ty": round(ty, 2),
+                    "src_width": round(sw, 2),
+                    "src_height": round(sh, 2),
+                },
+                flush=True,
+            )
+
+            return out.getvalue()
+
+        except Exception as e:
+            print(
+                "PROVIDER4_LAZARO_LETTER_FRAME_FAILED_FALLBACK_SOFT =",
+                {
+                    "filename": filename,
+                    "error": str(e),
+                },
+                flush=True,
+            )
+
+            return self._enmarcar_pdf_frente_lazaro_suave(
+                pdf_bytes,
+                filename,
+                folio=folio,
+            )
+
     def _enmarcar_pdf_frente_lazaro_suave(
         self,
         pdf_bytes: bytes,
@@ -971,19 +1087,19 @@ class Provider4Client:
                 print("PROVIDER4_FRONT_ALREADY_FRAMED_KEEP_RAW_PAGE_LETTER = TRUE", flush=True)
 
             elif front_is_letter:
-                # CASO IMPORTANTE:
-                # Lázaro/Provider10 a veces entrega 1 página Letter 612x792,
-                # sin marco verde detectable, pero visualmente ya viene bien.
-                # Si la reenmarcamos, se reduce el contenido.
-                # Por eso conservamos el frente original y solo agregamos reverso.
-                framed_front = raw_front
-                print(
-                    "PROVIDER4_FRONT_LETTER_NO_FRAME_KEEP_RAW_NO_SCALE =",
-                    {
-                        "term": term,
-                        "folio": bool(inc_folio),
-                    },
-                    flush=True,
+                # Lázaro/Provider10 puede devolver frente Letter 612x792
+                # sin marco verde. NO lo dejamos crudo porque saldría sin marco.
+                # Lo enmarcamos casi entero con scale 0.96 para no achicarlo.
+                framed_front = self._enmarcar_pdf_frente_lazaro_letter_casi_entero(
+                    raw_front,
+                    f"{term}.pdf",
+                    folio=inc_folio,
+                )
+
+                framed_front = self._normalize_pdf_pages_to_letter(
+                    framed_front,
+                    term=term,
+                    label="PROVIDER4_FRONT_AFTER_LETTER_FRAME",
                 )
 
             else:
@@ -1135,15 +1251,18 @@ class Provider4Client:
                 print("PROVIDER4_CHAIN_FRONT_ALREADY_FRAMED_KEEP_RAW_PAGE_LETTER = TRUE", flush=True)
 
             elif front_is_letter:
-                # Cadena también puede venir en Letter correcta.
-                # No reenmarcar para no reducir el contenido.
-                framed_front = raw_front
-                print(
-                    "PROVIDER4_CHAIN_FRONT_LETTER_NO_FRAME_KEEP_RAW_NO_SCALE =",
-                    {
-                        "term": term,
-                    },
-                    flush=True,
+                # Cadena también puede venir Letter sin marco.
+                # Se pone marco casi entero para no achicarla.
+                framed_front = self._enmarcar_pdf_frente_lazaro_letter_casi_entero(
+                    raw_front,
+                    f"{term}.pdf",
+                    folio=False,
+                )
+
+                framed_front = self._normalize_pdf_pages_to_letter(
+                    framed_front,
+                    term=term,
+                    label="PROVIDER4_CHAIN_FRONT_AFTER_LETTER_FRAME",
                 )
 
             else:
