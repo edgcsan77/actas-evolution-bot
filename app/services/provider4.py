@@ -918,7 +918,7 @@ class Provider4Client:
                 # Si NO es foliada, usamos escala suave para evitar actas muy reducidas.
                 # Si es foliada, dejamos Provider7 como fallback para no romper folios.
                 if inc_folio:
-                    framed_front = _enmarcar_pdf_frente_provider7(
+                    framed_front = self._enmarcar_pdf_frente_lazaro_suave(
                         raw_front,
                         f"{term}.pdf",
                         folio=inc_folio,
