@@ -482,6 +482,61 @@ class Provider4Client:
             )
             return pdf_bytes
 
+    def _pdf_first_page_is_letter(self, pdf_bytes: bytes, term: str = "") -> bool:
+        """
+        Detecta si la primera página ya viene en tamaño Letter 612x792.
+        En Lázaro/Provider4/10/11, si el frente ya viene Letter y trae texto válido,
+        NO debemos reenmarcarlo porque se reduce visualmente.
+        """
+        LETTER_W = 612.0
+        LETTER_H = 792.0
+        TOL = 2.0
+
+        try:
+            reader = PdfReader(BytesIO(pdf_bytes))
+
+            if len(reader.pages) < 1:
+                return False
+
+            page = reader.pages[0]
+
+            try:
+                page.transfer_rotation_to_content()
+            except Exception:
+                pass
+
+            w = float(page.mediabox.width)
+            h = float(page.mediabox.height)
+
+            is_letter = (
+                abs(w - LETTER_W) <= TOL
+                and abs(h - LETTER_H) <= TOL
+            )
+
+            print(
+                "PROVIDER4_FRONT_IS_LETTER_CHECK =",
+                {
+                    "term": term,
+                    "width": round(w, 2),
+                    "height": round(h, 2),
+                    "is_letter": bool(is_letter),
+                },
+                flush=True,
+            )
+
+            return bool(is_letter)
+
+        except Exception as e:
+            print(
+                "PROVIDER4_FRONT_IS_LETTER_CHECK_FAILED =",
+                {
+                    "term": term,
+                    "error": str(e),
+                },
+                flush=True,
+            )
+            return False
+
     def _enmarcar_pdf_frente_lazaro_suave(
         self,
         pdf_bytes: bytes,
@@ -907,28 +962,38 @@ class Provider4Client:
                 label="PROVIDER4_FRONT_BEFORE_FRAME",
             )
 
+            front_is_letter = self._pdf_first_page_is_letter(raw_front, term=term)
+
             if front_has_frame:
-                # Si Lázaro ya entregó el frente con marco verde,
-                # NO volver a enmarcar porque puede achicar el contenido central.
-                # Pero sí normalizamos a Letter para evitar mezcla A4/Letter.
+                # Si Lázaro ya entregó frente con marco verde,
+                # NO volver a enmarcar.
                 framed_front = raw_front
                 print("PROVIDER4_FRONT_ALREADY_FRAMED_KEEP_RAW_PAGE_LETTER = TRUE", flush=True)
+
+            elif front_is_letter:
+                # CASO IMPORTANTE:
+                # Lázaro/Provider10 a veces entrega 1 página Letter 612x792,
+                # sin marco verde detectable, pero visualmente ya viene bien.
+                # Si la reenmarcamos, se reduce el contenido.
+                # Por eso conservamos el frente original y solo agregamos reverso.
+                framed_front = raw_front
+                print(
+                    "PROVIDER4_FRONT_LETTER_NO_FRAME_KEEP_RAW_NO_SCALE =",
+                    {
+                        "term": term,
+                        "folio": bool(inc_folio),
+                    },
+                    flush=True,
+                )
+
             else:
-                # Enmarcado especial para Lázaro.
-                # Si NO es foliada, usamos escala suave para evitar actas muy reducidas.
-                # Si es foliada, dejamos Provider7 como fallback para no romper folios.
-                if inc_folio:
-                    framed_front = self._enmarcar_pdf_frente_lazaro_suave(
-                        raw_front,
-                        f"{term}.pdf",
-                        folio=inc_folio,
-                    )
-                else:
-                    framed_front = self._enmarcar_pdf_frente_lazaro_suave(
-                        raw_front,
-                        f"{term}.pdf",
-                        folio=inc_folio,
-                    )
+                # Solo si NO viene Letter, usamos el marco suave.
+                # Esto evita deformar o reducir actas que ya vienen correctas.
+                framed_front = self._enmarcar_pdf_frente_lazaro_suave(
+                    raw_front,
+                    f"{term}.pdf",
+                    folio=inc_folio,
+                )
 
                 framed_front = self._normalize_pdf_pages_to_letter(
                     framed_front,
@@ -1063,9 +1128,24 @@ class Provider4Client:
                 label="PROVIDER4_CHAIN_FRONT_BEFORE_FRAME",
             )
 
+            front_is_letter = self._pdf_first_page_is_letter(raw_front, term=term)
+
             if front_has_frame:
                 framed_front = raw_front
                 print("PROVIDER4_CHAIN_FRONT_ALREADY_FRAMED_KEEP_RAW_PAGE_LETTER = TRUE", flush=True)
+
+            elif front_is_letter:
+                # Cadena también puede venir en Letter correcta.
+                # No reenmarcar para no reducir el contenido.
+                framed_front = raw_front
+                print(
+                    "PROVIDER4_CHAIN_FRONT_LETTER_NO_FRAME_KEEP_RAW_NO_SCALE =",
+                    {
+                        "term": term,
+                    },
+                    flush=True,
+                )
+
             else:
                 framed_front = self._enmarcar_pdf_frente_lazaro_suave(
                     raw_front,
