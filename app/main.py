@@ -383,14 +383,124 @@ def _evolution_instance_state(instance_name: str) -> dict:
         _cache_set_json(cache_key, result, ttl=8)
         return result
 
-def _evolution_connect_qr(instance_name: str) -> dict:
+    
+def _extract_qr_from_evolution_payload(payload) -> str:
+    """
+    Extrae QR/base64 aunque Evolution lo mande con estructura distinta.
+    Soporta:
+    - {"base64": "..."}
+    - {"qrcode": {"base64": "..."}}
+    - {"qrcode": "..."}
+    - {"qr": "..."}
+    - {"qrCode": "..."}
+    - {"code": "..."}
+    - {"instance": {"qrcode": "..."}}
+    - listas con un dict adentro
+    """
+    if isinstance(payload, list):
+        for item in payload:
+            qr = _extract_qr_from_evolution_payload(item)
+            if qr:
+                return qr
+        return ""
+
+    if not isinstance(payload, dict):
+        return ""
+
+    candidates = []
+
+    candidates.extend([
+        payload.get("base64"),
+        payload.get("qr"),
+        payload.get("qrCode"),
+        payload.get("code"),
+        payload.get("pairingCode"),
+    ])
+
+    qrcode = payload.get("qrcode")
+    if isinstance(qrcode, dict):
+        candidates.extend([
+            qrcode.get("base64"),
+            qrcode.get("code"),
+            qrcode.get("qr"),
+            qrcode.get("qrCode"),
+        ])
+    elif isinstance(qrcode, str):
+        candidates.append(qrcode)
+
+    instance = payload.get("instance")
+    if isinstance(instance, dict):
+        candidates.extend([
+            instance.get("qrcode"),
+            instance.get("qr"),
+            instance.get("qrCode"),
+            instance.get("base64"),
+        ])
+
+    for value in candidates:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    return ""
+
+
+def _evolution_create_instance_if_needed(instance_name: str) -> dict:
+    """
+    Crea/recrea la instancia en Evolution si connect responde count:0
+    o si la instancia no existe realmente en Evolution.
+    """
+    url = f"{EVOLUTION_BASE_URL}/instance/create"
+
+    r = requests.post(
+        url,
+        headers={
+            "apikey": EVOLUTION_APIKEY,
+            "Content-Type": "application/json",
+        },
+        json={
+            "instanceName": instance_name,
+            "qrcode": True,
+            "integration": "WHATSAPP-BAILEYS",
+        },
+        timeout=30,
+    )
+
     try:
-        url = f"{EVOLUTION_BASE_URL}/instance/connect/{instance_name}"
+        data = r.json()
+    except Exception:
+        data = {"raw": r.text}
+
+    print(
+        "EVOLUTION_CREATE_FOR_QR =",
+        instance_name,
+        r.status_code,
+        data,
+        flush=True,
+    )
+
+    return {
+        "ok": r.status_code in (200, 201, 403, 409),
+        "status_code": r.status_code,
+        "data": data,
+    }
+
+
+def _evolution_connect_qr(instance_name: str) -> dict:
+    inst = (instance_name or "").strip()
+
+    if not inst:
+        return {
+            "ok": False,
+            "error": "EMPTY_INSTANCE",
+        }
+
+    def _connect_once() -> dict:
+        url = f"{EVOLUTION_BASE_URL}/instance/connect/{inst}"
 
         r = requests.get(
             url,
             headers={"apikey": EVOLUTION_APIKEY},
-            timeout=15,
+            timeout=20,
         )
 
         try:
@@ -398,21 +508,92 @@ def _evolution_connect_qr(instance_name: str) -> dict:
         except Exception:
             data = {"raw": r.text}
 
-        print("EVOLUTION_QR_DEBUG =", instance_name, r.status_code, data, flush=True)
+        qr = _extract_qr_from_evolution_payload(data)
+
+        print(
+            "EVOLUTION_QR_DEBUG =",
+            inst,
+            r.status_code,
+            data,
+            "qr_found=",
+            bool(qr),
+            flush=True,
+        )
 
         return {
-            "ok": r.status_code < 400,
+            "http_ok": r.status_code < 400,
             "status_code": r.status_code,
             "data": data,
+            "qr": qr,
+        }
+
+    try:
+        first = _connect_once()
+
+        # Caso exacto de tu pantalla: Evolution responde {"count": 0}
+        # Tu código antes lo trataba como ok, pero realmente NO trae QR.
+        first_data = first.get("data") or {}
+        first_qr = first.get("qr") or ""
+
+        no_qr = not first_qr
+        count_zero = isinstance(first_data, dict) and int(first_data.get("count") or 0) == 0
+
+        if no_qr and count_zero:
+            created = _evolution_create_instance_if_needed(inst)
+
+            if not created.get("ok"):
+                return {
+                    "ok": False,
+                    "error": "EVOLUTION_CREATE_FAILED_BEFORE_QR",
+                    "create_status_code": created.get("status_code"),
+                    "create_response": created.get("data"),
+                    "connect_response": first_data,
+                }
+
+            time.sleep(1.5)
+            second = _connect_once()
+
+            if second.get("qr"):
+                return {
+                    "ok": True,
+                    "status_code": second.get("status_code"),
+                    "qr": second.get("qr"),
+                    "qr_image": second.get("qr"),
+                    "data": second.get("data"),
+                    "created_before_qr": True,
+                }
+
+            return {
+                "ok": False,
+                "error": "EVOLUTION_NO_QR_AFTER_CREATE",
+                "connect_response": second.get("data"),
+                "create_response": created.get("data"),
+            }
+
+        if first_qr:
+            return {
+                "ok": True,
+                "status_code": first.get("status_code"),
+                "qr": first_qr,
+                "qr_image": first_qr,
+                "data": first.get("data"),
+                "created_before_qr": False,
+            }
+
+        return {
+            "ok": False,
+            "error": "EVOLUTION_NO_QR_RETURNED",
+            "status_code": first.get("status_code"),
+            "data": first_data,
         }
 
     except Exception as e:
-        print("EVOLUTION_QR_ERROR =", instance_name, repr(e), flush=True)
+        print("EVOLUTION_QR_ERROR =", inst, repr(e), flush=True)
         return {
             "ok": False,
             "error": str(e),
         }
-
+        
 
 def _bot_status_rows_uncached(db: Session) -> list[dict]:
     static_bots = set(BOT_LABELS.keys()) | set(BOT_PANEL_TOKENS.values())
@@ -484,7 +665,6 @@ def _bot_status_rows_uncached(db: Session) -> list[dict]:
     return out
 
 
-
 def _bot_status_rows(db: Session) -> list[dict]:
     """
     Cache corto para acelerar panel principal.
@@ -506,9 +686,38 @@ def _bot_status_rows(db: Session) -> list[dict]:
 
     return rows
 
+    
 @app.get("/panel/instance/{instance_name}/qr")
-def panel_instance_qr(instance_name: str):
-    result = _evolution_connect_qr(instance_name)
+def panel_instance_qr(
+    instance_name: str,
+    token: str = "",
+    db: Session = Depends(get_db),
+):
+    inst = (instance_name or "").strip()
+
+    if not inst:
+        return {"ok": False, "error": "EMPTY_INSTANCE"}
+
+    # Seguridad: solo permitir QR de bots registrados/visibles en panel.
+    exists_static = inst in BOT_LABELS or inst in BOT_PANEL_TOKENS.values()
+
+    exists_dynamic = (
+        db.query(BotControl)
+        .filter(
+            BotControl.instance_name == inst,
+            BotControl.is_active == True,
+        )
+        .first()
+    )
+
+    if not exists_static and not exists_dynamic:
+        return {
+            "ok": False,
+            "error": "INSTANCE_NOT_REGISTERED_IN_PANEL",
+            "instance_name": inst,
+        }
+
+    result = _evolution_connect_qr(inst)
     return result
 
 
@@ -11709,6 +11918,28 @@ def panel_actas(
           }}
         }}
 
+        function normalizeQrImage(qr) {{
+          const value = String(qr || "").trim();
+        
+          if (!value) return "";
+        
+          if (value.startsWith("data:image")) {{
+            return value;
+          }}
+        
+          // Base64 normal de PNG/JPG/WebP.
+          // Antes solo aceptabas /9j, pero muchos QR PNG empiezan con iVBORw0KGgo.
+          const looksBase64 =
+            value.length > 100 &&
+            /^[A-Za-z0-9+/=]+$/.test(value);
+        
+          if (looksBase64) {{
+            return `data:image/png;base64,${{value}}`;
+          }}
+        
+          return "";
+        }}
+        
         async function getBotQr(instanceName) {{
           const box = document.getElementById("botQrBox");
           if (!box) return;
@@ -11716,46 +11947,68 @@ def panel_actas(
           box.innerHTML = "<strong>Generando QR...</strong>";
         
           try {{
-            const res = await fetch(`/panel/instance/${{instanceName}}/qr`);
+            const res = await fetch(`/panel/instance/${{encodeURIComponent(instanceName)}}/qr`);
             const data = await res.json();
         
             if (!data.ok) {{
-              box.innerHTML = `<div style="color:red;font-weight:800;">Error: ${{data.error || "No se pudo generar QR"}}</div>`;
+              box.innerHTML = `
+                <div style="color:red;font-weight:800;margin-bottom:10px;">
+                  Error: ${{data.error || "No se pudo generar QR"}}
+                </div>
+                <pre style="white-space:pre-wrap;background:#111827;color:white;padding:14px;border-radius:12px;">${{JSON.stringify(data, null, 2)}}</pre>
+              `;
               return;
             }}
         
             const payload = data.data || {{}};
+        
             const qr =
+              data.qr_image ||
+              data.qr ||
               payload.base64 ||
               payload.qrcode?.base64 ||
               payload.qrcode?.code ||
+              payload.qrcode ||
               payload.qr ||
               payload.qrCode ||
               payload.code ||
               payload.pairingCode ||
               payload.instance?.qrcode ||
               payload.instance?.qr ||
+              payload.instance?.base64 ||
               "";
         
-            if (qr && String(qr).startsWith("data:image")) {{
+            const imgSrc = normalizeQrImage(qr);
+        
+            if (imgSrc) {{
               box.innerHTML = `
                 <div style="padding:14px;border:1px solid #e5e7eb;border-radius:14px;background:white;">
                   <strong>QR para ${{instanceName}}</strong><br><br>
-                  <img src="${{qr}}" style="max-width:280px;width:100%;border-radius:12px;">
+                  <img src="${{imgSrc}}" style="max-width:280px;width:100%;border-radius:12px;">
+                  <div style="margin-top:10px;color:#64748b;font-size:13px;">
+                    Escanéalo desde WhatsApp &gt; Dispositivos vinculados.
+                  </div>
                 </div>
               `;
-            }} else if (qr && String(qr).startsWith("/9j")) {{
-              box.innerHTML = `
-                <div style="padding:14px;border:1px solid #e5e7eb;border-radius:14px;background:white;">
-                  <strong>QR para ${{instanceName}}</strong><br><br>
-                  <img src="data:image/png;base64,${{qr}}" style="max-width:280px;width:100%;border-radius:12px;">
-                </div>
-              `;
-            }} else {{
-              box.innerHTML = `
-                <pre style="white-space:pre-wrap;background:#111827;color:white;padding:14px;border-radius:12px;">${{JSON.stringify(payload, null, 2)}}</pre>
-              `;
+              return;
             }}
+        
+            if (qr) {{
+              box.innerHTML = `
+                <div style="padding:14px;border:1px solid #e5e7eb;border-radius:14px;background:white;">
+                  <strong>Código recibido para ${{instanceName}}</strong>
+                  <pre style="white-space:pre-wrap;background:#111827;color:white;padding:14px;border-radius:12px;">${{qr}}</pre>
+                </div>
+              `;
+              return;
+            }}
+        
+            box.innerHTML = `
+              <div style="color:#b45309;font-weight:800;margin-bottom:10px;">
+                Evolution respondió OK, pero no mandó QR.
+              </div>
+              <pre style="white-space:pre-wrap;background:#111827;color:white;padding:14px;border-radius:12px;">${{JSON.stringify(data, null, 2)}}</pre>
+            `;
         
           }} catch (e) {{
             box.innerHTML = `<div style="color:red;font-weight:800;">Error de conexión</div>`;
