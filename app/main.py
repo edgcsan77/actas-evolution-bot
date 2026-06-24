@@ -14864,10 +14864,15 @@ def _close_provider_negative_response(
     """
     Cierra solicitudes PROCESSING/QUEUED cuando proveedor WhatsApp responde negativo.
 
-    Orden seguro:
-    1) Si viene quoted_msg_id, cerrar por provider_message_id.
-    2) Si viene CURP/cadena en texto, cerrar por provider_group_id + curp.
-    3) Si no encontró por grupo, cerrar por CURP solo si hay match único reciente.
+    Soporta:
+    - Respuesta individual por reply/cita.
+    - Una o varias CURP/cadenas en el mismo mensaje.
+    - Mensajes tipo lista:
+        CURP1 No hay registros disponibles
+        CURP2 No hay registros disponibles
+
+    Para mensajes con varios identificadores, cierra y notifica cada
+    solicitud que tenga coincidencia segura.
     """
     info = _provider_negative_response_info(text_body)
 
@@ -14910,10 +14915,23 @@ def _close_provider_negative_response(
 
         return None
 
-    open_req = None
-    match_mode = ""
+    matched_requests = []
+    matched_ids = set()
+    match_modes = {}
 
-    # 1) Forma reply/cita: proveedor responde "SIN", "-", "No hay registros..."
+    def _add_match(req, mode: str):
+        if not req:
+            return False
+
+        if req.id in matched_ids:
+            return False
+
+        matched_ids.add(req.id)
+        matched_requests.append(req)
+        match_modes[req.id] = mode
+        return True
+
+    # 1) Si es respuesta/cita a un mensaje específico, intenta cerrar ese.
     if quoted_msg_id:
         rows = (
             db.query(RequestLog)
@@ -14927,56 +14945,54 @@ def _close_provider_negative_response(
             .all()
         )
 
-        open_req = _pick_by_type(rows)
-        match_mode = "quoted_msg_id"
+        _add_match(
+            _pick_by_type(rows),
+            "quoted_msg_id",
+        )
 
-    # 2) Forma con CURP/cadena en el texto.
-    if not open_req:
-        for ident in info["identifiers"]:
-            rows = (
-                db.query(RequestLog)
-                .filter(
-                    RequestLog.provider_group_id == source_chat_id,
-                    RequestLog.curp == ident,
-                    RequestLog.status.in_(["QUEUED", "PROCESSING"]),
-                    RequestLog.provider_name.in_(WHATSAPP_TEXT_PROVIDERS),
-                )
-                .order_by(RequestLog.created_at.desc())
-                .all()
+    # 2) Por cada CURP/cadena del texto, buscar primero dentro del grupo proveedor.
+    for ident in info["identifiers"]:
+        rows = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.provider_group_id == source_chat_id,
+                RequestLog.curp == ident,
+                RequestLog.status.in_(["QUEUED", "PROCESSING"]),
+                RequestLog.provider_name.in_(WHATSAPP_TEXT_PROVIDERS),
             )
+            .order_by(RequestLog.created_at.desc())
+            .all()
+        )
 
-            open_req = _pick_by_type(rows)
-            match_mode = "provider_group_id_curp"
+        req = _pick_by_type(rows)
 
-            if open_req:
-                break
+        if req:
+            _add_match(req, "provider_group_id_curp")
+            continue
 
-    # 3) Último fallback: por CURP/cadena sin grupo, solo si hay match único reciente.
-    # Esto ayuda si provider_group_id quedó raro, pero evita cerrar solicitudes equivocadas.
-    if not open_req:
+        # 3) Respaldo seguro por CURP/cadena si el provider_group_id no coincide.
+        # Solo acepta coincidencia única reciente.
         recent_limit = _utc_now_naive() - timedelta(hours=18)
 
-        for ident in info["identifiers"]:
-            rows = (
-                db.query(RequestLog)
-                .filter(
-                    RequestLog.curp == ident,
-                    RequestLog.status.in_(["QUEUED", "PROCESSING"]),
-                    RequestLog.provider_name.in_(WHATSAPP_TEXT_PROVIDERS),
-                    RequestLog.created_at >= recent_limit,
-                )
-                .order_by(RequestLog.created_at.desc())
-                .limit(20)
-                .all()
+        rows = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.curp == ident,
+                RequestLog.status.in_(["QUEUED", "PROCESSING"]),
+                RequestLog.provider_name.in_(WHATSAPP_TEXT_PROVIDERS),
+                RequestLog.created_at >= recent_limit,
             )
+            .order_by(RequestLog.created_at.desc())
+            .limit(20)
+            .all()
+        )
 
-            open_req = _pick_by_type(rows)
-            match_mode = "curp_recent_unique"
+        _add_match(
+            _pick_by_type(rows),
+            "curp_recent_unique",
+        )
 
-            if open_req:
-                break
-
-    if not open_req:
+    if not matched_requests:
         print("PROVIDER_NEGATIVE_WITHOUT_MATCH =", {
             "source_chat_id": source_chat_id,
             "quoted_msg_id": quoted_msg_id,
@@ -14990,26 +15006,43 @@ def _close_provider_negative_response(
             "identifiers": info["identifiers"],
         }
 
-    open_req.status = "ERROR"
-    open_req.error_message = f"SIN REGISTRO | PROVIDER_NEGATIVE_TEXT: {info['raw'][:180]}"
-    open_req.updated_at = _utc_now_naive()
+    now = _utc_now_naive()
+
+    for req in matched_requests:
+        req.status = "ERROR"
+        req.error_message = (
+            f"SIN REGISTRO | PROVIDER_NEGATIVE_TEXT: {info['raw'][:180]}"
+        )
+        req.updated_at = now
+
     db.commit()
 
-    try:
-        _notify_client_no_record(open_req)
-    except Exception as notify_exc:
-        print("PROVIDER_NEGATIVE_NOTIFY_ERROR =", {
-            "request_id": open_req.id,
-            "error": str(notify_exc),
-        }, flush=True)
+    notified_request_ids = []
+    notify_errors = []
 
-    print("PROVIDER_NEGATIVE_CLOSED =", {
-        "request_id": open_req.id,
-        "curp": open_req.curp,
-        "act_type": open_req.act_type,
-        "provider_name": open_req.provider_name,
-        "provider_group_id": open_req.provider_group_id,
-        "match_mode": match_mode,
+    for req in matched_requests:
+        try:
+            _notify_client_no_record(req)
+            notified_request_ids.append(req.id)
+
+        except Exception as notify_exc:
+            notify_errors.append({
+                "request_id": req.id,
+                "error": str(notify_exc),
+            })
+
+            print("PROVIDER_NEGATIVE_NOTIFY_ERROR =", {
+                "request_id": req.id,
+                "error": str(notify_exc),
+            }, flush=True)
+
+    print("PROVIDER_NEGATIVE_MULTI_CLOSED =", {
+        "request_ids": [req.id for req in matched_requests],
+        "curps": [req.curp for req in matched_requests],
+        "act_types": [req.act_type for req in matched_requests],
+        "match_modes": match_modes,
+        "notified_request_ids": notified_request_ids,
+        "notify_errors": notify_errors,
         "quoted_msg_id": quoted_msg_id,
         "identifiers": info["identifiers"],
         "text": info["raw"][:250],
@@ -15017,8 +15050,11 @@ def _close_provider_negative_response(
 
     return {
         "closed": True,
-        "request_id": open_req.id,
-        "match_mode": match_mode,
+        "count": len(matched_requests),
+        "request_ids": [req.id for req in matched_requests],
+        "notified_request_ids": notified_request_ids,
+        "match_modes": match_modes,
+        "notify_errors": notify_errors,
     }
 
 
