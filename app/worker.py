@@ -491,6 +491,7 @@ SUPPORT_ERROR_LABELS_ES = {
     "NO_PROVIDER_FOR_SPECIAL_FORMAT": "No hay proveedor disponible para este tipo/formato de solicitud.",
     "UNKNOWN_PROVIDER": "Proveedor desconocido o no configurado.",
     "NO_FOLIADAS_PROVIDER_GROUP_CONFIGURED": "No hay grupo configurado para actas foliadas.",
+    "NO_CADENA_PROVIDER_GROUP_CONFIGURED": "No hay grupo configurado para actas por cadena.",
     "NO_BIRTH_PROVIDER_GROUP_CONFIGURED": "No hay grupo configurado para nacimientos.",
     "NO_SPECIAL_PROVIDER_GROUP_CONFIGURED": "No hay grupo configurado para actas especiales.",
     "NO_PROVIDER6_FOLIADAS_GROUP_CONFIGURED": "No hay grupo de foliadas configurado para ACTAS ESCALANTE.",
@@ -1842,24 +1843,26 @@ def _pick_provider1_group(term: str | None, act_type: str, request_id: int) -> s
 
     especiales_group = (settings.PROVIDER_GROUP_ESPECIALES or "").strip()
     foliadas_group = (settings.PROVIDER_GROUP_FOLIADAS or "").strip()
+    cadena_group = (settings.PROVIDER_GROUP_CADENA or "").strip()
 
     is_nacimiento = act_type_up.startswith("NACIMIENTO") or act_type_up.startswith("NAC")
     is_cadena_req = is_chain(term)
     is_folio_req = _is_folio_act(act_type_up)
     is_curp_req = _is_curp_term(term)
 
-    # 1. FOLIADAS -> grupo foliadas
+    # 1. CADENAS -> grupo exclusivo de cadena.
+    # Debe ir antes de FOLIADAS para que una cadena jamás termine
+    # en el grupo de foliadas aunque el tipo tenga la palabra FOLIO.
+    if is_cadena_req:
+        if not cadena_group:
+            raise RuntimeError("NO_CADENA_PROVIDER_GROUP_CONFIGURED")
+        return cadena_group
+
+    # 2. FOLIADAS -> grupo exclusivo de foliadas.
     if is_folio_req:
         if not foliadas_group:
             raise RuntimeError("NO_FOLIADAS_PROVIDER_GROUP_CONFIGURED")
         return foliadas_group
-
-    # 2. TODAS LAS CADENAS -> grupo foliadas
-    if is_cadena_req:
-        if not foliadas_group:
-            raise RuntimeError("NO_FOLIADAS_PROVIDER_GROUP_CONFIGURED")
-        return foliadas_group
-
     # 3. NACIMIENTO POR CURP -> repartir entre grupos nacimiento 1, 2, 3 y 4
     if is_nacimiento and is_curp_req:
         nacimiento_groups = [
