@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     PROVIDER_GROUP_NACIMIENTO_4: str = ""
     PROVIDER_GROUP_ESPECIALES: str = ""
     PROVIDER_GROUP_FOLIADAS: str = ""
+    PROVIDER_GROUP_CADENA: str = ""
 
     # PROVIDER 2
     PROVIDER2_GROUP_1: str = ""
