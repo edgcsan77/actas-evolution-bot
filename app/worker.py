@@ -3991,7 +3991,22 @@ def process_request(request_id: int):
                 else f"{req.curp}.pdf"
             )
 
+            req_id_for_pdf = int(req.id)
+
             try:
+                db.rollback()
+            
+                req = (
+                    db.query(RequestLog)
+                    .filter(RequestLog.id == req_id_for_pdf)
+                    .first()
+                )
+            
+                if not req:
+                    raise RuntimeError(
+                        f"REQUEST_NOT_FOUND_BEFORE_R2_SAVE:{req_id_for_pdf}"
+                    )
+            
                 save_request_pdf_to_r2(
                     req,
                     db,
@@ -3999,9 +4014,15 @@ def process_request(request_id: int):
                     filename=filename,
                     origin=f"worker:{provider_name}",
                 )
+            
             except Exception as r2_exc:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+            
                 print(f"R2_SAVE_{provider_name}_PDF_ERROR =", {
-                    "req_id": getattr(req, "id", None),
+                    "req_id": req_id_for_pdf,
                     "filename": filename,
                     "error": str(r2_exc),
                 }, flush=True)
