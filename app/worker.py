@@ -1306,7 +1306,7 @@ def _deliver_pdf_base64_with_retries(
 ) -> bool:
     last_error = None
 
-    for attempt in range(1, 2):
+    for attempt in range(1, 3):
         try:
             _send_pdf_base64_to_client_once(
                 req,
@@ -4184,8 +4184,21 @@ def process_request(request_id: int):
         raise RuntimeError("UNKNOWN_PROVIDER")
 
     except Exception as e:
-        req = db.query(RequestLog).filter(RequestLog.id == request_id).first()
         err = str(e)
+    
+        try:
+            db.rollback()
+        except Exception as rollback_exc:
+            print("PROCESS_REQUEST_ERROR_ROLLBACK_FAILED =", {
+                "request_id": request_id,
+                "error": str(rollback_exc),
+            }, flush=True)
+    
+        req = (
+            db.query(RequestLog)
+            .filter(RequestLog.id == request_id)
+            .first()
+        )
     
         if req:
             req.updated_at = _utc_now_naive()
