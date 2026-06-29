@@ -1107,50 +1107,105 @@ def _handle_api_charge_after_done(req, db):
     if not _is_api_request(req):
         return
 
-    if (req.status or "").upper() != "DONE":
+    request_id = getattr(req, "id", None)
+
+    if not request_id:
+        print("API_CHARGE_SKIP_NO_REQUEST_ID =", flush=True)
         return
 
-    if getattr(req, "api_charged", False):
-        print("API_CHARGE_ALREADY_DONE =", req.id, flush=True)
-        return
+    try:
+        # ============================================================
+        # 1) BLOQUEAR Y RECARGAR LA SOLICITUD REAL DESDE POSTGRES
+        # ============================================================
+        # No confiar en el objeto req recibido porque puede estar viejo
+        # si dos workers/procesos llegaron casi al mismo tiempo.
+        locked_req = (
+            db.query(RequestLog)
+            .populate_existing()
+            .filter(RequestLog.id == request_id)
+            .with_for_update()
+            .first()
+        )
 
-    client = (
-        db.query(ApiClient)
-        .filter(ApiClient.id == req.api_client_id)
-        .with_for_update()
-        .first()
-    )
+        if not locked_req:
+            print("API_CHARGE_REQUEST_NOT_FOUND =", request_id, flush=True)
+            return
 
-    if not client:
-        print("API_CHARGE_CLIENT_NOT_FOUND =", req.api_client_id, flush=True)
-        return
+        if not _is_api_request(locked_req):
+            return
 
-    price = Decimal(str(req.api_price or client.price_per_done or 5))
+        if (locked_req.status or "").upper() != "DONE":
+            print("API_CHARGE_SKIP_NOT_DONE =", {
+                "request_id": locked_req.id,
+                "status": locked_req.status,
+            }, flush=True)
+            return
 
-    client.credit_balance = Decimal(str(client.credit_balance or 0)) - price
-    client.updated_at = _utc_now_naive()
+        # Ya dentro del lock de RequestLog.
+        # Si un worker anterior ya cobró, este sale sin volver a tocar saldo.
+        if bool(locked_req.api_charged):
+            print("API_CHARGE_ALREADY_DONE =", locked_req.id, flush=True)
+            return
 
-    req.api_charged = True
-    req.api_price = price
-    req.updated_at = _utc_now_naive()
+        # ============================================================
+        # 2) BLOQUEAR EL CLIENTE ANTES DE MOVER EL SALDO
+        # ============================================================
+        client = (
+            db.query(ApiClient)
+            .populate_existing()
+            .filter(ApiClient.id == locked_req.api_client_id)
+            .with_for_update()
+            .first()
+        )
 
-    db.add(ApiCreditLog(
-        api_client_id=client.id,
-        request_log_id=req.id,
-        amount=-price,
-        type="CHARGE",
-        note=f"Acta DONE request_id={req.id}",
-        created_at=_utc_now_naive(),
-    ))
+        if not client:
+            print("API_CHARGE_CLIENT_NOT_FOUND =", {
+                "request_id": locked_req.id,
+                "api_client_id": locked_req.api_client_id,
+            }, flush=True)
+            return
 
-    db.commit()
+        price = Decimal(
+            str(locked_req.api_price or client.price_per_done or 5)
+        )
 
-    print("API_CHARGED_DONE =", {
-        "req_id": req.id,
-        "api_client_id": client.id,
-        "amount": str(price),
-        "balance": str(client.credit_balance),
-    }, flush=True)
+        client.credit_balance = (
+            Decimal(str(client.credit_balance or 0)) - price
+        )
+        client.updated_at = _utc_now_naive()
+
+        # Marcamos cobrada la MISMA fila bloqueada.
+        locked_req.api_charged = True
+        locked_req.api_price = price
+        locked_req.updated_at = _utc_now_naive()
+
+        db.add(ApiCreditLog(
+            api_client_id=client.id,
+            request_log_id=locked_req.id,
+            amount=-price,
+            type="CHARGE",
+            note=f"Acta DONE request_id={locked_req.id}",
+            created_at=_utc_now_naive(),
+        ))
+
+        db.commit()
+
+        print("API_CHARGED_DONE =", {
+            "req_id": locked_req.id,
+            "api_client_id": client.id,
+            "amount": str(price),
+            "balance": str(client.credit_balance),
+        }, flush=True)
+
+    except Exception as e:
+        db.rollback()
+
+        print("API_CHARGE_ERROR =", {
+            "request_id": request_id,
+            "error": str(e),
+        }, flush=True)
+
+        raise
 
 
 def _store_api_pdf_result(req, db, safe_media_b64: str, filename: str, provider_media_label: str):
