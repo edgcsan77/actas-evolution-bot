@@ -3293,8 +3293,70 @@ NO_TIME_CAPTION_GROUPS = {
 }
 
 
+def _acquire_request_processing_lock(request_id: int) -> str | None:
+    """
+    Impide que dos workers procesen simultáneamente el mismo request_id.
+    El token permite liberar únicamente nuestro propio lock.
+    """
+    token = f"{random.getrandbits(128):032x}"
+    key = f"request_processing_lock:{request_id}"
+
+    try:
+        acquired = redis_conn.set(
+            key,
+            token,
+            nx=True,
+            ex=60 * 15,
+        )
+
+        if acquired:
+            return token
+
+        return None
+
+    except Exception as e:
+        print("REQUEST_PROCESSING_LOCK_REDIS_ERROR =", {
+            "request_id": request_id,
+            "error": str(e),
+        }, flush=True)
+
+        # Mejor no procesar si Redis no puede garantizar exclusión.
+        return None
+
+
+def _release_request_processing_lock(request_id: int, token: str | None):
+    if not token:
+        return
+
+    key = f"request_processing_lock:{request_id}"
+
+    try:
+        current = redis_conn.get(key)
+
+        if isinstance(current, bytes):
+            current = current.decode("utf-8", errors="ignore")
+
+        if current == token:
+            redis_conn.delete(key)
+
+    except Exception as e:
+        print("REQUEST_PROCESSING_UNLOCK_REDIS_ERROR =", {
+            "request_id": request_id,
+            "error": str(e),
+        }, flush=True)
+
+
 def process_request(request_id: int):
+    processing_lock_token = _acquire_request_processing_lock(request_id)
+
+    if not processing_lock_token:
+        print("PROCESS_REQUEST_DUPLICATE_OR_LOCK_UNAVAILABLE_SKIP =", {
+            "request_id": request_id,
+        }, flush=True)
+        return
+
     db = SessionLocal()
+
     try:
         req = db.query(RequestLog).filter(RequestLog.id == request_id).first()
         if not req:
@@ -4589,4 +4651,10 @@ def process_request(request_id: int):
         raise
         
     finally:
-        db.close()
+        try:
+            db.close()
+        finally:
+            _release_request_processing_lock(
+                request_id,
+                processing_lock_token,
+            )
