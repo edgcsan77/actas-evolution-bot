@@ -381,6 +381,13 @@ def _notify_client_no_record_once(req, label: str = "NO_RECORD") -> bool:
     una solicitud solo puede avisar 'No hay registros disponibles' una vez.
     Usa la misma llave que main.py: no_record_notified:{req.id}
     """
+    if _is_api_request(req):
+        print(f"{label}_API_SKIP_WHATSAPP_NOTIFY =", {
+            "request_id": getattr(req, "id", None),
+            "api_client_id": getattr(req, "api_client_id", None),
+        }, flush=True)
+        return False
+        
     req_id = getattr(req, "id", None)
     dedupe_key = f"no_record_notified:{req_id}"
 
@@ -4207,6 +4214,15 @@ def process_request(request_id: int):
                 }, flush=True)
 
             instance = req.instance_name or "docifybot8"
+
+            if _store_api_pdf_result(
+                req,
+                db,
+                safe_media_b64,
+                filename,
+                "BASE64_PROVIDER7_API",
+            ):
+                return
 
             print("REQ_INSTANCE_NAME =", req.instance_name, flush=True)
             print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
