@@ -14336,6 +14336,7 @@ def _api_client_panel_rows(db: Session) -> list[dict]:
     """
     clients = (
         db.query(ApiClient)
+        .filter(ApiClient.count_in_panel == True)
         .order_by(ApiClient.created_at.desc(), ApiClient.id.desc())
         .all()
     )
