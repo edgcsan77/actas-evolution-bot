@@ -693,6 +693,9 @@ def panel_instance_qr(
     token: str = "",
     db: Session = Depends(get_db),
 ):
+    if token != PANEL_TOKEN:
+        return {"ok": False, "error": "UNAUTHORIZED"}
+
     inst = (instance_name or "").strip()
 
     if not inst:
@@ -13771,19 +13774,38 @@ def _get_api_client_or_401(db: Session, authorization: str | None) -> ApiClient:
 
 
 def _api_pending_reserved_amount(db: Session, client: ApiClient) -> Decimal:
-    price = Decimal(str(client.price_per_done or 5))
+    """
+    Reserva el precio congelado de cada solicitud pendiente.
 
-    pending_count = (
-        db.query(RequestLog)
+    No usar:
+        precio_actual_del_cliente × cantidad_pendiente
+
+    porque el precio del cliente puede cambiar después de crear solicitudes
+    que aún siguen QUEUED o PROCESSING.
+    """
+    current_price = Decimal(str(client.price_per_done or 5))
+
+    reserved = (
+        db.query(
+            func.coalesce(
+                func.sum(
+                    func.coalesce(
+                        RequestLog.api_price,
+                        current_price,
+                    )
+                ),
+                0,
+            )
+        )
         .filter(
             RequestLog.api_client_id == client.id,
             RequestLog.status.in_(["QUEUED", "PROCESSING"]),
             RequestLog.api_charged == False,
         )
-        .count()
+        .scalar()
     )
 
-    return price * Decimal(pending_count)
+    return Decimal(str(reserved or 0))
 
 
 def _ensure_api_panel_group(db: Session, client: ApiClient):
@@ -13843,7 +13865,20 @@ def _ensure_api_panel_group(db: Session, client: ApiClient):
 # API V1 - CODIGOS PUBLICOS DE ERROR
 # ============================================================
 
+API_ALLOWED_ACT_TYPES = {
+    "NACIMIENTO",
+    "MATRIMONIO",
+    "DEFUNCION",
+    "DIVORCIO",
+    "CADENA",
+    "FOLIADA NACIMIENTO",
+    "FOLIADA MATRIMONIO",
+    "FOLIADA DEFUNCION",
+    "FOLIADA DIVORCIO",
+}
+
 API_ERROR_MESSAGES = {
+    "INVALID_ACT_TYPE": "El tipo de acta no es valido.",
     "MISSING_API_KEY": "Falta enviar el encabezado Authorization: Bearer TU_API_KEY.",
     "INVALID_API_KEY": "API key invalida.",
     "MISSING_TERM": "Falta enviar el dato a consultar.",
@@ -14132,6 +14167,14 @@ def api_v1_create_acta(
     ).strip().upper()
     external_id = (payload.get("external_id") or "").strip()
 
+    act_type = re.sub(r"\s+", " ", act_type).strip()
+
+    if act_type not in API_ALLOWED_ACT_TYPES:
+        return _api_error_response(
+            "INVALID_ACT_TYPE",
+            error_raw=f"INVALID_ACT_TYPE:{act_type}",
+        )
+
     if not term:
         return _api_error_response("MISSING_TERM")
 
@@ -14302,8 +14345,56 @@ def api_v1_create_acta(
             error_raw=f"CREATE_REQUEST_FAILED:{str(e)[:200]}",
         )
 
-    _enqueue_process_request(row, "api_v1_create_acta")
-
+    try:
+        _enqueue_process_request(row, "api_v1_create_acta")
+    
+    except Exception as enqueue_exc:
+        # La solicitud ya existe en PostgreSQL, pero no quedó en Redis/RQ.
+        # La marcamos ERROR para que NO reserve saldo eternamente.
+        db.rollback()
+    
+        try:
+            failed_row = (
+                db.query(RequestLog)
+                .filter(
+                    RequestLog.id == row.id,
+                    RequestLog.api_client_id == auth_client.id,
+                )
+                .with_for_update()
+                .first()
+            )
+    
+            if failed_row and (failed_row.status or "").upper() == "QUEUED":
+                failed_row.status = "ERROR"
+                failed_row.error_message = (
+                    f"QUEUE_ENQUEUE_FAILED:{str(enqueue_exc)[:300]}"
+                )
+                failed_row.updated_at = _utc_now_naive()
+                db.commit()
+    
+            else:
+                db.rollback()
+    
+        except Exception as mark_error_exc:
+            db.rollback()
+    
+            print("API_QUEUE_FAILURE_MARK_ERROR_FAILED =", {
+                "request_id": getattr(row, "id", None),
+                "enqueue_error": str(enqueue_exc),
+                "mark_error": str(mark_error_exc),
+            }, flush=True)
+    
+        print("API_QUEUE_ENQUEUE_FAILED =", {
+            "request_id": getattr(row, "id", None),
+            "api_client_id": getattr(auth_client, "id", None),
+            "error": str(enqueue_exc),
+        }, flush=True)
+    
+        return _api_error_response(
+            "CREATE_REQUEST_FAILED",
+            error_raw=f"QUEUE_ENQUEUE_FAILED:{str(enqueue_exc)[:200]}",
+        )
+    
     return {
         "ok": True,
         "request_id": row.id,
@@ -14443,6 +14534,7 @@ def api_v1_get_acta_pdf(
 
 @app.get("/api/v1/actas")
 def api_v1_list_actas(
+    request: Request,
     limit: int = 50,
     offset: int = 0,
     authorization: str | None = Header(default=None),
@@ -14464,7 +14556,7 @@ def api_v1_list_actas(
 
     items = []
 
-    base_url = "http://187.127.248.94:8000"
+    base_url = str(request.base_url).rstrip("/")
     
     for r in rows:
         item = {
@@ -14510,6 +14602,20 @@ def api_admin_create_client(
 
     if not name:
         return {"ok": False, "error": "MISSING_NAME"}
+
+    if credit < 0:
+        return {
+            "ok": False,
+            "error": "INVALID_CREDIT_BALANCE",
+            "message": "El saldo inicial no puede ser negativo.",
+        }
+    
+    if price <= 0:
+        return {
+            "ok": False,
+            "error": "INVALID_PRICE_PER_DONE",
+            "message": "El precio por acta debe ser mayor a cero.",
+        }
 
     api_key = "sk_" + secrets.token_urlsafe(32)
 
@@ -14626,6 +14732,16 @@ def is_authorized_group(db: Session, group_jid: str) -> bool:
 
 
 def _deliver_text_result(req: RequestLog, text: str, instance_name: str = None):
+    # Las solicitudes API se consultan por endpoint.
+    # Nunca intentar mandarlas a api:X ni api_cliente_X.
+    if getattr(req, "api_client_id", None):
+        print("API_SKIP_WHATSAPP_TEXT_DELIVERY =", {
+            "request_id": getattr(req, "id", None),
+            "api_client_id": getattr(req, "api_client_id", None),
+            "text_preview": (text or "")[:160],
+        }, flush=True)
+        return False
+
     instance = req.instance_name or instance_name or "docifybot8"
 
     text_up = (text or "").upper()
