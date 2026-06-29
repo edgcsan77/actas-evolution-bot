@@ -9707,7 +9707,7 @@ def panel_actas(
                 type="number"
                 min="0"
                 step="0.01"
-                value="0"
+                value=""
                 placeholder="Saldo inicial"
               >
         
@@ -9717,7 +9717,7 @@ def panel_actas(
                 type="number"
                 min="0.01"
                 step="0.01"
-                value="5"
+                value=""
                 placeholder="Precio por acta"
               >
         
