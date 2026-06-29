@@ -9667,6 +9667,468 @@ def panel_actas(
           <div id="botQrBox" style="margin-top:14px;"></div>
         </div>
         """
+
+        api_clients_panel_html = """
+        <div class="box" id="apiClientsSection">
+          <div class="head">
+            <div>
+              <strong>🔑 API externa · clientes y saldos</strong>
+              <div class="small">
+                Cada cliente API se asigna automáticamente a DOCIFYBOT8
+                como grupo virtual: API - Nombre del cliente.
+              </div>
+            </div>
+        
+            <button type="button" class="btn btn-primary" onclick="loadApiClients()">
+              Actualizar API
+            </button>
+          </div>
+        
+          <div style="padding:16px;border-bottom:1px solid #e5e7eb;">
+            <strong>Crear cliente API</strong>
+        
+            <div
+              style="
+                display:grid;
+                grid-template-columns:2fr 1fr 1fr auto;
+                gap:10px;
+                margin-top:12px;
+              "
+            >
+              <input
+                id="apiNewName"
+                class="input"
+                placeholder="Nombre del cliente / programador"
+              >
+        
+              <input
+                id="apiNewCredit"
+                class="input"
+                type="number"
+                min="0"
+                step="0.01"
+                value="0"
+                placeholder="Saldo inicial"
+              >
+        
+              <input
+                id="apiNewPrice"
+                class="input"
+                type="number"
+                min="0.01"
+                step="0.01"
+                value="5"
+                placeholder="Precio por acta"
+              >
+        
+              <button
+                type="button"
+                class="btn btn-success"
+                onclick="createApiClient()"
+              >
+                Crear API key
+              </button>
+            </div>
+        
+            <div
+              id="apiKeyCreatedBox"
+              style="
+                display:none;
+                margin-top:14px;
+                padding:12px;
+                border-radius:12px;
+                background:#ecfdf5;
+                border:1px solid #86efac;
+              "
+            ></div>
+          </div>
+        
+          <div id="apiClientsWrap" style="padding:16px;">
+            <div class="small">Cargando clientes API...</div>
+          </div>
+        </div>
+        """
+
+        api_clients_panel_js = r"""
+        const apiPanelToken = new URLSearchParams(window.location.search).get("token") || "";
+        
+        function apiMoney(value) {
+          const n = Number(value || 0);
+        
+          return n.toLocaleString("es-MX", {
+            style: "currency",
+            currency: "MXN"
+          });
+        }
+        
+        function escapeApiHtml(value) {
+          return String(value ?? "")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
+        }
+        
+        function escapeApiJs(value) {
+          return String(value ?? "")
+            .replaceAll("\\", "\\\\")
+            .replaceAll("'", "\\'")
+            .replaceAll("\n", "\\n")
+            .replaceAll("\r", "");
+        }
+        
+        async function apiPanelFetch(path, options = {}) {
+          const joiner = path.includes("?") ? "&" : "?";
+          const url = `${path}${joiner}token=${encodeURIComponent(apiPanelToken)}`;
+        
+          const response = await fetch(url, options);
+        
+          let data = {};
+        
+          try {
+            data = await response.json();
+          } catch (_) {}
+        
+          if (!response.ok || !data.ok) {
+            throw new Error(
+              data.error ||
+              data.message ||
+              "No se pudo completar la acción."
+            );
+          }
+        
+          return data;
+        }
+        
+        async function loadApiClients() {
+          const wrap = document.getElementById("apiClientsWrap");
+        
+          if (!wrap) return;
+        
+          wrap.innerHTML = '<div class="small">Actualizando clientes API...</div>';
+        
+          try {
+            const data = await apiPanelFetch("/panel/api/clients");
+            const rows = data.items || [];
+        
+            if (!rows.length) {
+              wrap.innerHTML = `
+                <div class="small">
+                  Aún no hay clientes API registrados.
+                </div>
+              `;
+              return;
+            }
+        
+            let output = `
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Cliente</th>
+                      <th>Estado</th>
+                      <th>Grupo DOCIFYBOT8</th>
+                      <th>Saldo</th>
+                      <th>Reservado</th>
+                      <th>Disponible</th>
+                      <th>Precio</th>
+                      <th>DONE</th>
+                      <th>Pendientes</th>
+                      <th>Errores</th>
+                      <th>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+            `;
+        
+            for (const item of rows) {
+              const clientId = Number(item.id);
+        
+              const status = item.is_active
+                ? '<span class="badge badge-success">ACTIVO</span>'
+                : '<span class="badge badge-danger">INACTIVO</span>';
+        
+              output += `
+                <tr>
+                  <td>
+                    <strong>${escapeApiHtml(item.name)}</strong><br>
+                    <span class="small">ID ${clientId}</span>
+                  </td>
+        
+                  <td>${status}</td>
+        
+                  <td>
+                    <strong>${escapeApiHtml(item.panel_instance_name || "docifybot8")}</strong><br>
+                    <span class="small">${escapeApiHtml(item.panel_group_jid || "")}</span>
+                  </td>
+        
+                  <td>${apiMoney(item.balance)}</td>
+                  <td>${apiMoney(item.reserved)}</td>
+                  <td><strong>${apiMoney(item.available)}</strong></td>
+                  <td>${apiMoney(item.price_per_done)}</td>
+                  <td>${Number(item.done_count || 0)}</td>
+                  <td>${Number(item.pending_count || 0)}</td>
+                  <td>${Number(item.error_count || 0)}</td>
+        
+                  <td>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;min-width:250px;">
+                      <button
+                        type="button"
+                        class="btn btn-success"
+                        style="padding:7px 9px;font-size:12px;"
+                        onclick="rechargeApiClient(${clientId})"
+                      >
+                        Recargar
+                      </button>
+        
+                      <button
+                        type="button"
+                        class="btn btn-primary"
+                        style="padding:7px 9px;font-size:12px;"
+                        onclick="editApiClient(
+                          ${clientId},
+                          '${escapeApiJs(item.name)}',
+                          '${item.price_per_done}',
+                          ${item.is_active ? "true" : "false"}
+                        )"
+                      >
+                        Configurar
+                      </button>
+        
+                      <button
+                        type="button"
+                        class="btn btn-warning"
+                        style="padding:7px 9px;font-size:12px;"
+                        onclick="rotateApiKey(
+                          ${clientId},
+                          '${escapeApiJs(item.name)}'
+                        )"
+                      >
+                        Regenerar key
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }
+        
+            output += `
+                  </tbody>
+                </table>
+              </div>
+            `;
+        
+            wrap.innerHTML = output;
+        
+          } catch (error) {
+            wrap.innerHTML = `
+              <div style="color:#b91c1c;font-weight:700;">
+                Error API: ${escapeApiHtml(error.message || String(error))}
+              </div>
+            `;
+          }
+        }
+        
+        async function createApiClient() {
+          const name = document.getElementById("apiNewName")?.value.trim() || "";
+          const creditBalance = document.getElementById("apiNewCredit")?.value.trim() || "0";
+          const pricePerDone = document.getElementById("apiNewPrice")?.value.trim() || "5";
+          const keyBox = document.getElementById("apiKeyCreatedBox");
+        
+          if (!name) {
+            alert("Escribe el nombre del cliente API.");
+            return;
+          }
+        
+          if (!confirm(`¿Crear API key para ${name}? Quedará asociado a DOCIFYBOT8.`)) {
+            return;
+          }
+        
+          try {
+            const data = await apiPanelFetch("/panel/api/clients", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                name,
+                credit_balance: creditBalance,
+                price_per_done: pricePerDone
+              })
+            });
+        
+            if (keyBox) {
+              keyBox.style.display = "block";
+              keyBox.innerHTML = `
+                <strong>✅ Cliente creado: ${escapeApiHtml(data.name)}</strong><br>
+                <span>Grupo virtual: <code>${escapeApiHtml(data.panel_group_jid)}</code></span><br>
+                <span>Precio: ${apiMoney(data.price_per_done)} por acta DONE</span><br><br>
+                <strong>API key — cópiala ahora:</strong><br>
+                <code
+                  style="
+                    display:block;
+                    overflow-wrap:anywhere;
+                    margin-top:8px;
+                    padding:9px;
+                    background:#fff;
+                    border:1px solid #bbf7d0;
+                    border-radius:8px;
+                  "
+                >${escapeApiHtml(data.api_key)}</code>
+              `;
+            }
+        
+            document.getElementById("apiNewName").value = "";
+            document.getElementById("apiNewCredit").value = "0";
+            document.getElementById("apiNewPrice").value = "5";
+        
+            await loadApiClients();
+        
+          } catch (error) {
+            alert(error.message || String(error));
+          }
+        }
+        
+        async function rechargeApiClient(clientId) {
+          const amount = prompt("Monto de recarga en MXN:");
+        
+          if (amount === null) return;
+        
+          const note = prompt(
+            "Nota de la recarga:",
+            "Recarga desde panel principal"
+          );
+        
+          if (note === null) return;
+        
+          try {
+            const data = await apiPanelFetch(
+              `/panel/api/clients/${clientId}/recharge`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  amount,
+                  note
+                })
+              }
+            );
+        
+            alert(`Recarga aplicada. Saldo actual: ${apiMoney(data.balance)}`);
+            await loadApiClients();
+        
+          } catch (error) {
+            alert(error.message || String(error));
+          }
+        }
+        
+        async function editApiClient(
+          clientId,
+          currentName,
+          currentPrice,
+          currentActive
+        ) {
+          const name = prompt("Nombre del cliente:", currentName);
+        
+          if (name === null) return;
+        
+          const price = prompt("Precio por acta DONE:", currentPrice);
+        
+          if (price === null) return;
+        
+          const activeText = prompt(
+            "¿Cliente activo? Escribe SI o NO:",
+            currentActive ? "SI" : "NO"
+          );
+        
+          if (activeText === null) return;
+        
+          const isActive = [
+            "SI",
+            "S",
+            "YES",
+            "Y",
+            "1",
+            "TRUE"
+          ].includes(activeText.trim().toUpperCase());
+        
+          try {
+            const data = await apiPanelFetch(
+              `/panel/api/clients/${clientId}/settings`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  name,
+                  price_per_done: price,
+                  is_active: isActive
+                })
+              }
+            );
+        
+            alert(
+              `Cliente actualizado.\n` +
+              `Bot: ${data.panel_instance_name}\n` +
+              `Grupo: ${data.panel_group_jid}`
+            );
+        
+            await loadApiClients();
+        
+          } catch (error) {
+            alert(error.message || String(error));
+          }
+        }
+        
+        async function rotateApiKey(clientId, clientName) {
+          if (!confirm(
+            `¿Regenerar API key de ${clientName}?\n\n` +
+            "La key anterior dejará de funcionar inmediatamente."
+          )) {
+            return;
+          }
+        
+          try {
+            const data = await apiPanelFetch(
+              `/panel/api/clients/${clientId}/rotate-key`,
+              {
+                method: "POST"
+              }
+            );
+        
+            const box = document.getElementById("apiKeyCreatedBox");
+        
+            if (box) {
+              box.style.display = "block";
+              box.innerHTML = `
+                <strong>🔐 Nueva API key para ${escapeApiHtml(clientName)}</strong><br>
+                <span>La API key anterior ya quedó invalidada.</span><br><br>
+                <code
+                  style="
+                    display:block;
+                    overflow-wrap:anywhere;
+                    padding:9px;
+                    background:#fff;
+                    border:1px solid #fde68a;
+                    border-radius:8px;
+                  "
+                >${escapeApiHtml(data.api_key)}</code>
+              `;
+            }
+        
+          } catch (error) {
+            alert(error.message || String(error));
+          }
+        }
+        
+        document.addEventListener("DOMContentLoaded", () => {
+          loadApiClients();
+        });
+        """
     
         html = f"""
         <!doctype html>
@@ -11033,6 +11495,8 @@ def panel_actas(
 
         html += bot_status_html
 
+        html += api_clients_panel_html
+
         html += """
         <div class="box">
           <div class="head">
@@ -11522,6 +11986,8 @@ def panel_actas(
           </div>
         </div>
         """
+
+        
     
         html += """
         <div class="box">
@@ -12908,6 +13374,8 @@ def panel_actas(
           }});
         }}
 
+        {api_clients_panel_js}
+
       </script>
     </body>
     </html>
@@ -13861,6 +14329,122 @@ def _ensure_api_panel_group(db: Session, client: ApiClient):
     db.commit()
 
 
+def _api_client_panel_rows(db: Session) -> list[dict]:
+    """
+    Información para panel principal.
+    Cada cliente API ya está ligado a docifybot8 mediante panel_group_jid.
+    """
+    clients = (
+        db.query(ApiClient)
+        .order_by(ApiClient.created_at.desc(), ApiClient.id.desc())
+        .all()
+    )
+
+    rows = []
+
+    for client in clients:
+        client_id = client.id
+
+        done_count = (
+            db.query(func.count(RequestLog.id))
+            .filter(
+                RequestLog.api_client_id == client_id,
+                RequestLog.status == "DONE",
+            )
+            .scalar()
+            or 0
+        )
+
+        pending_count = (
+            db.query(func.count(RequestLog.id))
+            .filter(
+                RequestLog.api_client_id == client_id,
+                RequestLog.status.in_(["QUEUED", "PROCESSING"]),
+            )
+            .scalar()
+            or 0
+        )
+
+        error_count = (
+            db.query(func.count(RequestLog.id))
+            .filter(
+                RequestLog.api_client_id == client_id,
+                RequestLog.status == "ERROR",
+            )
+            .scalar()
+            or 0
+        )
+
+        total_count = (
+            db.query(func.count(RequestLog.id))
+            .filter(RequestLog.api_client_id == client_id)
+            .scalar()
+            or 0
+        )
+
+        reserved = _api_pending_reserved_amount(db, client)
+        balance = Decimal(str(client.credit_balance or 0))
+        available = balance - reserved
+
+        last_request = (
+            db.query(RequestLog)
+            .filter(RequestLog.api_client_id == client_id)
+            .order_by(RequestLog.created_at.desc(), RequestLog.id.desc())
+            .first()
+        )
+
+        last_recharge = (
+            db.query(ApiCreditLog)
+            .filter(
+                ApiCreditLog.api_client_id == client_id,
+                ApiCreditLog.type == "RECHARGE",
+            )
+            .order_by(ApiCreditLog.created_at.desc(), ApiCreditLog.id.desc())
+            .first()
+        )
+
+        rows.append({
+            "id": client.id,
+            "name": client.name or f"API #{client.id}",
+            "is_active": bool(client.is_active),
+            "count_in_panel": bool(client.count_in_panel),
+            "panel_instance_name": (
+                client.panel_instance_name or "docifybot8"
+            ),
+            "panel_group_jid": client.panel_group_jid or "",
+            "balance": _money(balance),
+            "reserved": _money(reserved),
+            "available": _money(available),
+            "price_per_done": _money(client.price_per_done),
+            "done_count": int(done_count),
+            "pending_count": int(pending_count),
+            "error_count": int(error_count),
+            "total_count": int(total_count),
+            "created_at": (
+                client.created_at.isoformat()
+                if getattr(client, "created_at", None)
+                else ""
+            ),
+            "last_request_at": (
+                last_request.created_at.isoformat()
+                if last_request and last_request.created_at
+                else ""
+            ),
+            "last_request_status": (
+                last_request.status
+                if last_request
+                else ""
+            ),
+            "last_recharge_at": (
+                last_recharge.created_at.isoformat()
+                if last_recharge and last_recharge.created_at
+                else ""
+            ),
+        })
+
+    return rows
+
+
 # ============================================================
 # API V1 - CODIGOS PUBLICOS DE ERROR
 # ============================================================
@@ -14699,6 +15283,261 @@ def api_admin_recharge_client(
         "balance": _money(client.credit_balance),
     }
 
+
+@app.get("/panel/api/clients")
+def panel_api_clients(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not _is_valid_admin_panel_token(request):
+        return {"ok": False, "error": "UNAUTHORIZED"}
+
+    return {
+        "ok": True,
+        "items": _api_client_panel_rows(db),
+    }
+
+
+@app.post("/panel/api/clients")
+def panel_api_create_client(
+    request: Request,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    if not _is_valid_admin_panel_token(request):
+        return {"ok": False, "error": "UNAUTHORIZED"}
+
+    name = (payload.get("name") or "").strip()
+    credit_raw = str(payload.get("credit_balance") or "0").strip()
+    price_raw = str(payload.get("price_per_done") or "5").strip()
+
+    if not name:
+        return {
+            "ok": False,
+            "error": "MISSING_NAME",
+            "message": "Escribe el nombre del cliente API.",
+        }
+
+    try:
+        credit = Decimal(credit_raw)
+        price = Decimal(price_raw)
+    except Exception:
+        return {
+            "ok": False,
+            "error": "INVALID_NUMERIC_VALUES",
+            "message": "Saldo y precio deben ser números válidos.",
+        }
+
+    if credit < 0:
+        return {
+            "ok": False,
+            "error": "INVALID_CREDIT_BALANCE",
+            "message": "El saldo inicial no puede ser negativo.",
+        }
+
+    if price <= 0:
+        return {
+            "ok": False,
+            "error": "INVALID_PRICE_PER_DONE",
+            "message": "El precio por acta debe ser mayor a cero.",
+        }
+
+    api_key = "sk_" + secrets.token_urlsafe(32)
+
+    client = ApiClient(
+        name=name,
+        api_key=api_key,
+        credit_balance=credit,
+        price_per_done=price,
+        panel_instance_name="docifybot8",
+        panel_group_jid=None,
+        count_in_panel=True,
+        is_active=True,
+    )
+
+    db.add(client)
+    db.commit()
+    db.refresh(client)
+
+    client.panel_group_jid = f"api_cliente_{client.id}"
+    db.commit()
+    db.refresh(client)
+
+    _ensure_api_panel_group(db, client)
+    _clear_panel_cache()
+    _clear_group_name_cache()
+
+    return {
+        "ok": True,
+        "message": "Cliente API creado y vinculado a DOCIFYBOT8.",
+        "client_id": client.id,
+        "name": client.name,
+        "api_key": api_key,
+        "credit_balance": _money(client.credit_balance),
+        "price_per_done": _money(client.price_per_done),
+        "panel_instance_name": client.panel_instance_name,
+        "panel_group_jid": client.panel_group_jid,
+    }
+
+
+@app.post("/panel/api/clients/{client_id}/recharge")
+def panel_api_recharge_client(
+    client_id: int,
+    request: Request,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    if not _is_valid_admin_panel_token(request):
+        return {"ok": False, "error": "UNAUTHORIZED"}
+
+    try:
+        amount = Decimal(str(payload.get("amount") or "0"))
+    except Exception:
+        return {"ok": False, "error": "INVALID_AMOUNT"}
+
+    note = (payload.get("note") or "").strip()
+
+    if amount <= 0:
+        return {
+            "ok": False,
+            "error": "INVALID_AMOUNT",
+            "message": "La recarga debe ser mayor a cero.",
+        }
+
+    client = (
+        db.query(ApiClient)
+        .filter(ApiClient.id == client_id)
+        .with_for_update()
+        .first()
+    )
+
+    if not client:
+        return {"ok": False, "error": "CLIENT_NOT_FOUND"}
+
+    client.credit_balance = Decimal(str(client.credit_balance or 0)) + amount
+    client.updated_at = _utc_now_naive()
+
+    db.add(ApiCreditLog(
+        api_client_id=client.id,
+        request_log_id=None,
+        amount=amount,
+        type="RECHARGE",
+        note=note or "Recarga desde panel principal",
+        created_at=_utc_now_naive(),
+    ))
+
+    db.commit()
+    _clear_panel_cache()
+
+    return {
+        "ok": True,
+        "client_id": client.id,
+        "balance": _money(client.credit_balance),
+    }
+
+
+@app.post("/panel/api/clients/{client_id}/settings")
+def panel_api_update_client(
+    client_id: int,
+    request: Request,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    if not _is_valid_admin_panel_token(request):
+        return {"ok": False, "error": "UNAUTHORIZED"}
+
+    client = (
+        db.query(ApiClient)
+        .filter(ApiClient.id == client_id)
+        .with_for_update()
+        .first()
+    )
+
+    if not client:
+        return {"ok": False, "error": "CLIENT_NOT_FOUND"}
+
+    new_name = (payload.get("name") or client.name or "").strip()
+    price_raw = payload.get("price_per_done", client.price_per_done)
+    is_active = bool(payload.get("is_active", client.is_active))
+
+    if not new_name:
+        return {
+            "ok": False,
+            "error": "MISSING_NAME",
+            "message": "El cliente debe conservar un nombre.",
+        }
+
+    try:
+        new_price = Decimal(str(price_raw))
+    except Exception:
+        return {"ok": False, "error": "INVALID_PRICE_PER_DONE"}
+
+    if new_price <= 0:
+        return {
+            "ok": False,
+            "error": "INVALID_PRICE_PER_DONE",
+            "message": "El precio debe ser mayor a cero.",
+        }
+
+    client.name = new_name
+    client.price_per_done = new_price
+    client.is_active = is_active
+
+    # Siempre vinculado al bot principal.
+    client.panel_instance_name = "docifybot8"
+    client.count_in_panel = True
+    client.updated_at = _utc_now_naive()
+
+    db.commit()
+    db.refresh(client)
+
+    _ensure_api_panel_group(db, client)
+    _clear_panel_cache()
+    _clear_group_name_cache()
+
+    return {
+        "ok": True,
+        "client_id": client.id,
+        "name": client.name,
+        "price_per_done": _money(client.price_per_done),
+        "is_active": bool(client.is_active),
+        "panel_instance_name": client.panel_instance_name,
+        "panel_group_jid": client.panel_group_jid,
+    }
+
+
+@app.post("/panel/api/clients/{client_id}/rotate-key")
+def panel_api_rotate_key(
+    client_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not _is_valid_admin_panel_token(request):
+        return {"ok": False, "error": "UNAUTHORIZED"}
+
+    client = (
+        db.query(ApiClient)
+        .filter(ApiClient.id == client_id)
+        .with_for_update()
+        .first()
+    )
+
+    if not client:
+        return {"ok": False, "error": "CLIENT_NOT_FOUND"}
+
+    new_key = "sk_" + secrets.token_urlsafe(32)
+
+    client.api_key = new_key
+    client.updated_at = _utc_now_naive()
+
+    db.commit()
+
+    return {
+        "ok": True,
+        "client_id": client.id,
+        "api_key": new_key,
+        "message": "Nueva API key creada. La anterior dejó de funcionar.",
+    }
 
 
 @app.get("/health")
