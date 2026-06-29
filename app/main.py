@@ -14120,33 +14120,30 @@ def api_v1_create_acta(
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ):
-    client = _get_api_client_or_401(db, authorization)
+    # 1) Autentica la API key.
+    # Aquí solo obtenemos el id; después bloqueamos la fila real del cliente.
+    auth_client = _get_api_client_or_401(db, authorization)
 
     term = (payload.get("term") or payload.get("curp") or "").strip().upper()
-    act_type = (payload.get("act_type") or payload.get("tipo") or "NACIMIENTO").strip().upper()
+    act_type = (
+        payload.get("act_type")
+        or payload.get("tipo")
+        or "NACIMIENTO"
+    ).strip().upper()
     external_id = (payload.get("external_id") or "").strip()
 
     if not term:
         return _api_error_response("MISSING_TERM")
 
-    price = Decimal(str(client.price_per_done or 5))
-    reserved = _api_pending_reserved_amount(db, client)
-    available = Decimal(str(client.credit_balance or 0)) - reserved
-
-    if available < price:
-        return _api_error_response(
-            "INSUFFICIENT_BALANCE",
-            balance=_money(client.credit_balance),
-            reserved=_money(reserved),
-            available=_money(available),
-            price_per_done=_money(price),
-        )
-
+    # IMPORTANTE:
+    # Primero revisamos duplicado antes de validar saldo.
+    # Así un retry legítimo del programador devuelve su solicitud anterior,
+    # aunque ya no tenga saldo disponible.
     if external_id:
         existing = (
             db.query(RequestLog)
             .filter(
-                RequestLog.api_client_id == client.id,
+                RequestLog.api_client_id == auth_client.id,
                 RequestLog.api_external_id == external_id,
             )
             .order_by(RequestLog.created_at.desc())
@@ -14163,58 +14160,143 @@ def api_v1_create_acta(
                 "status": existing.status,
                 "duplicated": True,
                 "charged": bool(existing.api_charged),
-                "charged_amount": _money(existing.api_price) if existing.api_charged else 0.0,
+                "charged_amount": (
+                    _money(existing.api_price)
+                    if existing.api_charged
+                    else 0.0
+                ),
             }
-        
+
             if existing.status == "DONE":
                 resp["pdf_url"] = f"/api/v1/actas/{existing.id}/pdf"
-        
+
             if existing.status == "ERROR":
                 resp.update(_api_request_error_fields(existing))
-        
+
             return resp
 
-    _ensure_api_panel_group(db, client)
-
-    source_group_id = client.panel_group_jid if client.count_in_panel else None
-    source_chat_id = source_group_id or f"api_cliente_{client.id}"
-
-    request_key = (
-        f"api:{client.id}:{external_id}"
-        if external_id
-        else f"api:{client.id}:{uuid.uuid4().hex}"
-    )
-
-    now = _utc_now_naive()
-
-    row = RequestLog(
-        request_key=request_key,
-        curp=term,
-        act_type=act_type,
-        requester_wa_id=f"api:{client.id}",
-        requester_name=client.name,
-        source_chat_id=source_chat_id,
-        source_group_id=source_group_id,
-        instance_name=client.panel_instance_name or "docifybot8",
-        evolution_message_id=None,
-        status="QUEUED",
-        created_at=now,
-        updated_at=now,
-        expires_at=now + timedelta(days=settings.HISTORY_DAYS),
-        api_client_id=client.id,
-        api_external_id=external_id or None,
-        api_charged=False,
-        api_price=price,
-        api_count_in_panel=bool(client.count_in_panel),
-    )
-
-    db.add(row)
+    # Esto puede hacer commit porque crea/asegura el grupo virtual del panel.
+    # Por eso se hace ANTES de adquirir el bloqueo FOR UPDATE del cliente.
+    _ensure_api_panel_group(db, auth_client)
 
     try:
+        # ============================================================
+        # BLOQUEO PRINCIPAL DE SALDO
+        # ============================================================
+        # Solo una creación API por cliente puede pasar por aquí a la vez.
+        # Mientras una request calcula reserved/available y crea el RequestLog,
+        # cualquier otra request del mismo cliente espera.
+        client = (
+            db.query(ApiClient)
+            .populate_existing()
+            .filter(
+                ApiClient.id == auth_client.id,
+                ApiClient.is_active == True,
+            )
+            .with_for_update()
+            .first()
+        )
+
+        if not client:
+            return _api_error_response("INVALID_API_KEY")
+
+        # Segunda comprobación de external_id DESPUÉS del lock.
+        # Protege contra dos POST idénticos que llegaron casi simultáneamente.
+        if external_id:
+            existing = (
+                db.query(RequestLog)
+                .filter(
+                    RequestLog.api_client_id == client.id,
+                    RequestLog.api_external_id == external_id,
+                )
+                .order_by(RequestLog.created_at.desc())
+                .first()
+            )
+
+            if existing:
+                resp = {
+                    "ok": True,
+                    "request_id": existing.id,
+                    "external_id": existing.api_external_id,
+                    "term": existing.curp,
+                    "act_type": existing.act_type,
+                    "status": existing.status,
+                    "duplicated": True,
+                    "charged": bool(existing.api_charged),
+                    "charged_amount": (
+                        _money(existing.api_price)
+                        if existing.api_charged
+                        else 0.0
+                    ),
+                }
+
+                if existing.status == "DONE":
+                    resp["pdf_url"] = f"/api/v1/actas/{existing.id}/pdf"
+
+                if existing.status == "ERROR":
+                    resp.update(_api_request_error_fields(existing))
+
+                return resp
+
+        # Ahora sí: saldo actualizado y protegido por el lock del cliente.
+        price = Decimal(str(client.price_per_done or 5))
+        reserved = _api_pending_reserved_amount(db, client)
+        available = Decimal(str(client.credit_balance or 0)) - reserved
+
+        if available < price:
+            return _api_error_response(
+                "INSUFFICIENT_BALANCE",
+                balance=_money(client.credit_balance),
+                reserved=_money(reserved),
+                available=_money(available),
+                price_per_done=_money(price),
+            )
+
+        source_group_id = client.panel_group_jid if client.count_in_panel else None
+        source_chat_id = source_group_id or f"api_cliente_{client.id}"
+
+        request_key = (
+            f"api:{client.id}:{external_id}"
+            if external_id
+            else f"api:{client.id}:{uuid.uuid4().hex}"
+        )
+
+        now = _utc_now_naive()
+
+        row = RequestLog(
+            request_key=request_key,
+            curp=term,
+            act_type=act_type,
+            requester_wa_id=f"api:{client.id}",
+            requester_name=client.name,
+            source_chat_id=source_chat_id,
+            source_group_id=source_group_id,
+            instance_name=client.panel_instance_name or "docifybot8",
+            evolution_message_id=None,
+            status="QUEUED",
+            created_at=now,
+            updated_at=now,
+            expires_at=now + timedelta(days=settings.HISTORY_DAYS),
+            api_client_id=client.id,
+            api_external_id=external_id or None,
+            api_charged=False,
+            api_price=price,
+            api_count_in_panel=bool(client.count_in_panel),
+        )
+
+        db.add(row)
         db.commit()
         db.refresh(row)
+
     except Exception as e:
         db.rollback()
+
+        print("API_CREATE_REQUEST_ERROR =", {
+            "api_client_id": getattr(auth_client, "id", None),
+            "external_id": external_id,
+            "error": str(e),
+        }, flush=True)
+
         return _api_error_response(
             "CREATE_REQUEST_FAILED",
             error_raw=f"CREATE_REQUEST_FAILED:{str(e)[:200]}",
