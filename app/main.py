@@ -118,7 +118,9 @@ PANEL_HTML_TTL = 180
 PANEL_RECENT_TTL = 60
 PANEL_GROUP_DETAIL_TTL = 180
 GROUP_NAME_CACHE_TTL = 300
-EVOLUTION_STATE_CACHE_TTL = 60  # consultar estado WhatsApp máximo cada 60s por instancia
+EVOLUTION_STATE_CACHE_TTL = 60
+PANEL_HTML_CACHE_VERSION = "2026-07-01-qr-token-v1"
+
 PANEL_STREAM_SLEEP = 5
 PANEL_STREAM_ENABLED = False
 
@@ -3200,11 +3202,20 @@ def bot_is_open():
 
 def _clear_panel_cache():
     try:
-        keys = redis_conn.keys("panel:*")
-        if keys:
-            redis_conn.delete(*keys)
-    except Exception:
-        pass
+        batch = []
+
+        for key in redis_conn.scan_iter(match="panel:*", count=200):
+            batch.append(key)
+
+            if len(batch) >= 500:
+                redis_conn.delete(*batch)
+                batch.clear()
+
+        if batch:
+            redis_conn.delete(*batch)
+
+    except Exception as e:
+        print("CLEAR_PANEL_CACHE_ERROR =", repr(e), flush=True)
 
 
 def _clear_group_name_cache():
@@ -7598,7 +7609,7 @@ def _panel_cache_key(
     date_from: str = "",
     date_to: str = "",
 ) -> str:
-    return "panel:html:" + "|".join([
+    return f"panel:html:{PANEL_HTML_CACHE_VERSION}:" + "|".join([
         (view or "").strip(),
         (date_from or "").strip(),
         (date_to or "").strip(),
@@ -9205,7 +9216,14 @@ def panel_actas(
         if cached_panel:
             if isinstance(cached_panel, bytes):
                 cached_panel = cached_panel.decode("utf-8", errors="ignore")
-            return HTMLResponse(content=cached_panel)
+            return HTMLResponse(
+                content=cached_panel,
+                headers={
+                    "Cache-Control": "no-store, max-age=0, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                },
+            )
 
         time_min, time_max, view = _panel_period_bounds(view, date_from, date_to)
 
@@ -12416,7 +12434,12 @@ def panel_actas(
           box.innerHTML = "<strong>Generando QR...</strong>";
         
           try {{
-            const res = await fetch(`/panel/instance/${{encodeURIComponent(instanceName)}}/qr`);
+            const panelToken = new URLSearchParams(window.location.search).get("token") || "";
+
+            const res = await fetch(
+              `/panel/instance/${{encodeURIComponent(instanceName)}}/qr?token=${{encodeURIComponent(panelToken)}}`
+            );
+            
             const data = await res.json();
         
             if (!data.ok) {{
@@ -13385,7 +13408,14 @@ def panel_actas(
         except Exception:
             pass
             
-        return HTMLResponse(content=html)
+        return HTMLResponse(
+            content=html,
+            headers={
+                "Cache-Control": "no-store, max-age=0, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
         
     except Exception as e:
         print("panel_actas error:", repr(e), flush=True)
