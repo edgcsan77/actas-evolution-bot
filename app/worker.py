@@ -2763,11 +2763,31 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
         # verificarpdf.php puede devolver PDF prematuro/sin marco.
         # Lo pasamos por el reparador de Provider4 antes de entregarlo.
         try:
-            if chain_mode:
+            source = (check_result.get("source") or "").strip().lower()
+        
+            if chain_mode and source == "history":
+                # verificar_cadena_por_historial_new_api() ya descarga,
+                # valida y repara la cadena mediante
+                # _download_and_validate_with_retries(... is_chain=True).
+                # No volver a enmarcar ni reconstruir el reverso.
+                print(
+                    f"{provider_name}_CHAIN_HISTORY_PDF_ALREADY_REPAIRED_SKIP =",
+                    {
+                        "request_id": req.id,
+                        "term": term,
+                        "source": source,
+                    },
+                    flush=True,
+                )
+        
+            elif chain_mode:
+                # Ruta de seguridad por si en el futuro existe otra fuente
+                # de PDF para cadenas que entregue el archivo crudo.
                 pdf_bytes = client._repair_chain_pdf_if_needed(
                     pdf_bytes,
                     term,
                 )
+        
             else:
                 pdf_bytes = client._repair_pdf_if_needed(
                     pdf_bytes,
@@ -2781,7 +2801,11 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
                 "term": term,
                 "error": str(repair_exc),
             }, flush=True)
-            raise RuntimeError(f"{provider_name}_NEW_VERIFICAR_PDF_INCOMPLETE_OR_FRAMELESS:{term}:{str(repair_exc)[:250]}")
+        
+            raise RuntimeError(
+                f"{provider_name}_NEW_VERIFICAR_PDF_INCOMPLETE_OR_FRAMELESS:"
+                f"{term}:{str(repair_exc)[:250]}"
+            )
         
         if not client._pdf_has_two_pages(pdf_bytes):
             raise RuntimeError(f"{provider_name}_NEW_VERIFICAR_REPAIRED_STILL_INCOMPLETE:{term}")
