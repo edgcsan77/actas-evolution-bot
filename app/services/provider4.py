@@ -2052,7 +2052,7 @@ class Provider4Client:
         history_html: str,
         term: str,
         tipoa: str | None = None,
-    ) -> str | None:
+   ) -> str | None:
         """
         Extrae solamente un d.php identificado como foliado.
     
