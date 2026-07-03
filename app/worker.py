@@ -10,6 +10,7 @@ from decimal import Decimal
 
 from app.db import SessionLocal
 from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_
 
 from app.models import RequestLog, ProviderSetting, AppSetting, GroupPromotion, ApiClient, ApiCreditLog
 from app.services.evolution import send_group_text, send_text, send_document_base64, send_group_document_base64
@@ -39,6 +40,7 @@ PROVIDER4_NEW_FLOW_TTL_SEC = 60 * 20
 PROVIDER4_NEW_CHECK_DELAY_SEC = 30
 PROVIDER4_NEW_MAX_CHECK_ATTEMPTS = 90
 
+API_STALE_TIMEOUT_MINUTES = 45
 
 def _current_queue_name() -> str:
     try:
@@ -1504,16 +1506,39 @@ def retry_pdf_delivery(request_id: int, attempt: int = 1):
 
 
 def sweep_stuck_requests(max_age_minutes: int = 20, limit: int = 80):
+    """
+    Limpieza automática de solicitudes estancadas.
+
+    - WhatsApp normal:
+      conserva el comportamiento existente:
+      QUEUED se reencola y PROCESSING viejo se cierra.
+
+    - API externa:
+      nunca se reencola automáticamente después del timeout.
+      Se marca ERROR y libera la reserva de saldo.
+    """
     db = SessionLocal()
 
     try:
-        cutoff = _utc_now_naive() - timedelta(minutes=max_age_minutes)
+        now = _utc_now_naive()
+
+        normal_cutoff = now - timedelta(minutes=max_age_minutes)
+        api_cutoff = now - timedelta(minutes=API_STALE_TIMEOUT_MINUTES)
 
         rows = (
             db.query(RequestLog)
             .filter(
                 RequestLog.status.in_(["QUEUED", "PROCESSING"]),
-                RequestLog.updated_at < cutoff,
+                or_(
+                    and_(
+                        RequestLog.api_client_id.is_(None),
+                        RequestLog.updated_at < normal_cutoff,
+                    ),
+                    and_(
+                        RequestLog.api_client_id.isnot(None),
+                        RequestLog.updated_at < api_cutoff,
+                    ),
+                ),
             )
             .order_by(RequestLog.updated_at.asc())
             .limit(limit)
@@ -1522,29 +1547,92 @@ def sweep_stuck_requests(max_age_minutes: int = 20, limit: int = 80):
 
         print("SWEEP_STUCK_REQUESTS_FOUND =", {
             "count": len(rows),
-            "max_age_minutes": max_age_minutes,
+            "normal_max_age_minutes": max_age_minutes,
+            "api_max_age_minutes": API_STALE_TIMEOUT_MINUTES,
         }, flush=True)
 
         for req in rows:
             try:
-                err = (req.error_message or "").upper()
+                # =====================================================
+                # API EXTERNA
+                # =====================================================
+                if _is_api_request(req):
+                    # Si existe lock vivo, hay un worker trabajando justo
+                    # ahora. No cerramos una solicitud activa.
+                    active_lock = redis_conn.get(
+                        f"request_processing_lock:{req.id}"
+                    )
 
-                # Si ya tiene PDF guardado, intentar entregar.
-                if req.pdf_url:
+                    if active_lock:
+                        print("API_STALE_SWEEP_SKIP_ACTIVE_LOCK =", {
+                            "request_id": req.id,
+                            "api_client_id": req.api_client_id,
+                            "status": req.status,
+                        }, flush=True)
+                        continue
+
+                    # Una API no se cobra hasta DONE. Si está pendiente,
+                    # api_charged debe seguir false. No se modifica saldo:
+                    # al cambiar a ERROR automáticamente deja de reservar.
+                    if bool(req.api_charged):
+                        print("API_STALE_SWEEP_SKIP_ALREADY_CHARGED =", {
+                            "request_id": req.id,
+                            "api_client_id": req.api_client_id,
+                            "status": req.status,
+                        }, flush=True)
+                        continue
+
+                    old_status = (req.status or "").upper()
+
                     req.status = "ERROR"
-                    req.error_message = "DELIVERY_FAILED_PENDING_RETRY: sweep detected stored PDF"
-                    req.updated_at = _utc_now_naive()
+                    req.error_message = (
+                        "API_STALE_TIMEOUT:"
+                        f"sin resultado después de "
+                        f"{API_STALE_TIMEOUT_MINUTES} minutos"
+                    )
+                    req.updated_at = now
                     db.commit()
 
-                    _schedule_delivery_retry(req.id, attempt=1, delay_sec=10)
+                    print("API_STALE_TIMEOUT_CLOSED =", {
+                        "request_id": req.id,
+                        "api_client_id": req.api_client_id,
+                        "old_status": old_status,
+                        "curp": req.curp,
+                        "act_type": req.act_type,
+                        "api_external_id": req.api_external_id,
+                    }, flush=True)
+
                     continue
 
-                # Si sigue QUEUED, reencolar.
-                if req.status == "QUEUED":
-                    req.updated_at = _utc_now_naive()
+                # =====================================================
+                # WHATSAPP / FLUJO NORMAL EXISTENTE
+                # =====================================================
+                if req.pdf_url:
+                    req.status = "ERROR"
+                    req.error_message = (
+                        "DELIVERY_FAILED_PENDING_RETRY: "
+                        "sweep detected stored PDF"
+                    )
+                    req.updated_at = now
                     db.commit()
 
-                    queue = slow_request_queue if (req.provider_name or "").upper() in SLOW_PROVIDERS else request_queue
+                    _schedule_delivery_retry(
+                        req.id,
+                        attempt=1,
+                        delay_sec=10,
+                    )
+                    continue
+
+                if req.status == "QUEUED":
+                    req.updated_at = now
+                    db.commit()
+
+                    queue = (
+                        slow_request_queue
+                        if (req.provider_name or "").upper() in SLOW_PROVIDERS
+                        else request_queue
+                    )
+
                     queue.enqueue(process_request, req.id)
 
                     print("SWEEP_REQUEUED_QUEUED_REQUEST =", {
@@ -1553,11 +1641,12 @@ def sweep_stuck_requests(max_age_minutes: int = 20, limit: int = 80):
                     }, flush=True)
                     continue
 
-                # Si está PROCESSING demasiado viejo, cerrarlo como timeout recuperable.
-                # Si el PDF llega tarde por WhatsApp, main.py todavía puede empatarlo porque filtra ERROR reciente con TIMEOUT.
                 req.status = "ERROR"
-                req.error_message = f"TIMEOUT_8MIN_CANCELLED: auto-cierre por sweep > {max_age_minutes} min sin PDF útil"
-                req.updated_at = _utc_now_naive()
+                req.error_message = (
+                    f"TIMEOUT_8MIN_CANCELLED: auto-cierre por sweep > "
+                    f"{max_age_minutes} min sin PDF útil"
+                )
+                req.updated_at = now
                 db.commit()
 
                 print("SWEEP_CLOSED_PROCESSING_TIMEOUT =", {
@@ -1569,6 +1658,7 @@ def sweep_stuck_requests(max_age_minutes: int = 20, limit: int = 80):
 
             except Exception as one_exc:
                 db.rollback()
+
                 print("SWEEP_STUCK_ONE_ERROR =", {
                     "request_id": getattr(req, "id", None),
                     "error": str(one_exc),
@@ -3377,6 +3467,22 @@ def process_request(request_id: int):
             return
 
         terminal_error = (getattr(req, "error_message", "") or "").upper()
+
+        # Una API vencida ya no debe ser procesada otra vez aunque exista
+        # un job viejo pendiente en Redis/RQ.
+        if (
+            _is_api_request(req)
+            and current_status == "ERROR"
+            and terminal_error.startswith("API_STALE_TIMEOUT:")
+        ):
+            print("PROCESS_REQUEST_API_STALE_SKIP =", {
+                "request_id": req.id,
+                "api_client_id": req.api_client_id,
+                "curp": req.curp,
+                "act_type": req.act_type,
+                "error_message": req.error_message,
+            }, flush=True)
+            return
 
         if current_status == "ERROR" and (
             "CLIENT_NOTIFIED_FAIL" in terminal_error
