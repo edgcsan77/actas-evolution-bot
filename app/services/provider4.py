@@ -2277,6 +2277,7 @@ class Provider4Client:
         tipoa: str,
         inc_folio: bool = False,
         user: str = "",
+        is_chain: bool = False,
     ) -> dict:
         """
         Nuevo flujo Provider4:
@@ -2285,6 +2286,7 @@ class Provider4Client:
         No descarga PDF.
         """
         curp_clean = (curp or "").strip().upper()
+        identifier_kind = "CADENA" if is_chain else "CURP"
         tipo_num = self._new_tipo_num(tipoa)
         foliado_num = 1 if inc_folio else 0
 
@@ -2299,7 +2301,10 @@ class Provider4Client:
             params["User"] = user
 
         print("PROVIDER4_NEW_PETICION_URL =", self.NEW_PETICION_URL, flush=True)
-        print("PROVIDER4_NEW_PETICION_PARAMS =", params, flush=True)
+        print("PROVIDER4_NEW_PETICION_PARAMS =", {
+            **params,
+            "_identifier_kind": identifier_kind,
+        }, flush=True)
 
         r = self.session.get(
             self.NEW_PETICION_URL,
@@ -2335,7 +2340,12 @@ class Provider4Client:
             return {"ok": True, "submitted": True, "code": "ERROR_TRAMITEEXISTENTE", "raw": text}
 
         if "CURP_INVALIDA" in text_up:
-            raise RuntimeError(f"PROVIDER4_CURP_INVALIDA:{curp_clean}")
+            error_code = (
+                "PROVIDER4_CHAIN_INVALIDA"
+                if is_chain
+                else "PROVIDER4_CURP_INVALIDA"
+            )
+            raise RuntimeError(f"{error_code}:{curp_clean}")
 
         if "CUENTAINEXISTENTE" in text_up:
             raise RuntimeError("PROVIDER4_CUENTA_INEXISTENTE")
@@ -2348,6 +2358,7 @@ class Provider4Client:
         *,
         curp: str,
         tipoa: str,
+        is_chain: bool = False,
     ) -> dict:
         """
         Nuevo flujo Provider4:
@@ -2356,6 +2367,7 @@ class Provider4Client:
         Si ya está: PDF directo.
         """
         curp_clean = (curp or "").strip().upper()
+        identifier_kind = "CADENA" if is_chain else "CURP"
         tipo_num = self._new_tipo_num(tipoa)
 
         params = {
@@ -2364,7 +2376,10 @@ class Provider4Client:
         }
 
         print("PROVIDER4_NEW_VERIFICAR_URL =", self.NEW_VERIFICAR_PDF_URL, flush=True)
-        print("PROVIDER4_NEW_VERIFICAR_PARAMS =", params, flush=True)
+        print("PROVIDER4_NEW_VERIFICAR_PARAMS =", {
+            **params,
+            "_identifier_kind": identifier_kind,
+        }, flush=True)
 
         r = self.session.get(
             self.NEW_VERIFICAR_PDF_URL,
@@ -2416,7 +2431,12 @@ class Provider4Client:
             }
 
         if "CURP_INVALIDA" in text_up:
-            raise RuntimeError(f"PROVIDER4_CURP_INVALIDA:{curp_clean}")
+            error_code = (
+                "PROVIDER4_CHAIN_INVALIDA"
+                if is_chain
+                else "PROVIDER4_CURP_INVALIDA"
+            )
+            raise RuntimeError(f"{error_code}:{curp_clean}")
 
         # NO_LOCALIZADO_VERIFICAR_PDF_OK:
         # La API de verificarpdf.php puede responder NO_LOCALIZADO cuando el trámite ya quedó sin registro.
