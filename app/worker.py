@@ -2587,11 +2587,19 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
             raise RuntimeError(f"{provider_name}_NEW_TIMEOUT_WAITING_PDF:{term}")
 
         try:
-            check_result = client.verificar_pdf_new_api(
-                curp=term,
-                tipoa=tipoa,
-                is_chain=chain_mode,
-            )
+            if chain_mode:
+                # peticion.php sí acepta cadena dentro de `curp`,
+                # pero verificarpdf.php exige CURP real.
+                # Para cadena se consulta el PDF desde vHistory.php.
+                check_result = client.verificar_cadena_por_historial_new_api(
+                    cadena=term,
+                    tipoa=tipoa,
+                )
+            else:
+                check_result = client.verificar_pdf_new_api(
+                    curp=term,
+                    tipoa=tipoa,
+                )
         except Exception as e:
             # NO_LOCALIZADO_VERIFICAR_CALL_SAFETY_OK:
             # Seguridad directa en la consulta PDF: si la API responde NO_LOCALIZADO
