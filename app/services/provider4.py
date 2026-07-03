@@ -2047,12 +2047,12 @@ class Provider4Client:
 
         return None
 
-   def _extract_pdf_link_from_folio_row(
+    def _extract_pdf_link_from_folio_row(
         self,
         history_html: str,
         term: str,
         tipoa: str | None = None,
-   ) -> str | None:
+    ) -> str | None:
         """
         Extrae solamente un d.php identificado como foliado.
     
