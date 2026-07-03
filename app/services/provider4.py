@@ -2047,27 +2047,82 @@ class Provider4Client:
 
         return None
 
-    def _extract_pdf_link_from_folio_row(self, history_html: str, term: str, tipoa: str | None = None) -> str | None:
+   def _extract_pdf_link_from_folio_row(
+        self,
+        history_html: str,
+        term: str,
+        tipoa: str | None = None,
+    ) -> str | None:
+        """
+        Extrae solamente un d.php identificado como foliado.
+    
+        No basta con que el enlace esté dentro de una fila que diga
+        'Descargar foliado': algunas filas pueden contener también un
+        d.php normal. Para evitar entregar PDF sin folio, exigimos que
+        el propio enlace contenga FOLIO/FOLIADO.
+        """
+    
         term_up = (term or "").strip().upper()
     
-        row_html = self._history_folio_row_for_term(history_html, term, tipoa)
+        row_html = self._history_folio_row_for_term(
+            history_html,
+            term,
+            tipoa,
+        )
     
         if not row_html:
-            print("PROVIDER4_FOLIO_ROW_FOR_DPHP_NOT_FOUND =", term_up, flush=True)
+            print(
+                "PROVIDER4_FOLIO_ROW_FOR_DPHP_NOT_FOUND =",
+                term_up,
+                flush=True,
+            )
             return None
     
-        m = re.search(
+        matches = re.findall(
             r"""href\s*=\s*["']([^"']*d\.php\?f=[^"']+)["']""",
             row_html,
             flags=re.IGNORECASE,
         )
     
-        if m:
-            link = urljoin(f"{self.BASE_URL}/servicio/", unescape(m.group(1)))
-            print("PROVIDER4_EXTRACTED_DPHP_FROM_FOLIO_ROW =", link, flush=True)
-            return link
+        if not matches:
+            print(
+                "PROVIDER4_FOLIO_ROW_FOUND_BUT_DPHP_NOT_FOUND =",
+                term_up,
+                flush=True,
+            )
+            return None
     
-        print("PROVIDER4_FOLIO_ROW_FOUND_BUT_DPHP_NOT_FOUND =", term_up, flush=True)
+        for raw_link in matches:
+            link = urljoin(
+                f"{self.BASE_URL}/servicio/",
+                unescape(raw_link),
+            )
+    
+            link_up = unescape(link).upper()
+    
+            if (
+                "_FOLIO" in link_up
+                or "_FOLIADO" in link_up
+                or "FOLIO" in link_up
+                or "FOLIADO" in link_up
+            ):
+                print(
+                    "PROVIDER4_EXTRACTED_REAL_FOLIO_DPHP =",
+                    link,
+                    flush=True,
+                )
+                return link
+    
+        print(
+            "PROVIDER4_FOLIO_ROW_HAS_ONLY_NON_FOLIO_DPHP =",
+            {
+                "term": term_up,
+                "links": matches,
+            },
+            flush=True,
+        )
+    
+        # Retorna None para que el flujo use addFol.php como respaldo.
         return None
 
     def _find_pdf_link_in_any_lazaro_history(
@@ -2462,15 +2517,18 @@ class Provider4Client:
         *,
         cadena: str,
         tipoa: str,
+        inc_folio: bool = False,
     ) -> dict:
         """
-        Flujo nuevo para cadena:
+        Flujo nuevo por cadena.
     
-        peticion.php acepta la cadena en el campo `curp`, pero
-        verificarpdf.php exige una CURP válida y responde CURP_INVALIDA.
+        peticion.php acepta la cadena en el parámetro `curp`, pero
+        verificarpdf.php exige CURP válida. Por eso se consulta vHistory.php.
     
-        Por eso, después de enviar la petición, la disponibilidad del PDF
-        se consulta mediante vHistory.php y se descarga desde el link d.php.
+        Si inc_folio=True:
+        - busca primero un d.php realmente foliado;
+        - si no existe, usa addFol.php como respaldo;
+        - nunca descarga el PDF normal como si fuera foliado.
         """
     
         term = (cadena or "").strip().upper()
@@ -2480,6 +2538,7 @@ class Provider4Client:
     
         print("PROVIDER4_CHAIN_HISTORY_CHECK_TERM =", term, flush=True)
         print("PROVIDER4_CHAIN_HISTORY_CHECK_HID =", self.HID, flush=True)
+        print("PROVIDER4_CHAIN_HISTORY_INC_FOLIO =", bool(inc_folio), flush=True)
     
         self.warm()
         history_html = self.get_history_html()
@@ -2490,8 +2549,7 @@ class Provider4Client:
             flush=True,
         )
     
-        # Para cadena NO filtramos por tipo.
-        # La cadena identifica por sí misma el documento solicitado.
+        # La cadena identifica el documento; no filtrar por tipo.
         history_tipoa = None
     
         if (
@@ -2504,6 +2562,123 @@ class Provider4Client:
                 "reason": "NO_LOCALIZADO",
             }
     
+        # ==========================================================
+        # CADENA FOLIADA
+        # ==========================================================
+        if inc_folio:
+            print(
+                "PROVIDER4_CHAIN_HISTORY_FOLIO_MODE =",
+                {
+                    "term": term,
+                    "hid": self.HID,
+                },
+                flush=True,
+            )
+    
+            # Solo debe devolver un d.php que realmente sea foliado.
+            dphp_folio_link = self._extract_pdf_link_from_folio_row(
+                history_html,
+                term,
+                history_tipoa,
+            )
+    
+            # Respaldo: addFol.php genera/descarga la versión foliadas.
+            addfol_link = self._extract_folio_link(
+                history_html,
+                term,
+                history_tipoa,
+            )
+    
+            attempts = []
+    
+            if dphp_folio_link:
+                attempts.append(
+                    (
+                        "HISTORY_DPHP_FOLIADO",
+                        dphp_folio_link,
+                        False,
+                    )
+                )
+    
+            if addfol_link:
+                attempts.append(
+                    (
+                        "HISTORY_ADDFOL_FALLBACK",
+                        addfol_link,
+                        True,
+                    )
+                )
+    
+            if not attempts:
+                print(
+                    "PROVIDER4_CHAIN_HISTORY_FOLIO_NOT_READY =",
+                    {
+                        "term": term,
+                        "hid": self.HID,
+                    },
+                    flush=True,
+                )
+    
+                return {
+                    "ready": False,
+                    "code": "HISTORY_FOLIO_NOT_READY",
+                    "reason": "PDF_NOT_READY",
+                }
+    
+            last_error = None
+    
+            for source_name, pdf_url, use_folio_downloader in attempts:
+                try:
+                    print(
+                        "PROVIDER4_CHAIN_HISTORY_FOLIO_LINK =",
+                        {
+                            "term": term,
+                            "source": source_name,
+                            "url": pdf_url,
+                        },
+                        flush=True,
+                    )
+    
+                    pdf_bytes = self._download_and_validate_with_retries(
+                        url=pdf_url,
+                        term=term,
+                        tipoa=tipoa,
+                        inc_folio=True,
+                        is_chain=True,
+                        use_folio_downloader=use_folio_downloader,
+                        max_attempts=4,
+                        sleep_seconds=4,
+                    )
+    
+                    return {
+                        "ready": True,
+                        "pdf_bytes": pdf_bytes,
+                        "code": "PDF_READY_HISTORY_FOLIO",
+                        "source": "history_folio",
+                    }
+    
+                except Exception as folio_exc:
+                    last_error = folio_exc
+    
+                    print(
+                        "PROVIDER4_CHAIN_HISTORY_FOLIO_DOWNLOAD_FAILED =",
+                        {
+                            "term": term,
+                            "source": source_name,
+                            "url": pdf_url,
+                            "error": str(folio_exc),
+                        },
+                        flush=True,
+                    )
+    
+            raise RuntimeError(
+                "PROVIDER4_CHAIN_HISTORY_FOLIO_DOWNLOAD_FAILED:"
+                f"{term}:{str(last_error)[:250]}"
+            )
+    
+        # ==========================================================
+        # CADENA NORMAL, SIN FOLIO
+        # ==========================================================
         link = self._extract_pdf_link(
             history_html,
             term,
