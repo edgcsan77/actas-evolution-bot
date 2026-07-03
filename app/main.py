@@ -14896,6 +14896,40 @@ def api_v1_create_acta(
 
                 return resp
 
+        # ============================================================
+        # BLOQUEO DE DUPLICADO ACTIVO POR CURP + TIPO
+        # ============================================================
+        # external_id protege reintentos idénticos.
+        # Esto protege cuando el cliente manda OTRO external_id para
+        # la misma CURP y tipo mientras la primera solicitud sigue viva.
+        active_duplicate = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.api_client_id == client.id,
+                RequestLog.curp == term,
+                RequestLog.act_type == act_type,
+                RequestLog.status.in_(["QUEUED", "PROCESSING"]),
+            )
+            .order_by(RequestLog.created_at.asc())
+            .first()
+        )
+
+        if active_duplicate:
+            return {
+                "ok": False,
+                "error_code": "ACTIVE_DUPLICATE_REQUEST",
+                "error_message": (
+                    "Ya existe una solicitud activa para esta CURP y tipo de acta. "
+                    "Espera el resultado o consulta la solicitud original."
+                ),
+                "request_id": active_duplicate.id,
+                "existing_external_id": active_duplicate.api_external_id,
+                "status": active_duplicate.status,
+                "term": active_duplicate.curp,
+                "act_type": active_duplicate.act_type,
+                "reserved_price": _money(active_duplicate.api_price),
+            }
+
         # Ahora sí: saldo actualizado y protegido por el lock del cliente.
         price = Decimal(str(client.price_per_done or 5))
         reserved = _api_pending_reserved_amount(db, client)
