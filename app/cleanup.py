@@ -42,11 +42,24 @@ def cleanup_expired_and_mark_pending():
         print("CLEANUP_DELETED_EXPIRED =", deleted_count, flush=True)
 
         # 2) marcar WHATSAPP vencidos a los 8 minutos y WEB vencidos a los 11 minutos.
-        whatsapp_timeout_minutes = int(getattr(settings, "REQUEST_TIMEOUT_MINUTES", 8) or 8)
-        web_timeout_minutes = int(getattr(settings, "WEB_REQUEST_TIMEOUT_MINUTES", 11) or 11)
-
+        whatsapp_timeout_minutes = int(
+            getattr(settings, "REQUEST_TIMEOUT_MINUTES", 8) or 8
+        )
+        
+        web_timeout_minutes = int(
+            getattr(settings, "WEB_REQUEST_TIMEOUT_MINUTES", 11) or 11
+        )
+        
+        # API externa: no debe retener saldo por horas.
+        # 45 minutos permite que los proveedores lentos terminen,
+        # pero evita reservas eternas.
+        api_timeout_minutes = int(
+            getattr(settings, "API_REQUEST_TIMEOUT_MINUTES", 45) or 45
+        )
+        
         whatsapp_limit = now - timedelta(minutes=whatsapp_timeout_minutes)
         web_limit = now - timedelta(minutes=web_timeout_minutes)
+        api_limit = now - timedelta(minutes=api_timeout_minutes)
 
         whatsapp_providers = [
             "PROVIDER1",
@@ -90,24 +103,48 @@ def cleanup_expired_and_mark_pending():
             .all()
         )
 
+        rows_api = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.status.in_(["QUEUED", "PROCESSING"]),
+                RequestLog.api_client_id.isnot(None),
+                RequestLog.created_at.is_not(None),
+                RequestLog.created_at <= api_limit,
+                RequestLog.api_charged == False,
+            )
+            .all()
+        )
+
         print("CLEANUP_WHATSAPP_TIMEOUT_LIMIT =", whatsapp_limit, flush=True)
         print("CLEANUP_WEB_TIMEOUT_LIMIT =", web_limit, flush=True)
+        print("CLEANUP_API_TIMEOUT_LIMIT =", api_limit, flush=True)
+        
         print("CLEANUP_WHATSAPP_TIMEOUT_ROWS =", len(rows_whatsapp), flush=True)
         print("CLEANUP_WEB_TIMEOUT_ROWS =", len(rows_web), flush=True)
-
-        rows = rows_whatsapp + rows_web
+        print("CLEANUP_API_TIMEOUT_ROWS =", len(rows_api), flush=True)
+        
+        rows = rows_whatsapp + rows_web + rows_api
         changed_ids = []
 
         for r in rows:
             provider = (r.provider_name or "").upper()
-
-            if provider in web_providers:
-                minutes = web_timeout_minutes
-                label = f"Auto-cierre (>{minutes} min) WEB cleanup"
+            is_api = r.api_client_id is not None
+        
+            if is_api:
+                label = (
+                    "API_STALE_TIMEOUT:"
+                    f"sin resultado después de {api_timeout_minutes} minutos"
+                )
+        
+            elif provider in web_providers:
+                label = f"Auto-cierre (>{web_timeout_minutes} min) WEB cleanup"
+        
             else:
-                minutes = whatsapp_timeout_minutes
-                label = f"Auto-cierre (>{minutes} min) WHATSAPP cleanup"
-
+                label = (
+                    f"Auto-cierre (>{whatsapp_timeout_minutes} min) "
+                    "WHATSAPP cleanup"
+                )
+        
             r.status = "ERROR"
             r.updated_at = now
             r.error_message = label
@@ -119,6 +156,16 @@ def cleanup_expired_and_mark_pending():
         # 3) avisar por WhatsApp después del commit
         for r in rows:
             try:
+                # Las solicitudes API reciben resultado por endpoint/API,
+                # no se debe enviar aviso por WhatsApp.
+                if r.api_client_id is not None:
+                    print(
+                        "CLEANUP_API_TIMEOUT_NO_WHATSAPP =",
+                        r.id,
+                        flush=True,
+                    )
+                    continue
+                
                 msg = (
                     f"⚠️ Solicitud sin éxito en Registro Civil\n"
                     f"Dato: {r.curp}\n"
