@@ -4904,10 +4904,30 @@ def process_request(request_id: int):
                     try:
                         _client_retry = client if "client" in locals() else None
                         if _client_retry is not None:
-                            _chk_retry = _client_retry.verificar_pdf_new_api(
-                                curp=(getattr(req, "curp", "") or "").strip().upper(),
-                                tipoa=_tipo_retry,
+                            _retry_term = (
+                                getattr(req, "curp", "") or ""
+                            ).strip().upper()
+                            
+                            _retry_chain_mode = (
+                                is_chain(_retry_term)
+                                or bool(re.fullmatch(r"\d{15,25}", _retry_term))
                             )
+                            
+                            _retry_inc_folio = _is_folio_act(
+                                getattr(req, "act_type", "")
+                            )
+                            
+                            if _retry_chain_mode:
+                                _chk_retry = _client_retry.verificar_cadena_por_historial_new_api(
+                                    cadena=_retry_term,
+                                    tipoa=_tipo_retry,
+                                    inc_folio=_retry_inc_folio,
+                                )
+                            else:
+                                _chk_retry = _client_retry.verificar_pdf_new_api(
+                                    curp=_retry_term,
+                                    tipoa=_tipo_retry,
+                                )
                             _check_debug = str(_chk_retry)
                             _chk_up = _check_debug.upper().replace(" ", "_")
                             if "NO_LOCALIZADO" in _chk_up or "NO_REGISTRO" in _chk_up or "SIN_REGISTRO" in _chk_up:
