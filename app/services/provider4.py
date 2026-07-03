@@ -2456,6 +2456,102 @@ class Provider4Client:
             }
 
         raise RuntimeError(f"PROVIDER4_NEW_VERIFICAR_UNKNOWN_RESPONSE:{text_preview[:300]}")
+
+    def verificar_cadena_por_historial_new_api(
+        self,
+        *,
+        cadena: str,
+        tipoa: str,
+    ) -> dict:
+        """
+        Flujo nuevo para cadena:
+    
+        peticion.php acepta la cadena en el campo `curp`, pero
+        verificarpdf.php exige una CURP válida y responde CURP_INVALIDA.
+    
+        Por eso, después de enviar la petición, la disponibilidad del PDF
+        se consulta mediante vHistory.php y se descarga desde el link d.php.
+        """
+    
+        term = (cadena or "").strip().upper()
+    
+        if not term:
+            raise RuntimeError("PROVIDER4_CHAIN_EMPTY")
+    
+        print("PROVIDER4_CHAIN_HISTORY_CHECK_TERM =", term, flush=True)
+        print("PROVIDER4_CHAIN_HISTORY_CHECK_HID =", self.HID, flush=True)
+    
+        self.warm()
+        history_html = self.get_history_html()
+    
+        print(
+            "PROVIDER4_CHAIN_HISTORY_HTML_PREVIEW =",
+            (history_html or "")[:1500],
+            flush=True,
+        )
+    
+        # Para cadena NO filtramos por tipo.
+        # La cadena identifica por sí misma el documento solicitado.
+        history_tipoa = None
+    
+        if (
+            self._detect_no_result(history_html, term, history_tipoa)
+            or self._detect_no_result_loose(history_html, term, history_tipoa)
+        ):
+            return {
+                "ready": False,
+                "code": "NO_LOCALIZADO",
+                "reason": "NO_LOCALIZADO",
+            }
+    
+        link = self._extract_pdf_link(
+            history_html,
+            term,
+            history_tipoa,
+        )
+    
+        if not link:
+            print(
+                "PROVIDER4_CHAIN_HISTORY_PDF_NOT_READY =",
+                {
+                    "term": term,
+                    "hid": self.HID,
+                },
+                flush=True,
+            )
+    
+            return {
+                "ready": False,
+                "code": "HISTORY_PDF_NOT_READY",
+                "reason": "PDF_NOT_READY",
+            }
+    
+        print(
+            "PROVIDER4_CHAIN_HISTORY_PDF_LINK =",
+            {
+                "term": term,
+                "link": link,
+            },
+            flush=True,
+        )
+    
+        pdf_bytes = self._download_and_validate_with_retries(
+            url=link,
+            term=term,
+            tipoa=tipoa,
+            inc_folio=False,
+            is_chain=True,
+            use_folio_downloader=False,
+            max_attempts=4,
+            sleep_seconds=4,
+        )
+    
+        return {
+            "ready": True,
+            "pdf_bytes": pdf_bytes,
+            "code": "PDF_READY_HISTORY",
+            "source": "history",
+        }
     
     def process_and_download(
         self,
