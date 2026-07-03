@@ -2512,14 +2512,20 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
         act_type=req.act_type,
     )
     
-    # Una cadena no debe pedir foliado adicional aunque el texto del tipo
-    # contenga algo parecido a FOLIO.
-    act_type_up = (req.act_type or "").upper().strip()
-
-    inc_folio = (
-        "FOLIO" in act_type_up
-        or "FOLIADA" in act_type_up
-        or "FOLIADO" in act_type_up
+    # El foliado depende del tipo/comando solicitado.
+    # Aplica igual para CURP o para cadena.
+    inc_folio = _is_folio_act(req.act_type)
+    
+    print(
+        f"{provider_name}_NEW_FOLIO_REQUEST =",
+        {
+            "request_id": req.id,
+            "term": term,
+            "chain_mode": chain_mode,
+            "act_type": req.act_type,
+            "inc_folio": inc_folio,
+        },
+        flush=True,
     )
 
     # User opcional; si luego te da User, lo guardas en app_settings.
@@ -2591,12 +2597,10 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
 
         try:
             if chain_mode:
-                # peticion.php sí acepta cadena dentro de `curp`,
-                # pero verificarpdf.php exige CURP real.
-                # Para cadena se consulta el PDF desde vHistory.php.
                 check_result = client.verificar_cadena_por_historial_new_api(
                     cadena=term,
                     tipoa=tipoa,
+                    inc_folio=inc_folio,
                 )
             else:
                 check_result = client.verificar_pdf_new_api(
@@ -2765,29 +2769,27 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
         try:
             source = (check_result.get("source") or "").strip().lower()
         
-            if chain_mode and source == "history":
-                # verificar_cadena_por_historial_new_api() ya descarga,
-                # valida y repara la cadena mediante
-                # _download_and_validate_with_retries(... is_chain=True).
-                # No volver a enmarcar ni reconstruir el reverso.
+            if chain_mode and source.startswith("history"):
+                # Las rutas history y history_folio ya descargan,
+                # validan y reparan mediante _download_and_validate_with_retries.
+                # No volver a enmarcar ni reconstruir reverso.
                 print(
                     f"{provider_name}_CHAIN_HISTORY_PDF_ALREADY_REPAIRED_SKIP =",
                     {
                         "request_id": req.id,
                         "term": term,
                         "source": source,
+                        "inc_folio": inc_folio,
                     },
                     flush=True,
                 )
-        
+            
             elif chain_mode:
-                # Ruta de seguridad por si en el futuro existe otra fuente
-                # de PDF para cadenas que entregue el archivo crudo.
                 pdf_bytes = client._repair_chain_pdf_if_needed(
                     pdf_bytes,
                     term,
                 )
-        
+            
             else:
                 pdf_bytes = client._repair_pdf_if_needed(
                     pdf_bytes,
