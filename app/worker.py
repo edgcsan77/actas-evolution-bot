@@ -909,25 +909,38 @@ def _is_curp_term(value: str | None) -> bool:
 
 
 def _is_provider4_eligible(term: str | None, act_type: str | None) -> bool:
+    """
+    Lázaro Web 1 / 2 / 3 acepta:
+    - CURP válida.
+    - Cadena / identificador electrónico numérico.
 
-    term = (term or "").strip().upper()
+    Para cadena, el flujo nuevo manda exactamente el mismo parámetro
+    HTTP llamado "curp", pero su valor real es la cadena.
+    """
+    term_clean = (term or "").strip().upper()
     act_type_up = (act_type or "").upper().strip()
 
-    if is_chain(term) or bool(re.fullmatch(r"\d{15,25}", term)):
-        print("LAZARO_REMOVED_CHAIN_NOT_SUPPORTED =", {
-            "term": term,
+    chain_mode = (
+        is_chain(term_clean)
+        or bool(re.fullmatch(r"\d{15,25}", term_clean))
+    )
+
+    if chain_mode:
+        print("LAZARO_CHAIN_ELIGIBLE =", {
+            "term": term_clean,
             "act_type": act_type_up,
         }, flush=True)
-        return False
+        return True
 
-    if "CADENA" in act_type_up:
-        print("LAZARO_REMOVED_ACT_TYPE_CADENA =", {
-            "term": term,
-            "act_type": act_type_up,
-        }, flush=True)
-        return False
+    curp_ok = _is_curp_term(term_clean)
 
-    return _is_curp_term(term)
+    print("LAZARO_CURP_ELIGIBILITY =", {
+        "term": term_clean,
+        "act_type": act_type_up,
+        "eligible": curp_ok,
+    }, flush=True)
+
+    return curp_ok
 
 
 def _group_individual_limit_reached(row: GroupPromotion | None) -> bool:
@@ -2327,6 +2340,64 @@ def _provider4_tipo_acta(act_type: str) -> str:
     raise RuntimeError(f"PROVIDER4_UNKNOWN_ACT_TYPE:{raw}")
 
 
+def _provider4_tipo_acta_for_request(
+    db,
+    provider_name: str,
+    term: str,
+    act_type: str,
+) -> str:
+    """
+    Para CURP usa el tipo real de acta.
+
+    Para cadena, Lázaro acepta la cadena usando el mismo endpoint y campo
+    `curp`. El endpoint sigue exigiendo un parámetro `tipo`, aunque la cadena
+    identifica el documento.
+
+    El valor se deja configurable por proveedor para no amarrarlo a código.
+    Usa nacimiento como valor por defecto porque equivale a tipo=1.
+    """
+    term_clean = (term or "").strip().upper()
+
+    chain_mode = (
+        is_chain(term_clean)
+        or bool(re.fullmatch(r"\d{15,25}", term_clean))
+    )
+
+    if not chain_mode:
+        return _provider4_tipo_acta(act_type)
+
+    provider_name = (provider_name or "PROVIDER4").strip().upper()
+
+    configured = (
+        _get_app_setting(
+            db,
+            f"{provider_name}_CHAIN_TIPOA",
+            "nacimiento",
+        )
+        or "nacimiento"
+    ).strip().lower()
+
+    allowed = {
+        "nacimiento",
+        "matrimonio",
+        "defuncion",
+        "divorcio",
+    }
+
+    if configured not in allowed:
+        raise RuntimeError(
+            f"{provider_name}_INVALID_CHAIN_TIPOA:{configured}"
+        )
+
+    print(f"{provider_name}_CHAIN_TIPOA_USING =", {
+        "term": term_clean,
+        "configured_tipoa": configured,
+        "original_act_type": act_type,
+    }, flush=True)
+
+    return configured
+
+
 def _process_provider3(req, db):
     phpsessid = _get_app_setting(db, "PROVIDER3_PHPSESSID", settings.PROVIDER3_PHPSESSID)
 
@@ -2392,17 +2463,21 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
     provider_name = (provider_name or "PROVIDER4").strip().upper()
 
     term = (req.curp or "").strip().upper()
-    chain_mode = is_chain(term) or bool(re.fullmatch(r"\d{15,25}", term))
 
+    chain_mode = (
+        is_chain(term)
+        or bool(re.fullmatch(r"\d{15,25}", term))
+    )
+    
     print(f"{provider_name}_NEW_PROCESS_TERM =", term, flush=True)
     print(f"{provider_name}_NEW_PROCESS_CHAIN_MODE =", chain_mode, flush=True)
-
-    # Provider dijo que cadena será después. Por ahora solo CURP.
-    if chain_mode:
-        raise RuntimeError(f"{provider_name}_NEW_API_CHAIN_NOT_SUPPORTED_YET")
-
-    if not _is_curp_term(term):
-        raise RuntimeError(f"{provider_name}_NOT_CURP")
+    
+    if not term:
+        raise RuntimeError(f"{provider_name}_EMPTY_TERM")
+    
+    # CURP solamente se exige cuando NO es cadena.
+    if not chain_mode and not _is_curp_term(term):
+        raise RuntimeError(f"{provider_name}_NOT_CURP_OR_CHAIN")
 
     if provider_name == "PROVIDER4" and PROVIDER4_TEST_GROUPS and req.source_group_id not in PROVIDER4_TEST_GROUPS:
         raise RuntimeError("PROVIDER4_NOT_ALLOWED_GROUP")
@@ -2430,8 +2505,19 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
 
     client = Provider4Client(hid=hid)
 
-    tipoa = _provider4_tipo_acta(req.act_type)
-    inc_folio = "FOLIO" in (req.act_type or "").upper().strip()
+    tipoa = _provider4_tipo_acta_for_request(
+        db=db,
+        provider_name=provider_name,
+        term=term,
+        act_type=req.act_type,
+    )
+    
+    # Una cadena no debe pedir foliado adicional aunque el texto del tipo
+    # contenga algo parecido a FOLIO.
+    inc_folio = (
+        not chain_mode
+        and "FOLIO" in (req.act_type or "").upper().strip()
+    )
 
     # User opcional; si luego te da User, lo guardas en app_settings.
     user_key = f"{provider_name}_USER"
@@ -2470,6 +2556,7 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
                 "term": term,
                 "tipoa": tipoa,
                 "inc_folio": bool(inc_folio),
+                "is_chain": bool(chain_mode),
                 "attempts": 0,
                 "submitted_code": submit_result.get("code"),
                 "submitted_at": _utc_now_naive().isoformat(),
@@ -2625,11 +2712,18 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
         # verificarpdf.php puede devolver PDF prematuro/sin marco.
         # Lo pasamos por el reparador de Provider4 antes de entregarlo.
         try:
-            pdf_bytes = client._repair_pdf_if_needed(
-                pdf_bytes,
-                term,
-                inc_folio=inc_folio,
-            )
+            if chain_mode:
+                pdf_bytes = client._repair_chain_pdf_if_needed(
+                    pdf_bytes,
+                    term,
+                )
+            else:
+                pdf_bytes = client._repair_pdf_if_needed(
+                    pdf_bytes,
+                    term,
+                    inc_folio=inc_folio,
+                )
+        
         except Exception as repair_exc:
             print(f"{provider_name}_NEW_VERIFICAR_REPAIR_FAILED =", {
                 "request_id": req.id,
