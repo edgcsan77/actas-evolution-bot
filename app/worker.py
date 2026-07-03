@@ -2674,26 +2674,64 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
 
                 raise RuntimeError(f"{provider_name}_NO_RECORD:{term}")
 
-            # Timeout real por tiempo para Lázaro Web Provider4/10/11.
-            # false / ARCHIVO NO EXISTE significa "PDF aún no listo",
-            # pero no debe quedarse PROCESSING infinito.
+            # Timeout contado desde que Lázaro aceptó peticion.php,
+            # no desde que el usuario mandó el mensaje ni desde created_at.
+            # Así una espera previa en Redis/RQ no consume el tiempo del proveedor.
             try:
-                created_at = getattr(req, "created_at", None)
+                submitted_at_raw = (flow.get("submitted_at") or "").strip()
                 web_elapsed_sec = 0.0
-                if created_at:
-                    if getattr(created_at, "tzinfo", None) is not None:
-                        created_at = created_at.replace(tzinfo=None)
-                    web_elapsed_sec = (_utc_now_naive() - created_at).total_seconds()
-
+            
+                if submitted_at_raw:
+                    submitted_at = datetime.fromisoformat(submitted_at_raw)
+            
+                    if getattr(submitted_at, "tzinfo", None) is not None:
+                        submitted_at = submitted_at.astimezone(
+                            timezone.utc
+                        ).replace(tzinfo=None)
+            
+                    web_elapsed_sec = max(
+                        0.0,
+                        (_utc_now_naive() - submitted_at).total_seconds(),
+                    )
+            
+                else:
+                    # Fallback solo para solicitudes antiguas creadas antes
+                    # de que existiera submitted_at en el flow Redis.
+                    created_at = getattr(req, "created_at", None)
+            
+                    if created_at:
+                        if getattr(created_at, "tzinfo", None) is not None:
+                            created_at = created_at.replace(tzinfo=None)
+            
+                        web_elapsed_sec = max(
+                            0.0,
+                            (_utc_now_naive() - created_at).total_seconds(),
+                        )
+            
                 if web_elapsed_sec >= 11 * 60:
                     _provider4_new_clear_flow(req.id)
-                    print(f"{provider_name}_NEW_TIMEOUT_BY_AGE = {{'request_id': {req.id}, 'elapsed_sec': {web_elapsed_sec}, 'attempts': {attempts}, 'last_code': {check_result.get('code')!r}}}", flush=True)
-                    raise RuntimeError(f"{provider_name}_NEW_TIMEOUT_WAITING_PDF:{term}")
+            
+                    print(f"{provider_name}_NEW_TIMEOUT_BY_SUBMITTED_AT =", {
+                        "request_id": req.id,
+                        "elapsed_sec": round(web_elapsed_sec, 2),
+                        "attempts": attempts,
+                        "submitted_at": submitted_at_raw,
+                        "last_code": check_result.get("code"),
+                    }, flush=True)
+            
+                    raise RuntimeError(
+                        f"{provider_name}_NEW_TIMEOUT_WAITING_PDF:{term}"
+                    )
+            
             except RuntimeError:
                 raise
+            
             except Exception as e:
-                print(f"{provider_name}_NEW_TIMEOUT_BY_AGE_CHECK_ERROR = {{'request_id': {req.id}, 'error': {str(e)!r}}}", flush=True)
-
+                print(f"{provider_name}_NEW_TIMEOUT_BY_AGE_CHECK_ERROR =", {
+                    "request_id": req.id,
+                    "error": str(e),
+                }, flush=True)
+    
             flow["attempts"] = attempts
             flow["last_check_at"] = _utc_now_naive().isoformat()
             flow["last_code"] = check_result.get("code") or ""
@@ -4080,9 +4118,45 @@ def process_request(request_id: int):
                         raise RuntimeError(f"{provider_name}_WRONG_ACT_TYPE")
                 
                 if chain_mode:
-                    if not _validate_pdf_contains_electronic_id_or_code(pdf_bytes, term):
-                        print(f"{provider_name}_VALIDATE_FAIL_REQ_ELECTRONIC_ID_OR_CODE =", term, flush=True)
-                        raise RuntimeError(f"{provider_name}_WRONG_ELECTRONIC_ID_OR_CODE_IN_PDF:{term}")
+                    pdf_text = _extract_pdf_visible_text(pdf_bytes)
+                    normalized_pdf_text = _normalize_alnum(pdf_text)
+                    normalized_chain = _normalize_alnum(term)
+                
+                    # Solo rechazar si sí pudimos leer contenido suficiente
+                    # y la cadena definitivamente no aparece.
+                    #
+                    # Si el PDF es escaneado o el texto no se puede extraer,
+                    # no se debe rechazar una acta válida por falso negativo.
+                    if pdf_text and len(pdf_text.strip()) >= 30:
+                        if normalized_chain not in normalized_pdf_text:
+                            print(
+                                f"{provider_name}_VALIDATE_FAIL_REQ_ELECTRONIC_ID_OR_CODE =",
+                                {
+                                    "term": term,
+                                    "text_len": len(pdf_text),
+                                },
+                                flush=True,
+                            )
+                
+                            raise RuntimeError(
+                                f"{provider_name}_WRONG_ELECTRONIC_ID_OR_CODE_IN_PDF:{term}"
+                            )
+                
+                        print(
+                            f"{provider_name}_VALIDATE_CHAIN_FOUND_IN_FINAL_PDF =",
+                            term,
+                            flush=True,
+                        )
+                
+                    else:
+                        print(
+                            f"{provider_name}_VALIDATE_CHAIN_TEXT_UNREADABLE_SOFT_PASS =",
+                            {
+                                "term": term,
+                                "text_len": len(pdf_text or ""),
+                            },
+                            flush=True,
+                        )
                 else:
                     term_check = _validate_pdf_term_detailed(
                         pdf_bytes,
