@@ -2514,9 +2514,12 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
     
     # Una cadena no debe pedir foliado adicional aunque el texto del tipo
     # contenga algo parecido a FOLIO.
+    act_type_up = (req.act_type or "").upper().strip()
+
     inc_folio = (
-        not chain_mode
-        and "FOLIO" in (req.act_type or "").upper().strip()
+        "FOLIO" in act_type_up
+        or "FOLIADA" in act_type_up
+        or "FOLIADO" in act_type_up
     )
 
     # User opcional; si luego te da User, lo guardas en app_settings.
