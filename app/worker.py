@@ -2548,6 +2548,7 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
                 tipoa=tipoa,
                 inc_folio=inc_folio,
                 user=user_value,
+                is_chain=chain_mode,
             )
 
             flow = {
@@ -2589,6 +2590,7 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
             check_result = client.verificar_pdf_new_api(
                 curp=term,
                 tipoa=tipoa,
+                is_chain=chain_mode,
             )
         except Exception as e:
             # NO_LOCALIZADO_VERIFICAR_CALL_SAFETY_OK:
