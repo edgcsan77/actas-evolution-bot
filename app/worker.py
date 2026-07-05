@@ -262,6 +262,37 @@ DEFAULT_BOT_PROVIDER_MODE = {
 }
 
 
+BOT_HIDDEN_NO_ACCOUNTING_GROUPS = {
+    "docifybot8mx": {
+        "120363407565721999@g.us",
+        "120363408048979577@g.us",
+        "120363424360403186@g.us",
+    },
+}
+
+
+def _bot_hidden_no_accounting_group_ids(instance_name: str | None) -> set[str]:
+    inst = _norm_instance(instance_name)
+
+    return {
+        str(group_jid).strip()
+        for group_jid in BOT_HIDDEN_NO_ACCOUNTING_GROUPS.get(inst, set())
+        if str(group_jid).strip()
+    }
+
+
+def _is_bot_hidden_no_accounting_group(
+    instance_name: str | None,
+    group_jid: str | None,
+) -> bool:
+    gid = (group_jid or "").strip()
+
+    if not gid:
+        return False
+
+    return gid in _bot_hidden_no_accounting_group_ids(instance_name)
+
+
 def _norm_instance(instance_name: str | None) -> str:
     return (instance_name or "").strip().lower()
 
@@ -324,6 +355,14 @@ def _request_is_no_accounting(req, db) -> bool:
     instance_name = _norm_instance(getattr(req, "instance_name", None))
     provider_name = (getattr(req, "provider_name", "") or "").strip().upper()
     provider_group_id = (getattr(req, "provider_group_id", "") or "").strip()
+
+    # Estos grupos continúan procesándose, pero no consumen
+    # límite, usadas ni promociones.
+    if _is_bot_hidden_no_accounting_group(
+        instance_name,
+        getattr(req, "source_group_id", None),
+    ):
+        return True
 
     # MAYAPROVIDER jamás consume límite ni promociones.
     if provider_name == "MAYAPROVIDER":
