@@ -1038,6 +1038,9 @@ BOT_PANEL_TOKENS = {
 }
 
 
+BOT_MANAGER_NAME_KEY_PREFIX = "BOT_MANAGER_NAME:"
+BOT_MANAGER_PRICE_KEY_PREFIX = "BOT_MANAGER_PRICE:"
+
 MIN_BOT_PROMO_ACTAS = 10
 
 
@@ -3006,6 +3009,88 @@ def panel_unblock_instance(instance_name: str):
         "instance_name": instance_name,
         "blocked": False,
         "admin_blocked": False,
+    }
+
+
+@app.post("/panel/instance/{instance_name}/manager-price")
+async def panel_set_instance_manager_price(
+    instance_name: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not _is_valid_admin_panel_token(request):
+        return {
+            "ok": False,
+            "error": "UNAUTHORIZED",
+        }
+
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    inst = _norm_instance(instance_name)
+
+    if not inst:
+        return {
+            "ok": False,
+            "error": "INSTANCIA_INVALIDA",
+        }
+
+    manager_name = str(payload.get("manager_name") or "").strip()
+
+    if len(manager_name) > 100:
+        return {
+            "ok": False,
+            "error": "El nombre del gestor no puede exceder 100 caracteres.",
+        }
+
+    raw_price = str(payload.get("manager_price") or "").strip()
+
+    # Se permite vacío para borrar el precio.
+    manager_price = ""
+
+    if raw_price:
+        try:
+            price_value = Decimal(
+                raw_price
+                .replace("$", "")
+                .replace(",", "")
+                .strip()
+            )
+        except Exception:
+            return {
+                "ok": False,
+                "error": "El precio debe ser un número válido.",
+            }
+
+        if price_value < 0:
+            return {
+                "ok": False,
+                "error": "El precio no puede ser negativo.",
+            }
+
+        manager_price = f"{price_value.quantize(Decimal('0.01')):.2f}"
+
+    _set_app_setting(
+        db,
+        _bot_manager_name_key(inst),
+        manager_name,
+    )
+
+    _set_app_setting(
+        db,
+        _bot_manager_price_key(inst),
+        manager_price,
+    )
+
+    _clear_panel_cache()
+
+    return {
+        "ok": True,
+        "instance_name": inst,
+        "manager_name": manager_name,
+        "manager_price": manager_price,
     }
 
 
@@ -11525,6 +11610,8 @@ def panel_actas(
             <table>
               <thead>
                 <tr>
+                  <th>Gestor</th>
+                  <th>Precio</th>
                   <th>Bot</th>
                   <th class="right">Solicitudes</th>
                   <th class="right">Usadas</th>
@@ -11539,8 +11626,25 @@ def panel_actas(
               <tbody>
         """
 
+        commercial_data_by_instance = {}
+
+        for item in by_instance:
+            item_inst = (item["instance_name"] or "").strip()
+
+            if not item_inst:
+                continue
+
+            commercial_data_by_instance[item_inst] = _get_bot_manager_data(
+                db,
+                item_inst,
+            )
+
         for r in by_instance:
             inst = (r["instance_name"] or "").strip()
+        
+            commercial_data = commercial_data_by_instance.get(inst, {})
+            manager_name = commercial_data.get("manager_name") or ""
+            manager_price = commercial_data.get("manager_price") or ""
         
             bot_credit = _bot_credit_stats(db, inst)
             bot_used = bot_credit["used"]
@@ -11556,7 +11660,39 @@ def panel_actas(
             )
         
             html += f"""
-                <tr>
+                <tr>        
+                  <td>
+                    <input
+                      id="bot_manager_name_{_esc(inst)}"
+                      type="text"
+                      maxlength="100"
+                      value="{_esc(manager_name)}"
+                      placeholder="Nombre del gestor"
+                      style="min-width:170px;width:100%;"
+                    >
+                  </td>
+            
+                  <td>
+                    <div style="display:flex;gap:8px;align-items:center;min-width:180px;">
+                      <input
+                        id="bot_manager_price_{_esc(inst)}"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value="{_esc(manager_price)}"
+                        placeholder="Ej. 3.50"
+                        style="width:100%;"
+                      >
+                      <button
+                        class="btn btn-primary"
+                        type="button"
+                        onclick="saveBotManagerData('{_esc(inst)}')"
+                      >
+                        Guardar
+                      </button>
+                    </div>
+                  </td>
+                
                   <td><strong>{_esc(bot_labels_map.get(inst) or inst)}</strong></td>
                   <td class="right">{r["total"]}</td>
                   <td class="right">{bot_used}</td>
@@ -12354,6 +12490,62 @@ def panel_actas(
           }}
         
           alert("Peso actualizado: " + providerName + " = " + data.weight);
+        }}
+
+        async function saveBotManagerData(instanceName) {{
+          const managerInput = document.getElementById(
+            `bot_manager_name_${{instanceName}}`
+          );
+
+          const priceInput = document.getElementById(
+            `bot_manager_price_${{instanceName}}`
+          );
+
+          const managerName = (managerInput?.value || "").trim();
+          const managerPrice = (priceInput?.value || "").trim();
+
+          if (managerPrice !== "") {{
+            const numericPrice = Number(managerPrice);
+
+            if (Number.isNaN(numericPrice) || numericPrice < 0) {{
+              alert("Ingresa un precio válido mayor o igual a cero.");
+              return;
+            }}
+          }}
+
+          const panelToken = new URLSearchParams(
+            window.location.search
+          ).get("token") || "";
+
+          try {{
+            const response = await fetch(
+              `/panel/instance/${{encodeURIComponent(instanceName)}}/manager-price?token=${{encodeURIComponent(panelToken)}}`,
+              {{
+                method: "POST",
+                headers: {{
+                  "Content-Type": "application/json"
+                }},
+                body: JSON.stringify({{
+                  manager_name: managerName,
+                  manager_price: managerPrice
+                }})
+              }}
+            );
+
+            const data = await response.json();
+
+            if (!data.ok) {{
+              alert(data.error || "No se pudieron guardar los datos del gestor.");
+              return;
+            }}
+
+            alert(`Datos guardados para ${{instanceName}}.`);
+            location.reload();
+
+          }} catch (error) {{
+            console.error("BOT_MANAGER_SAVE_ERROR", error);
+            alert("Error de conexión al guardar los datos del gestor.");
+          }}
         }}
 
         async function saveBotLimit(instanceName) {{
@@ -16808,6 +17000,39 @@ def _set_app_setting(db: Session, key: str, value: str):
 
     db.commit()
     return row
+
+
+def _bot_manager_name_key(instance_name: str) -> str:
+    inst = _norm_instance(instance_name)
+
+    if not inst:
+        raise ValueError("Instancia vacía")
+
+    return f"{BOT_MANAGER_NAME_KEY_PREFIX}{inst}"
+
+
+def _bot_manager_price_key(instance_name: str) -> str:
+    inst = _norm_instance(instance_name)
+
+    if not inst:
+        raise ValueError("Instancia vacía")
+
+    return f"{BOT_MANAGER_PRICE_KEY_PREFIX}{inst}"
+
+
+def _get_bot_manager_data(db: Session, instance_name: str) -> dict:
+    return {
+        "manager_name": _get_app_setting(
+            db,
+            _bot_manager_name_key(instance_name),
+            "",
+        ),
+        "manager_price": _get_app_setting(
+            db,
+            _bot_manager_price_key(instance_name),
+            "",
+        ),
+    }
 
 
 def _providers_status_text(db: Session) -> str:
