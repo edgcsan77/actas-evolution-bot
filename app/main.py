@@ -213,6 +213,14 @@ def _request_is_no_accounting_main(db: Session, req) -> bool:
     provider_name = (getattr(req, "provider_name", "") or "").strip().upper()
     provider_group_id = (getattr(req, "provider_group_id", "") or "").strip()
 
+    # Grupos especiales: siguen funcionando, pero no consumen
+    # límite, contador de usadas ni promociones del bot.
+    if _is_bot_hidden_no_accounting_group(
+        instance_name,
+        getattr(req, "source_group_id", None),
+    ):
+        return True
+
     # MAYAPROVIDER jamás debe consumir límite, promo ni contador,
     # aunque el bot cambie después de modo privado a global.
     if provider_name == "MAYAPROVIDER":
@@ -630,6 +638,20 @@ def _bot_status_rows_uncached(db: Session) -> list[dict]:
             db.query(RequestLog)
             .filter(RequestLog.instance_name == inst)
         )
+
+        hidden_no_accounting_groups = _bot_hidden_no_accounting_group_ids(
+            inst
+        )
+
+        if hidden_no_accounting_groups:
+            q_total = q_total.filter(
+                or_(
+                    RequestLog.source_group_id.is_(None),
+                    RequestLog.source_group_id.notin_(
+                        hidden_no_accounting_groups
+                    ),
+                )
+            )
         
         personal_provider = _personal_provider_filter_for_instance(db, inst)
         if personal_provider:
@@ -1041,6 +1063,37 @@ BOT_PANEL_TOKENS = {
 BOT_MANAGER_NAME_KEY_PREFIX = "BOT_MANAGER_NAME:"
 BOT_MANAGER_PRICE_KEY_PREFIX = "BOT_MANAGER_PRICE:"
 
+BOT_HIDDEN_NO_ACCOUNTING_GROUPS = {
+    "docifybot8mx": {
+        "120363407565721999@g.us",
+        "120363408048979577@g.us",
+        "120363424360403186@g.us",
+    },
+}
+
+
+def _bot_hidden_no_accounting_group_ids(instance_name: str | None) -> set[str]:
+    inst = _norm_instance(instance_name)
+
+    return {
+        str(group_jid).strip()
+        for group_jid in BOT_HIDDEN_NO_ACCOUNTING_GROUPS.get(inst, set())
+        if str(group_jid).strip()
+    }
+
+
+def _is_bot_hidden_no_accounting_group(
+    instance_name: str | None,
+    group_jid: str | None,
+) -> bool:
+    gid = (group_jid or "").strip()
+
+    if not gid:
+        return False
+
+    return gid in _bot_hidden_no_accounting_group_ids(instance_name)
+    
+
 MIN_BOT_PROMO_ACTAS = 10
 
 
@@ -1172,7 +1225,15 @@ def _owned_group_ids_for_instance(db: Session, instance_name: str) -> list[str]:
         .all()
     )
 
-    return [gid for (gid,) in rows if gid]
+    hidden_no_accounting_groups = _bot_hidden_no_accounting_group_ids(
+        instance_name
+    )
+
+    return [
+        gid
+        for (gid,) in rows
+        if gid and gid not in hidden_no_accounting_groups
+    ]
 
 
 def _bot_groups_for_instance(db: Session, instance_name: str):
