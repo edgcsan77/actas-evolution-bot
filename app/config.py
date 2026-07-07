@@ -84,6 +84,13 @@ class Settings(BaseSettings):
     PROVIDER12_GROUP_ESPECIALES: str = ""
 
     # PROVIDER 13
+    PROVIDER13_GROUP_NACIMIENTO_1: str = ""
+    PROVIDER13_GROUP_FOLIO: str = ""
+    PROVIDER13_GROUP_NACIMIENTO_2: str = ""
+    PROVIDER13_GROUP_CADENA: str = ""
+    PROVIDER13_GROUP_ESPECIALES: str = ""
+
+    # PROVIDER 14
     MAYAPROVIDER_GROUP_1: str = ""
     MAYAPROVIDER_GROUP_2: str = ""
 
