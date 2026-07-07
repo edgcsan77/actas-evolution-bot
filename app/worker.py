@@ -529,6 +529,7 @@ PROVIDER_LABELS_SUPPORT = {
     "PROVIDER10": "LAZARO WEB 2",
     "PROVIDER11": "LAZARO WEB 3",
     "PROVIDER12": "VILLAFUERTE",
+    "PROVIDER13": "RL",
     "MAYAPROVIDER": "PROVEEDOR DE MAYA",
 }
 
@@ -609,6 +610,19 @@ SUPPORT_ERROR_LABELS_ES = {
     "PROVIDER12_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para VILLAFUERTE.",
     "PROVIDER12_NACIMIENTO_GROUP_NOT_CONFIGURED": "No hay grupo de nacimiento configurado para VILLAFUERTE.",
     "PROVIDER12_ESPECIALES_GROUP_NOT_CONFIGURED": "No hay grupo de especiales configurado para VILLAFUERTE.",
+
+    "PROVIDER13_NACIMIENTO_GROUP_NOT_CONFIGURED": (
+        "No hay grupos de nacimiento configurados para RL."
+    ),
+    "PROVIDER13_FOLIO_GROUP_NOT_CONFIGURED": (
+        "No hay grupo de foliadas configurado para RL."
+    ),
+    "PROVIDER13_CADENA_GROUP_NOT_CONFIGURED": (
+        "No hay grupo de cadena configurado para RL."
+    ),
+    "PROVIDER13_ESPECIALES_GROUP_NOT_CONFIGURED": (
+        "No hay grupo de especiales configurado para RL."
+    ),
 }
 
 
@@ -629,7 +643,7 @@ def _support_provider_from_error(err: str | None) -> str:
     # PROVIDER1_SEND_FAILED
     # PROVIDER_1_SEND_FAILED
     # PROVIDER10_DOWNLOAD_FAILED
-    m = re.search(r"\bPROVIDER_?(10|11|[1-9])(?=\b|_)", text)
+    m = re.search(r"\bPROVIDER_?(10|11|12|13|[1-9])(?=\b|_)", text)
     if m:
         return f"PROVIDER{m.group(1)}"
 
@@ -675,7 +689,7 @@ def _clean_error_code(code: str | None) -> str:
 
     # Algunos errores llegan como PROVIDER1_WRONG_CURP_IN_PDF.
     # Para traducirlos mejor quitamos el prefijo del proveedor.
-    code_up = re.sub(r"^PROVIDER(?:10|11|[1-9])_", "", code_up)
+    code_up = re.sub(r"^PROVIDER(?:10|11|12|13|[1-9])_", "", code_up)
 
     # Y también MAYAPROVIDER_...
     code_up = re.sub(r"^MAYAPROVIDER_", "", code_up)
@@ -1757,7 +1771,8 @@ def _enabled_providers(db) -> list[str]:
     p10 = _get_or_create_provider(db, "PROVIDER10", False)
     p11 = _get_or_create_provider(db, "PROVIDER11", False)
     p12 = _get_or_create_provider(db, "PROVIDER12", False)
-    p13 = _get_or_create_provider(db, "MAYAPROVIDER", False)
+    p13 = _get_or_create_provider(db, "PROVIDER13", False)
+    p_maya = _get_or_create_provider(db, "MAYAPROVIDER", False)
 
     enabled = []
     if p1.is_enabled:
@@ -1784,6 +1799,8 @@ def _enabled_providers(db) -> list[str]:
         enabled.append("PROVIDER11")
     if p12.is_enabled:
         enabled.append("PROVIDER12")
+    if p13.is_enabled:
+        enabled.append("PROVIDER13")
 
     return enabled
 
@@ -2181,6 +2198,79 @@ def _pick_provider12_group(term: str | None, act_type: str | None, request_id: i
     return group
 
 
+def _pick_provider13_group(
+    term: str | None,
+    act_type: str | None,
+    request_id: int,
+) -> str:
+    act_type_up = (act_type or "").upper().strip()
+
+    nacimiento_group_1 = (
+        settings.PROVIDER13_GROUP_NACIMIENTO_1 or ""
+    ).strip()
+
+    nacimiento_group_2 = (
+        settings.PROVIDER13_GROUP_NACIMIENTO_2 or ""
+    ).strip()
+
+    folio_group = (
+        settings.PROVIDER13_GROUP_FOLIO or ""
+    ).strip()
+
+    cadena_group = (
+        settings.PROVIDER13_GROUP_CADENA or ""
+    ).strip()
+
+    especiales_group = (
+        settings.PROVIDER13_GROUP_ESPECIALES or ""
+    ).strip()
+
+    is_cadena_req = is_chain(term)
+    is_folio_req = _is_folio_act(act_type_up)
+    is_birth_req = _is_birth_request(term, act_type_up)
+
+    # 1. CADENA primero.
+    # Una cadena con la palabra "folio" debe seguir yendo a RL cadena.
+    if is_cadena_req:
+        if not cadena_group:
+            raise RuntimeError("PROVIDER13_CADENA_GROUP_NOT_CONFIGURED")
+        return cadena_group
+
+    # 2. Solicitudes foliadas.
+    if is_folio_req:
+        if not folio_group:
+            raise RuntimeError("PROVIDER13_FOLIO_GROUP_NOT_CONFIGURED")
+        return folio_group
+
+    # 3. Nacimientos por CURP: balance entre los dos grupos.
+    if is_birth_req:
+        nacimiento_groups = [
+            group
+            for group in (
+                nacimiento_group_1,
+                nacimiento_group_2,
+            )
+            if group
+        ]
+
+        if not nacimiento_groups:
+            raise RuntimeError(
+                "PROVIDER13_NACIMIENTO_GROUP_NOT_CONFIGURED"
+            )
+
+        return nacimiento_groups[
+            (request_id - 1) % len(nacimiento_groups)
+        ]
+
+    # 4. Matrimonio, defunción, divorcio y otros especiales.
+    if not especiales_group:
+        raise RuntimeError(
+            "PROVIDER13_ESPECIALES_GROUP_NOT_CONFIGURED"
+        )
+
+    return especiales_group
+
+
 def _pick_provider_group(
     provider_name: str,
     term: str | None,
@@ -2247,6 +2337,9 @@ def _pick_provider_group(
     if provider_name == "PROVIDER12":
         return _pick_provider12_group(term, act_type, request_id)
 
+    if provider_name == "PROVIDER13":
+        return _pick_provider13_group(term, act_type, request_id)
+
     if provider_name == "MAYAPROVIDER":
         provider11_groups = [
             settings.MAYAPROVIDER_GROUP_1,
@@ -2264,7 +2357,17 @@ def _pick_provider_group(
 
 
 def _build_provider_message(provider_name: str, term: str, act_type: str) -> str | None:
-    if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9", "PROVIDER12", "MAYAPROVIDER"):
+    if provider_name in (
+        "PROVIDER1",
+        "PROVIDER2",
+        "PROVIDER5",
+        "PROVIDER6",
+        "PROVIDER8",
+        "PROVIDER9",
+        "PROVIDER12",
+        "PROVIDER13",
+        "MAYAPROVIDER",
+    ):
         provider_type = provider_label_for_type(act_type)
 
         if is_chain(term):
@@ -3910,7 +4013,17 @@ def process_request(request_id: int):
 
             return
 
-        if provider_name in ("PROVIDER1", "PROVIDER2", "PROVIDER5", "PROVIDER6", "PROVIDER8", "PROVIDER9", "PROVIDER12", "MAYAPROVIDER"):
+        if provider_name in (
+            "PROVIDER1",
+            "PROVIDER2",
+            "PROVIDER5",
+            "PROVIDER6",
+            "PROVIDER8",
+            "PROVIDER9",
+            "PROVIDER12",
+            "PROVIDER13",
+            "MAYAPROVIDER",
+        ):
             print("PROVIDER_SEND_TO_PROVIDER =", req.id, time.time(), flush=True)
         
             send_ok = False
@@ -4326,6 +4439,7 @@ def process_request(request_id: int):
                             "PROVIDER8",
                             "PROVIDER9",
                             "PROVIDER12",
+                            "PROVIDER13",
                         }
                         and p != provider_name
                         and not (p == "PROVIDER6" and not _is_provider6_allowed_request(req.curp, req.act_type))
