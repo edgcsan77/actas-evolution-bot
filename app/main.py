@@ -11258,8 +11258,6 @@ def panel_actas(
                       </div>
                     </div>
 
-                    <div class="provider-card provider-placeholder"></div>
-
                     <div class="provider-card">
                       <div class="provider-name">LAZARO 1</div>
                       <div style="margin:6px 0;">
