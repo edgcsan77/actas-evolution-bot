@@ -333,6 +333,7 @@ def _provider_from_mode(mode: str | None) -> str | None:
         "PROVIDER10",
         "PROVIDER11",
         "PROVIDER12",
+        "PROVIDER13",
         "MAYAPROVIDER",
     }:
         return provider_name
