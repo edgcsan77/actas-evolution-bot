@@ -202,6 +202,38 @@ def send_text(number: str, text: str, instance_name: str = None):
     )
 
 
+def send_reaction(
+    number: str,
+    message_id: str,
+    emoji: str = "🙌",
+    instance_name: str = None,
+    from_me: bool = False,
+):
+    instance = instance_name or settings.EVOLUTION_INSTANCE
+    url = f"{settings.EVOLUTION_BASE_URL}/message/sendReaction/{instance}"
+
+    clean_number = _normalize_number(number)
+
+    payload = {
+        "key": {
+            "remoteJid": clean_number,
+            "fromMe": from_me,
+            "id": message_id,
+        },
+        "reaction": emoji,
+    }
+
+    print("SEND_REACTION_URL =", url, flush=True)
+    print("SEND_REACTION_PAYLOAD =", payload, flush=True)
+
+    return _post_send_text_with_retries(
+        url,
+        payload,
+        label="SEND_REACTION",
+        max_attempts=2,
+    )
+
+
 def send_document(number: str, pdf_url: str, filename: str = "acta.pdf", caption: str = "", instance_name: str = None):
     instance = instance_name or settings.EVOLUTION_INSTANCE
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{instance}"
