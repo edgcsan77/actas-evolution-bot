@@ -26,6 +26,7 @@ from app.config import settings
 from app.db import Base, engine, get_db, SessionLocal
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion, GroupAlias, GroupCategory, BotControl, BotRechargeLog, ApiClient, ApiCreditLog
 from app.queue import request_queue, slow_request_queue, redis_conn, broadcast_queue, ack_queue
+from rq.registry import StartedJobRegistry, DeferredJobRegistry, ScheduledJobRegistry, FailedJobRegistry
 from app.worker import (
     process_request,
     provider3_keepalive_job,
@@ -123,6 +124,10 @@ PANEL_HTML_CACHE_VERSION = "2026-07-01-qr-token-v1"
 
 PANEL_STREAM_SLEEP = 5
 PANEL_STREAM_ENABLED = False
+
+CLEANUP_ENABLED_KEY = "cleanup:enabled"
+CLEANUP_MAX_AGE_MINUTES_KEY = "cleanup:max_age_minutes"
+CLEANUP_DEFAULT_MAX_AGE_MINUTES = 45
 
 EVOLUTION_BASE_URL = settings.EVOLUTION_BASE_URL.rstrip("/")
 EVOLUTION_APIKEY = settings.EVOLUTION_API_KEY
@@ -9706,6 +9711,83 @@ def panel_actas(
         
         provider_states = _esc(_providers_status_text(db)).replace("\n", "<br>")
 
+        cleanup_enabled = _cleanup_enabled(db)
+        cleanup_max_age_minutes = _cleanup_max_age_minutes(db)
+        
+        cleanup_panel_html = f"""
+        <div class="box">
+          <div class="head">
+            <div>
+              <strong>🧹 Cleanup / Atoradas</strong>
+              <span class="small">
+                Configura el auto-cierre de app.cleanup y limpia solicitudes QUEUED/PROCESSING viejas.
+              </span>
+            </div>
+          </div>
+        
+          <div class="cards" style="padding:16px;grid-template-columns:repeat(2,minmax(0,1fr));">
+            <div class="card">
+              <div class="label">Auto cleanup</div>
+              <div class="value" style="font-size:1.6rem;">
+                {"ACTIVO" if cleanup_enabled else "DESACTIVADO"}
+              </div>
+        
+              <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                <label style="display:flex;align-items:center;gap:8px;font-weight:800;">
+                  <input id="cleanupEnabled" type="checkbox" {"checked" if cleanup_enabled else ""}>
+                  Activar app.cleanup
+                </label>
+        
+                <input
+                  id="cleanupMaxAgeMinutes"
+                  type="number"
+                  min="1"
+                  max="1440"
+                  step="1"
+                  value="{cleanup_max_age_minutes}"
+                  style="width:120px;padding:10px;border:1px solid #d1d5db;border-radius:10px;"
+                >
+        
+                <span class="small">minutos máximos antes de cerrar atoradas</span>
+        
+                <button type="button" class="btn btn-primary" onclick="saveCleanupSettings()">
+                  Guardar configuración
+                </button>
+              </div>
+            </div>
+        
+            <div class="card">
+              <div class="label">Borrado manual Redis/RQ + DB</div>
+              <div class="value" style="font-size:1.6rem;">QUEUED / PROCESSING</div>
+        
+              <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                <input
+                  id="cleanupPurgeMinutes"
+                  type="number"
+                  min="1"
+                  max="1440"
+                  step="1"
+                  value="{cleanup_max_age_minutes}"
+                  style="width:120px;padding:10px;border:1px solid #d1d5db;border-radius:10px;"
+                >
+        
+                <span class="small">borrar con más de X minutos</span>
+        
+                <button type="button" class="btn btn-warning" onclick="previewCleanupPurge()">
+                  Revisar cuántas
+                </button>
+        
+                <button type="button" class="btn btn-danger" onclick="purgeCleanupStuck()">
+                  Borrar atoradas
+                </button>
+              </div>
+        
+              <div id="cleanupStatusBox" class="small" style="margin-top:12px;"></div>
+            </div>
+          </div>
+        </div>
+        """
+
         metrics_html = ""
         if delivery_metrics:
             metrics_html = f"""
@@ -11671,6 +11753,8 @@ def panel_actas(
         </div>
         """
 
+        html += cleanup_panel_html
+
         html += metrics_html
 
         html += f"""
@@ -12324,6 +12408,125 @@ def panel_actas(
       <script>
         const PANEL_STREAM_ENABLED = {json.dumps(PANEL_STREAM_ENABLED)};
         let broadcastRunning = false;
+
+        async function saveCleanupSettings() {{
+          const enabled = !!document.getElementById("cleanupEnabled")?.checked;
+          const maxAge = Number(document.getElementById("cleanupMaxAgeMinutes")?.value || 0);
+        
+          if (!maxAge || maxAge < 1 || maxAge > 1440) {{
+            alert("Ingresa minutos válidos entre 1 y 1440.");
+            return;
+          }}
+        
+          try {{
+            const res = await fetch(`/panel/cleanup/settings?token=docifymx2026`, {{
+              method: "POST",
+              headers: {{
+                "Content-Type": "application/json"
+              }},
+              body: JSON.stringify({{
+                enabled,
+                max_age_minutes: maxAge
+              }})
+            }});
+        
+            const data = await res.json();
+        
+            if (!data.ok) {{
+              alert(data.error || "No se pudo guardar configuración.");
+              return;
+            }}
+        
+            alert(`Cleanup actualizado: ${{data.enabled ? "ACTIVO" : "DESACTIVADO"}} · ${{data.max_age_minutes}} min`);
+            location.reload();
+        
+          }} catch (e) {{
+            alert("Error conectando con el servidor.");
+          }}
+        }}
+        
+        async function previewCleanupPurge() {{
+          const minutes = Number(document.getElementById("cleanupPurgeMinutes")?.value || 0);
+          const box = document.getElementById("cleanupStatusBox");
+        
+          if (!minutes || minutes < 1 || minutes > 1440) {{
+            alert("Ingresa minutos válidos entre 1 y 1440.");
+            return;
+          }}
+        
+          if (box) {{
+            box.innerHTML = "Revisando atoradas...";
+          }}
+        
+          try {{
+            const res = await fetch(`/panel/cleanup/status?token=docifymx2026&older_than_minutes=${{encodeURIComponent(minutes)}}`);
+            const data = await res.json();
+        
+            if (!data.ok) {{
+              alert(data.error || "No se pudo revisar.");
+              return;
+            }}
+        
+            if (box) {{
+              box.innerHTML = `
+                Encontradas: <strong>${{data.stuck_count}}</strong>
+                solicitudes QUEUED/PROCESSING con más de
+                <strong>${{data.check_minutes}}</strong> minutos.
+              `;
+            }}
+        
+          }} catch (e) {{
+            alert("Error conectando con el servidor.");
+          }}
+        }}
+        
+        async function purgeCleanupStuck() {{
+          const minutes = Number(document.getElementById("cleanupPurgeMinutes")?.value || 0);
+        
+          if (!minutes || minutes < 1 || minutes > 1440) {{
+            alert("Ingresa minutos válidos entre 1 y 1440.");
+            return;
+          }}
+        
+          const ok = confirm(
+            `¿Seguro que deseas BORRAR de Redis/RQ y base de datos las solicitudes ` +
+            `QUEUED/PROCESSING con más de ${{minutes}} minutos?\n\n` +
+            `Esta acción no se puede deshacer.`
+          );
+        
+          if (!ok) return;
+        
+          try {{
+            const res = await fetch(`/panel/cleanup/purge-stuck?token=docifymx2026`, {{
+              method: "POST",
+              headers: {{
+                "Content-Type": "application/json"
+              }},
+              body: JSON.stringify({{
+                older_than_minutes: minutes
+              }})
+            }});
+        
+            const data = await res.json();
+        
+            if (!data.ok) {{
+              alert(data.error || "No se pudo borrar.");
+              return;
+            }}
+        
+            alert(
+              `Limpieza lista.\n\n` +
+              `Encontradas: ${{data.found}}\n` +
+              `Borradas DB: ${{data.deleted_db}}\n` +
+              `Jobs RQ borrados: ${{data.rq?.deleted || 0}}`
+            );
+        
+            location.reload();
+        
+          }} catch (e) {{
+            alert("Error conectando con el servidor.");
+          }}
+        }}
 
         let panelAudioRecorder = null;
         let panelAudioChunks = [];
@@ -17119,6 +17322,260 @@ def _set_app_setting(db: Session, key: str, value: str):
 
     db.commit()
     return row
+
+
+def _cleanup_enabled(db: Session) -> bool:
+    value = _get_app_setting(db, CLEANUP_ENABLED_KEY, "1")
+    return str(value).strip().lower() in {"1", "true", "yes", "si", "sí", "on", "enabled"}
+
+
+def _cleanup_max_age_minutes(db: Session) -> int:
+    raw = _get_app_setting(
+        db,
+        CLEANUP_MAX_AGE_MINUTES_KEY,
+        str(CLEANUP_DEFAULT_MAX_AGE_MINUTES),
+    )
+
+    try:
+        value = int(float(str(raw).strip()))
+    except Exception:
+        value = CLEANUP_DEFAULT_MAX_AGE_MINUTES
+
+    return max(1, min(value, 1440))
+
+
+def _rq_job_has_request_id(job, request_ids: set[int]) -> bool:
+    try:
+        args = list(getattr(job, "args", None) or [])
+        kwargs = dict(getattr(job, "kwargs", None) or {})
+
+        candidates = []
+
+        for arg in args:
+            candidates.append(arg)
+
+        for key in ("request_id", "req_id", "id"):
+            if key in kwargs:
+                candidates.append(kwargs.get(key))
+
+        for item in candidates:
+            try:
+                if int(item) in request_ids:
+                    return True
+            except Exception:
+                continue
+
+        return False
+
+    except Exception:
+        return False
+
+
+def _delete_rq_jobs_for_request_ids(request_ids: list[int]) -> dict:
+    """
+    Elimina jobs pendientes/diferidos/programados/fallidos de RQ que traigan
+    como argumento el request_id. Esto limpia Redis/RQ.
+
+    Nota: si un job ya está ejecutándose dentro de un worker, borrar metadata
+    de RQ no mata el proceso Python en curso. Para esos casos, al borrar la fila
+    de RequestLog el worker ya no debería poder continuar normalmente.
+    """
+    ids_set = {int(x) for x in request_ids if x}
+    result = {
+        "checked": 0,
+        "deleted": 0,
+        "errors": [],
+    }
+
+    if not ids_set:
+        return result
+
+    queues = [
+        request_queue,
+        slow_request_queue,
+    ]
+
+    registry_classes = [
+        StartedJobRegistry,
+        DeferredJobRegistry,
+        ScheduledJobRegistry,
+        FailedJobRegistry,
+    ]
+
+    for queue in queues:
+        job_ids = set()
+
+        try:
+            job_ids.update(queue.job_ids or [])
+        except Exception as e:
+            result["errors"].append(f"{getattr(queue, 'name', 'queue')}:job_ids:{e}")
+
+        for registry_cls in registry_classes:
+            try:
+                registry = registry_cls(queue=queue)
+                job_ids.update(registry.get_job_ids() or [])
+            except Exception as e:
+                result["errors"].append(
+                    f"{getattr(queue, 'name', 'queue')}:{registry_cls.__name__}:{e}"
+                )
+
+        for job_id in job_ids:
+            try:
+                result["checked"] += 1
+                job = queue.fetch_job(job_id)
+
+                if not job:
+                    continue
+
+                if not _rq_job_has_request_id(job, ids_set):
+                    continue
+
+                job.delete()
+                result["deleted"] += 1
+
+            except Exception as e:
+                result["errors"].append(f"{getattr(queue, 'name', 'queue')}:{job_id}:{e}")
+
+    return result
+
+
+def _cleanup_stuck_candidates(db: Session, older_than_minutes: int) -> list[RequestLog]:
+    cutoff = _utc_now_naive() - timedelta(minutes=older_than_minutes)
+
+    return (
+        db.query(RequestLog)
+        .filter(
+            RequestLog.status.in_(["QUEUED", "PROCESSING"]),
+            RequestLog.created_at < cutoff,
+        )
+        .order_by(RequestLog.created_at.asc(), RequestLog.id.asc())
+        .all()
+    )
+
+
+@app.get("/panel/cleanup/status")
+def panel_cleanup_status(
+    request: Request,
+    older_than_minutes: int | None = None,
+    db: Session = Depends(get_db),
+):
+    if not _is_valid_admin_panel_token(request):
+        return {"ok": False, "error": "UNAUTHORIZED"}
+
+    max_age_minutes = _cleanup_max_age_minutes(db)
+    check_minutes = older_than_minutes or max_age_minutes
+    check_minutes = max(1, min(int(check_minutes), 1440))
+
+    rows = _cleanup_stuck_candidates(db, check_minutes)
+
+    return {
+        "ok": True,
+        "enabled": _cleanup_enabled(db),
+        "max_age_minutes": max_age_minutes,
+        "check_minutes": check_minutes,
+        "stuck_count": len(rows),
+        "items": [
+            {
+                "id": r.id,
+                "status": r.status,
+                "curp": r.curp,
+                "act_type": r.act_type,
+                "provider_name": r.provider_name,
+                "instance_name": r.instance_name,
+                "created_at": str(r.created_at),
+                "updated_at": str(r.updated_at),
+                "error_message": r.error_message,
+            }
+            for r in rows[:80]
+        ],
+    }
+
+
+@app.post("/panel/cleanup/settings")
+def panel_cleanup_settings(
+    request: Request,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    if not _is_valid_admin_panel_token(request):
+        return {"ok": False, "error": "UNAUTHORIZED"}
+
+    enabled = bool(payload.get("enabled"))
+    max_age_raw = payload.get("max_age_minutes")
+
+    try:
+        max_age_minutes = int(float(max_age_raw))
+    except Exception:
+        return {"ok": False, "error": "MINUTOS_INVALIDOS"}
+
+    if max_age_minutes < 1 or max_age_minutes > 1440:
+        return {"ok": False, "error": "El rango permitido es de 1 a 1440 minutos"}
+
+    _set_app_setting(db, CLEANUP_ENABLED_KEY, "1" if enabled else "0")
+    _set_app_setting(db, CLEANUP_MAX_AGE_MINUTES_KEY, str(max_age_minutes))
+
+    _clear_panel_cache()
+
+    return {
+        "ok": True,
+        "enabled": enabled,
+        "max_age_minutes": max_age_minutes,
+    }
+
+
+@app.post("/panel/cleanup/purge-stuck")
+def panel_cleanup_purge_stuck(
+    request: Request,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    if not _is_valid_admin_panel_token(request):
+        return {"ok": False, "error": "UNAUTHORIZED"}
+
+    try:
+        older_than_minutes = int(float(payload.get("older_than_minutes")))
+    except Exception:
+        return {"ok": False, "error": "MINUTOS_INVALIDOS"}
+
+    if older_than_minutes < 1 or older_than_minutes > 1440:
+        return {"ok": False, "error": "El rango permitido es de 1 a 1440 minutos"}
+
+    rows = _cleanup_stuck_candidates(db, older_than_minutes)
+    request_ids = [int(r.id) for r in rows if r.id]
+
+    rq_result = _delete_rq_jobs_for_request_ids(request_ids)
+
+    deleted_db = 0
+
+    if request_ids:
+        deleted_db = (
+            db.query(RequestLog)
+            .filter(RequestLog.id.in_(request_ids))
+            .delete(synchronize_session=False)
+        )
+        db.commit()
+
+    _clear_panel_cache()
+
+    print(
+        "PANEL_CLEANUP_PURGE_STUCK =",
+        {
+            "older_than_minutes": older_than_minutes,
+            "request_ids": request_ids,
+            "deleted_db": deleted_db,
+            "rq_result": rq_result,
+        },
+        flush=True,
+    )
+
+    return {
+        "ok": True,
+        "older_than_minutes": older_than_minutes,
+        "found": len(request_ids),
+        "deleted_db": int(deleted_db or 0),
+        "rq": rq_result,
+        "request_ids": request_ids[:200],
+    }
 
 
 def _bot_manager_name_key(instance_name: str) -> str:
