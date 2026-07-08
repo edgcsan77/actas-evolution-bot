@@ -110,7 +110,11 @@ def _worker_stop_if_instance_blocked(req, db, label: str = "WORKER_BLOCKED_INSTA
             },
             flush=True,
         )
-        return False
+    
+        # Importante:
+        # Si el bot está bloqueado y el request ya está en estado terminal,
+        # no lo modificamos, pero SÍ detenemos el procesamiento.
+        return True
 
     now = _utc_now_naive()
 
