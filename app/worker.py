@@ -42,6 +42,93 @@ PROVIDER4_NEW_MAX_CHECK_ATTEMPTS = 90
 
 API_STALE_TIMEOUT_MINUTES = 45
 
+BLOCKED_INSTANCES_KEY = "blocked_instances_no_response"
+ADMIN_BLOCKED_INSTANCES_KEY = "admin_blocked_instances_no_minipanel_unlock"
+
+
+def _worker_redis_sismember_str(key: str, value: str) -> bool:
+    value = (value or "").strip()
+
+    if not value:
+        return False
+
+    try:
+        if redis_conn.sismember(key, value):
+            return True
+
+        if redis_conn.sismember(key, value.encode("utf-8")):
+            return True
+
+        return False
+
+    except Exception as e:
+        print(
+            "WORKER_BLOCK_CHECK_REDIS_ERROR =",
+            {
+                "key": key,
+                "value": value,
+                "error": repr(e),
+            },
+            flush=True,
+        )
+        return False
+
+
+def _worker_is_instance_blocked(instance_name: str | None) -> bool:
+    instance_name = (instance_name or "").strip()
+
+    if not instance_name:
+        return False
+
+    return bool(
+        _worker_redis_sismember_str(BLOCKED_INSTANCES_KEY, instance_name)
+        or _worker_redis_sismember_str(ADMIN_BLOCKED_INSTANCES_KEY, instance_name)
+    )
+
+
+def _worker_stop_if_instance_blocked(req, db, label: str = "WORKER_BLOCKED_INSTANCE") -> bool:
+    instance_name = (getattr(req, "instance_name", "") or "").strip()
+
+    if not _worker_is_instance_blocked(instance_name):
+        return False
+
+    now = _utc_now_naive()
+
+    req.status = "ERROR"
+    req.updated_at = now
+    req.error_message = "BOT_BLOCKED_BEFORE_PROVIDER_SUBMIT"
+    db.commit()
+
+    try:
+        _provider4_new_clear_flow(req.id)
+    except Exception as clear_exc:
+        print(
+            f"{label}_CLEAR_PROVIDER4_FLOW_ERROR =",
+            {
+                "request_id": getattr(req, "id", None),
+                "error": str(clear_exc),
+            },
+            flush=True,
+        )
+
+    print(
+        f"{label}_SKIPPED_PROVIDER =",
+        {
+            "request_id": getattr(req, "id", None),
+            "curp": getattr(req, "curp", None),
+            "act_type": getattr(req, "act_type", None),
+            "instance_name": instance_name,
+            "source_group_id": getattr(req, "source_group_id", None),
+            "provider_name": getattr(req, "provider_name", None),
+            "status": getattr(req, "status", None),
+            "error_message": getattr(req, "error_message", None),
+        },
+        flush=True,
+    )
+
+    return True
+
+
 def _current_queue_name() -> str:
     try:
         job = get_current_job(connection=redis_conn)
@@ -49,6 +136,7 @@ def _current_queue_name() -> str:
     except Exception as e:
         print("CURRENT_QUEUE_NAME_ERROR =", str(e), flush=True)
         return ""
+
 
 def _should_reroute_to_slow(provider_name: str | None) -> bool:
     return (provider_name or "").strip().upper() in SLOW_PROVIDERS
@@ -2603,6 +2691,16 @@ def _process_provider3(req, db):
 
 def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
 
+    if _worker_stop_if_instance_blocked(
+        req,
+        db,
+        label="WORKER_BLOCKED_INSTANCE_PROVIDER4_ENTRY",
+    ):
+        return {
+            "pending": True,
+            "reason": "BOT_BLOCKED_BEFORE_PROVIDER_SUBMIT",
+        }
+
     provider_name = (provider_name or "PROVIDER4").strip().upper()
 
     term = (req.curp or "").strip().upper()
@@ -2695,6 +2793,16 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
         # PASO 1: PETICIÓN
         # ==========================
         if phase != "SUBMITTED":
+            if _worker_stop_if_instance_blocked(
+                req,
+                db,
+                label="WORKER_BLOCKED_INSTANCE_BEFORE_LAZARO_SUBMIT",
+            ):
+                return {
+                    "pending": True,
+                    "reason": "BOT_BLOCKED_BEFORE_PROVIDER_SUBMIT",
+                }
+        
             submit_result = client.submit_peticion_new_api(
                 curp=term,
                 tipoa=tipoa,
@@ -2732,6 +2840,16 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
         # ==========================
         # PASO 2: CONSULTA PDF
         # ==========================
+        if _worker_stop_if_instance_blocked(
+            req,
+            db,
+            label="WORKER_BLOCKED_INSTANCE_BEFORE_LAZARO_VERIFY",
+        ):
+            return {
+                "pending": True,
+                "reason": "BOT_BLOCKED_BEFORE_PROVIDER_VERIFY",
+            }
+        
         attempts += 1
 
         if attempts > PROVIDER4_NEW_MAX_CHECK_ATTEMPTS:
@@ -3765,7 +3883,14 @@ def process_request(request_id: int):
         req = db.query(RequestLog).filter(RequestLog.id == request_id).first()
         if not req:
             return
-
+        
+        if _worker_stop_if_instance_blocked(
+            req,
+            db,
+            label="WORKER_BLOCKED_INSTANCE_AT_START",
+        ):
+            return
+        
         filename = _default_pdf_filename(req)
         
         current_status = (req.status or "").strip().upper()
