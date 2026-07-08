@@ -12409,9 +12409,14 @@ def panel_actas(
         const PANEL_STREAM_ENABLED = {json.dumps(PANEL_STREAM_ENABLED)};
         let broadcastRunning = false;
 
+        function getPanelToken() {{
+          return new URLSearchParams(window.location.search).get("token") || "";
+        }}
+        
         async function saveCleanupSettings() {{
           const enabled = !!document.getElementById("cleanupEnabled")?.checked;
           const maxAge = Number(document.getElementById("cleanupMaxAgeMinutes")?.value || 0);
+          const panelToken = getPanelToken();
         
           if (!maxAge || maxAge < 1 || maxAge > 1440) {{
             alert("Ingresa minutos válidos entre 1 y 1440.");
@@ -12419,7 +12424,7 @@ def panel_actas(
           }}
         
           try {{
-            const res = await fetch(`/panel/cleanup/settings?token=docifymx2026`, {{
+            const res = await fetch(`/panel/cleanup/settings?token=${{encodeURIComponent(panelToken)}}`, {{
               method: "POST",
               headers: {{
                 "Content-Type": "application/json"
@@ -12448,6 +12453,7 @@ def panel_actas(
         async function previewCleanupPurge() {{
           const minutes = Number(document.getElementById("cleanupPurgeMinutes")?.value || 0);
           const box = document.getElementById("cleanupStatusBox");
+          const panelToken = getPanelToken();
         
           if (!minutes || minutes < 1 || minutes > 1440) {{
             alert("Ingresa minutos válidos entre 1 y 1440.");
@@ -12459,7 +12465,10 @@ def panel_actas(
           }}
         
           try {{
-            const res = await fetch(`/panel/cleanup/status?token=docifymx2026&older_than_minutes=${{encodeURIComponent(minutes)}}`);
+            const res = await fetch(
+              `/panel/cleanup/status?token=${{encodeURIComponent(panelToken)}}&older_than_minutes=${{encodeURIComponent(minutes)}}`
+            );
+        
             const data = await res.json();
         
             if (!data.ok) {{
@@ -12482,6 +12491,7 @@ def panel_actas(
         
         async function purgeCleanupStuck() {{
           const minutes = Number(document.getElementById("cleanupPurgeMinutes")?.value || 0);
+          const panelToken = getPanelToken();
         
           if (!minutes || minutes < 1 || minutes > 1440) {{
             alert("Ingresa minutos válidos entre 1 y 1440.");
@@ -12497,7 +12507,7 @@ def panel_actas(
           if (!ok) return;
         
           try {{
-            const res = await fetch(`/panel/cleanup/purge-stuck?token=docifymx2026`, {{
+            const res = await fetch(`/panel/cleanup/purge-stuck?token=${{encodeURIComponent(panelToken)}}`, {{
               method: "POST",
               headers: {{
                 "Content-Type": "application/json"
