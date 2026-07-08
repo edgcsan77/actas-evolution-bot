@@ -9720,7 +9720,7 @@ def panel_actas(
             <div>
               <strong>🧹 Cleanup / Atoradas</strong>
               <span class="small">
-                Configura el auto-cierre de app.cleanup y limpia solicitudes QUEUED/PROCESSING viejas.
+                Configura el auto-cierre de app.cleanup y limpia solicitudes EN COLA/PROCESANDO viejas.
               </span>
             </div>
           </div>
@@ -9758,7 +9758,7 @@ def panel_actas(
         
             <div class="card">
               <div class="label">Borrado manual Redis/RQ + DB</div>
-              <div class="value" style="font-size:1.6rem;">QUEUED / PROCESSING</div>
+              <div class="value" style="font-size:1.6rem;">EN COLA / PROCESANDO</div>
         
               <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
                 <input
@@ -12479,7 +12479,7 @@ def panel_actas(
             if (box) {{
               box.innerHTML = `
                 Encontradas: <strong>${{data.stuck_count}}</strong>
-                solicitudes QUEUED/PROCESSING con más de
+                solicitudes EN COLA/PROCESANDO con más de
                 <strong>${{data.check_minutes}}</strong> minutos.
               `;
             }}
@@ -12500,7 +12500,7 @@ def panel_actas(
         
           const ok = confirm(
             `¿Seguro que deseas BORRAR de Redis/RQ y base de datos las solicitudes ` +
-            `QUEUED/PROCESSING con más de ${{minutes}} minutos?\n\n` +
+            `EN COLA/PROCESANDO con más de ${{minutes}} minutos?\n\n` +
             `Esta acción no se puede deshacer.`
           );
         
