@@ -91,6 +91,10 @@ class Settings(BaseSettings):
     PROVIDER13_GROUP_ESPECIALES: str = ""
 
     # PROVIDER 14
+    PROVIDER14_PRIVATE_JID: str = ""
+    PROVIDER14_STEP_DELAY_SECONDS: float = 1.5
+
+    # MAYAPROVIDER
     MAYAPROVIDER_GROUP_1: str = ""
     MAYAPROVIDER_GROUP_2: str = ""
 
