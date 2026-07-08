@@ -92,6 +92,26 @@ def _worker_stop_if_instance_blocked(req, db, label: str = "WORKER_BLOCKED_INSTA
     if not _worker_is_instance_blocked(instance_name):
         return False
 
+    current_status = (getattr(req, "status", "") or "").strip().upper()
+
+    # MUY IMPORTANTE:
+    # No tocar solicitudes ya terminadas. Un job viejo en Redis/RQ no debe
+    # convertir un DONE o ERROR final en ERROR por bloqueo posterior.
+    if current_status in {"DONE", "ERROR"}:
+        print(
+            f"{label}_SKIP_TERMINAL_STATUS =",
+            {
+                "request_id": getattr(req, "id", None),
+                "curp": getattr(req, "curp", None),
+                "act_type": getattr(req, "act_type", None),
+                "instance_name": instance_name,
+                "status": current_status,
+                "error_message": getattr(req, "error_message", None),
+            },
+            flush=True,
+        )
+        return False
+
     now = _utc_now_naive()
 
     req.status = "ERROR"
@@ -1779,15 +1799,22 @@ def sweep_stuck_requests(max_age_minutes: int = 20, limit: int = 80):
                     continue
 
                 if req.status == "QUEUED":
+                    if _worker_stop_if_instance_blocked(
+                        req,
+                        db,
+                        label="SWEEP_BLOCKED_INSTANCE_QUEUED_NOT_REENQUEUED",
+                    ):
+                        continue
+                
                     req.updated_at = now
                     db.commit()
-
+                
                     queue = (
                         slow_request_queue
                         if (req.provider_name or "").upper() in SLOW_PROVIDERS
                         else request_queue
                     )
-
+                
                     queue.enqueue(process_request, req.id)
 
                     print("SWEEP_REQUEUED_QUEUED_REQUEST =", {
@@ -5183,6 +5210,13 @@ def process_request(request_id: int):
                     try:
                         _client_retry = client if "client" in locals() else None
                         if _client_retry is not None:
+                            if _worker_stop_if_instance_blocked(
+                                req,
+                                db,
+                                label="WORKER_BLOCKED_INSTANCE_BEFORE_LAZARO_ERROR_RECHECK",
+                            ):
+                                return
+                                
                             _retry_term = (
                                 getattr(req, "curp", "") or ""
                             ).strip().upper()
