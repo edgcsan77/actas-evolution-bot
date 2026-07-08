@@ -92,7 +92,7 @@ class Settings(BaseSettings):
 
     # PROVIDER 14
     PROVIDER14_PRIVATE_JID: str = ""
-    PROVIDER14_STEP_DELAY_SECONDS: float = 1.5
+    PROVIDER14_STEP_DELAY_SECONDS: float = 2.0
 
     # MAYAPROVIDER
     MAYAPROVIDER_GROUP_1: str = ""
