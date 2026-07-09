@@ -2442,9 +2442,19 @@ def _provider14_mode_message(act_type: str | None) -> str:
 
 
 def _provider14_mode_ack_key(mode_text: str) -> str:
-    safe = re.sub(r"[^A-Z0-9]+", "_", (mode_text or "").strip().upper()).strip("_")
-    return f"provider14:mode_ack:{safe}"
+    text = (mode_text or "").strip().upper()
 
+    text = re.sub(r"\bMAT\b", "MAT", text)
+    text = re.sub(r"\bDEF\b", "DEF", text)
+    text = re.sub(r"\bDIV\b", "DIV", text)
+    text = re.sub(r"\bNAC\b", "NAC", text)
+
+    text = text.replace("REVERSADO", "REVERSO")
+    text = text.replace("FOLIO", "FOLIADO")
+
+    safe = re.sub(r"[^A-Z0-9]+", "_", text).strip("_")
+    return f"provider14:mode_ack:{safe}"
+    
 
 def _provider14_lock_key() -> str:
     return "provider14:mode_send_lock"
