@@ -1040,7 +1040,7 @@ PROVIDER_LABELS = {
     "PROVIDER11": "LAZARO WEB 3",
     "PROVIDER12": "VILLAFUERTE",
     "PROVIDER13": "RL",
-    "PROVIDER13": "EMILIANO BOT",
+    "PROVIDER14": "EMILIANO BOT",
     "MAYAPROVIDER": "PROVEEDOR DE MAYA",
 }
 
@@ -9323,6 +9323,7 @@ def panel_provider_weight(payload: dict, db: Session = Depends(get_db)):
         "PROVIDER11",
         "PROVIDER12",
         "PROVIDER13",
+        "PROVIDER14",
     }:
         return {"ok": False, "error": "Proveedor inválido"}
 
@@ -11319,6 +11320,57 @@ def panel_actas(
                         <button
                           class="btn btn-danger"
                           onclick="toggleProvider('PROVIDER13','off')"
+                        >
+                          Desactivar
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="provider-card">
+                      <div class="provider-name">EMILIANO BOT</div>
+                    
+                      <div style="margin:6px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
+                          Prioridad de uso
+                        </div>
+                    
+                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
+                          <div style="display:flex;align-items:center;gap:6px;">
+                            <input
+                              id="weight_PROVIDER14"
+                              type="number"
+                              min="0"
+                              step="0.1"
+                              value="{provider_weight_map.get('PROVIDER14', 0)}"
+                              style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;"
+                            >
+                            <span style="font-size:12px;opacity:.7;">nivel</span>
+                          </div>
+                    
+                          <button
+                            class="btn btn-primary"
+                            onclick="saveProviderWeight('PROVIDER14')"
+                          >
+                            Aplicar
+                          </button>
+                        </div>
+                    
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">
+                          Más alto = este proveedor se usa más seguido
+                        </div>
+                      </div>
+                    
+                      <div class="provider-actions">
+                        <button
+                          class="btn btn-success"
+                          onclick="toggleProvider('PROVIDER14','on')"
+                        >
+                          Activar
+                        </button>
+                    
+                        <button
+                          class="btn btn-danger"
+                          onclick="toggleProvider('PROVIDER14','off')"
                         >
                           Desactivar
                         </button>
@@ -14543,6 +14595,7 @@ def startup():
         _get_or_create_provider(db, "PROVIDER11", False)
         _get_or_create_provider(db, "PROVIDER12", False)
         _get_or_create_provider(db, "PROVIDER13", False)
+        _get_or_create_provider(db, "PROVIDER14", False)
         _get_or_create_provider(db, "MAYAPROVIDER", False)
     
         current = _get_app_setting(db, "PROVIDER3_PHPSESSID", "")
@@ -17643,6 +17696,7 @@ def _providers_status_text(db: Session) -> str:
     p11 = _get_or_create_provider(db, "PROVIDER11", False)
     p12 = _get_or_create_provider(db, "PROVIDER12", False)
     p13 = _get_or_create_provider(db, "PROVIDER13", False)
+    p14 = _get_or_create_provider(db, "PROVIDER14", False)
 
     s1 = "ON" if p1.is_enabled else "OFF"
     s2 = "ON" if p2.is_enabled else "OFF"
@@ -17657,6 +17711,7 @@ def _providers_status_text(db: Session) -> str:
     s11 = "ON" if p11.is_enabled else "OFF"
     s12 = "ON" if p12.is_enabled else "OFF"
     s13 = "ON" if p13.is_enabled else "OFF"
+    s14 = "ON" if p14.is_enabled else "OFF"
 
     provider1_extra = ""
     provider2_extra = ""
@@ -17671,6 +17726,7 @@ def _providers_status_text(db: Session) -> str:
     provider11_extra = ""
     provider12_extra = ""
     provider13_extra = ""
+    provider14_extra = ""
 
     local_start = _panel_month_start()
     local_end = _panel_month_end()
@@ -17857,12 +17913,28 @@ def _providers_status_text(db: Session) -> str:
     except Exception as e:
         provider13_extra = f" | ERROR DB: {str(e)}"
 
+    try:
+        provider14_total = (
+            db.query(func.count(RequestLog.id))
+            .filter(
+                RequestLog.provider_name == "PROVIDER14",
+                RequestLog.status == "DONE",
+                RequestLog.created_at >= utc_start,
+                RequestLog.created_at < utc_end,
+            )
+            .scalar()
+        ) or 0
+        provider14_extra = f" | CURP hechas: {provider14_total}"
+    except Exception as e:
+        provider14_extra = f" | ERROR DB: {str(e)}"
+
     text = (
         f"ESCALANTE:      {s6}{provider6_extra}\n"
         f"ADMIN:          {s1}{provider1_extra}\n"
         f"LUIS:           {s5}{provider5_extra}\n"
         f"VILLAFUERTE:    {s12}{provider12_extra}\n"
         f"RL:             {s13}{provider13_extra}\n"
+        f"EMILIANO BOT:   {s14}{provider14_extra}\n"
         f"EMILIANO:       {s9}{provider9_extra}\n"
         f"LAZARO 1:       {s4}{provider4_extra}\n"
         f"LAZARO 2:       {s10}{provider10_extra}\n"
@@ -19122,9 +19194,20 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             if doc:
                 filename = doc.get("fileName") or ""
                 filename_id = _extract_identifier_from_filename_local(filename)
-            
+                
+                doc_caption = (
+                    doc.get("caption")
+                    or doc.get("title")
+                    or doc.get("fileName")
+                    or ""
+                )
+                
+                caption_id = _extract_provider_identifier_loose(doc_caption or "")
+                
                 print("PROVIDER_DOC_FILENAME =", filename, flush=True)
                 print("PROVIDER_DOC_FILENAME_IDENTIFIER =", filename_id, flush=True)
+                print("PROVIDER_DOC_CAPTION =", doc_caption, flush=True)
+                print("PROVIDER_DOC_CAPTION_IDENTIFIER =", caption_id, flush=True)
             
                 provider_msg_ts = data.get("messageTimestamp")
                 webhook_received_ts = time.time()
@@ -19144,7 +19227,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 print("PROVIDER1_PDF_RECEIVED =", media_message_id, pdf_received_ts, flush=True)
             
                 open_req = None
-                lookup_id = filename_id or provider_id
+                lookup_id = filename_id or provider_id or caption_id
             
                 media_b64_start_ts = time.time()
                 print("PROVIDER1_MEDIA_B64_START =", media_message_id, media_b64_start_ts, flush=True)
