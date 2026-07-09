@@ -446,6 +446,7 @@ def _provider_from_mode(mode: str | None) -> str | None:
         "PROVIDER11",
         "PROVIDER12",
         "PROVIDER13",
+        "PROVIDER14",
         "MAYAPROVIDER",
     }:
         return provider_name
@@ -643,6 +644,7 @@ PROVIDER_LABELS_SUPPORT = {
     "PROVIDER11": "LAZARO WEB 3",
     "PROVIDER12": "VILLAFUERTE",
     "PROVIDER13": "RL",
+    "PROVIDER14": "EMILIANO BOT",
     "MAYAPROVIDER": "PROVEEDOR DE MAYA",
 }
 
@@ -1892,6 +1894,7 @@ def _enabled_providers(db) -> list[str]:
     p11 = _get_or_create_provider(db, "PROVIDER11", False)
     p12 = _get_or_create_provider(db, "PROVIDER12", False)
     p13 = _get_or_create_provider(db, "PROVIDER13", False)
+    p14 = _get_or_create_provider(db, "PROVIDER14", False)
     p_maya = _get_or_create_provider(db, "MAYAPROVIDER", False)
 
     enabled = []
@@ -1921,6 +1924,8 @@ def _enabled_providers(db) -> list[str]:
         enabled.append("PROVIDER12")
     if p13.is_enabled:
         enabled.append("PROVIDER13")
+    if p14.is_enabled:
+        enabled.append("PROVIDER14")
 
     return enabled
 
@@ -2391,6 +2396,108 @@ def _pick_provider13_group(
     return especiales_group
 
 
+def _provider14_private_jid() -> str:
+    jid = (getattr(settings, "PROVIDER14_PRIVATE_JID", "") or "").strip()
+
+    if not jid:
+        raise RuntimeError("PROVIDER14_PRIVATE_JID_NOT_CONFIGURED")
+
+    return jid
+
+
+def _provider14_command_for_act_type(act_type: str | None) -> str:
+    act_type_up = (act_type or "").upper().strip()
+    is_folio = _is_folio_act(act_type_up)
+
+    if "MATRIMONIO" in act_type_up or "MATRI" in act_type_up:
+        prefix = "Mat"
+    elif "DEFUNCION" in act_type_up or "DEFUN" in act_type_up:
+        prefix = "Def"
+    elif "DIVORCIO" in act_type_up or "DIVOR" in act_type_up:
+        prefix = "Div"
+    elif "NACIMIENTO" in act_type_up or "NAC" in act_type_up:
+        prefix = "Nac"
+    else:
+        raise RuntimeError("PROVIDER14_ACT_TYPE_NOT_ALLOWED")
+
+    return f"{prefix} foliado" if is_folio else f"{prefix} reverso"
+
+
+def _provider14_term_text(term: str | None, act_type: str | None) -> str:
+    term_clean = (term or "").strip().upper()
+    act_type_up = (act_type or "").upper().strip()
+
+    if "MATRIMONIO" in act_type_up or "MATRI" in act_type_up:
+        tipo = "matrimonio"
+    elif "DEFUNCION" in act_type_up or "DEFUN" in act_type_up:
+        tipo = "defuncion"
+    elif "DIVORCIO" in act_type_up or "DIVOR" in act_type_up:
+        tipo = "divorcio"
+    else:
+        tipo = "nacimiento"
+
+    return f"{term_clean} {tipo}"
+
+
+def _send_provider14_request(req, db):
+    provider_jid = _provider14_private_jid()
+    sender_instance = _provider_sender_instance("PROVIDER14", req)
+
+    command_text = _provider14_command_for_act_type(req.act_type)
+    term_text = _provider14_term_text(req.curp, req.act_type)
+
+    delay = float(
+        getattr(settings, "PROVIDER14_STEP_DELAY_SECONDS", 2.0) or 2.0
+    )
+
+    print("PROVIDER14_SEND_COMMAND =", {
+        "req_id": req.id,
+        "provider_jid": provider_jid,
+        "command_text": command_text,
+        "term_text": term_text,
+        "sender_instance": sender_instance,
+    }, flush=True)
+
+    send_text(
+        provider_jid,
+        command_text,
+        instance_name=sender_instance,
+    )
+
+    time.sleep(max(0.8, delay))
+
+    resp_json = send_text(
+        provider_jid,
+        term_text,
+        instance_name=sender_instance,
+    )
+
+    provider_sent_msg_id = (
+        (resp_json or {}).get("key", {}).get("id")
+        or (resp_json or {}).get("data", {}).get("key", {}).get("id")
+        or (resp_json or {}).get("id")
+        or ""
+    )
+
+    req.provider_group_id = provider_jid
+    req.provider_message = f"{command_text}\n{term_text}"
+
+    if provider_sent_msg_id:
+        req.provider_message_id = provider_sent_msg_id
+
+    req.updated_at = _utc_now_naive()
+    db.commit()
+
+    print("PROVIDER14_SEND_OK =", {
+        "req_id": req.id,
+        "provider_jid": provider_jid,
+        "provider_sent_msg_id": provider_sent_msg_id,
+        "provider_message": req.provider_message,
+    }, flush=True)
+
+    return True
+
+
 def _pick_provider_group(
     provider_name: str,
     term: str | None,
@@ -2460,6 +2567,9 @@ def _pick_provider_group(
     if provider_name == "PROVIDER13":
         return _pick_provider13_group(term, act_type, request_id)
 
+    if provider_name == "PROVIDER14":
+        return _provider14_private_jid()
+
     if provider_name == "MAYAPROVIDER":
         provider11_groups = [
             settings.MAYAPROVIDER_GROUP_1,
@@ -2500,6 +2610,9 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
             return f"{term}"
 
         return f"{term} {provider_type}"
+
+    if provider_name == "PROVIDER14":
+        return f"{_provider14_command_for_act_type(act_type)}\n{_provider14_term_text(term, act_type)}"
 
     if provider_name == "PROVIDER3":
         return None
@@ -4179,6 +4292,7 @@ def process_request(request_id: int):
             "PROVIDER9",
             "PROVIDER12",
             "PROVIDER13",
+            "PROVIDER14",
             "MAYAPROVIDER",
         ):
             print("PROVIDER_SEND_TO_PROVIDER =", req.id, time.time(), flush=True)
@@ -4190,6 +4304,11 @@ def process_request(request_id: int):
                 try:
                     sender_instance = _provider_sender_instance(provider_name, req)
                     print("PROVIDER_SENDER_INSTANCE =", sender_instance, flush=True)
+
+                    if provider_name == "PROVIDER14":
+                        _send_provider14_request(req, db)
+                        send_ok = True
+                        break
                     
                     resp_json = send_group_text(provider_group_id, text_to_provider, sender_instance)
                     
@@ -4597,6 +4716,7 @@ def process_request(request_id: int):
                             "PROVIDER9",
                             "PROVIDER12",
                             "PROVIDER13",
+                            "PROVIDER14",
                         }
                         and p != provider_name
                         and not (p == "PROVIDER6" and not _is_provider6_allowed_request(req.curp, req.act_type))
@@ -4636,11 +4756,14 @@ def process_request(request_id: int):
                             flush=True,
                         )
                 
-                        send_group_text(
-                            req.provider_group_id,
-                            req.provider_message,
-                            _provider_sender_instance(fallback_provider, req),
-                        )
+                        if fallback_provider == "PROVIDER14":
+                            _send_provider14_request(req, db)
+                        else:
+                            send_group_text(
+                                req.provider_group_id,
+                                req.provider_message,
+                                _provider_sender_instance(fallback_provider, req),
+                            )
                 
                         print(
                             "LAZARO_FALLBACK_SENT_TO_WHATSAPP_PROVIDER =",
