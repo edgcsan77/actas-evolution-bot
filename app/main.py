@@ -62,6 +62,7 @@ from app.services.evolution import (
     send_document_base64,
     send_group_document_base64,
     get_media_base64,
+    send_reaction,
 )
 
 from app.utils.bot_limits import (
@@ -196,6 +197,7 @@ def _provider_from_mode(mode: str | None) -> str | None:
         "PROVIDER11",
         "PROVIDER12",
         "PROVIDER13",
+        "PROVIDER14",
         "MAYAPROVIDER",
     }:
         return provider_name
@@ -286,6 +288,7 @@ WHATSAPP_TEXT_PROVIDERS = [
     "PROVIDER9",
     "PROVIDER12",
     "PROVIDER13",
+    "PROVIDER14",
     "MAYAPROVIDER",
 ]
 
@@ -1037,6 +1040,7 @@ PROVIDER_LABELS = {
     "PROVIDER11": "LAZARO WEB 3",
     "PROVIDER12": "VILLAFUERTE",
     "PROVIDER13": "RL",
+    "PROVIDER13": "EMILIANO BOT",
     "MAYAPROVIDER": "PROVEEDOR DE MAYA",
 }
 
@@ -16406,6 +16410,9 @@ def _provider_negative_response_info(text_body: str | None) -> dict:
     long_negative_patterns = [
         r"\bNO\s+HAY\s+REGISTROS?\s+DISPONIBLES?\b",
         r"\bNO\s+HAY\s+REGISTROS?\b",
+        r"\bHUBO\s+UN\s+ERROR\s+CON\s+LA\s+SOLICITUD\b",
+        r"\bNO\s+ENCONTRAD[OA]\s+POR\s+CURP\b",
+        r"\bVERIFICA\s+Y\s+VUELVE\s+A\s+INTENTAR\b",
         r"\bNO\s+SE\s+ENCONTRO\b",
         r"\bNO\s+SE\s+ENCONTR[ÓO]\b",
         r"\bNO\s+SE\s+ENCUENTRA\b",
@@ -17184,6 +17191,7 @@ def _all_provider_groups() -> set[str]:
         settings.PROVIDER13_GROUP_NACIMIENTO_2,
         settings.PROVIDER13_GROUP_CADENA,
         settings.PROVIDER13_GROUP_ESPECIALES,
+        settings.PROVIDER14_PRIVATE_JID,
         settings.MAYAPROVIDER_GROUP_1,
         settings.MAYAPROVIDER_GROUP_2,
     }
@@ -18725,6 +18733,97 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             
             print("PROVIDER_QUOTED_MSG_ID =", quoted_msg_id, flush=True)
             print("PROVIDER_TEXT_NORM =", text_norm, flush=True)
+
+            # =========================
+            # PROVIDER14: confirmar solicitud reaccionando 🙌
+            # =========================
+            provider14_jid = (
+                getattr(settings, "PROVIDER14_PRIVATE_JID", "") or ""
+            ).strip()
+
+            is_provider14_message = (
+                provider14_jid
+                and source_chat_id == provider14_jid
+            )
+
+            if is_provider14_message:
+                text_norm_p14 = normalize_text(text_body or "")
+
+                is_new_request_confirmation = (
+                    "NUEVA SOLICITUD" in text_norm_p14
+                    and (
+                        "REACCIONA" in text_norm_p14
+                        or "SI ES CORRECTO" in text_norm_p14
+                    )
+                )
+
+                if is_new_request_confirmation:
+                    p14_term = provider_id or _extract_provider_identifier_loose(text_body or "")
+
+                    open_req = None
+
+                    if p14_term:
+                        open_req = (
+                            db.query(RequestLog)
+                            .filter(
+                                RequestLog.provider_group_id == source_chat_id,
+                                RequestLog.curp == p14_term,
+                                RequestLog.status == "PROCESSING",
+                                RequestLog.provider_name == "PROVIDER14",
+                            )
+                            .order_by(RequestLog.created_at.desc())
+                            .first()
+                        )
+
+                    if not open_req:
+                        open_req = (
+                            db.query(RequestLog)
+                            .filter(
+                                RequestLog.provider_group_id == source_chat_id,
+                                RequestLog.status == "PROCESSING",
+                                RequestLog.provider_name == "PROVIDER14",
+                            )
+                            .order_by(RequestLog.created_at.desc())
+                            .first()
+                        )
+
+                    print("PROVIDER14_CONFIRM_DETECTED =", {
+                        "msg_id": msg_id,
+                        "source_chat_id": source_chat_id,
+                        "p14_term": p14_term,
+                        "matched_req_id": getattr(open_req, "id", None),
+                    }, flush=True)
+
+                    if open_req:
+                        try:
+                            send_reaction(
+                                source_chat_id,
+                                msg_id,
+                                "🙌",
+                                instance_name=instance_name,
+                                from_me=False,
+                            )
+
+                            open_req.provider_message_id = msg_id
+                            open_req.updated_at = _utc_now_naive()
+                            db.commit()
+
+                            print("PROVIDER14_REACTION_SENT =", {
+                                "req_id": open_req.id,
+                                "msg_id": msg_id,
+                                "reaction": "🙌",
+                            }, flush=True)
+
+                            return {
+                                "ok": True,
+                                "provider_result": "provider14_confirm_reacted",
+                            }
+
+                        except Exception as react_exc:
+                            print("PROVIDER14_REACTION_ERROR =", {
+                                "msg_id": msg_id,
+                                "error": str(react_exc),
+                            }, flush=True)
 
             # 1) INTENTAR DETECTAR PDF
             doc = None
