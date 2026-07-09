@@ -1040,7 +1040,7 @@ PROVIDER_LABELS = {
     "PROVIDER11": "LAZARO WEB 3",
     "PROVIDER12": "VILLAFUERTE",
     "PROVIDER13": "RL",
-    "PROVIDER14": "EMILIANO BOT",
+    "PROVIDER14": "E-BOT",
     "MAYAPROVIDER": "PROVEEDOR DE MAYA",
 }
 
@@ -11327,7 +11327,7 @@ def panel_actas(
                     </div>
 
                     <div class="provider-card">
-                      <div class="provider-name">EMILIANO BOT</div>
+                      <div class="provider-name">E-BOT</div>
                     
                       <div style="margin:6px 0;">
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
@@ -17934,7 +17934,7 @@ def _providers_status_text(db: Session) -> str:
         f"LUIS:           {s5}{provider5_extra}\n"
         f"VILLAFUERTE:    {s12}{provider12_extra}\n"
         f"RL:             {s13}{provider13_extra}\n"
-        f"EMILIANO BOT:   {s14}{provider14_extra}\n"
+        f"E-BOT:          {s14}{provider14_extra}\n"
         f"EMILIANO:       {s9}{provider9_extra}\n"
         f"LAZARO 1:       {s4}{provider4_extra}\n"
         f"LAZARO 2:       {s10}{provider10_extra}\n"
