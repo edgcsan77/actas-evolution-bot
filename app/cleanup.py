@@ -104,6 +104,8 @@ def cleanup_expired_and_mark_pending():
             "PROVIDER8",
             "PROVIDER9",
             "PROVIDER12",
+            "PROVIDER13",
+            "PROVIDER14",
             "MAYAPROVIDER",
         ]
 
