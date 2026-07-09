@@ -2405,70 +2405,52 @@ def _provider14_private_jid() -> str:
     return jid
 
 
-def _provider14_command_for_act_type(act_type: str | None) -> str:
+def _provider14_prefix_for_act_type(act_type: str | None) -> str:
     act_type_up = (act_type or "").upper().strip()
-    is_folio = _is_folio_act(act_type_up)
 
     if "MATRIMONIO" in act_type_up or "MATRI" in act_type_up:
-        prefix = "Mat"
-    elif "DEFUNCION" in act_type_up or "DEFUN" in act_type_up:
-        prefix = "Def"
-    elif "DIVORCIO" in act_type_up or "DIVOR" in act_type_up:
-        prefix = "Div"
-    elif "NACIMIENTO" in act_type_up or "NAC" in act_type_up:
-        prefix = "Nac"
-    else:
-        raise RuntimeError("PROVIDER14_ACT_TYPE_NOT_ALLOWED")
+        return "Mat"
 
-    return f"{prefix} foliado" if is_folio else f"{prefix} reverso"
+    if "DEFUNCION" in act_type_up or "DEFUN" in act_type_up:
+        return "Def"
+
+    if "DIVORCIO" in act_type_up or "DIVOR" in act_type_up:
+        return "Div"
+
+    if "NACIMIENTO" in act_type_up or "NAC" in act_type_up:
+        return "Nac"
+
+    raise RuntimeError("PROVIDER14_ACT_TYPE_NOT_ALLOWED")
 
 
-def _provider14_term_text(term: str | None, act_type: str | None) -> str:
+def _provider14_message(term: str | None, act_type: str | None) -> str:
     term_clean = (term or "").strip().upper()
-    act_type_up = (act_type or "").upper().strip()
 
-    if "MATRIMONIO" in act_type_up or "MATRI" in act_type_up:
-        tipo = "matrimonio"
-    elif "DEFUNCION" in act_type_up or "DEFUN" in act_type_up:
-        tipo = "defuncion"
-    elif "DIVORCIO" in act_type_up or "DIVOR" in act_type_up:
-        tipo = "divorcio"
-    else:
-        tipo = "nacimiento"
+    if not term_clean:
+        raise RuntimeError("PROVIDER14_EMPTY_TERM")
 
-    return f"{term_clean} {tipo}"
+    prefix = _provider14_prefix_for_act_type(act_type)
+    mode = "foliado" if _is_folio_act(act_type or "") else "reverso"
+
+    return f"{prefix} {mode} {term_clean}"
 
 
 def _send_provider14_request(req, db):
     provider_jid = _provider14_private_jid()
     sender_instance = _provider_sender_instance("PROVIDER14", req)
 
-    command_text = _provider14_command_for_act_type(req.act_type)
-    term_text = _provider14_term_text(req.curp, req.act_type)
+    text_to_provider = _provider14_message(req.curp, req.act_type)
 
-    delay = float(
-        getattr(settings, "PROVIDER14_STEP_DELAY_SECONDS", 2.0) or 2.0
-    )
-
-    print("PROVIDER14_SEND_COMMAND =", {
+    print("PROVIDER14_SEND =", {
         "req_id": req.id,
         "provider_jid": provider_jid,
-        "command_text": command_text,
-        "term_text": term_text,
+        "text": text_to_provider,
         "sender_instance": sender_instance,
     }, flush=True)
 
-    send_text(
-        provider_jid,
-        command_text,
-        instance_name=sender_instance,
-    )
-
-    time.sleep(max(0.8, delay))
-
     resp_json = send_text(
         provider_jid,
-        term_text,
+        text_to_provider,
         instance_name=sender_instance,
     )
 
@@ -2480,7 +2462,7 @@ def _send_provider14_request(req, db):
     )
 
     req.provider_group_id = provider_jid
-    req.provider_message = f"{command_text}\n{term_text}"
+    req.provider_message = text_to_provider
 
     if provider_sent_msg_id:
         req.provider_message_id = provider_sent_msg_id
@@ -2612,7 +2594,7 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
         return f"{term} {provider_type}"
 
     if provider_name == "PROVIDER14":
-        return f"{_provider14_command_for_act_type(act_type)}\n{_provider14_term_text(term, act_type)}"
+        return _provider14_message(term, act_type)
 
     if provider_name == "PROVIDER3":
         return None
