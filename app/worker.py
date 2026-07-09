@@ -2435,49 +2435,181 @@ def _provider14_message(term: str | None, act_type: str | None) -> str:
     return f"{prefix} {mode} {term_clean}"
 
 
+def _provider14_mode_message(act_type: str | None) -> str:
+    prefix = _provider14_prefix_for_act_type(act_type)
+    mode = "foliado" if _is_folio_act(act_type or "") else "reverso"
+    return f"{prefix} {mode}"
+
+
+def _provider14_mode_ack_key(mode_text: str) -> str:
+    safe = re.sub(r"[^A-Z0-9]+", "_", (mode_text or "").strip().upper()).strip("_")
+    return f"provider14:mode_ack:{safe}"
+
+
+def _provider14_lock_key() -> str:
+    return "provider14:mode_send_lock"
+
+
+def _provider14_wait_mode_ack(mode_text: str, timeout_s: float = 12.0) -> bool:
+    key = _provider14_mode_ack_key(mode_text)
+    deadline = time.time() + timeout_s
+
+    while time.time() < deadline:
+        try:
+            if redis_conn.get(key):
+                print("PROVIDER14_MODE_ACK_SEEN =", {
+                    "mode_text": mode_text,
+                    "key": key,
+                }, flush=True)
+                return True
+        except Exception as e:
+            print("PROVIDER14_MODE_ACK_REDIS_ERROR =", {
+                "mode_text": mode_text,
+                "error": str(e),
+            }, flush=True)
+
+        time.sleep(0.4)
+
+    print("PROVIDER14_MODE_ACK_TIMEOUT =", {
+        "mode_text": mode_text,
+        "key": key,
+        "timeout_s": timeout_s,
+    }, flush=True)
+
+    return False
+
+
+def _provider14_acquire_lock(timeout_s: float = 20.0) -> str:
+    token = uuid.uuid4().hex
+    key = _provider14_lock_key()
+    deadline = time.time() + timeout_s
+
+    while time.time() < deadline:
+        try:
+            ok = redis_conn.set(key, token, nx=True, ex=45)
+            if ok:
+                print("PROVIDER14_LOCK_ACQUIRED =", token, flush=True)
+                return token
+        except Exception as e:
+            print("PROVIDER14_LOCK_REDIS_ERROR =", repr(e), flush=True)
+
+        time.sleep(0.3)
+
+    raise RuntimeError("PROVIDER14_LOCK_TIMEOUT")
+
+
+def _provider14_release_lock(token: str):
+    key = _provider14_lock_key()
+
+    try:
+        current = redis_conn.get(key)
+
+        if isinstance(current, bytes):
+            current = current.decode("utf-8", errors="ignore")
+
+        if current == token:
+            redis_conn.delete(key)
+            print("PROVIDER14_LOCK_RELEASED =", token, flush=True)
+
+    except Exception as e:
+        print("PROVIDER14_LOCK_RELEASE_ERROR =", repr(e), flush=True)
+
+
 def _send_provider14_request(req, db):
     provider_jid = _provider14_private_jid()
     sender_instance = _provider_sender_instance("PROVIDER14", req)
 
+    mode_text = _provider14_mode_message(req.act_type)
     text_to_provider = _provider14_message(req.curp, req.act_type)
 
-    print("PROVIDER14_SEND =", {
-        "req_id": req.id,
-        "provider_jid": provider_jid,
-        "text": text_to_provider,
-        "sender_instance": sender_instance,
-    }, flush=True)
+    lock_token = _provider14_acquire_lock()
 
-    resp_json = send_text(
-        provider_jid,
-        text_to_provider,
-        instance_name=sender_instance,
-    )
+    try:
+        ack_key = _provider14_mode_ack_key(mode_text)
 
-    provider_sent_msg_id = (
-        (resp_json or {}).get("key", {}).get("id")
-        or (resp_json or {}).get("data", {}).get("key", {}).get("id")
-        or (resp_json or {}).get("id")
-        or ""
-    )
+        try:
+            redis_conn.delete(ack_key)
+        except Exception as e:
+            print("PROVIDER14_MODE_ACK_DELETE_ERROR =", {
+                "req_id": req.id,
+                "mode_text": mode_text,
+                "error": str(e),
+            }, flush=True)
 
-    req.provider_group_id = provider_jid
-    req.provider_message = text_to_provider
+        print("PROVIDER14_MODE_SEND =", {
+            "req_id": req.id,
+            "provider_jid": provider_jid,
+            "mode_text": mode_text,
+            "sender_instance": sender_instance,
+        }, flush=True)
 
-    if provider_sent_msg_id:
-        req.provider_message_id = provider_sent_msg_id
+        mode_resp_json = send_text(
+            provider_jid,
+            mode_text,
+            instance_name=sender_instance,
+        )
 
-    req.updated_at = _utc_now_naive()
-    db.commit()
+        mode_sent_msg_id = (
+            (mode_resp_json or {}).get("key", {}).get("id")
+            or (mode_resp_json or {}).get("data", {}).get("key", {}).get("id")
+            or (mode_resp_json or {}).get("id")
+            or ""
+        )
 
-    print("PROVIDER14_SEND_OK =", {
-        "req_id": req.id,
-        "provider_jid": provider_jid,
-        "provider_sent_msg_id": provider_sent_msg_id,
-        "provider_message": req.provider_message,
-    }, flush=True)
+        print("PROVIDER14_MODE_SEND_OK =", {
+            "req_id": req.id,
+            "provider_jid": provider_jid,
+            "mode_sent_msg_id": mode_sent_msg_id,
+            "mode_text": mode_text,
+        }, flush=True)
 
-    return True
+        mode_ack_ok = _provider14_wait_mode_ack(mode_text, timeout_s=12.0)
+
+        if not mode_ack_ok:
+            raise RuntimeError(f"PROVIDER14_MODE_ACK_TIMEOUT:{mode_text}")
+
+        print("PROVIDER14_SEND =", {
+            "req_id": req.id,
+            "provider_jid": provider_jid,
+            "text": text_to_provider,
+            "sender_instance": sender_instance,
+            "mode_text": mode_text,
+        }, flush=True)
+
+        resp_json = send_text(
+            provider_jid,
+            text_to_provider,
+            instance_name=sender_instance,
+        )
+
+        provider_sent_msg_id = (
+            (resp_json or {}).get("key", {}).get("id")
+            or (resp_json or {}).get("data", {}).get("key", {}).get("id")
+            or (resp_json or {}).get("id")
+            or ""
+        )
+
+        req.provider_group_id = provider_jid
+        req.provider_message = text_to_provider
+
+        if provider_sent_msg_id:
+            req.provider_message_id = provider_sent_msg_id
+
+        req.updated_at = _utc_now_naive()
+        db.commit()
+
+        print("PROVIDER14_SEND_OK =", {
+            "req_id": req.id,
+            "provider_jid": provider_jid,
+            "provider_sent_msg_id": provider_sent_msg_id,
+            "provider_message": req.provider_message,
+            "mode_text": mode_text,
+        }, flush=True)
+
+        return True
+
+    finally:
+        _provider14_release_lock(lock_token)
 
 
 def _pick_provider_group(
