@@ -202,6 +202,23 @@ def send_text(number: str, text: str, instance_name: str = None):
     )
 
 
+def _normalize_jid_for_reaction(number: str) -> str:
+    raw = str(number or "").strip()
+
+    if not raw:
+        return ""
+
+    if raw.endswith("@g.us") or raw.endswith("@s.whatsapp.net"):
+        return raw
+
+    clean = _normalize_number(raw)
+
+    if not clean:
+        return ""
+
+    return f"{clean}@s.whatsapp.net"
+
+
 def send_reaction(
     number: str,
     message_id: str,
@@ -212,11 +229,17 @@ def send_reaction(
     instance = instance_name or settings.EVOLUTION_INSTANCE
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendReaction/{instance}"
 
-    clean_number = _normalize_number(number)
+    remote_jid = _normalize_jid_for_reaction(number)
+
+    if not remote_jid:
+        raise ValueError("SEND_REACTION_EMPTY_REMOTE_JID")
+
+    if not message_id:
+        raise ValueError("SEND_REACTION_EMPTY_MESSAGE_ID")
 
     payload = {
         "key": {
-            "remoteJid": clean_number,
+            "remoteJid": remote_jid,
             "fromMe": from_me,
             "id": message_id,
         },
@@ -226,12 +249,51 @@ def send_reaction(
     print("SEND_REACTION_URL =", url, flush=True)
     print("SEND_REACTION_PAYLOAD =", payload, flush=True)
 
-    return _post_send_text_with_retries(
-        url,
-        payload,
-        label="SEND_REACTION",
-        max_attempts=2,
-    )
+    last_error = None
+
+    for attempt in range(1, 3):
+        try:
+            print("SEND_REACTION_ATTEMPT =", attempt, flush=True)
+
+            resp = requests.post(
+                url,
+                headers=_headers(),
+                json=payload,
+                timeout=(5, 35),
+            )
+
+            body_text = resp.text or ""
+
+            print("SEND_REACTION_STATUS =", resp.status_code, flush=True)
+            print("SEND_REACTION_BODY =", body_text[:1000], flush=True)
+
+            if resp.status_code in (200, 201):
+                try:
+                    return resp.json()
+                except Exception:
+                    return {"ok": True, "raw": body_text[:1000]}
+
+            last_error = requests.HTTPError(
+                f"{resp.status_code} Error for url: {url} | body={body_text[:1000]}",
+                response=resp,
+            )
+
+            if not _is_retryable_evolution_error(resp.status_code, body_text):
+                raise last_error
+
+        except Exception as e:
+            last_error = e
+            print("SEND_REACTION_ERROR_ATTEMPT =", attempt, str(e), flush=True)
+
+            if attempt >= 2:
+                break
+
+            if not _is_retryable_evolution_error(None, "", e):
+                break
+
+            time.sleep(2)
+
+    raise last_error
 
 
 def send_document(number: str, pdf_url: str, filename: str = "acta.pdf", caption: str = "", instance_name: str = None):
