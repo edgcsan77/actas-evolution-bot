@@ -18821,6 +18821,28 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             if is_provider14_message:
                 text_norm_p14 = normalize_text(text_body or "")
 
+                if (
+                    "NO SE ENCUENTRA ACTIVO" in text_norm_p14
+                    or "SERVICIO NO ESTA ACTIVO" in text_norm_p14
+                    or "SERVICIO NO SE ENCUENTRA ACTIVO" in text_norm_p14
+                ):
+                    try:
+                        redis_conn.setex("provider14:service_closed", 60, "1")
+                        print("PROVIDER14_SERVICE_CLOSED_SET =", {
+                            "source_chat_id": source_chat_id,
+                            "text": text_body,
+                        }, flush=True)
+                    except Exception as e:
+                        print("PROVIDER14_SERVICE_CLOSED_SET_ERROR =", {
+                            "error": str(e),
+                            "text": text_body,
+                        }, flush=True)
+
+                    return {
+                        "ok": True,
+                        "provider_result": "provider14_service_closed",
+                    }
+
                 provider14_mode_ack = ""
 
                 if (
@@ -18846,6 +18868,45 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     elif "REVERSADO" in text_norm_p14 or "REVERSO" in text_norm_p14:
                         p14_mode = "REVERSO"
 
+                    waiting_mode = ""
+
+                    if not p14_prefix:
+                        try:
+                            waiting_mode = redis_conn.get("provider14:mode_waiting")
+
+                            if isinstance(waiting_mode, bytes):
+                                waiting_mode = waiting_mode.decode("utf-8", errors="ignore")
+
+                            waiting_mode = (waiting_mode or "").strip().upper()
+
+                            if waiting_mode.startswith("NAC_"):
+                                p14_prefix = "NAC"
+                            elif waiting_mode.startswith("MAT_"):
+                                p14_prefix = "MAT"
+                            elif waiting_mode.startswith("DIV_"):
+                                p14_prefix = "DIV"
+                            elif waiting_mode.startswith("DEF_"):
+                                p14_prefix = "DEF"
+
+                            if not p14_mode:
+                                if "FOLIADO" in waiting_mode:
+                                    p14_mode = "FOLIADO"
+                                elif "REVERSO" in waiting_mode:
+                                    p14_mode = "REVERSO"
+
+                            print("PROVIDER14_MODE_ACK_INFERRED_FROM_WAITING =", {
+                                "waiting_mode": waiting_mode,
+                                "p14_prefix": p14_prefix,
+                                "p14_mode": p14_mode,
+                                "text": text_body,
+                            }, flush=True)
+
+                        except Exception as e:
+                            print("PROVIDER14_MODE_WAITING_READ_ERROR =", {
+                                "error": str(e),
+                                "text": text_body,
+                            }, flush=True)
+
                     if p14_prefix and p14_mode:
                         provider14_mode_ack = f"{p14_prefix} {p14_mode}"
                         provider14_mode_ack_key = (
@@ -18859,10 +18920,17 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                         try:
                             redis_conn.setex(provider14_mode_ack_key, 60, "1")
+
+                            try:
+                                redis_conn.delete("provider14:mode_waiting")
+                            except Exception:
+                                pass
+
                             print("PROVIDER14_MODE_ACK_SET =", {
                                 "source_chat_id": source_chat_id,
                                 "mode_ack": provider14_mode_ack,
                                 "key": provider14_mode_ack_key,
+                                "waiting_mode": waiting_mode,
                                 "text": text_body,
                             }, flush=True)
                         except Exception as e:
@@ -18871,6 +18939,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                                 "key": provider14_mode_ack_key,
                                 "error": str(e),
                             }, flush=True)
+
+                        return {
+                            "ok": True,
+                            "provider_result": "provider14_mode_ack",
+                        }
 
                 is_new_request_confirmation = (
                     "NUEVA SOLICITUD" in text_norm_p14
