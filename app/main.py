@@ -18821,6 +18821,57 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             if is_provider14_message:
                 text_norm_p14 = normalize_text(text_body or "")
 
+                provider14_mode_ack = ""
+
+                if (
+                    "SE HAN ACTUALIZADO" in text_norm_p14
+                    or "ESTABLECISTE" in text_norm_p14
+                    or "PREFERENCIAS" in text_norm_p14
+                ):
+                    p14_prefix = ""
+
+                    if "MATRIMONIO" in text_norm_p14:
+                        p14_prefix = "MAT"
+                    elif "DEFUNCION" in text_norm_p14 or "DEFUNCIÓN" in text_norm_p14:
+                        p14_prefix = "DEF"
+                    elif "DIVORCIO" in text_norm_p14:
+                        p14_prefix = "DIV"
+                    elif "NACIMIENTO" in text_norm_p14:
+                        p14_prefix = "NAC"
+
+                    p14_mode = ""
+
+                    if "FOLIADO" in text_norm_p14 or "FOLIO" in text_norm_p14:
+                        p14_mode = "FOLIADO"
+                    elif "REVERSADO" in text_norm_p14 or "REVERSO" in text_norm_p14:
+                        p14_mode = "REVERSO"
+
+                    if p14_prefix and p14_mode:
+                        provider14_mode_ack = f"{p14_prefix} {p14_mode}"
+                        provider14_mode_ack_key = (
+                            "provider14:mode_ack:"
+                            + re.sub(
+                                r"[^A-Z0-9]+",
+                                "_",
+                                provider14_mode_ack.strip().upper(),
+                            ).strip("_")
+                        )
+
+                        try:
+                            redis_conn.setex(provider14_mode_ack_key, 60, "1")
+                            print("PROVIDER14_MODE_ACK_SET =", {
+                                "source_chat_id": source_chat_id,
+                                "mode_ack": provider14_mode_ack,
+                                "key": provider14_mode_ack_key,
+                                "text": text_body,
+                            }, flush=True)
+                        except Exception as e:
+                            print("PROVIDER14_MODE_ACK_SET_ERROR =", {
+                                "mode_ack": provider14_mode_ack,
+                                "key": provider14_mode_ack_key,
+                                "error": str(e),
+                            }, flush=True)
+
                 is_new_request_confirmation = (
                     "NUEVA SOLICITUD" in text_norm_p14
                     and (
