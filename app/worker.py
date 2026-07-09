@@ -2450,6 +2450,10 @@ def _provider14_mode_ack_key(mode_text: str) -> str:
 
     safe = re.sub(r"[^A-Z0-9]+", "_", text).strip("_")
     return f"provider14:mode_ack:{safe}"
+
+
+def _provider14_mode_waiting_key() -> str:
+    return "provider14:mode_waiting"
     
 
 def _provider14_lock_key() -> str:
@@ -2462,12 +2466,22 @@ def _provider14_wait_mode_ack(mode_text: str, timeout_s: float = 12.0) -> bool:
 
     while time.time() < deadline:
         try:
+            if redis_conn.get("provider14:service_closed"):
+                print("PROVIDER14_SERVICE_CLOSED_SEEN =", {
+                    "mode_text": mode_text,
+                    "key": "provider14:service_closed",
+                }, flush=True)
+                raise RuntimeError("PROVIDER14_SERVICE_CLOSED")
+
             if redis_conn.get(key):
                 print("PROVIDER14_MODE_ACK_SEEN =", {
                     "mode_text": mode_text,
                     "key": key,
                 }, flush=True)
                 return True
+
+        except RuntimeError:
+            raise
         except Exception as e:
             print("PROVIDER14_MODE_ACK_REDIS_ERROR =", {
                 "mode_text": mode_text,
@@ -2570,6 +2584,29 @@ def _send_provider14_request(req, db):
             redis_conn.delete(ack_key)
         except Exception as e:
             print("PROVIDER14_MODE_ACK_DELETE_ERROR =", {
+                "req_id": req.id,
+                "mode_text": mode_text,
+                "error": str(e),
+            }, flush=True)
+
+        try:
+            redis_conn.delete("provider14:service_closed")
+        except Exception:
+            pass
+
+        try:
+            waiting_value = ack_key.replace("provider14:mode_ack:", "")
+            redis_conn.setex(_provider14_mode_waiting_key(), 60, waiting_value)
+
+            print("PROVIDER14_MODE_WAITING_SET =", {
+                "req_id": req.id,
+                "mode_text": mode_text,
+                "waiting_value": waiting_value,
+                "key": _provider14_mode_waiting_key(),
+            }, flush=True)
+
+        except Exception as e:
+            print("PROVIDER14_MODE_WAITING_SET_ERROR =", {
                 "req_id": req.id,
                 "mode_text": mode_text,
                 "error": str(e),
