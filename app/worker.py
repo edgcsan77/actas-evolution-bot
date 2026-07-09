@@ -5,6 +5,7 @@ import re
 import json
 import random
 import requests
+import uuid
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
@@ -2444,13 +2445,8 @@ def _provider14_mode_message(act_type: str | None) -> str:
 def _provider14_mode_ack_key(mode_text: str) -> str:
     text = (mode_text or "").strip().upper()
 
-    text = re.sub(r"\bMAT\b", "MAT", text)
-    text = re.sub(r"\bDEF\b", "DEF", text)
-    text = re.sub(r"\bDIV\b", "DIV", text)
-    text = re.sub(r"\bNAC\b", "NAC", text)
-
     text = text.replace("REVERSADO", "REVERSO")
-    text = text.replace("FOLIO", "FOLIADO")
+    text = re.sub(r"\bFOLIO\b", "FOLIADO", text)
 
     safe = re.sub(r"[^A-Z0-9]+", "_", text).strip("_")
     return f"provider14:mode_ack:{safe}"
@@ -2482,6 +2478,39 @@ def _provider14_wait_mode_ack(mode_text: str, timeout_s: float = 12.0) -> bool:
 
     print("PROVIDER14_MODE_ACK_TIMEOUT =", {
         "mode_text": mode_text,
+        "key": key,
+        "timeout_s": timeout_s,
+    }, flush=True)
+
+    return False
+
+
+def _provider14_submit_ack_key(request_id: int) -> str:
+    return f"provider14:submit_ack:{int(request_id)}"
+
+
+def _provider14_wait_submit_ack(request_id: int, timeout_s: float = 25.0) -> bool:
+    key = _provider14_submit_ack_key(request_id)
+    deadline = time.time() + timeout_s
+
+    while time.time() < deadline:
+        try:
+            if redis_conn.get(key):
+                print("PROVIDER14_SUBMIT_ACK_SEEN =", {
+                    "request_id": request_id,
+                    "key": key,
+                }, flush=True)
+                return True
+        except Exception as e:
+            print("PROVIDER14_SUBMIT_ACK_REDIS_ERROR =", {
+                "request_id": request_id,
+                "error": str(e),
+            }, flush=True)
+
+        time.sleep(0.4)
+
+    print("PROVIDER14_SUBMIT_ACK_TIMEOUT =", {
+        "request_id": request_id,
         "key": key,
         "timeout_s": timeout_s,
     }, flush=True)
@@ -2615,6 +2644,11 @@ def _send_provider14_request(req, db):
             "provider_message": req.provider_message,
             "mode_text": mode_text,
         }, flush=True)
+
+        submit_ack_ok = _provider14_wait_submit_ack(req.id, timeout_s=25.0)
+
+        if not submit_ack_ok:
+            raise RuntimeError(f"PROVIDER14_SUBMIT_ACK_TIMEOUT:{req.id}")
 
         return True
 
