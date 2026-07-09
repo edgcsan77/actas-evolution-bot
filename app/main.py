@@ -18931,6 +18931,20 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             open_req.updated_at = _utc_now_naive()
                             db.commit()
 
+                            try:
+                                submit_ack_key = f"provider14:submit_ack:{int(open_req.id)}"
+                                redis_conn.setex(submit_ack_key, 60, "1")
+                                print("PROVIDER14_SUBMIT_ACK_SET =", {
+                                    "req_id": open_req.id,
+                                    "key": submit_ack_key,
+                                    "msg_id": msg_id,
+                                }, flush=True)
+                            except Exception as ack_exc:
+                                print("PROVIDER14_SUBMIT_ACK_SET_ERROR =", {
+                                    "req_id": open_req.id,
+                                    "error": str(ack_exc),
+                                }, flush=True)
+
                             print("PROVIDER14_REACTION_SENT =", {
                                 "req_id": open_req.id,
                                 "msg_id": msg_id,
