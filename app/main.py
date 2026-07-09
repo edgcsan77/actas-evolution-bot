@@ -1669,7 +1669,7 @@ def _panel_error_bucket(error_message: str | None, status: str | None = None) ->
     if " | " in code:
         code = code.split(" | ", 1)[0].strip()
 
-    code = re.sub(r"^PROVIDER(?:10|11|12|13|[1-9])_", "", code)
+    code = re.sub(r"^PROVIDER(?:10|11|12|13|14|[1-9])_", "", code)
     code = re.sub(r"^MAYAPROVIDER_", "", code)
 
     # ==========================================================
