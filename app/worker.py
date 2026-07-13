@@ -2452,6 +2452,14 @@ def _provider14_mode_ack_key(mode_text: str) -> str:
     return f"provider14:mode_ack:{safe}"
 
 
+def _provider14_mode_value(mode_text: str) -> str:
+    return _provider14_mode_ack_key(mode_text).replace("provider14:mode_ack:", "")
+
+
+def _provider14_last_mode_key() -> str:
+    return "provider14:last_confirmed_mode"
+
+
 def _provider14_mode_waiting_key() -> str:
     return "provider14:mode_waiting"
     
@@ -2579,70 +2587,113 @@ def _send_provider14_request(req, db):
 
     try:
         ack_key = _provider14_mode_ack_key(mode_text)
-
-        try:
-            redis_conn.delete(ack_key)
-        except Exception as e:
-            print("PROVIDER14_MODE_ACK_DELETE_ERROR =", {
-                "req_id": req.id,
-                "mode_text": mode_text,
-                "error": str(e),
-            }, flush=True)
+        current_mode_value = _provider14_mode_value(mode_text)
 
         try:
             redis_conn.delete("provider14:service_closed")
         except Exception:
             pass
 
-        try:
-            waiting_value = ack_key.replace("provider14:mode_ack:", "")
-            redis_conn.setex(_provider14_mode_waiting_key(), 60, waiting_value)
+        last_mode_value = ""
 
-            print("PROVIDER14_MODE_WAITING_SET =", {
-                "req_id": req.id,
-                "mode_text": mode_text,
-                "waiting_value": waiting_value,
-                "key": _provider14_mode_waiting_key(),
-            }, flush=True)
+        try:
+            last_mode_value = redis_conn.get(_provider14_last_mode_key())
+
+            if isinstance(last_mode_value, bytes):
+                last_mode_value = last_mode_value.decode("utf-8", errors="ignore")
+
+            last_mode_value = (last_mode_value or "").strip().upper()
 
         except Exception as e:
-            print("PROVIDER14_MODE_WAITING_SET_ERROR =", {
+            print("PROVIDER14_LAST_MODE_GET_ERROR =", {
                 "req_id": req.id,
                 "mode_text": mode_text,
                 "error": str(e),
             }, flush=True)
 
-        print("PROVIDER14_MODE_SEND =", {
-            "req_id": req.id,
-            "provider_jid": provider_jid,
-            "mode_text": mode_text,
-            "sender_instance": sender_instance,
-        }, flush=True)
+        same_mode = bool(last_mode_value and last_mode_value == current_mode_value)
 
-        mode_resp_json = send_text(
-            provider_jid,
-            mode_text,
-            instance_name=sender_instance,
-        )
+        if same_mode:
+            print("PROVIDER14_MODE_SKIP_SAME =", {
+                "req_id": req.id,
+                "mode_text": mode_text,
+                "current_mode_value": current_mode_value,
+                "last_mode_value": last_mode_value,
+            }, flush=True)
 
-        mode_sent_msg_id = (
-            (mode_resp_json or {}).get("key", {}).get("id")
-            or (mode_resp_json or {}).get("data", {}).get("key", {}).get("id")
-            or (mode_resp_json or {}).get("id")
-            or ""
-        )
+        else:
+            try:
+                redis_conn.delete(ack_key)
+            except Exception as e:
+                print("PROVIDER14_MODE_ACK_DELETE_ERROR =", {
+                    "req_id": req.id,
+                    "mode_text": mode_text,
+                    "error": str(e),
+                }, flush=True)
 
-        print("PROVIDER14_MODE_SEND_OK =", {
-            "req_id": req.id,
-            "provider_jid": provider_jid,
-            "mode_sent_msg_id": mode_sent_msg_id,
-            "mode_text": mode_text,
-        }, flush=True)
+            try:
+                redis_conn.setex("provider14:mode_waiting", 60, current_mode_value)
+                print("PROVIDER14_MODE_WAITING_SET =", {
+                    "req_id": req.id,
+                    "mode_text": mode_text,
+                    "waiting_value": current_mode_value,
+                    "key": "provider14:mode_waiting",
+                }, flush=True)
+            except Exception as e:
+                print("PROVIDER14_MODE_WAITING_SET_ERROR =", {
+                    "req_id": req.id,
+                    "mode_text": mode_text,
+                    "error": str(e),
+                }, flush=True)
 
-        mode_ack_ok = _provider14_wait_mode_ack(mode_text, timeout_s=12.0)
+            print("PROVIDER14_MODE_SEND =", {
+                "req_id": req.id,
+                "provider_jid": provider_jid,
+                "mode_text": mode_text,
+                "sender_instance": sender_instance,
+                "last_mode_value": last_mode_value,
+                "current_mode_value": current_mode_value,
+            }, flush=True)
 
-        if not mode_ack_ok:
-            raise RuntimeError(f"PROVIDER14_MODE_ACK_TIMEOUT:{mode_text}")
+            mode_resp_json = send_text(
+                provider_jid,
+                mode_text,
+                instance_name=sender_instance,
+            )
+
+            mode_sent_msg_id = (
+                (mode_resp_json or {}).get("key", {}).get("id")
+                or (mode_resp_json or {}).get("data", {}).get("key", {}).get("id")
+                or (mode_resp_json or {}).get("id")
+                or ""
+            )
+
+            print("PROVIDER14_MODE_SEND_OK =", {
+                "req_id": req.id,
+                "provider_jid": provider_jid,
+                "mode_sent_msg_id": mode_sent_msg_id,
+                "mode_text": mode_text,
+            }, flush=True)
+
+            mode_ack_ok = _provider14_wait_mode_ack(mode_text, timeout_s=12.0)
+
+            if not mode_ack_ok:
+                raise RuntimeError(f"PROVIDER14_MODE_ACK_TIMEOUT:{mode_text}")
+
+            try:
+                redis_conn.set(_provider14_last_mode_key(), current_mode_value)
+                print("PROVIDER14_LAST_MODE_SET =", {
+                    "req_id": req.id,
+                    "mode_text": mode_text,
+                    "last_mode_value": current_mode_value,
+                    "key": _provider14_last_mode_key(),
+                }, flush=True)
+            except Exception as e:
+                print("PROVIDER14_LAST_MODE_SET_ERROR =", {
+                    "req_id": req.id,
+                    "mode_text": mode_text,
+                    "error": str(e),
+                }, flush=True)
 
         print("PROVIDER14_SEND =", {
             "req_id": req.id,
