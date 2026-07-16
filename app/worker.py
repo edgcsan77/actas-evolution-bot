@@ -154,6 +154,146 @@ def _worker_stop_if_instance_blocked(req, db, label: str = "WORKER_BLOCKED_INSTA
     return True
 
 
+def _worker_mark_generic_failure_if_allowed(
+    req,
+    generic_error: str,
+    label: str = "WORKER_GENERIC_FAILURE",
+) -> bool:
+    """
+    Marca una solicitud con error técnico solamente si PostgreSQL confirma
+    que no fue terminada previamente como DONE o SIN REGISTRO.
+
+    Retorna:
+        True  -> sí se guardó el error técnico; puede enviarse el aviso genérico.
+        False -> ya estaba DONE o SIN REGISTRO; no modificar ni notificar.
+    """
+    request_id = getattr(req, "id", None)
+
+    if not request_id:
+        print(
+            f"{label}_SKIP_NO_REQUEST_ID =",
+            {},
+            flush=True,
+        )
+        return False
+
+    guard_db = SessionLocal()
+
+    try:
+        # Bloquea la fila durante la comprobación y la actualización.
+        # Así main.py y worker.py no pueden modificarla simultáneamente.
+        fresh_req = (
+            guard_db.query(RequestLog)
+            .populate_existing()
+            .filter(RequestLog.id == request_id)
+            .with_for_update()
+            .first()
+        )
+
+        if not fresh_req:
+            print(
+                f"{label}_SKIP_REQUEST_NOT_FOUND =",
+                {
+                    "request_id": request_id,
+                },
+                flush=True,
+            )
+            guard_db.rollback()
+            return False
+
+        fresh_status = (
+            getattr(fresh_req, "status", "") or ""
+        ).strip().upper()
+
+        fresh_error = (
+            getattr(fresh_req, "error_message", "") or ""
+        ).strip().upper()
+
+        is_no_record = any(
+            marker in fresh_error
+            for marker in (
+                "SIN REGISTRO",
+                "SIN_REGISTRO",
+                "NO_RECORD",
+                "NO RECORD",
+                "NO_REGISTRO",
+                "NO REGISTRO",
+                "NO_LOCALIZADO",
+                "NO LOCALIZADO",
+                "NO HAY REGISTRO",
+                "NO HAY REGISTROS",
+                "ACTA NO LOCALIZADA",
+                "CURP INEXISTENTE",
+            )
+        )
+
+        # No sobrescribir resultados definitivos.
+        if fresh_status == "DONE" or (
+            fresh_status == "ERROR"
+            and is_no_record
+        ):
+            print(
+                f"{label}_SKIP_TERMINAL_RESULT =",
+                {
+                    "request_id": fresh_req.id,
+                    "curp": fresh_req.curp,
+                    "act_type": fresh_req.act_type,
+                    "status": fresh_req.status,
+                    "error_message": fresh_req.error_message,
+                    "attempted_generic_error": generic_error,
+                },
+                flush=True,
+            )
+
+            guard_db.rollback()
+            return False
+
+        # PostgreSQL confirmó que sigue siendo una solicitud
+        # susceptible de terminar con error técnico.
+        fresh_req.status = "ERROR"
+        fresh_req.error_message = str(generic_error or "")[:1000]
+        fresh_req.updated_at = _utc_now_naive()
+
+        guard_db.commit()
+
+        # Mantener sincronizado el objeto de la sesión original.
+        req.status = fresh_req.status
+        req.error_message = fresh_req.error_message
+        req.updated_at = fresh_req.updated_at
+
+        print(
+            f"{label}_GENERIC_FAILURE_COMMITTED =",
+            {
+                "request_id": fresh_req.id,
+                "curp": fresh_req.curp,
+                "act_type": fresh_req.act_type,
+                "error_message": fresh_req.error_message,
+            },
+            flush=True,
+        )
+
+        return True
+
+    except Exception as guard_exc:
+        guard_db.rollback()
+
+        print(
+            f"{label}_GUARD_ERROR =",
+            {
+                "request_id": request_id,
+                "error": repr(guard_exc),
+            },
+            flush=True,
+        )
+
+        # Por seguridad, si no se puede confirmar el estado real,
+        # no enviar el mensaje genérico.
+        return False
+
+    finally:
+        guard_db.close()
+
+
 def _current_queue_name() -> str:
     try:
         job = get_current_job(connection=redis_conn)
@@ -4619,10 +4759,12 @@ def process_request(request_id: int):
                 except Exception as retry_exc:
                     print("PROVIDER_SEND_REQUEUE_ERROR =", str(retry_exc), flush=True)
             
-            req.status = "ERROR"
-            req.error_message = f"{provider_name}_SEND_FAILED"
-            req.updated_at = _utc_now_naive()
-            db.commit()
+            if not _worker_mark_generic_failure_if_allowed(
+                req,
+                generic_error=f"{provider_name}_SEND_FAILED",
+                label=f"{provider_name}_SEND_FAILED",
+            ):
+                return
         
             msg = (
                 f"⚠️ Solicitud sin éxito en Registro Civil\n"
@@ -5212,10 +5354,12 @@ def process_request(request_id: int):
         
                     return
         
-                req.status = "ERROR"
-                req.error_message = err[:1000]
-                req.updated_at = _utc_now_naive()
-                db.commit()
+                if not _worker_mark_generic_failure_if_allowed(
+                    req,
+                    generic_error=err[:1000],
+                    label="PROVIDER7_GENERIC_FAILURE",
+                ):
+                    return
         
                 try:
                     msg = (
@@ -5399,10 +5543,12 @@ def process_request(request_id: int):
             
                     return
             
-                req.status = "ERROR"
-                req.error_message = err
-                req.updated_at = _utc_now_naive()
-                db.commit()
+                if not _worker_mark_generic_failure_if_allowed(
+                    req,
+                    generic_error=err,
+                    label="NO_PROVIDER_ENABLED_FINAL_FAILURE",
+                ):
+                    return
 
                 msg = (
                     f"⚠️ Solicitud sin éxito en Registro Civil\n"
@@ -5529,9 +5675,12 @@ def process_request(request_id: int):
                 err.startswith("PROVIDER3_SESSION_INVALID_OR_EXPIRED:")
                 or err.startswith("PROVIDER3_NO_CREDITS:")
             ):
-                req.status = "ERROR"
-                req.error_message = err
-                db.commit()
+                if not _worker_mark_generic_failure_if_allowed(
+                    req,
+                    generic_error=err,
+                    label="PROVIDER3_SESSION_OR_CREDITS_FAILURE",
+                ):
+                    return
     
                 msg = (
                     f"⚠️ Solicitud sin éxito en Registro Civil\n"
