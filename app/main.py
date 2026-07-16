@@ -20543,6 +20543,78 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         
             # request_key único por intento
             request_key = f"{base_request_key}:{_mx_now().strftime('%Y%m%d')}:try_{same_requests_count + 1}:{uuid.uuid4().hex[:6]}"
+
+            # ============================================================
+            # RESULTADO DEFINITIVO PREVIO: SIN REGISTRO
+            # Se revisa antes de reutilizar errores o crear otra solicitud.
+            # Comparte el resultado entre grupos pertenecientes al mismo bot.
+            # ============================================================
+            no_record_existing = (
+                db.query(RequestLog)
+                .filter(
+                    RequestLog.curp == term,
+                    RequestLog.act_type == act_type,
+                    RequestLog.instance_name == instance_name,
+                    RequestLog.status == "ERROR",
+                    or_(
+                        RequestLog.error_message.ilike("%SIN REGISTRO%"),
+                        RequestLog.error_message.ilike("%SIN_REGISTRO%"),
+                        RequestLog.error_message.ilike("%NO_RECORD%"),
+                        RequestLog.error_message.ilike("%NO RECORD%"),
+                        RequestLog.error_message.ilike("%NO_REGISTRO%"),
+                        RequestLog.error_message.ilike("%NO REGISTRO%"),
+                        RequestLog.error_message.ilike("%NO HAY REGISTRO%"),
+                        RequestLog.error_message.ilike("%NO HAY REGISTROS%"),
+                        RequestLog.error_message.ilike("%NO_LOCALIZADO%"),
+                        RequestLog.error_message.ilike("%NO LOCALIZADO%"),
+                        RequestLog.error_message.ilike("%ACTA NO LOCALIZADA%"),
+                        RequestLog.error_message.ilike("%CURP INEXISTENTE%"),
+                    ),
+                )
+                .order_by(
+                    RequestLog.updated_at.desc(),
+                    RequestLog.id.desc(),
+                )
+                .first()
+            )
+            
+            if no_record_existing:
+                no_record_msg = (
+                    "❌ No hay registros disponibles.\n"
+                    f"Dato: {term}\n"
+                    f"Tipo: {act_type}\n\n"
+                    "Verificar que la CURP esté certificada en RENAPO"
+                )
+            
+                print(
+                    "GLOBAL_NO_RECORD_RETURNED_WITHOUT_RETRY =",
+                    {
+                        "matched_request_id": no_record_existing.id,
+                        "term": term,
+                        "act_type": act_type,
+                        "instance_name": instance_name,
+                        "current_source_chat_id": source_chat_id,
+                        "original_source_chat_id": no_record_existing.source_chat_id,
+                        "error_message": no_record_existing.error_message,
+                    },
+                    flush=True,
+                )
+            
+                if source_group_id:
+                    if should_send_extra_text(source_group_id):
+                        send_group_text(
+                            source_group_id,
+                            no_record_msg,
+                            instance_name=instance_name,
+                        )
+                else:
+                    send_text(
+                        requester_wa_id,
+                        no_record_msg,
+                        instance_name=instance_name,
+                    )
+            
+                continue
         
             # 2) si existe una anterior en ERROR, reutilizar SOLO la más reciente en error
             error_existing = (
