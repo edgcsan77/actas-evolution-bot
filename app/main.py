@@ -20562,6 +20562,67 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             )
         
             if error_existing:
+                existing_error_upper = (
+                    error_existing.error_message or ""
+                ).strip().upper()
+            
+                existing_is_no_record = any(
+                    marker in existing_error_upper
+                    for marker in (
+                        "SIN REGISTRO",
+                        "SIN_REGISTRO",
+                        "NO_RECORD",
+                        "NO RECORD",
+                        "NO_REGISTRO",
+                        "NO REGISTRO",
+                        "NO_LOCALIZADO",
+                        "NO LOCALIZADO",
+                        "NO HAY REGISTRO",
+                        "NO HAY REGISTROS",
+                        "ACTA NO LOCALIZADA",
+                        "CURP INEXISTENTE",
+                    )
+                )
+            
+                if existing_is_no_record:
+                    no_record_msg = (
+                        "❌ No hay registros disponibles.\n"
+                        f"Dato: {term}\n"
+                        f"Tipo: {act_type}\n\n"
+                        "Verificar que la CURP esté certificada en RENAPO"
+                    )
+            
+                    print(
+                        "EXISTING_NO_RECORD_RETURNED_WITHOUT_RETRY =",
+                        {
+                            "request_id": error_existing.id,
+                            "term": term,
+                            "act_type": act_type,
+                            "source_chat_id": source_chat_id,
+                            "error_message": error_existing.error_message,
+                        },
+                        flush=True,
+                    )
+            
+                    if source_group_id:
+                        if should_send_extra_text(source_group_id):
+                            send_group_text(
+                                source_group_id,
+                                no_record_msg,
+                                instance_name=instance_name,
+                            )
+                    else:
+                        send_text(
+                            requester_wa_id,
+                            no_record_msg,
+                            instance_name=instance_name,
+                        )
+            
+                    # Muy importante:
+                    # no cambiar el ERROR, no borrar error_message,
+                    # no poner QUEUED y no enviar nuevamente al proveedor.
+                    continue
+            
                 error_existing.request_key = request_key
                 error_existing.curp = term
                 error_existing.act_type = act_type
