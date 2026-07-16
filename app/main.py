@@ -16425,12 +16425,16 @@ def _extract_provider_no_record_identifiers(text_body: str | None) -> list[str]:
 
         for m in pattern_before.finditer(norm):
             ident = re.sub(r"[^A-Z0-9]", "", m.group("id").upper())
-            if ident and ident not in found:
+            if ident:
+                # No eliminar repetidos:
+                # cada aparición puede corresponder a una solicitud distinta.
                 found.append(ident)
-
+        
         for m in pattern_after.finditer(norm):
             ident = re.sub(r"[^A-Z0-9]", "", m.group("id").upper())
-            if ident and ident not in found:
+            if ident:
+                # No eliminar repetidos:
+                # cada aparición puede corresponder a una solicitud distinta.
                 found.append(ident)
 
     return found
@@ -16562,43 +16566,127 @@ def _close_provider_negative_response(
 
     text_norm = info["norm"]
     negative_act_group = _text_mentions_act_type_group(text_norm)
-
-    def _pick_by_type(rows):
-        if not rows:
-            return None
-
-        if negative_act_group:
-            typed = [
-                r for r in rows
-                if _expected_act_type_group(r.act_type) == negative_act_group
-            ]
-
-            print("NEGATIVE_PICK_BY_TYPE =", {
-                "negative_act_group": negative_act_group,
-                "candidate_ids": [r.id for r in rows],
-                "candidate_types": [r.act_type for r in rows],
-                "typed_ids": [r.id for r in typed],
-            }, flush=True)
-
-            if len(typed) == 1:
-                return typed[0]
-
-            return None
-
-        if len(rows) == 1:
-            return rows[0]
-
-        print("NEGATIVE_AMBIGUOUS_WITHOUT_TYPE =", {
-            "candidate_ids": [r.id for r in rows],
-            "candidate_types": [r.act_type for r in rows],
-            "text": info["raw"][:180],
-        }, flush=True)
-
-        return None
-
+    
     matched_requests = []
     matched_ids = set()
     match_modes = {}
+    
+    def _pick_by_type(
+        rows,
+        *,
+        explicit_identifier: bool = False,
+    ):
+        if not rows:
+            return None
+    
+        # Excluir solicitudes que ya fueron relacionadas con otro renglón
+        # del mismo mensaje del proveedor.
+        available_rows = [
+            row
+            for row in rows
+            if row.id not in matched_ids
+        ]
+    
+        if not available_rows:
+            return None
+    
+        # Cuando el proveedor menciona explícitamente el tipo de acta,
+        # limitar las candidatas a ese tipo.
+        if negative_act_group:
+            typed = [
+                row
+                for row in available_rows
+                if _expected_act_type_group(row.act_type) == negative_act_group
+            ]
+    
+            print(
+                "NEGATIVE_PICK_BY_TYPE =",
+                {
+                    "negative_act_group": negative_act_group,
+                    "candidate_ids": [
+                        row.id for row in available_rows
+                    ],
+                    "candidate_types": [
+                        row.act_type for row in available_rows
+                    ],
+                    "typed_ids": [
+                        row.id for row in typed
+                    ],
+                },
+                flush=True,
+            )
+    
+            if not typed:
+                return None
+    
+            # Si hay varias del mismo tipo, tomar primero la más antigua.
+            return sorted(
+                typed,
+                key=lambda row: (
+                    row.created_at or datetime.min,
+                    row.id,
+                ),
+            )[0]
+    
+        # Caso normal: solo hay una candidata.
+        if len(available_rows) == 1:
+            return available_rows[0]
+    
+        if explicit_identifier:
+            type_groups = {
+                _expected_act_type_group(row.act_type)
+                for row in available_rows
+            }
+    
+            # Es seguro tomar una por una cuando:
+            # 1. El proveedor escribió explícitamente la CURP.
+            # 2. Todas las solicitudes abiertas son del mismo tipo.
+            #
+            # Ejemplo:
+            # CUTM... No hay registros disponibles
+            # CUTM... No hay registros disponibles
+            #
+            # Dos solicitudes abiertas de MATRIMONIO.
+            if len(type_groups) == 1:
+                selected = sorted(
+                    available_rows,
+                    key=lambda row: (
+                        row.created_at or datetime.min,
+                        row.id,
+                    ),
+                )[0]
+    
+                print(
+                    "NEGATIVE_REPEATED_IDENTIFIER_SELECTED =",
+                    {
+                        "selected_request_id": selected.id,
+                        "identifier": selected.curp,
+                        "act_type": selected.act_type,
+                        "remaining_candidate_ids": [
+                            row.id for row in available_rows
+                        ],
+                    },
+                    flush=True,
+                )
+    
+                return selected
+    
+        print(
+            "NEGATIVE_AMBIGUOUS_WITHOUT_TYPE =",
+            {
+                "candidate_ids": [
+                    row.id for row in available_rows
+                ],
+                "candidate_types": [
+                    row.act_type for row in available_rows
+                ],
+                "explicit_identifier": explicit_identifier,
+                "text": info["raw"][:180],
+            },
+            flush=True,
+        )
+    
+        return None
 
     def _add_match(req, mode: str):
         if not req:
@@ -16641,11 +16729,19 @@ def _close_provider_negative_response(
                 RequestLog.status.in_(["QUEUED", "PROCESSING"]),
                 RequestLog.provider_name.in_(WHATSAPP_TEXT_PROVIDERS),
             )
-            .order_by(RequestLog.created_at.desc())
+            # La primera respuesta negativa debe cerrar primero
+            # la solicitud más antigua.
+            .order_by(
+                RequestLog.created_at.asc(),
+                RequestLog.id.asc(),
+            )
             .all()
         )
-
-        req = _pick_by_type(rows)
+    
+        req = _pick_by_type(
+            rows,
+            explicit_identifier=True,
+        )
 
         if req:
             _add_match(req, "provider_group_id_curp")
@@ -16663,14 +16759,20 @@ def _close_provider_negative_response(
                 RequestLog.provider_name.in_(WHATSAPP_TEXT_PROVIDERS),
                 RequestLog.created_at >= recent_limit,
             )
-            .order_by(RequestLog.created_at.desc())
+            .order_by(
+                RequestLog.created_at.asc(),
+                RequestLog.id.asc(),
+            )
             .limit(20)
             .all()
         )
-
+        
         _add_match(
-            _pick_by_type(rows),
-            "curp_recent_unique",
+            _pick_by_type(
+                rows,
+                explicit_identifier=True,
+            ),
+            "curp_recent_explicit",
         )
 
     if not matched_requests:
