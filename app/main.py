@@ -18098,6 +18098,53 @@ def webhook_msg_seen(msg_id: str, instance_name: str | None = None) -> bool:
     return False
 
 
+def release_webhook_msg_seen(
+    msg_id: str,
+    instance_name: str | None = None,
+):
+    """
+    Libera el dedupe cuando el webhook falló
+    por una causa transitoria.
+    """
+
+    if not msg_id:
+        return
+
+    try:
+        redis_conn.delete(
+            f"wa:webhook:msg:{msg_id}"
+        )
+
+        instance = (
+            instance_name
+            or "default"
+        ).strip()
+
+        redis_conn.delete(
+            f"wa:webhook:msg_instance:{instance}:{msg_id}"
+        )
+
+        print(
+            "WEBHOOK_MSG_DEDUPE_RELEASED =",
+            {
+                "msg_id": msg_id,
+                "instance_name": instance,
+            },
+            flush=True,
+        )
+
+    except Exception as exc:
+        print(
+            "WEBHOOK_MSG_DEDUPE_RELEASE_ERROR =",
+            {
+                "msg_id": msg_id,
+                "instance_name": instance_name,
+                "error": str(exc),
+            },
+            flush=True,
+        )
+
+
 def block_all_client_groups():
     excluded_words = ("PROV", "PRUEBA", "PRUEBAS", "TEST")
 
@@ -19495,17 +19542,31 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     }, flush=True)
                 
                 except Exception as media_exc:
-                    print("GET_MEDIA_BASE64_CALL_ERROR =", {
-                        "media_message_id": media_message_id,
-                        "instance_name": instance_name,
-                        "filename": filename,
-                        "lookup_id": lookup_id,
-                        "error": str(media_exc),
-                    }, flush=True)
+                    print(
+                        "GET_MEDIA_BASE64_CALL_ERROR =",
+                        {
+                            "media_message_id": media_message_id,
+                            "instance_name": instance_name,
+                            "filename": filename,
+                            "lookup_id": lookup_id,
+                            "error": str(media_exc),
+                        },
+                        flush=True,
+                    )
+                
+                    # El msg_id se marcó como visto al entrar al webhook.
+                    # Como la descarga falló por una causa transitoria,
+                    # se libera para permitir que Evolution lo reenvíe.
+                    release_webhook_msg_seen(
+                        msg_id,
+                        instance_name,
+                    )
                 
                     return {
                         "ok": True,
-                        "ignored": "provider_pdf_media_download_failed",
+                        "ignored": (
+                            "provider_pdf_media_download_failed_retryable"
+                        ),
                         "error": str(media_exc),
                     }
                 
@@ -19528,8 +19589,21 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 )
                 
                 if not media_b64:
-                    print("PROVIDER_PDF_BASE64_EMPTY =", media_json, flush=True)
-                    return {"ok": True, "ignored": "provider_pdf_base64_empty"}
+                    print(
+                        "PROVIDER_PDF_BASE64_EMPTY =",
+                        media_json,
+                        flush=True,
+                    )
+                
+                    release_webhook_msg_seen(
+                        msg_id,
+                        instance_name,
+                    )
+                
+                    return {
+                        "ok": True,
+                        "ignored": "provider_pdf_base64_empty_retryable",
+                    }
                 
                 if media_b64.startswith("data:"):
                     parts = media_b64.split(",", 1)
@@ -19549,8 +19623,20 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 print("PDF_BYTES_LEN =", len(pdf_bytes), flush=True)
                 
                 if b"%PDF" not in pdf_bytes[:20]:
-                    print("PROVIDER_PDF_INVALID_BINARY", flush=True)
-                    return {"ok": True, "ignored": "provider_pdf_invalid_binary"}
+                    print(
+                        "PROVIDER_PDF_INVALID_BINARY",
+                        flush=True,
+                    )
+                
+                    release_webhook_msg_seen(
+                        msg_id,
+                        instance_name,
+                    )
+                
+                    return {
+                        "ok": True,
+                        "ignored": "provider_pdf_invalid_binary_retryable",
+                    }
 
                 open_req = _pick_matching_processing_req_for_pdf(
                     db=db,
