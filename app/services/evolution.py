@@ -386,69 +386,129 @@ def send_group_document(group_jid: str, pdf_url: str, filename: str = "acta.pdf"
     )
 
 
-def get_media_base64(media_type: str, message_id: str, instance_name: str = None):
+def get_media_base64(
+    media_type: str,
+    message_id: str,
+    instance_name: str = None,
+):
+    """
+    Obtiene el base64 de un medio de Evolution.
+
+    Evolution puede emitir messages.upsert antes de que el archivo
+    esté disponible en getBase64FromMediaMessage.
+
+    Una respuesta HTTP 200 sin base64 todavía no se considera éxito.
+    """
+
     import time
 
     instance = instance_name or settings.EVOLUTION_INSTANCE
-    url = f"{settings.EVOLUTION_BASE_URL}/chat/getBase64FromMediaMessage/{instance}"
-    
+
+    url = (
+        f"{settings.EVOLUTION_BASE_URL}"
+        f"/chat/getBase64FromMediaMessage/{instance}"
+    )
+
     payload = {
         "message": {
             "key": {
-                "id": message_id
+                "id": message_id,
             }
         },
-        "convertToMp4": False
+        "convertToMp4": False,
     }
 
     print("GET_MEDIA_BASE64_URL =", url, flush=True)
     print("GET_MEDIA_BASE64_MESSAGE_ID =", message_id, flush=True)
     print("GET_MEDIA_BASE64_PAYLOAD =", payload, flush=True)
 
+    max_attempts = 5
+    retry_delays = [1, 2, 3, 5]
     last_error = None
 
-    for attempt in range(1, 3):
+    for attempt in range(1, max_attempts + 1):
         try:
-            print("GET_MEDIA_BASE64_ATTEMPT =", attempt, flush=True)
+            print(
+                "GET_MEDIA_BASE64_ATTEMPT =",
+                attempt,
+                flush=True,
+            )
 
             resp = requests.post(
                 url,
                 headers=_headers(),
                 json=payload,
-                timeout=(3, 20)
+                timeout=(3, 20),
             )
 
-            print("GET_MEDIA_BASE64_STATUS =", resp.status_code, flush=True)
-            try:
-                _j = resp.json()
-                _safe = {
-                    "mediaType": _j.get("mediaType"),
-                    "fileName": _j.get("fileName"),
-                    "mimetype": _j.get("mimetype"),
-                    "has_base64": bool(_j.get("base64")),
-                    "base64_len": len(_j.get("base64") or ""),
-                    "size": _j.get("size"),
-                }
-                print("GET_MEDIA_BASE64_BODY_SAFE =", _safe, flush=True)
-            except Exception:
-                print("GET_MEDIA_BASE64_BODY_SAFE_TEXT =", (resp.text or "")[:300], flush=True)
+            print(
+                "GET_MEDIA_BASE64_STATUS =",
+                resp.status_code,
+                flush=True,
+            )
 
             resp.raise_for_status()
-            return resp.json()
 
-        except Exception as e:
-            last_error = e
-            print("GET_MEDIA_BASE64_ATTEMPT_ERROR =", {
-                "attempt": attempt,
-                "message_id": message_id,
-                "instance": instance,
-                "error": str(e),
-            }, flush=True)
+            media_json = resp.json()
 
-            if attempt < 2:
-                time.sleep(2)
+            media_b64 = (
+                media_json.get("base64")
+                or media_json.get("data")
+                or media_json.get("media")
+                or ""
+            )
 
-    raise last_error
+            safe_log = {
+                "mediaType": media_json.get("mediaType"),
+                "fileName": media_json.get("fileName"),
+                "mimetype": media_json.get("mimetype"),
+                "has_base64": bool(media_b64),
+                "base64_len": len(media_b64 or ""),
+                "size": media_json.get("size"),
+            }
+
+            print(
+                "GET_MEDIA_BASE64_BODY_SAFE =",
+                safe_log,
+                flush=True,
+            )
+
+            # IMPORTANTE:
+            # HTTP 200 sin base64 significa que Evolution
+            # todavía no tiene disponible el archivo.
+            if not media_b64:
+                raise RuntimeError(
+                    "MEDIA_NOT_READY_YET: "
+                    f"message_id={message_id} "
+                    f"attempt={attempt}"
+                )
+
+            return media_json
+
+        except Exception as exc:
+            last_error = exc
+
+            print(
+                "GET_MEDIA_BASE64_ATTEMPT_ERROR =",
+                {
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "message_id": message_id,
+                    "instance": instance,
+                    "error": str(exc),
+                },
+                flush=True,
+            )
+
+            if attempt < max_attempts:
+                time.sleep(retry_delays[attempt - 1])
+
+    raise RuntimeError(
+        "GET_MEDIA_BASE64_EXHAUSTED: "
+        f"message_id={message_id} "
+        f"instance={instance}: "
+        f"{last_error}"
+    )
 
 
 def send_document_base64(number: str, media_b64: str, filename: str = "acta.pdf", caption: str = "", instance_name: str = None):
