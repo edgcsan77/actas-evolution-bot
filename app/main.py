@@ -19616,8 +19616,43 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     media_b64 += "=" * (4 - missing_padding)
 
                 t_decode = time.perf_counter()
-                pdf_bytes = base64.b64decode(media_b64, validate=False)
-                print("T_BASE64_DECODE =", round(time.perf_counter() - t_decode, 3), flush=True)
+
+                try:
+                    pdf_bytes = base64.b64decode(
+                        media_b64,
+                        validate=False,
+                    )
+                
+                except Exception as decode_exc:
+                    print(
+                        "PROVIDER_PDF_BASE64_DECODE_ERROR =",
+                        {
+                            "msg_id": msg_id,
+                            "media_message_id": media_message_id,
+                            "filename": filename,
+                            "lookup_id": lookup_id,
+                            "base64_len": len(media_b64 or ""),
+                            "error": str(decode_exc),
+                        },
+                        flush=True,
+                    )
+                
+                    release_webhook_msg_seen(
+                        msg_id,
+                        instance_name,
+                    )
+                
+                    return {
+                        "ok": True,
+                        "ignored": "provider_pdf_base64_decode_failed_retryable",
+                        "error": str(decode_exc),
+                    }
+                
+                print(
+                    "T_BASE64_DECODE =",
+                    round(time.perf_counter() - t_decode, 3),
+                    flush=True,
+                )
                 
                 print("PDF_HEADER =", pdf_bytes[:8], flush=True)
                 print("PDF_BYTES_LEN =", len(pdf_bytes), flush=True)
@@ -19658,50 +19693,106 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 }, flush=True)
                 
                 if not open_req:
-                    print("PROVIDER_PDF_WITHOUT_SAFE_MATCH =", {
-                        "filename": filename,
-                        "lookup_id": lookup_id,
-                        "source_chat_id": source_chat_id,
-                        "quoted_msg_id": quoted_msg_id,
-                    }, flush=True)
+                    print(
+                        "PROVIDER_PDF_WITHOUT_SAFE_MATCH =",
+                        {
+                            "filename": filename,
+                            "lookup_id": lookup_id,
+                            "source_chat_id": source_chat_id,
+                            "quoted_msg_id": quoted_msg_id,
+                            "msg_id": msg_id,
+                            "media_message_id": media_message_id,
+                        },
+                        flush=True,
+                    )
                 
                     fallback_req = None
+                    fallback_filters = None
+                
                     if lookup_id:
                         fallback_filters = [
                             RequestLog.curp == lookup_id,
                             _provider_pdf_match_status_filter(),
                         ]
-                        
+                
                         fallback_req = (
                             db.query(RequestLog)
                             .filter(*fallback_filters)
                             .order_by(
-                                case((RequestLog.status == "PROCESSING", 0), else_=1),
+                                case(
+                                    (RequestLog.status == "PROCESSING", 0),
+                                    else_=1,
+                                ),
                                 RequestLog.created_at.desc(),
                             )
                             .first()
                         )
                 
-                    if fallback_req:
+                    if fallback_req and fallback_filters:
                         active_count = (
                             db.query(RequestLog)
                             .filter(*fallback_filters)
                             .count()
                         )
                 
-                        print("PROVIDER_PDF_LAST_RESORT_ACTIVE_COUNT =", active_count, flush=True)
+                        print(
+                            "PROVIDER_PDF_LAST_RESORT_ACTIVE_COUNT =",
+                            active_count,
+                            flush=True,
+                        )
                 
                         if active_count == 1:
-                            print("PROVIDER_PDF_LAST_RESORT_MATCH =", fallback_req.id, flush=True)
+                            print(
+                                "PROVIDER_PDF_LAST_RESORT_MATCH =",
+                                fallback_req.id,
+                                flush=True,
+                            )
                             open_req = fallback_req
+                
                         else:
-                            print("PROVIDER_PDF_LAST_RESORT_AMBIGUOUS =", {
-                                "lookup_id": lookup_id,
-                                "active_count": active_count,
-                            }, flush=True)
-                            return {"ok": True, "ignored": "ambiguous_multiple_processing_or_recent_timeout_requests"}
+                            print(
+                                "PROVIDER_PDF_LAST_RESORT_AMBIGUOUS =",
+                                {
+                                    "lookup_id": lookup_id,
+                                    "active_count": active_count,
+                                },
+                                flush=True,
+                            )
+                
+                            # No liberar en caso ambiguo:
+                            # podría entregar el mismo PDF a la solicitud incorrecta.
+                            return {
+                                "ok": True,
+                                "ignored": (
+                                    "ambiguous_multiple_processing_"
+                                    "or_recent_timeout_requests"
+                                ),
+                            }
+                
                     else:
-                        return {"ok": True, "ignored": "provider_pdf_without_safe_match"}
+                        # Puede ser una carrera:
+                        # el proveedor respondió antes de que la solicitud quedara
+                        # completamente visible o registrada en base de datos.
+                        release_webhook_msg_seen(
+                            msg_id,
+                            instance_name,
+                        )
+                
+                        print(
+                            "PROVIDER_PDF_MATCH_RETRY_RELEASED =",
+                            {
+                                "msg_id": msg_id,
+                                "media_message_id": media_message_id,
+                                "lookup_id": lookup_id,
+                                "source_chat_id": source_chat_id,
+                            },
+                            flush=True,
+                        )
+                
+                        return {
+                            "ok": True,
+                            "ignored": "provider_pdf_without_safe_match_retryable",
+                        }
 
                 is_chain_req = is_chain(open_req.curp)
                 detected_pdf_type = "" if is_chain_req else _detect_pdf_act_type(pdf_bytes)
