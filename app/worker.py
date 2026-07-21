@@ -2843,6 +2843,22 @@ def _send_provider14_request(req, db):
             "mode_text": mode_text,
         }, flush=True)
 
+        req.provider_name = "PROVIDER14"
+        req.provider_group_id = provider_jid
+        req.provider_message = text_to_provider
+        req.updated_at = _utc_now_naive()
+        db.commit()
+        
+        print(
+            "PROVIDER14_PRE_SEND_COMMITTED =",
+            {
+                "req_id": req.id,
+                "provider_group_id": provider_jid,
+                "provider_message": text_to_provider,
+            },
+            flush=True,
+        )
+        
         resp_json = send_text(
             provider_jid,
             text_to_provider,
@@ -2855,9 +2871,6 @@ def _send_provider14_request(req, db):
             or (resp_json or {}).get("id")
             or ""
         )
-
-        req.provider_group_id = provider_jid
-        req.provider_message = text_to_provider
 
         if provider_sent_msg_id:
             req.provider_message_id = provider_sent_msg_id
