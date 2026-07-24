@@ -122,9 +122,15 @@ def _post_send_media_with_retries(url: str, payload: dict, *, label: str, max_at
     raise last_error
 
 
-def _post_send_text_with_retries(url: str, payload: dict, *, label: str, max_attempts: int = 2):
+def _post_send_text_with_retries(
+    url: str,
+    payload: dict,
+    *,
+    label: str,
+    max_attempts: int = 5,
+):
     last_error = None
-    delays = [2, 5]
+    delays = [2, 4, 8, 15]
 
     number = (payload or {}).get("number") or ""
 
@@ -198,7 +204,7 @@ def send_text(number: str, text: str, instance_name: str = None):
         url,
         payload,
         label="SEND_TEXT",
-        max_attempts=2,
+        max_attempts=5,
     )
 
 
@@ -347,7 +353,7 @@ def send_group_text(group_jid: str, text: str, instance_name: str = None):
         url,
         payload,
         label="SEND_GROUP_TEXT",
-        max_attempts=2,
+        max_attempts=5,
     )
 
 
