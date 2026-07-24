@@ -21022,7 +21022,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         source_group_id,
                         ack_msg,
                         instance_name=instance_name,
-                        job_timeout=60,
+                        job_timeout=180,
                     )
                 else:
                     ack_queue.enqueue(
@@ -21030,7 +21030,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         requester_wa_id,
                         ack_msg,
                         instance_name=instance_name,
-                        job_timeout=60,
+                        job_timeout=180,
                     )
             
                 print(
