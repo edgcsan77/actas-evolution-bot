@@ -18710,6 +18710,47 @@ def is_bot_generated_text(text: str | None) -> bool:
     return any(t.startswith(prefix) for prefix in BOT_AUTO_MESSAGES_PREFIXES)
 
 
+def _webhook_message_has_processable_content(message) -> bool:
+    """
+    Evita consumir el dedupe con eventos messages.upsert vacíos
+    o con actualizaciones que todavía no contienen el mensaje real.
+
+    Se consideran procesables:
+    - texto normal;
+    - texto extendido;
+    - documentos/PDF;
+    - imágenes;
+    - video/audio;
+    - botones/listas;
+    - mensajes encapsulados.
+    """
+    if not isinstance(message, dict) or not message:
+        return False
+
+    processable_keys = {
+        "conversation",
+        "extendedTextMessage",
+        "documentMessage",
+        "documentWithCaptionMessage",
+        "imageMessage",
+        "videoMessage",
+        "audioMessage",
+        "buttonsResponseMessage",
+        "listResponseMessage",
+        "templateButtonReplyMessage",
+        "interactiveResponseMessage",
+        "ephemeralMessage",
+        "viewOnceMessage",
+        "viewOnceMessageV2",
+        "viewOnceMessageV2Extension",
+    }
+
+    return any(
+        key in message and message.get(key) is not None
+        for key in processable_keys
+    )
+
+
 @app.post("/webhook/evolution")
 async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
     try:
@@ -18758,11 +18799,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         participant = key.get("participant", "")
         msg_id = key.get("id", "")
         
-        if webhook_msg_seen(msg_id, instance_name):
-            print("IGNORED_REASON = duplicate_msg_id", flush=True)
-            print("IGNORED_MSG_ID =", msg_id, flush=True)
-            return {"ok": True, "ignored": "duplicate_msg_id"}
-        
         is_group = remote_jid.endswith("@g.us")
         source_chat_id = remote_jid
         source_group_id = remote_jid if is_group else None
@@ -18774,15 +18810,84 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         print("ADMIN_DEBUG_SENDER =", data.get("sender", ""), flush=True)
         print("ADMIN_DEBUG_REQUESTER_WA_ID =", requester_wa_id, flush=True)
         print("ADMIN_DEBUG_ADMIN_PHONES =", settings.ADMIN_PHONE, flush=True)
-
         
         text_body = ""
+        
         if "conversation" in message:
             text_body = message.get("conversation", "")
+
         elif "extendedTextMessage" in message:
-            text_body = message.get("extendedTextMessage", {}).get("text", "")
+            text_body = (
+                message
+                .get("extendedTextMessage", {})
+                .get("text", "")
+            )
         
         text_upper = normalize_text(text_body)
+
+        message_keys = (
+            list(message.keys())
+            if isinstance(message, dict)
+            else []
+        )
+
+        print(
+            "WEBHOOK_INPUT_AUDIT =",
+            {
+                "event": event,
+                "instance_name": instance_name,
+                "msg_id": msg_id,
+                "remote_jid": remote_jid,
+                "participant": participant,
+                "from_me": from_me,
+                "push_name": push_name,
+                "message_keys": message_keys,
+                "text": text_body[:180],
+            },
+            flush=True,
+        )
+
+        # Evolution puede emitir primero una variante vacía/incompleta
+        # y posteriormente el mismo msg_id con el contenido real.
+        # Una variante vacía NO debe consumir el deduplicador.
+        if not _webhook_message_has_processable_content(message):
+            print(
+                "WEBHOOK_EMPTY_OR_INCOMPLETE_UPSERT_IGNORED =",
+                {
+                    "instance_name": instance_name,
+                    "msg_id": msg_id,
+                    "remote_jid": remote_jid,
+                    "message_keys": message_keys,
+                },
+                flush=True,
+            )
+
+            return {
+                "ok": True,
+                "ignored": "empty_or_incomplete_upsert",
+                "msg_id": msg_id,
+            }
+
+        # El dedupe se reclama solo después de confirmar
+        # que existe contenido que el sistema puede procesar.
+        if webhook_msg_seen(msg_id, instance_name):
+            print(
+                "IGNORED_DUPLICATE_PROCESSABLE_MSG =",
+                {
+                    "instance_name": instance_name,
+                    "msg_id": msg_id,
+                    "remote_jid": remote_jid,
+                    "message_keys": message_keys,
+                    "text": text_body[:180],
+                },
+                flush=True,
+            )
+
+            return {
+                "ok": True,
+                "ignored": "duplicate_msg_id",
+                "msg_id": msg_id,
+            }
 
         # =========================
         # BLOQUEO DE BUCLE ENTRE BOTS
@@ -21068,8 +21173,38 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
         return {"ok": True}
 
-        
-
     except Exception as e:
-        print("WEBHOOK ERROR:", str(e), payload)
-        return {"ok": False, "error": str(e)}
+        try:
+            release_webhook_msg_seen(
+                locals().get("msg_id", ""),
+                locals().get("instance_name", ""),
+            )
+        except Exception as release_exc:
+            print(
+                "WEBHOOK_GLOBAL_DEDUPE_RELEASE_ERROR =",
+                {
+                    "error": repr(release_exc),
+                },
+                flush=True,
+            )
+
+        print(
+            "WEBHOOK_GLOBAL_ERROR =",
+            {
+                "error": repr(e),
+                "instance_name": locals().get("instance_name", ""),
+                "msg_id": locals().get("msg_id", ""),
+                "remote_jid": locals().get("remote_jid", ""),
+                "message_keys": (
+                    list(locals().get("message", {}).keys())
+                    if isinstance(locals().get("message"), dict)
+                    else []
+                ),
+            },
+            flush=True,
+        )
+
+        return {
+            "ok": False,
+            "error": str(e),
+        }
