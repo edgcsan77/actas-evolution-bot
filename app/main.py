@@ -18712,24 +18712,26 @@ def is_bot_generated_text(text: str | None) -> bool:
 
 def _webhook_message_has_processable_content(message) -> bool:
     """
-    Evita consumir el dedupe con eventos messages.upsert vacíos
-    o con actualizaciones que todavía no contienen el mensaje real.
-
-    Se consideran procesables:
-    - texto normal;
-    - texto extendido;
-    - documentos/PDF;
-    - imágenes;
-    - video/audio;
-    - botones/listas;
-    - mensajes encapsulados.
+    Confirma que el evento contiene contenido real y no solamente
+    una estructura vacía o incompleta de Evolution.
     """
     if not isinstance(message, dict) or not message:
         return False
 
-    processable_keys = {
-        "conversation",
-        "extendedTextMessage",
+    conversation = message.get("conversation")
+
+    if isinstance(conversation, str) and conversation.strip():
+        return True
+
+    extended = message.get("extendedTextMessage")
+
+    if isinstance(extended, dict):
+        extended_text = extended.get("text")
+
+        if isinstance(extended_text, str) and extended_text.strip():
+            return True
+
+    direct_media_keys = (
         "documentMessage",
         "documentWithCaptionMessage",
         "imageMessage",
@@ -18739,16 +18741,33 @@ def _webhook_message_has_processable_content(message) -> bool:
         "listResponseMessage",
         "templateButtonReplyMessage",
         "interactiveResponseMessage",
+    )
+
+    for key in direct_media_keys:
+        value = message.get(key)
+
+        if isinstance(value, dict) and value:
+            return True
+
+    wrapped_keys = (
         "ephemeralMessage",
         "viewOnceMessage",
         "viewOnceMessageV2",
         "viewOnceMessageV2Extension",
-    }
-
-    return any(
-        key in message and message.get(key) is not None
-        for key in processable_keys
     )
+
+    for key in wrapped_keys:
+        wrapper = message.get(key)
+
+        if not isinstance(wrapper, dict):
+            continue
+
+        nested_message = wrapper.get("message")
+
+        if _webhook_message_has_processable_content(nested_message):
+            return True
+
+    return False
 
 
 @app.post("/webhook/evolution")
@@ -18793,6 +18812,35 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         key = data.get("key", {})
         message = data.get("message", {})
         push_name = data.get("pushName", "")
+
+        original_message = message
+
+        for wrapper_key in (
+            "ephemeralMessage",
+            "viewOnceMessage",
+            "viewOnceMessageV2",
+            "viewOnceMessageV2Extension",
+        ):
+            wrapper = message.get(wrapper_key)
+
+            if not isinstance(wrapper, dict):
+                continue
+
+            nested_message = wrapper.get("message")
+
+            if isinstance(nested_message, dict) and nested_message:
+                print(
+                    "WEBHOOK_MESSAGE_UNWRAPPED =",
+                    {
+                        "wrapper": wrapper_key,
+                        "outer_keys": list(original_message.keys()),
+                        "nested_keys": list(nested_message.keys()),
+                    },
+                    flush=True,
+                )
+
+                message = nested_message
+                break
         
         remote_jid = key.get("remoteJid", "")
         from_me = key.get("fromMe", False)
