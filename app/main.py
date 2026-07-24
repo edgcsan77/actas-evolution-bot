@@ -18915,28 +18915,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 "ignored": "empty_or_incomplete_upsert",
                 "msg_id": msg_id,
             }
-
-        # El dedupe se reclama solo después de confirmar
-        # que existe contenido que el sistema puede procesar.
-        if webhook_msg_seen(msg_id, instance_name):
-            print(
-                "IGNORED_DUPLICATE_PROCESSABLE_MSG =",
-                {
-                    "instance_name": instance_name,
-                    "msg_id": msg_id,
-                    "remote_jid": remote_jid,
-                    "message_keys": message_keys,
-                    "text": text_body[:180],
-                },
-                flush=True,
-            )
-
-            return {
-                "ok": True,
-                "ignored": "duplicate_msg_id",
-                "msg_id": msg_id,
-            }
-
+            
         # =========================
         # BLOQUEO DE BUCLE ENTRE BOTS
         # =========================
@@ -19020,6 +18999,45 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     "source_group_id": source_group_id,
                     "instance_name": instance_name,
                 }
+
+        # =====================================================
+        # DEDUPE GLOBAL DESPUÉS DE VALIDAR LA INSTANCIA CORRECTA
+        # =====================================================
+        #
+        # El mismo mensaje puede llegar por varias instancias.
+        # Una instancia que no es propietaria del grupo no debe
+        # reservar el msg_id global y bloquear a la correcta.
+        if webhook_msg_seen(msg_id, instance_name):
+            print(
+                "IGNORED_DUPLICATE_AFTER_INSTANCE_AUTH =",
+                {
+                    "instance_name": instance_name,
+                    "msg_id": msg_id,
+                    "remote_jid": remote_jid,
+                    "source_group_id": source_group_id,
+                    "is_provider_message": is_provider_message,
+                    "is_admin_command": is_admin_command,
+                    "message_keys": message_keys,
+                    "text": text_body[:180],
+                },
+                flush=True,
+            )
+
+            return {
+                "ok": True,
+                "ignored": "duplicate_msg_id",
+                "msg_id": msg_id,
+            }
+
+        print(
+            "WEBHOOK_DEDUPE_CLAIMED_AFTER_INSTANCE_AUTH =",
+            {
+                "instance_name": instance_name,
+                "msg_id": msg_id,
+                "source_group_id": source_group_id,
+            },
+            flush=True,
+        )
         
         if is_group and not is_provider_message:
             try:
