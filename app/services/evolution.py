@@ -256,49 +256,62 @@ def send_reaction(
     print("SEND_REACTION_PAYLOAD =", payload, flush=True)
 
     last_error = None
-
-    for attempt in range(1, 3):
+    delays = [2, 4, 8, 15]
+    
+    for attempt in range(1, 6):
         try:
             print("SEND_REACTION_ATTEMPT =", attempt, flush=True)
-
+    
             resp = requests.post(
                 url,
                 headers=_headers(),
                 json=payload,
                 timeout=(5, 35),
             )
-
+    
             body_text = resp.text or ""
-
+    
             print("SEND_REACTION_STATUS =", resp.status_code, flush=True)
             print("SEND_REACTION_BODY =", body_text[:1000], flush=True)
-
+    
             if resp.status_code in (200, 201):
                 try:
                     return resp.json()
                 except Exception:
                     return {"ok": True, "raw": body_text[:1000]}
-
+    
             last_error = requests.HTTPError(
-                f"{resp.status_code} Error for url: {url} | body={body_text[:1000]}",
+                f"{resp.status_code} Error for url: {url} | "
+                f"body={body_text[:1000]}",
                 response=resp,
             )
-
-            if not _is_retryable_evolution_error(resp.status_code, body_text):
+    
+            if not _is_retryable_evolution_error(
+                resp.status_code,
+                body_text,
+            ):
                 raise last_error
-
+    
         except Exception as e:
             last_error = e
-            print("SEND_REACTION_ERROR_ATTEMPT =", attempt, str(e), flush=True)
-
-            if attempt >= 2:
+    
+            print(
+                f"SEND_REACTION_ERROR_ATTEMPT_{attempt} =",
+                str(e),
+                flush=True,
+            )
+    
+            if attempt >= 5:
                 break
-
+    
             if not _is_retryable_evolution_error(None, "", e):
                 break
-
-            time.sleep(2)
-
+    
+        if attempt < 5:
+            delay = delays[min(attempt - 1, len(delays) - 1)]
+            print("SEND_REACTION_RETRY_SLEEP =", delay, flush=True)
+            time.sleep(delay)
+    
     raise last_error
 
 
