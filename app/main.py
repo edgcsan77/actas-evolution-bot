@@ -854,8 +854,8 @@ def panel_create_bot(
     
     total = visible_static_count + active_dynamic
 
-    if total >= 30:
-        return {"ok": False, "error": "MAX_30_BOTS"}
+    if total >=99:
+        return {"ok": False, "error": "MAX_99_BOTS"}
 
     exists_static = instance_name in BOT_LABELS or instance_name in BOT_PANEL_TOKENS.values()
 
