@@ -463,6 +463,80 @@ def _extract_qr_from_evolution_payload(payload) -> str:
     return ""
 
 
+def _evolution_set_webhook(instance_name: str) -> dict:
+    """
+    Configura o restaura el webhook de una instancia de Evolution.
+    Se utiliza al crear una instancia y al solicitar Reconectar / QR.
+    """
+    inst = (instance_name or "").strip()
+
+    if not inst:
+        return {
+            "ok": False,
+            "error": "EMPTY_INSTANCE",
+        }
+
+    webhook_url = f"{EVOLUTION_BASE_URL}/webhook/set/{inst}"
+
+    try:
+        response = requests.post(
+            webhook_url,
+            headers={
+                "apikey": EVOLUTION_APIKEY,
+                "Content-Type": "application/json",
+            },
+            json={
+                "webhook": {
+                    "url": "http://187.127.248.94:8000/webhook/evolution",
+                    "enabled": True,
+                    "webhook_by_events": False,
+                    "events": [
+                        "MESSAGES_UPSERT",
+                    ],
+                }
+            },
+            timeout=30,
+        )
+
+        try:
+            data = response.json()
+        except Exception:
+            data = {
+                "raw": (response.text or "")[:500],
+            }
+
+        print(
+            "SET_EVOLUTION_WEBHOOK =",
+            {
+                "instance_name": inst,
+                "status_code": response.status_code,
+                "response": data,
+            },
+            flush=True,
+        )
+
+        return {
+            "ok": response.status_code in (200, 201),
+            "status_code": response.status_code,
+            "data": data,
+        }
+
+    except Exception as exc:
+        print(
+            "SET_EVOLUTION_WEBHOOK_ERROR =",
+            {
+                "instance_name": inst,
+                "error": repr(exc),
+            },
+            flush=True,
+        )
+
+        return {
+            "ok": False,
+            "error": str(exc),
+        }
+
+
 def _evolution_create_instance_if_needed(instance_name: str) -> dict:
     """
     Crea/recrea la instancia en Evolution si connect responde count:0
@@ -547,6 +621,7 @@ def _evolution_connect_qr(instance_name: str) -> dict:
         }
 
     try:
+        webhook_before_connect = _evolution_set_webhook(inst)
         first = _connect_once()
 
         # Caso exacto de tu pantalla: Evolution responde {"count": 0}
@@ -567,6 +642,16 @@ def _evolution_connect_qr(instance_name: str) -> dict:
                     "create_status_code": created.get("status_code"),
                     "create_response": created.get("data"),
                     "connect_response": first_data,
+                }
+
+            webhook_after_create = _evolution_set_webhook(inst)
+
+            if not webhook_after_create.get("ok"):
+                return {
+                    "ok": False,
+                    "error": "EVOLUTION_WEBHOOK_FAILED_AFTER_CREATE",
+                    "webhook_response": webhook_after_create,
+                    "create_response": created.get("data"),
                 }
 
             time.sleep(1.5)
