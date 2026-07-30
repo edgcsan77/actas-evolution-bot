@@ -8989,7 +8989,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                   <td>
                     <div style="display:grid;gap:8px;min-width:260px;">
                       <input id="promo_name_{_esc(g["group_jid"])}" placeholder="Nombre promo">
-                      <input id="promo_total_{_esc(g["group_jid"])}" type="number" min="10" step="1" placeholder="Total actas (mín. 10)">
+                      <input id="promo_total_{_esc(g["group_jid"])}" type="number" min="10" step="1" placeholder="">
                 
                       <button class="btn btn-success"
                         onclick="assignBotPromo('{_esc(g["group_jid"])}')">
@@ -9307,7 +9307,8 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
         async function assignBotPromo(groupJid) {
           const promoName = document.getElementById(`promo_name_${groupJid}`).value.trim();
           const totalActas = Number(document.getElementById(`promo_total_${groupJid}`).value.trim());
-          const pricePerPiece = document.getElementById(`promo_price_${groupJid}`).value.trim();
+          const pricePerPiece =
+              document.getElementById(`promo_price_${groupJid}`)?.value?.trim() || "";
 
           if (!totalActas || totalActas < 10) {
             alert("La promoción mínima es de 10 actas");
