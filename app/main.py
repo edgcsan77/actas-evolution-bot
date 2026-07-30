@@ -8990,7 +8990,6 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                     <div style="display:grid;gap:8px;min-width:260px;">
                       <input id="promo_name_{_esc(g["group_jid"])}" placeholder="Nombre promo">
                       <input id="promo_total_{_esc(g["group_jid"])}" type="number" min="10" step="1" placeholder="Total actas (mín. 10)">
-                      <input id="promo_price_{_esc(g["group_jid"])}" placeholder="Precio por acta">
                 
                       <button class="btn btn-success"
                         onclick="assignBotPromo('{_esc(g["group_jid"])}')">
