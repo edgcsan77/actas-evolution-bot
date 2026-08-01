@@ -12163,7 +12163,7 @@ def panel_actas(
               <thead>
                 <tr style="background:#fff200;">
                   <th>Proveedor</th>
-                  <th class="left">Total con éxito</th>
+                  <th class="right">Total con éxito</th>
                   <th class="right">Actas sin registro en sistema</th>
                   <th class="right">Actas erróneas / duplicadas</th>
                   <th class="right">Otros errores</th>
@@ -12178,7 +12178,7 @@ def panel_actas(
             for r in provider_control_rows:
                 html += f"""
                 <tr>
-                  <td class="right">{_esc(_provider_label(r["provider_name"]))}</td>
+                  <td class="left">{_esc(_provider_label(r["provider_name"]))}</td>
                   <td class="right">{r["total_exito"]}</td>
                   <td class="right">{r["sin_registro"]}</td>
                   <td class="right">{r["actas_erroneas"]}</td>
