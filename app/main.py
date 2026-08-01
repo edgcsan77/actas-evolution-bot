@@ -12163,7 +12163,7 @@ def panel_actas(
               <thead>
                 <tr style="background:#fff200;">
                   <th>Proveedor</th>
-                  <th class="right">Total con éxito</th>
+                  <th class="left">Total con éxito</th>
                   <th class="right">Actas sin registro en sistema</th>
                   <th class="right">Actas erróneas / duplicadas</th>
                   <th class="right">Otros errores</th>
