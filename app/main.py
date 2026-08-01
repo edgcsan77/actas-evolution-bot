@@ -12131,42 +12131,6 @@ def panel_actas(
         </div>
         """
 
-        html += f"""
-        <div class="box">
-          <div class="head"><strong>Resumen por proveedor</strong></div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Proveedor</th>
-                  <th class="right">Total</th>
-                  <th class="right">HECHO</th>
-                  <th class="right">ERROR</th>
-                </tr>
-              </thead>
-              <tbody>
-        """
-    
-        if by_provider:
-            for r in by_provider:
-                html += f"""
-                <tr>
-                  <td>{_esc(_provider_label(r["provider_name"]))}</td>
-                  <td class="right">{r["total"]}</td>
-                  <td class="right">{r["done"]}</td>
-                  <td class="right">{r["error"]}</td>
-                </tr>
-                """
-        else:
-            html += '<tr><td colspan="4">Sin datos.</td></tr>'
-    
-        html += """
-              </tbody>
-            </table>
-          </div>
-        </div>
-        """
-
         audit_params = {
             "token": current_token,
             "view": view,
