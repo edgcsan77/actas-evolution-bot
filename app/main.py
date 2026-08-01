@@ -12178,7 +12178,7 @@ def panel_actas(
             for r in provider_control_rows:
                 html += f"""
                 <tr>
-                  <td><strong>{_esc(_provider_label(r["provider_name"]))}</strong></td>
+                  <td>{_esc(_provider_label(r["provider_name"]))}</td>
                   <td class="right">{r["total_exito"]}</td>
                   <td class="right">{r["sin_registro"]}</td>
                   <td class="right">{r["actas_erroneas"]}</td>
