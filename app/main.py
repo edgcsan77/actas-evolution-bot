@@ -14992,6 +14992,12 @@ def _api_client_panel_rows(db: Session) -> list[dict]:
     clients = (
         db.query(ApiClient)
         .filter(ApiClient.count_in_panel == True)
+        .filter(
+            ApiClient.panel_group_jid.notin_([
+                "api_cesar_programador",
+                "api_cliente_7",
+            ])
+        )
         .order_by(ApiClient.created_at.desc(), ApiClient.id.desc())
         .all()
     )
