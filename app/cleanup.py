@@ -114,6 +114,7 @@ def cleanup_expired_and_mark_pending():
             "PROVIDER4",
             "PROVIDER10",
             "PROVIDER11",
+            "PROVIDER15",
         ]
 
         rows_whatsapp = (
