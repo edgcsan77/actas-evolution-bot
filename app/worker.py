@@ -20,6 +20,7 @@ from app.utils.curp import provider_label_for_type, is_chain
 from app.services.provider3 import Provider3Client, decode_pdf_base64
 from app.services.provider4 import Provider4Client
 from app.services.provider7 import Provider7Client
+from app.services.provider_sid_emiliano import ProviderSidEmilianoClient
 from rq import get_current_job
 from app.queue import redis_conn, request_queue, slow_request_queue
 from app.provider_status_cache import refresh_providers_status
@@ -2036,6 +2037,7 @@ def _enabled_providers(db) -> list[str]:
     p12 = _get_or_create_provider(db, "PROVIDER12", False)
     p13 = _get_or_create_provider(db, "PROVIDER13", False)
     p14 = _get_or_create_provider(db, "PROVIDER14", False)
+    p15 = _get_or_create_provider(db, "PROVIDER15", False)
     p_maya = _get_or_create_provider(db, "MAYAPROVIDER", False)
 
     enabled = []
@@ -2067,8 +2069,14 @@ def _enabled_providers(db) -> list[str]:
         enabled.append("PROVIDER13")
     if p14.is_enabled:
         enabled.append("PROVIDER14")
+    if (
+        p15.is_enabled
+        and settings.PROVIDER15_NODE_ENABLED
+    ):
+        enabled.append("PROVIDER15")
 
     return enabled
+    
 
 
 def _is_folio_type(act_type: str | None) -> bool:
@@ -2112,6 +2120,26 @@ def _is_provider6_allowed_request(term: str | None, act_type: str | None) -> boo
 
     # NACIMIENTO sí puede entrar a Escalante.
     if t.startswith("NACIMIENTO") or t.startswith("NAC"):
+        return True
+
+    return False
+
+
+def _is_provider15_allowed_request(
+    term: str | None,
+    act_type: str | None,
+) -> bool:
+    term_clean = (
+        term or ""
+    ).strip().upper()
+
+    # E-WEB acepta:
+    # - CURP
+    # - CADENA de 20 caracteres numéricos
+    if _is_curp_term(term_clean):
+        return True
+
+    if is_chain(term_clean):
         return True
 
     return False
@@ -2267,6 +2295,36 @@ def _pick_provider_name(
     
         if not enabled:
             raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
+
+    # PROVIDER15 / E-WEB:
+    # solo CURP y CADENA.
+    if (
+        "PROVIDER15" in enabled
+        and not _is_provider15_allowed_request(
+            term,
+            act_type,
+        )
+    ):
+        enabled = [
+            p
+            for p in enabled
+            if p != "PROVIDER15"
+        ]
+
+        print(
+            "PROVIDER15_REMOVED_NOT_ALLOWED_REQUEST =",
+            {
+                "enabled": enabled,
+                "term": term,
+                "act_type": act_type,
+            },
+            flush=True,
+        )
+
+        if not enabled:
+            raise RuntimeError(
+                "NO_PROVIDER_FOR_SPECIAL_FORMAT"
+            )
 
     print("PICK_PROVIDER_ENABLED_FINAL =", enabled, flush=True)
 
@@ -2969,6 +3027,9 @@ def _pick_provider_group(
     if provider_name == "PROVIDER14":
         return _provider14_private_jid()
 
+    if provider_name == "PROVIDER15":
+        return None
+
     if provider_name == "MAYAPROVIDER":
         provider11_groups = [
             settings.MAYAPROVIDER_GROUP_1,
@@ -3012,6 +3073,9 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
 
     if provider_name == "PROVIDER14":
         return _provider14_message(term, act_type)
+
+    if provider_name == "PROVIDER15":
+        return None
 
     if provider_name == "PROVIDER3":
         return None
@@ -3637,7 +3701,247 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
             err = f"{provider_name}_{err[len('PROVIDER4_'):]}"
 
         raise RuntimeError(err) from e
-    
+
+
+def _provider15_certificate_type(
+    act_type: str | None,
+) -> str:
+
+    value = (
+        act_type or ""
+    ).upper().strip()
+
+    if (
+        "MATRIMONIO" in value
+        or "MATRI" in value
+    ):
+        return "MATRIMONIO"
+
+    if (
+        "DEFUNCION" in value
+        or "DEFUNCIÓN" in value
+        or "DEFUN" in value
+    ):
+        return "DEFUNCION"
+
+    if (
+        "DIVORCIO" in value
+        or "DIVOR" in value
+    ):
+        return "DIVORCIO"
+
+    return "NACIMIENTO"
+
+
+def _provider15_acta_format(
+    act_type: str | None,
+) -> str:
+
+    if _is_folio_act(act_type):
+        return "FOLIADO"
+
+    return "REVERSADO"
+
+
+def _process_provider15(req, db):
+    if not settings.PROVIDER15_NODE_ENABLED:
+        raise RuntimeError(
+            "PROVIDER15_DISABLED_ON_THIS_NODE"
+        )
+
+    if not _provider_is_enabled(
+        db,
+        "PROVIDER15",
+    ):
+        raise RuntimeError(
+            "PROVIDER15_DISABLED_BEFORE_PROCESSING"
+        )
+
+    term = (
+        req.curp or ""
+    ).strip().upper()
+
+    if not _is_provider15_allowed_request(
+        term,
+        req.act_type,
+    ):
+        raise RuntimeError(
+            "PROVIDER15_NOT_CURP_OR_CHAIN"
+        )
+
+    username = (
+        settings.PROVIDER15_USERNAME
+        or ""
+    ).strip()
+
+    password = (
+        settings.PROVIDER15_PASSWORD
+        or ""
+    )
+
+    if not username:
+        raise RuntimeError(
+            "PROVIDER15_USERNAME_NOT_CONFIGURED"
+        )
+
+    if not password:
+        raise RuntimeError(
+            "PROVIDER15_PASSWORD_NOT_CONFIGURED"
+        )
+
+    client = ProviderSidEmilianoClient(
+        username=username,
+        password=password,
+
+        # IMPORTANTE:
+        # se lo pasamos explícitamente.
+        # Así el lock utiliza el Redis
+        # de ACTAS-CONTROL.
+        redis_url=settings.REDIS_URL,
+    )
+
+    acta_format = (
+        _provider15_acta_format(
+            req.act_type
+        )
+    )
+
+    print(
+        "PROVIDER15_WORKER_PROCESS_START =",
+        {
+            "request_id": req.id,
+            "term": term,
+            "act_type": req.act_type,
+            "acta_format": acta_format,
+        },
+        flush=True,
+    )
+
+    # =====================================
+    # CADENA
+    # =====================================
+
+    if is_chain(term):
+
+        result = client.process_by_chain(
+            term,
+            acta_format=acta_format,
+            timeout_seconds=120,
+            poll_interval=2.0,
+        )
+
+    # =====================================
+    # CURP
+    # =====================================
+
+    else:
+
+        certificate_type = (
+            _provider15_certificate_type(
+                req.act_type
+            )
+        )
+
+        result = client.process_certificate(
+            term,
+            certificate_type,
+            acta_format=acta_format,
+            timeout_seconds=120,
+            poll_interval=2.0,
+        )
+
+    if result.get("ok"):
+
+        pdf_bytes = result.get(
+            "pdf_bytes"
+        )
+
+        if not isinstance(
+            pdf_bytes,
+            bytes,
+        ):
+            raise RuntimeError(
+                "PROVIDER15_PDF_BYTES_MISSING"
+            )
+
+        if not pdf_bytes.startswith(
+            b"%PDF"
+        ):
+            raise RuntimeError(
+                "PROVIDER15_INVALID_PDF"
+            )
+
+        print(
+            "PROVIDER15_WORKER_SUCCESS =",
+            {
+                "request_id": req.id,
+                "term": term,
+                "provider_request_id": (
+                    result.get(
+                        "provider_request_id"
+                    )
+                ),
+                "provider_uuid": (
+                    result.get(
+                        "provider_uuid"
+                    )
+                ),
+                "pdf_size": len(
+                    pdf_bytes
+                ),
+            },
+            flush=True,
+        )
+
+        return {
+            "pdf_bytes": pdf_bytes,
+            "provider_request_id": (
+                result.get(
+                    "provider_request_id"
+                )
+            ),
+            "provider_uuid": (
+                result.get(
+                    "provider_uuid"
+                )
+            ),
+            "provider_result": result,
+        }
+
+    status = str(
+        result.get("status")
+        or ""
+    ).strip().lower()
+
+    message = str(
+        result.get("message")
+        or ""
+    ).strip()
+
+    if status == "not_found":
+        raise RuntimeError(
+            "PROVIDER15_NO_RECORD:"
+            f"{term}:"
+            f"{message}"
+        )
+
+    if status in {
+        "timeout",
+        "download_timeout",
+    }:
+        raise RuntimeError(
+            "PROVIDER15_TIMEOUT:"
+            f"{term}:"
+            f"{status}"
+        )
+
+    raise RuntimeError(
+        "PROVIDER15_FAILED:"
+        f"{term}:"
+        f"{status}:"
+        f"{message}"
+    )
+
 
 def _process_provider7(req, db):
     access_token = _get_app_setting(db, "PROVIDER7_ACCESS_TOKEN", settings.PROVIDER7_ACCESS_TOKEN)
@@ -4804,6 +5108,207 @@ def process_request(request_id: int):
                 f"{provider_name}_SEND_FAILED:{last_err or ''}",
                 last_err or ""
             )
+            return
+
+        if provider_name == "PROVIDER15":
+
+            try:
+                provider15_result = (
+                    _process_provider15(
+                        req,
+                        db,
+                    )
+                )
+
+            except Exception as exc:
+
+                err = str(exc)
+
+                if err.startswith(
+                    "PROVIDER15_NO_RECORD:"
+                ):
+                    req.status = "ERROR"
+                    req.error_message = err[:1000]
+                    req.updated_at = _utc_now_naive()
+                    db.commit()
+
+                    msg = (
+                        f"❌ No hay registros disponibles.\n"
+                        f"Dato: {req.curp}\n"
+                        f"Tipo: {req.act_type}\n\n"
+                        f"Verificar que los datos sean correctos."
+                    )
+
+                    instance = (
+                        req.instance_name
+                        or "docifybot8"
+                    )
+
+                    dedupe_key = (
+                        f"no_record_notified:"
+                        f"{req.id}"
+                    )
+
+                    try:
+                        first_notify = redis_conn.set(
+                            dedupe_key,
+                            "1",
+                            nx=True,
+                            ex=86400,
+                        )
+                    except Exception:
+                        first_notify = True
+
+                    if first_notify:
+                        if req.source_group_id:
+                            send_group_text(
+                                req.source_group_id,
+                                msg,
+                                instance,
+                            )
+                        else:
+                            from app.services.evolution import send_text
+
+                            send_text(
+                                req.requester_wa_id,
+                                msg,
+                                instance,
+                            )
+
+                    return
+
+                raise
+
+            pdf_bytes = _require_pdf_bytes(
+                provider15_result,
+                "PROVIDER15",
+                req,
+            )
+
+            safe_media_b64 = (
+                base64.b64encode(
+                    pdf_bytes
+                ).decode()
+            )
+
+            total_seconds = (
+                _request_total_seconds(
+                    req,
+                    process_started_ts,
+                )
+            )
+
+            caption_text = ""
+
+            if (
+                req.source_group_id
+                not in NO_TIME_CAPTION_GROUPS
+            ):
+                caption_text = (
+                    f"⏱️ Tiempo total: "
+                    f"{_fmt_seconds(total_seconds)}"
+                )
+
+            filename = (
+                f"{req.curp}_FOLIO.pdf"
+                if _is_folio_act(
+                    req.act_type
+                )
+                else f"{req.curp}.pdf"
+            )
+
+            try:
+                save_request_pdf_to_r2(
+                    req,
+                    db,
+                    pdf_bytes,
+                    filename=filename,
+                    origin="worker:PROVIDER15",
+                )
+
+            except Exception as r2_exc:
+                print(
+                    "R2_SAVE_PROVIDER15_PDF_ERROR =",
+                    {
+                        "req_id": req.id,
+                        "filename": filename,
+                        "error": str(
+                            r2_exc
+                        ),
+                    },
+                    flush=True,
+                )
+
+            instance = (
+                req.instance_name
+                or "docifybot8"
+            )
+
+            # API interna
+            if _store_api_pdf_result(
+                req,
+                db,
+                safe_media_b64,
+                filename,
+                "BASE64_PROVIDER15_API",
+            ):
+                return
+
+            delivery_key = (
+                f"provider15_delivery:"
+                f"{req.id}:"
+                f"{req.curp}:"
+                f"{req.source_group_id or req.requester_wa_id}"
+            )
+
+            if redis_conn.exists(
+                delivery_key
+            ):
+                print(
+                    "PROVIDER15_DUPLICATE_DELIVERY_IGNORED =",
+                    delivery_key,
+                    flush=True,
+                )
+                return
+
+            delivered = (
+                _deliver_pdf_base64_with_retries(
+                    req,
+                    db,
+                    safe_media_b64,
+                    filename,
+                    caption_text,
+                    instance,
+                    label="PROVIDER15",
+                )
+            )
+
+            if not delivered:
+                return
+
+            redis_conn.set(
+                delivery_key,
+                "1",
+                ex=3600,
+            )
+
+            req.provider_media_url = (
+                "BASE64_PROVIDER15"
+            )
+
+            req.status = "DONE"
+            req.error_message = None
+            req.updated_at = (
+                _utc_now_naive()
+            )
+
+            db.commit()
+
+            _after_done_accounting(
+                req,
+                db,
+            )
+
             return
 
         if provider_name == "PROVIDER3":
