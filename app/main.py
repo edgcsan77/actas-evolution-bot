@@ -11136,19 +11136,9 @@ def panel_actas(
                 box-shadow: 0 0 0 3px rgba(51, 65, 85, .10);
               }}
 
-              .provider-placeholder {{
-                visibility: hidden;
-                pointer-events: none;
-                box-shadow: none;
-                background: transparent;
-                border: none;
-              }}
-
-              @media (max-width: 1200px) {{
-                .provider-placeholder {{
-                  min-height: 12px;
-                  padding: 0;
-                }}
+              .provider-row-break {{
+                grid-column: 1 / -1;
+                height: 12px;
               }}
             
               @media (max-width: 1200px) {{
@@ -11418,7 +11408,7 @@ def panel_actas(
                       </div>
                     </div>
 
-                    <div class="provider-card provider-placeholder"></div>
+                    <div class="provider-row-break"></div>
 
                     <div class="provider-card">
                       <div class="provider-name">E-BOT</div>
@@ -11543,7 +11533,7 @@ def panel_actas(
                       </div>
                     </div>
 
-                    <div class="provider-card provider-placeholder"></div>
+                    <div class="provider-row-break"></div>
 
                     <div class="provider-card">
                       <div class="provider-name">LAZARO 1</div>
