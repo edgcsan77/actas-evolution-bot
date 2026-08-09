@@ -3778,36 +3778,33 @@ def _process_provider15(req, db):
             "PROVIDER15_NOT_CURP_OR_CHAIN"
         )
 
-    username = (
-        settings.PROVIDER15_USERNAME
+    agent_url = (
+        getattr(
+            settings,
+            "PROVIDER15_AGENT_URL",
+            "",
+        )
+        or ""
+    ).strip().rstrip("/")
+
+    agent_token = (
+        getattr(
+            settings,
+            "PROVIDER15_AGENT_TOKEN",
+            "",
+        )
         or ""
     ).strip()
 
-    password = (
-        settings.PROVIDER15_PASSWORD
-        or ""
-    )
-
-    if not username:
+    if not agent_url:
         raise RuntimeError(
-            "PROVIDER15_USERNAME_NOT_CONFIGURED"
+            "PROVIDER15_AGENT_URL_NOT_CONFIGURED"
         )
 
-    if not password:
+    if not agent_token:
         raise RuntimeError(
-            "PROVIDER15_PASSWORD_NOT_CONFIGURED"
+            "PROVIDER15_AGENT_TOKEN_NOT_CONFIGURED"
         )
-
-    client = ProviderSidEmilianoClient(
-        username=username,
-        password=password,
-
-        # IMPORTANTE:
-        # se lo pasamos explícitamente.
-        # Así el lock utiliza el Redis
-        # de ACTAS-CONTROL.
-        redis_url=settings.REDIS_URL,
-    )
 
     acta_format = (
         _provider15_acta_format(
@@ -3815,63 +3812,117 @@ def _process_provider15(req, db):
         )
     )
 
-    print(
-        "PROVIDER15_WORKER_PROCESS_START =",
-        {
-            "request_id": req.id,
-            "term": term,
-            "act_type": req.act_type,
-            "acta_format": acta_format,
-        },
-        flush=True,
-    )
+    chain_mode = is_chain(term)
 
-    # =====================================
-    # CADENA
-    # =====================================
+    payload = {
+        "term": term,
+        "acta_format": acta_format,
+        "is_chain": bool(chain_mode),
+    }
 
-    if is_chain(term):
-
-        result = client.process_by_chain(
-            term,
-            acta_format=acta_format,
-            timeout_seconds=120,
-            poll_interval=2.0,
-        )
-
-    # =====================================
-    # CURP
-    # =====================================
-
-    else:
-
-        certificate_type = (
+    if not chain_mode:
+        payload["certificate_type"] = (
             _provider15_certificate_type(
                 req.act_type
             )
         )
 
-        result = client.process_certificate(
-            term,
-            certificate_type,
-            acta_format=acta_format,
-            timeout_seconds=120,
-            poll_interval=2.0,
+    print(
+        "PROVIDER15_AGENT_PROCESS_START =",
+        {
+            "request_id": req.id,
+            "term": term,
+            "act_type": req.act_type,
+            "acta_format": acta_format,
+            "chain_mode": chain_mode,
+            "agent_url": agent_url,
+        },
+        flush=True,
+    )
+
+    try:
+        response = requests.post(
+            f"{agent_url}/provider15/process",
+            headers={
+                "Authorization": (
+                    f"Bearer {agent_token}"
+                ),
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=(10, 600),
+        )
+
+    except requests.Timeout as exc:
+        raise RuntimeError(
+            "PROVIDER15_AGENT_TIMEOUT"
+        ) from exc
+
+    except requests.RequestException as exc:
+        raise RuntimeError(
+            "PROVIDER15_AGENT_CONNECTION_ERROR:"
+            f"{str(exc)[:300]}"
+        ) from exc
+
+    print(
+        "PROVIDER15_AGENT_HTTP_STATUS =",
+        {
+            "request_id": req.id,
+            "status_code": response.status_code,
+        },
+        flush=True,
+    )
+
+    if response.status_code == 401:
+        raise RuntimeError(
+            "PROVIDER15_AGENT_UNAUTHORIZED"
+        )
+
+    if response.status_code >= 400:
+        body_preview = (
+            response.text or ""
+        )[:500]
+
+        raise RuntimeError(
+            "PROVIDER15_AGENT_HTTP_"
+            f"{response.status_code}:"
+            f"{body_preview}"
+        )
+
+    try:
+        result = response.json()
+
+    except Exception as exc:
+        raise RuntimeError(
+            "PROVIDER15_AGENT_INVALID_JSON"
+        ) from exc
+
+    if not isinstance(result, dict):
+        raise RuntimeError(
+            "PROVIDER15_AGENT_INVALID_RESPONSE"
         )
 
     if result.get("ok"):
+        pdf_b64 = str(
+            result.get("pdf_base64")
+            or ""
+        ).strip()
 
-        pdf_bytes = result.get(
-            "pdf_bytes"
-        )
-
-        if not isinstance(
-            pdf_bytes,
-            bytes,
-        ):
+        if not pdf_b64:
             raise RuntimeError(
-                "PROVIDER15_PDF_BYTES_MISSING"
+                "PROVIDER15_AGENT_PDF_MISSING"
             )
+
+        try:
+            pdf_bytes = base64.b64decode(
+                pdf_b64,
+                validate=True,
+            )
+
+        except Exception as exc:
+            raise RuntimeError(
+                "PROVIDER15_AGENT_PDF_BASE64_INVALID"
+            ) from exc
 
         if not pdf_bytes.startswith(
             b"%PDF"
@@ -3881,7 +3932,7 @@ def _process_provider15(req, db):
             )
 
         print(
-            "PROVIDER15_WORKER_SUCCESS =",
+            "PROVIDER15_AGENT_SUCCESS =",
             {
                 "request_id": req.id,
                 "term": term,
@@ -3924,6 +3975,7 @@ def _process_provider15(req, db):
 
     message = str(
         result.get("message")
+        or result.get("error")
         or ""
     ).strip()
 
