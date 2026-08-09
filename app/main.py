@@ -11411,6 +11411,8 @@ def panel_actas(
                       </div>
                     </div>
 
+                    <div class="provider-card provider-placeholder"></div>
+
                     <div class="provider-card">
                       <div class="provider-name">E-BOT</div>
                     
