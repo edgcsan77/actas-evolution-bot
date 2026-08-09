@@ -589,6 +589,7 @@ def _provider_from_mode(mode: str | None) -> str | None:
         "PROVIDER12",
         "PROVIDER13",
         "PROVIDER14",
+        "PROVIDER15",
         "MAYAPROVIDER",
     }:
         return provider_name
@@ -5139,50 +5140,12 @@ def process_request(request_id: int):
                     req.error_message = err[:1000]
                     req.updated_at = _utc_now_naive()
                     db.commit()
-
-                    msg = (
-                        f"❌ No hay registros disponibles.\n"
-                        f"Dato: {req.curp}\n"
-                        f"Tipo: {req.act_type}\n\n"
-                        f"Verificar que los datos sean correctos."
+                
+                    _notify_client_no_record_once(
+                        req,
+                        label="PROVIDER15_NO_RECORD",
                     )
-
-                    instance = (
-                        req.instance_name
-                        or "docifybot8"
-                    )
-
-                    dedupe_key = (
-                        f"no_record_notified:"
-                        f"{req.id}"
-                    )
-
-                    try:
-                        first_notify = redis_conn.set(
-                            dedupe_key,
-                            "1",
-                            nx=True,
-                            ex=86400,
-                        )
-                    except Exception:
-                        first_notify = True
-
-                    if first_notify:
-                        if req.source_group_id:
-                            send_group_text(
-                                req.source_group_id,
-                                msg,
-                                instance,
-                            )
-                        else:
-                            from app.services.evolution import send_text
-
-                            send_text(
-                                req.requester_wa_id,
-                                msg,
-                                instance,
-                            )
-
+                
                     return
 
                 raise
