@@ -1755,7 +1755,11 @@ def _panel_error_bucket(error_message: str | None, status: str | None = None) ->
     if " | " in code:
         code = code.split(" | ", 1)[0].strip()
 
-    code = re.sub(r"^PROVIDER(?:10|11|12|13|14|[1-9])_", "", code)
+    code = re.sub(
+        r"^PROVIDER(?:10|11|12|13|14|15|[1-9])_",
+        "",
+        code
+    )
     code = re.sub(r"^MAYAPROVIDER_", "", code)
 
     # ==========================================================
@@ -15227,7 +15231,11 @@ def _api_clean_internal_error_code(code: str | None) -> str:
     code_up = (code or "").strip().upper()
 
     # Quita prefijos internos tipo PROVIDER1_WRONG_CURP_IN_PDF
-    code_up = re.sub(r"^PROVIDER(?:10|11|[1-9])_", "", code_up)
+    code_up = re.sub(
+        r"^PROVIDER(?:10|11|12|13|14|15|[1-9])_",
+        "",
+        code_up
+    )
 
     # Quita prefijo interno de proveedor privado
     code_up = re.sub(r"^MAYAPROVIDER_", "", code_up)
