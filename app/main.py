@@ -1126,6 +1126,7 @@ PROVIDER_LABELS = {
     "PROVIDER12": "VILLAFUERTE",
     "PROVIDER13": "RL",
     "PROVIDER14": "E-BOT",
+    "PROVIDER15": "E-WEB",
     "MAYAPROVIDER": "PROVEEDOR DE MAYA",
 }
 
@@ -9403,6 +9404,7 @@ def panel_provider_weight(payload: dict, db: Session = Depends(get_db)):
         "PROVIDER12",
         "PROVIDER13",
         "PROVIDER14",
+        "PROVIDER15",
     }:
         return {"ok": False, "error": "Proveedor inválido"}
 
@@ -11450,6 +11452,59 @@ def panel_actas(
                         <button
                           class="btn btn-danger"
                           onclick="toggleProvider('PROVIDER14','off')"
+                        >
+                          Desactivar
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="provider-card">
+                      <div class="provider-name">E-WEB</div>
+                    
+                      <div style="margin:6px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
+                          Prioridad de uso
+                        </div>
+                    
+                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
+                          <div style="display:flex;align-items:center;gap:6px;">
+                            <input
+                              id="weight_PROVIDER15"
+                              type="number"
+                              min="0"
+                              step="0.1"
+                              value="{provider_weight_map.get('PROVIDER15', 0)}"
+                              style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;"
+                            >
+                            <span style="font-size:12px;opacity:.7;">
+                              nivel
+                            </span>
+                          </div>
+                    
+                          <button
+                            class="btn btn-primary"
+                            onclick="saveProviderWeight('PROVIDER15')"
+                          >
+                            Aplicar
+                          </button>
+                        </div>
+                    
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">
+                          Más alto = este proveedor se usa más seguido
+                        </div>
+                      </div>
+                    
+                      <div class="provider-actions">
+                        <button
+                          class="btn btn-success"
+                          onclick="toggleProvider('PROVIDER15','on')"
+                        >
+                          Activar
+                        </button>
+                    
+                        <button
+                          class="btn btn-danger"
+                          onclick="toggleProvider('PROVIDER15','off')"
                         >
                           Desactivar
                         </button>
@@ -14639,6 +14694,7 @@ def startup():
         _get_or_create_provider(db, "PROVIDER12", False)
         _get_or_create_provider(db, "PROVIDER13", False)
         _get_or_create_provider(db, "PROVIDER14", False)
+        _get_or_create_provider(db, "PROVIDER15", False)
         _get_or_create_provider(db, "MAYAPROVIDER", False)
     
         current = _get_app_setting(db, "PROVIDER3_PHPSESSID", "")
@@ -17848,6 +17904,7 @@ def _providers_status_text(db: Session) -> str:
     p12 = _get_or_create_provider(db, "PROVIDER12", False)
     p13 = _get_or_create_provider(db, "PROVIDER13", False)
     p14 = _get_or_create_provider(db, "PROVIDER14", False)
+    p15 = _get_or_create_provider(db, "PROVIDER14", False)
 
     s1 = "ON" if p1.is_enabled else "OFF"
     s2 = "ON" if p2.is_enabled else "OFF"
@@ -17863,6 +17920,7 @@ def _providers_status_text(db: Session) -> str:
     s12 = "ON" if p12.is_enabled else "OFF"
     s13 = "ON" if p13.is_enabled else "OFF"
     s14 = "ON" if p14.is_enabled else "OFF"
+    s15 = "ON" if p15.is_enabled else "OFF"
 
     provider1_extra = ""
     provider2_extra = ""
@@ -17878,6 +17936,7 @@ def _providers_status_text(db: Session) -> str:
     provider12_extra = ""
     provider13_extra = ""
     provider14_extra = ""
+    provider15_extra = ""
 
     local_start = _panel_month_start()
     local_end = _panel_month_end()
@@ -18079,6 +18138,39 @@ def _providers_status_text(db: Session) -> str:
     except Exception as e:
         provider14_extra = f" | ERROR DB: {str(e)}"
 
+    try:
+        provider15_total = (
+            db.query(
+                func.count(
+                    RequestLog.id
+                )
+            )
+            .filter(
+                RequestLog.provider_name
+                == "PROVIDER15",
+
+                RequestLog.status
+                == "DONE",
+
+                RequestLog.created_at
+                >= utc_start,
+
+                RequestLog.created_at
+                < utc_end,
+            )
+            .scalar()
+        ) or 0
+
+        provider15_extra = (
+            f" | CURP y CADENA hechas: "
+            f"{provider15_total}"
+        )
+
+    except Exception as e:
+        provider15_extra = (
+            f" | ERROR DB: {str(e)}"
+        )
+
     text = (
         f"ESCALANTE:      {s6}{provider6_extra}\n"
         f"ADMIN:          {s1}{provider1_extra}\n"
@@ -18086,6 +18178,7 @@ def _providers_status_text(db: Session) -> str:
         f"VILLAFUERTE:    {s12}{provider12_extra}\n"
         f"RL:             {s13}{provider13_extra}\n"
         f"E-BOT:          {s14}{provider14_extra}\n"
+        f"E-WEB:          {s15}{provider15_extra}\n"
         f"EMILIANO:       {s9}{provider9_extra}\n"
         f"LAZARO 1:       {s4}{provider4_extra}\n"
         f"LAZARO 2:       {s10}{provider10_extra}\n"
