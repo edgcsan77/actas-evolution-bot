@@ -787,6 +787,7 @@ PROVIDER_LABELS_SUPPORT = {
     "PROVIDER12": "VILLAFUERTE",
     "PROVIDER13": "RL",
     "PROVIDER14": "E-BOT",
+    "PROVIDER15": "E-WEB",
     "MAYAPROVIDER": "PROVEEDOR DE MAYA",
 }
 
@@ -900,7 +901,10 @@ def _support_provider_from_error(err: str | None) -> str:
     # PROVIDER1_SEND_FAILED
     # PROVIDER_1_SEND_FAILED
     # PROVIDER10_DOWNLOAD_FAILED
-    m = re.search(r"\bPROVIDER_?(10|11|12|13|[1-9])(?=\b|_)", text)
+    m = re.search(
+        r"\bPROVIDER_?(10|11|12|13|14|15|[1-9])(?=\b|_)",
+        text
+    )
     if m:
         return f"PROVIDER{m.group(1)}"
 
@@ -946,7 +950,11 @@ def _clean_error_code(code: str | None) -> str:
 
     # Algunos errores llegan como PROVIDER1_WRONG_CURP_IN_PDF.
     # Para traducirlos mejor quitamos el prefijo del proveedor.
-    code_up = re.sub(r"^PROVIDER(?:10|11|12|13|[1-9])_", "", code_up)
+    code_up = re.sub(
+        r"^PROVIDER(?:10|11|12|13|14|15|[1-9])_",
+        "",
+        code_up
+    )
 
     # Y también MAYAPROVIDER_...
     code_up = re.sub(r"^MAYAPROVIDER_", "", code_up)
