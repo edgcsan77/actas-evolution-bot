@@ -98,6 +98,8 @@ class Settings(BaseSettings):
     PROVIDER15_USERNAME: str = ""
     PROVIDER15_PASSWORD: str = ""
     PROVIDER15_NODE_ENABLED: bool = False
+    PROVIDER15_AGENT_URL: str = ""
+    PROVIDER15_AGENT_TOKEN: str = ""
 
     # MAYAPROVIDER
     MAYAPROVIDER_GROUP_1: str = ""
