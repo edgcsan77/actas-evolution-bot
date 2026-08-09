@@ -718,8 +718,8 @@ class ProviderSidEmilianoClient:
     def _acquire_format_request_lock(
         self,
         *,
-        wait_seconds: float = 30.0,
-        lock_seconds: int = 20,
+        wait_seconds: float = 60.0,
+        lock_seconds: int = 90,
     ) -> Optional[str]:
 
         # Para tests locales sin Redis:
