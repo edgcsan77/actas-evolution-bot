@@ -1297,9 +1297,19 @@ class ProviderSidEmilianoClient:
                 "PROVIDER15_REQUESTS_DECRYPT_FAILED"
             ) from exc
 
+        rows = decoded.get("data")
+
         print(
             "PROVIDER15_REQUESTS_RESULT =",
-            decoded,
+            {
+                "count": (
+                    len(rows)
+                    if isinstance(rows, list)
+                    else 0
+                ),
+                "error": decoded.get("error"),
+                "redirect": decoded.get("redirect"),
+            },
             flush=True,
         )
 
