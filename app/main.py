@@ -11143,6 +11143,13 @@ def panel_actas(
                 background: transparent;
                 border: none;
               }}
+
+              @media (max-width: 1200px) {{
+                .provider-placeholder {{
+                  min-height: 12px;
+                  padding: 0;
+                }}
+              }}
             
               @media (max-width: 1200px) {{
                 .grid-hero {{
