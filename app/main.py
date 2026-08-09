@@ -17904,7 +17904,7 @@ def _providers_status_text(db: Session) -> str:
     p12 = _get_or_create_provider(db, "PROVIDER12", False)
     p13 = _get_or_create_provider(db, "PROVIDER13", False)
     p14 = _get_or_create_provider(db, "PROVIDER14", False)
-    p15 = _get_or_create_provider(db, "PROVIDER14", False)
+    p15 = _get_or_create_provider(db, "PROVIDER15", False)
 
     s1 = "ON" if p1.is_enabled else "OFF"
     s2 = "ON" if p2.is_enabled else "OFF"
