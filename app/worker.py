@@ -20,7 +20,6 @@ from app.utils.curp import provider_label_for_type, is_chain
 from app.services.provider3 import Provider3Client, decode_pdf_base64
 from app.services.provider4 import Provider4Client
 from app.services.provider7 import Provider7Client
-from app.services.provider_sid_emiliano import ProviderSidEmilianoClient
 from rq import get_current_job
 from app.queue import redis_conn, request_queue, slow_request_queue
 from app.provider_status_cache import refresh_providers_status
