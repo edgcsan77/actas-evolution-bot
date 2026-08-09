@@ -94,6 +94,11 @@ class Settings(BaseSettings):
     PROVIDER14_PRIVATE_JID: str = ""
     PROVIDER14_STEP_DELAY_SECONDS: float = 2.0
 
+    # PROVIDER 15
+    PROVIDER15_USERNAME: str = ""
+    PROVIDER15_PASSWORD: str = ""
+    PROVIDER15_NODE_ENABLED: bool = False
+
     # MAYAPROVIDER
     MAYAPROVIDER_GROUP_1: str = ""
     MAYAPROVIDER_GROUP_2: str = ""
