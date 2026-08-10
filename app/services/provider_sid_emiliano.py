@@ -8,6 +8,7 @@ import time
 import os
 import uuid
 import redis
+import threading
 
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -26,6 +27,19 @@ DEFAULT_UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/150.0.0.0 Safari/537.36"
 )
+
+
+# Lock compartido entre TODAS las instancias del cliente
+# dentro del mismo proceso del agente.
+#
+# Solo protege:
+#   1. cambiar FOLIADO / REVERSADO
+#   2. crear la solicitud
+#
+# NO protege polling ni descarga del PDF.
+_PROVIDER15_LOCAL_FORMAT_LOCK = threading.Lock()
+
+_PROVIDER15_LOCAL_LOCK_TOKEN = "__LOCAL_FORMAT_LOCK__"
 
 
 class ProviderSidEmilianoClient:
@@ -725,11 +739,21 @@ class ProviderSidEmilianoClient:
         # Para tests locales sin Redis:
         # simplemente no se aplica lock.
         if self.redis_client is None:
+            acquired = _PROVIDER15_LOCAL_FORMAT_LOCK.acquire(
+                timeout=float(wait_seconds)
+            )
+        
+            if not acquired:
+                raise RuntimeError(
+                    "PROVIDER15_LOCAL_FORMAT_LOCK_TIMEOUT"
+                )
+        
             print(
-                "PROVIDER15_FORMAT_LOCK_DISABLED = True",
+                "PROVIDER15_LOCAL_FORMAT_LOCK_ACQUIRED = True",
                 flush=True,
             )
-            return None
+        
+            return _PROVIDER15_LOCAL_LOCK_TOKEN
 
         token = uuid.uuid4().hex
 
@@ -770,10 +794,28 @@ class ProviderSidEmilianoClient:
         token: Optional[str],
     ) -> None:
 
-        if (
-            self.redis_client is None
-            or not token
-        ):
+        if not token:
+            return
+        
+        if token == _PROVIDER15_LOCAL_LOCK_TOKEN:
+            try:
+                _PROVIDER15_LOCAL_FORMAT_LOCK.release()
+        
+                print(
+                    "PROVIDER15_LOCAL_FORMAT_LOCK_RELEASED = True",
+                    flush=True,
+                )
+        
+            except RuntimeError as exc:
+                print(
+                    "PROVIDER15_LOCAL_FORMAT_LOCK_RELEASE_ERROR =",
+                    repr(exc),
+                    flush=True,
+                )
+        
+            return
+        
+        if self.redis_client is None:
             return
 
         # Solo elimina el lock si todavía
