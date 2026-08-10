@@ -2201,6 +2201,50 @@ def _pick_provider_name(
     # GLOBAL:PROVIDERX      => fuerza proveedor global y SÍ cuenta
     if forced_provider:
         print("BOT_PROVIDER_FORCED =", forced_provider, flush=True)
+
+        enabled_now = set(
+            _enabled_providers(db)
+        )
+
+        if (
+            forced_provider != "MAYAPROVIDER"
+            and forced_provider not in enabled_now
+        ):
+            print(
+                "BOT_PROVIDER_FORCED_DISABLED =",
+                {
+                    "instance_name": instance_name,
+                    "forced_provider": forced_provider,
+                    "enabled": sorted(enabled_now),
+                },
+                flush=True,
+            )
+
+            raise RuntimeError(
+                f"NO_PROVIDER_ENABLED:"
+                f"FORCED_{forced_provider}_DISABLED"
+            )
+
+        if (
+            forced_provider == "PROVIDER15"
+            and not _is_provider15_allowed_request(
+                term,
+                act_type,
+            )
+        ):
+            print(
+                "BOT_PROVIDER_FORCED_PROVIDER15_NOT_ALLOWED =",
+                {
+                    "instance_name": instance_name,
+                    "term": term,
+                    "act_type": act_type,
+                },
+                flush=True,
+            )
+
+            raise RuntimeError(
+                "NO_PROVIDER_FOR_SPECIAL_FORMAT"
+            )
     
         if forced_provider in ("PROVIDER4", "PROVIDER10", "PROVIDER11") and not _is_provider4_eligible(term, act_type):
             print("BOT_PROVIDER_FORCED_LAZARO_NOT_ALLOWED_FALLBACK_TO_GLOBAL =", {
