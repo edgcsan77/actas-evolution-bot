@@ -141,8 +141,23 @@ DEFAULT_BOT_PROVIDER_MODE = {
 }
 
 BOT_PROVIDER_OPTIONS = {
-    "GLOBAL_POOL": "Global · proveedores de Mesino",
-    "PERSONAL:MAYAPROVIDER": "Privado · proveedor personal",
+    "GLOBAL_POOL": "Automático",
+
+    "GLOBAL:PROVIDER1": "ADMIN DIGITAL",
+    "GLOBAL:PROVIDER2": "ACTAS DEL SURESTE",
+    "GLOBAL:PROVIDER3": "AUSTRAM WEB",
+    "GLOBAL:PROVIDER4": "LAZARO WEB 1",
+    "GLOBAL:PROVIDER5": "LUIS SID",
+    "GLOBAL:PROVIDER6": "ACTAS ESCALANTE",
+    "GLOBAL:PROVIDER7": "MESINO SID",
+    "GLOBAL:PROVIDER8": "ANGEL",
+    "GLOBAL:PROVIDER9": "EMILIANO",
+    "GLOBAL:PROVIDER10": "LAZARO WEB 2",
+    "GLOBAL:PROVIDER11": "LAZARO WEB 3",
+    "GLOBAL:PROVIDER12": "VILLAFUERTE",
+    "GLOBAL:PROVIDER13": "RL",
+    "GLOBAL:PROVIDER14": "E-BOT",
+    "GLOBAL:PROVIDER15": "E-WEB",
 }
 
 
@@ -198,6 +213,7 @@ def _provider_from_mode(mode: str | None) -> str | None:
         "PROVIDER12",
         "PROVIDER13",
         "PROVIDER14",
+        "PROVIDER15",
         "MAYAPROVIDER",
     }:
         return provider_name
@@ -3172,6 +3188,77 @@ def panel_unblock_instance(instance_name: str):
         "blocked": False,
         "admin_blocked": False,
     }
+
+
+@app.post("/panel/instance/{instance_name}/provider-mode")
+async def panel_set_instance_provider_mode(
+    instance_name: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not _is_valid_admin_panel_token(request):
+        return {
+            "ok": False,
+            "error": "UNAUTHORIZED",
+        }
+
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    inst = _norm_instance(instance_name)
+
+    if not inst:
+        return {
+            "ok": False,
+            "error": "INSTANCIA_INVALIDA",
+        }
+
+    mode = str(
+        payload.get("mode")
+        or "GLOBAL_POOL"
+    ).strip().upper()
+
+    if mode not in BOT_PROVIDER_OPTIONS:
+        return {
+            "ok": False,
+            "error": "MODO_PROVEEDOR_INVALIDO",
+        }
+
+    try:
+        _set_bot_provider_mode(
+            db,
+            inst,
+            mode,
+        )
+
+        _clear_panel_cache()
+
+        print(
+            "PANEL_BOT_PROVIDER_MODE_UPDATED =",
+            {
+                "instance_name": inst,
+                "mode": mode,
+                "label": BOT_PROVIDER_OPTIONS.get(mode, mode),
+            },
+            flush=True,
+        )
+
+        return {
+            "ok": True,
+            "instance_name": inst,
+            "mode": mode,
+            "label": BOT_PROVIDER_OPTIONS.get(mode, mode),
+        }
+
+    except Exception as exc:
+        db.rollback()
+
+        return {
+            "ok": False,
+            "error": str(exc),
+        }
 
 
 @app.post("/panel/instance/{instance_name}/manager-price")
@@ -12010,6 +12097,7 @@ def panel_actas(
                   <th class="right">Límite</th>
                   <th class="right">Disponibles</th>
                   <th>Estado</th>
+                  <th>Proveedor</th>
                   <th>Nuevo límite</th>
                   <th>Recarga</th>
                   <th>Acciones</th>
@@ -12037,6 +12125,38 @@ def panel_actas(
             commercial_data = commercial_data_by_instance.get(inst, {})
             manager_name = commercial_data.get("manager_name") or ""
             manager_price = commercial_data.get("manager_price") or ""
+
+            provider_mode = _bot_provider_mode(
+                db,
+                inst,
+            )
+
+            provider_options_html = ""
+
+            for mode_value, mode_label in BOT_PROVIDER_OPTIONS.items():
+
+                if (
+                    mode_value == "PERSONAL:MAYAPROVIDER"
+                    and _norm_instance(inst) != "docifybot8maya"
+                ):
+                    continue
+                    
+                selected = (
+                    "selected"
+                    if provider_mode == mode_value
+                    else ""
+                )
+
+                provider_options_html += (
+                    f'<option value="{_esc(mode_value)}" {selected}>'
+                    f'{_esc(mode_label)}'
+                    f'</option>'
+                )
+
+            provider_mode_label = BOT_PROVIDER_OPTIONS.get(
+                provider_mode,
+                provider_mode,
+            )
         
             bot_credit = _bot_credit_stats(db, inst)
             bot_used = bot_credit["used"]
@@ -12091,6 +12211,44 @@ def panel_actas(
                   <td class="right">{bot_limit}</td>
                   <td class="right">{bot_available}</td>
                   <td>{status_badge}</td>
+
+                  <td>
+                    <div style="
+                      display:flex;
+                      flex-direction:column;
+                      gap:6px;
+                      min-width:190px;
+                    ">
+                      <select
+                        id="bot_provider_mode_{_esc(inst)}"
+                        style="
+                          width:100%;
+                          padding:8px;
+                          border:1px solid #cbd5e1;
+                          border-radius:8px;
+                          background:#fff;
+                        "
+                      >
+                        {provider_options_html}
+                      </select>
+                
+                      <button
+                        type="button"
+                        class="btn btn-primary"
+                        onclick="saveBotProviderMode('{_esc(inst)}', this)"
+                        style="width:100%;"
+                      >
+                        Guardar
+                      </button>
+                
+                      <span
+                        class="small"
+                        style="font-size:11px;"
+                      >
+                        Actual: {_esc(provider_mode_label)}
+                      </span>
+                    </div>
+                  </td>
         
                   <td>
                     <div style="display:flex;gap:8px;align-items:center;min-width:180px;">
@@ -12975,6 +13133,73 @@ def panel_actas(
           }}
         
           alert("Peso actualizado: " + providerName + " = " + data.weight);
+        }}
+
+        async function saveBotProviderMode(instanceName, button) {{
+          const select = document.getElementById(
+            "bot_provider_mode_" + instanceName
+          );
+        
+          if (!select) {{
+            alert("No se encontró el selector de proveedor.");
+            return;
+          }}
+        
+          const originalText = button
+            ? button.textContent
+            : "Guardar";
+        
+          if (button) {{
+            button.disabled = true;
+            button.textContent = "Guardando...";
+          }}
+        
+          try {{
+            const token = new URLSearchParams(
+              window.location.search
+            ).get("token") || "";
+        
+            const response = await fetch(
+              `/panel/instance/${{encodeURIComponent(instanceName)}}/provider-mode?token=${{encodeURIComponent(token)}}`,
+              {{
+                method: "POST",
+                headers: {{
+                  "Content-Type": "application/json"
+                }},
+                body: JSON.stringify({{
+                  mode: select.value
+                }})
+              }}
+            );
+        
+            const data = await response.json();
+        
+            if (!response.ok || !data.ok) {{
+              throw new Error(
+                data.error || "No se pudo guardar el proveedor."
+              );
+            }}
+        
+            if (button) {{
+              button.textContent = "Guardado ✓";
+        
+              setTimeout(() => {{
+                button.disabled = false;
+                button.textContent = originalText;
+              }}, 1200);
+            }}
+        
+          }} catch (error) {{
+            if (button) {{
+              button.disabled = false;
+              button.textContent = originalText;
+            }}
+        
+            alert(
+              "Error guardando proveedor: "
+              + (error.message || error)
+            );
+          }}
         }}
 
         async function saveBotManagerData(instanceName) {{
