@@ -3765,6 +3765,11 @@ def _process_provider15(req, db):
             "PROVIDER15_DISABLED_BEFORE_PROCESSING"
         )
 
+    # Cerrar cualquier transacción DB antes de esperar al agente E-WEB.
+    # Provider15 puede tardar varios minutos; no debemos dejar
+    # PostgreSQL idle-in-transaction durante esa espera.
+    db.commit()
+
     term = (
         req.curp or ""
     ).strip().upper()
@@ -5249,17 +5254,29 @@ def process_request(request_id: int):
                 )
 
             except Exception as r2_exc:
+                try:
+                    db.rollback()
+                except Exception as rollback_exc:
+                    print(
+                        "R2_SAVE_PROVIDER15_ROLLBACK_ERROR =",
+                        {
+                            "req_id": req.id,
+                            "error": str(rollback_exc),
+                        },
+                        flush=True,
+                    )
+
                 print(
                     "R2_SAVE_PROVIDER15_PDF_ERROR =",
                     {
                         "req_id": req.id,
                         "filename": filename,
-                        "error": str(
-                            r2_exc
-                        ),
+                        "error": str(r2_exc),
                     },
                     flush=True,
                 )
+
+                raise
 
             instance = (
                 req.instance_name
