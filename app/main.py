@@ -143,21 +143,19 @@ DEFAULT_BOT_PROVIDER_MODE = {
 BOT_PROVIDER_OPTIONS = {
     "GLOBAL_POOL": "Automático",
 
-    "GLOBAL:PROVIDER1": "ADMIN DIGITAL",
-    "GLOBAL:PROVIDER2": "ACTAS DEL SURESTE",
-    "GLOBAL:PROVIDER3": "AUSTRAM WEB",
-    "GLOBAL:PROVIDER4": "LAZARO WEB 1",
-    "GLOBAL:PROVIDER5": "LUIS SID",
-    "GLOBAL:PROVIDER6": "ACTAS ESCALANTE",
-    "GLOBAL:PROVIDER7": "MESINO SID",
-    "GLOBAL:PROVIDER8": "ANGEL",
-    "GLOBAL:PROVIDER9": "EMILIANO",
-    "GLOBAL:PROVIDER10": "LAZARO WEB 2",
-    "GLOBAL:PROVIDER11": "LAZARO WEB 3",
+    "GLOBAL:PROVIDER6": "ESCALANTE",
+    "GLOBAL:PROVIDER1": "ADMIN",
+    "GLOBAL:PROVIDER5": "LUIS",
     "GLOBAL:PROVIDER12": "VILLAFUERTE",
     "GLOBAL:PROVIDER13": "RL",
+    
     "GLOBAL:PROVIDER14": "E-BOT",
     "GLOBAL:PROVIDER15": "E-WEB",
+    "GLOBAL:PROVIDER9": "EMILIANO",
+    
+    "GLOBAL:PROVIDER4": "LAZARO WEB 1",
+    "GLOBAL:PROVIDER10": "LAZARO WEB 2",
+    "GLOBAL:PROVIDER11": "LAZARO WEB 3",
 }
 
 
@@ -11227,6 +11225,197 @@ def panel_actas(
                 grid-column: 1 / -1;
                 height: 12px;
               }}
+
+              .bot-control-grid {{
+                display: grid;
+                gap: 12px;
+                padding: 16px;
+              }}
+            
+              .bot-control-card {{
+                border: 1px solid #e5e7eb;
+                border-radius: 16px;
+                background: #ffffff;
+                overflow: hidden;
+              }}
+            
+              .bot-control-card[open] {{
+                box-shadow: 0 8px 24px rgba(15, 23, 42, .08);
+              }}
+            
+              .bot-control-summary {{
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 20px;
+                padding: 16px 18px;
+                cursor: pointer;
+                list-style: none;
+                background: #ffffff;
+              }}
+            
+              .bot-control-summary::-webkit-details-marker {{
+                display: none;
+              }}
+            
+              .bot-control-summary::after {{
+                content: "Ver detalles";
+                font-size: 12px;
+                font-weight: 800;
+                color: #334155;
+                white-space: nowrap;
+              }}
+            
+              .bot-control-card[open] .bot-control-summary::after {{
+                content: "Ocultar";
+              }}
+            
+              .bot-control-summary-main {{
+                display: flex;
+                flex-direction: column;
+                gap: 3px;
+                min-width: 190px;
+              }}
+            
+              .bot-control-name {{
+                font-size: 15px;
+                color: #0f172a;
+              }}
+            
+              .bot-control-instance {{
+                font-size: 11px;
+                color: #64748b;
+              }}
+            
+              .bot-control-summary-meta {{
+                display: flex;
+                align-items: center;
+                justify-content: flex-end;
+                flex-wrap: wrap;
+                gap: 14px;
+                font-size: 12px;
+                color: #64748b;
+              }}
+            
+              .bot-control-summary-meta strong {{
+                color: #0f172a;
+              }}
+            
+              .bot-control-body {{
+                border-top: 1px solid #e5e7eb;
+                background: #f8fafc;
+            
+                display: grid;
+                grid-template-columns:
+                  repeat(4, minmax(0, 1fr));
+            
+                gap: 14px;
+                padding: 18px;
+              }}
+            
+              .bot-control-field {{
+                display: flex;
+                flex-direction: column;
+                gap: 7px;
+                min-width: 0;
+              }}
+            
+              .bot-control-field label {{
+                font-size: 12px;
+                font-weight: 800;
+                color: #475569;
+              }}
+            
+              .bot-control-field input,
+              .bot-control-field select {{
+                width: 100%;
+                min-width: 0;
+                box-sizing: border-box;
+            
+                padding: 10px 12px;
+                border: 1px solid #cbd5e1;
+                border-radius: 10px;
+            
+                background: white;
+                color: #0f172a;
+                font: inherit;
+              }}
+            
+              .bot-control-provider {{
+                grid-column: span 2;
+              }}
+            
+              .bot-control-stat {{
+                border: 1px solid #e2e8f0;
+                border-radius: 12px;
+                background: white;
+                padding: 12px;
+            
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+              }}
+            
+              .bot-control-stat span {{
+                font-size: 11px;
+                font-weight: 700;
+                color: #64748b;
+                text-transform: uppercase;
+              }}
+            
+              .bot-control-stat strong {{
+                font-size: 18px;
+                color: #0f172a;
+              }}
+            
+              .bot-control-actions {{
+                grid-column: 1 / -1;
+            
+                display: flex;
+                justify-content: flex-end;
+                flex-wrap: wrap;
+                gap: 10px;
+            
+                padding-top: 4px;
+              }}
+            
+              @media (max-width: 1100px) {{
+                .bot-control-body {{
+                  grid-template-columns:
+                    repeat(2, minmax(0, 1fr));
+                }}
+            
+                .bot-control-provider {{
+                  grid-column: span 2;
+                }}
+              }}
+            
+              @media (max-width: 700px) {{
+                .bot-control-summary {{
+                  align-items: flex-start;
+                  flex-direction: column;
+                }}
+            
+                .bot-control-summary-meta {{
+                  justify-content: flex-start;
+                }}
+             
+                .bot-control-body {{
+                  grid-template-columns: 1fr;
+                }}
+            
+                .bot-control-provider {{
+                  grid-column: auto;
+                }}
+            
+                .bot-control-actions {{
+                  flex-direction: column;
+                }}
+            
+                .bot-control-actions .btn {{
+                  width: 100%;
+                }}
+              }}
             
               @media (max-width: 1200px) {{
                 .grid-hero {{
@@ -12082,34 +12271,25 @@ def panel_actas(
         html += """
         <div class="box">
           <div class="head">
-            <strong>Control por bot</strong>
-            <span class="small">Configura límite, consumo, bloqueo y recarga por instancia.</span>
+            <div>
+              <strong>Control por bot</strong>
+              <div class="small">
+                Configura proveedor, límite, consumo, bloqueo, gestor y precio por instancia.
+              </div>
+            </div>
+
+            <span class="badge badge-success">
+              Todos los bots
+            </span>
           </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Gestor</th>
-                  <th>Precio</th>
-                  <th>Bot</th>
-                  <th class="right">Solicitudes</th>
-                  <th class="right">Usadas</th>
-                  <th class="right">Límite</th>
-                  <th class="right">Disponibles</th>
-                  <th>Estado</th>
-                  <th>Proveedor</th>
-                  <th>Nuevo límite</th>
-                  <th>Recarga</th>
-                  <th>Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
+
+          <div class="bot-control-grid">
         """
 
         commercial_data_by_instance = {}
 
-        for item in by_instance:
-            item_inst = (item["instance_name"] or "").strip()
+        for b in bot_status_rows:
+            item_inst = (b.get("instance_name") or "").strip()
 
             if not item_inst:
                 continue
@@ -12119,12 +12299,32 @@ def panel_actas(
                 item_inst,
             )
 
-        for r in by_instance:
-            inst = (r["instance_name"] or "").strip()
-        
-            commercial_data = commercial_data_by_instance.get(inst, {})
-            manager_name = commercial_data.get("manager_name") or ""
-            manager_price = commercial_data.get("manager_price") or ""
+        for b in bot_status_rows:
+            inst = (b.get("instance_name") or "").strip()
+
+            if not inst:
+                continue
+
+            bot_label_text = (
+                b.get("label")
+                or bot_labels_map.get(inst)
+                or inst
+            )
+
+            commercial_data = commercial_data_by_instance.get(
+                inst,
+                {},
+            )
+
+            manager_name = (
+                commercial_data.get("manager_name")
+                or ""
+            )
+
+            manager_price = (
+                commercial_data.get("manager_price")
+                or ""
+            )
 
             provider_mode = _bot_provider_mode(
                 db,
@@ -12140,7 +12340,7 @@ def panel_actas(
                     and _norm_instance(inst) != "docifybot8maya"
                 ):
                     continue
-                    
+
                 selected = (
                     "selected"
                     if provider_mode == mode_value
@@ -12157,150 +12357,215 @@ def panel_actas(
                 provider_mode,
                 provider_mode,
             )
-        
-            bot_credit = _bot_credit_stats(db, inst)
+
+            bot_credit = _bot_credit_stats(
+                db,
+                inst,
+            )
+
             bot_used = bot_credit["used"]
             bot_limit = bot_credit["limit"]
-            bot_available = bot_credit["available"] if bot_limit > 0 else "∞"
-        
-            bot_blocked = is_instance_blocked(inst)
-        
+
+            bot_available = (
+                bot_credit["available"]
+                if bot_limit > 0
+                else "∞"
+            )
+
+            bot_blocked = is_instance_blocked(
+                inst
+            )
+
             status_badge = (
                 '<span class="badge badge-danger">BLOQUEADO</span>'
-                if bot_blocked else
-                '<span class="badge badge-success">ACTIVO</span>'
+                if bot_blocked
+                else '<span class="badge badge-success">ACTIVO</span>'
             )
-        
-            html += f"""
-                <tr>        
-                  <td>
-                    <input
-                      id="bot_manager_name_{_esc(inst)}"
-                      type="text"
-                      maxlength="100"
-                      value="{_esc(manager_name)}"
-                      placeholder="Nombre del gestor"
-                      style="min-width:170px;width:100%;"
-                    >
-                  </td>
-            
-                  <td>
-                    <div style="display:flex;gap:8px;align-items:center;min-width:180px;">
-                      <input
-                        id="bot_manager_price_{_esc(inst)}"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value="{_esc(manager_price)}"
-                        placeholder="Ej. 3.50"
-                        style="width:100%;"
-                      >
-                      <button
-                        class="btn btn-primary"
-                        type="button"
-                        onclick="saveBotManagerData('{_esc(inst)}')"
-                      >
-                        Guardar
-                      </button>
-                    </div>
-                  </td>
-                
-                  <td><strong>{_esc(bot_labels_map.get(inst) or inst)}</strong></td>
-                  <td class="right">{r["total"]}</td>
-                  <td class="right">{bot_used}</td>
-                  <td class="right">{bot_limit}</td>
-                  <td class="right">{bot_available}</td>
-                  <td>{status_badge}</td>
 
-                  <td>
-                    <div style="
-                      display:flex;
-                      flex-direction:column;
-                      gap:6px;
-                      min-width:190px;
-                    ">
-                      <select
-                        id="bot_provider_mode_{_esc(inst)}"
-                        style="
-                          width:100%;
-                          padding:8px;
-                          border:1px solid #cbd5e1;
-                          border-radius:8px;
-                          background:#fff;
-                        "
-                      >
-                        {provider_options_html}
-                      </select>
-                
-                      <button
-                        type="button"
-                        class="btn btn-primary"
-                        onclick="saveBotProviderMode('{_esc(inst)}', this)"
-                        style="width:100%;"
-                      >
-                        Guardar
-                      </button>
-                
-                      <span
-                        class="small"
-                        style="font-size:11px;"
-                      >
-                        Actual: {_esc(provider_mode_label)}
-                      </span>
-                    </div>
-                  </td>
-        
-                  <td>
-                    <div style="display:flex;gap:8px;align-items:center;min-width:180px;">
-                      <input
-                        id="bot_limit_{_esc(inst)}"
-                        type="number"
-                        min="0"
-                        step="1"
-                        value="{bot_limit}"
-                        placeholder="Ej. 1000"
-                        style="width:100%;"
-                      >
-                      <button class="btn btn-primary" onclick="saveBotLimit('{_esc(inst)}')">
-                        Guardar
-                      </button>
-                    </div>
-                  </td>
-        
-                  <td>
-                    <div style="display:flex;gap:8px;align-items:center;min-width:180px;">
-                      <input
-                        id="bot_recharge_{_esc(inst)}"
-                        type="number"
-                        min="1"
-                        step="1"
-                        placeholder="Ej. 250"
-                        style="width:100%;"
-                      >
-                      <button class="btn btn-success" onclick="rechargeBotLimit('{_esc(inst)}')">
-                        Recargar
-                      </button>
-                    </div>
-                  </td>
-        
-                  <td>
-                    <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                      <button class="btn btn-light" onclick="resetBotUsage('{_esc(inst)}')">
-                        Reset usadas
-                      </button>
-                      {
-                        f'<button class="btn btn-success" onclick="unblockBot(\'{_esc(inst)}\')">Desbloquear</button>'
-                        if bot_blocked else 
-                        f'<button class="btn btn-danger" onclick="blockBot(\'{_esc(inst)}\')">Bloquear</button>'
-                      }
-                    </div>
-                  </td>
-                </tr>
+            request_total = int(
+                b.get("total_requests")
+                or 0
+            )
+
+            html += f"""
+            <details class="bot-control-card">
+              <summary class="bot-control-summary">
+
+                <div class="bot-control-summary-main">
+                  <strong class="bot-control-name">
+                    {_esc(bot_label_text)}
+                  </strong>
+
+                  <span class="mono bot-control-instance">
+                    {_esc(inst)}
+                  </span>
+                </div>
+
+                <div class="bot-control-summary-meta">
+
+                  <span>
+                    Solicitudes:
+                    <strong>{request_total}</strong>
+                  </span>
+
+                  <span>
+                    Usadas:
+                    <strong>{bot_used}</strong>
+                  </span>
+
+                  <span>
+                    Proveedor:
+                    <strong>{_esc(provider_mode_label)}</strong>
+                  </span>
+
+                  {status_badge}
+
+                </div>
+              </summary>
+
+              <div class="bot-control-body">
+
+                <div class="bot-control-field">
+                  <label>Gestor</label>
+
+                  <input
+                    id="bot_manager_name_{_esc(inst)}"
+                    type="text"
+                    maxlength="100"
+                    value="{_esc(manager_name)}"
+                    placeholder="Nombre del gestor"
+                  >
+                </div>
+
+                <div class="bot-control-field">
+                  <label>Precio</label>
+
+                  <input
+                    id="bot_manager_price_{_esc(inst)}"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value="{_esc(manager_price)}"
+                    placeholder="Ej. 4.00"
+                  >
+                </div>
+
+                <div class="bot-control-field bot-control-action-field">
+                  <label>Guardar gestor / precio</label>
+
+                  <button
+                    class="btn btn-primary"
+                    type="button"
+                    onclick="saveBotManagerData('{_esc(inst)}')"
+                  >
+                    Guardar
+                  </button>
+                </div>
+
+                <div class="bot-control-stat">
+                  <span>Solicitudes</span>
+                  <strong>{request_total}</strong>
+                </div>
+
+                <div class="bot-control-stat">
+                  <span>Usadas</span>
+                  <strong>{bot_used}</strong>
+                </div>
+
+                <div class="bot-control-stat">
+                  <span>Límite</span>
+                  <strong>{bot_limit}</strong>
+                </div>
+
+                <div class="bot-control-stat">
+                  <span>Disponibles</span>
+                  <strong>{bot_available}</strong>
+                </div>
+
+                <div class="bot-control-field bot-control-provider">
+                  <label>Proveedor</label>
+
+                  <select
+                    id="bot_provider_mode_{_esc(inst)}"
+                  >
+                    {provider_options_html}
+                  </select>
+
+                  <button
+                    type="button"
+                    class="btn btn-primary"
+                    onclick="saveBotProviderMode('{_esc(inst)}', this)"
+                  >
+                    Guardar proveedor
+                  </button>
+
+                  <span class="small">
+                    Actual: {_esc(provider_mode_label)}
+                  </span>
+                </div>
+
+                <div class="bot-control-field">
+                  <label>Nuevo límite</label>
+
+                  <input
+                    id="bot_limit_{_esc(inst)}"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value="{bot_limit}"
+                    placeholder="Ej. 1000"
+                  >
+
+                  <button
+                    class="btn btn-primary"
+                    onclick="saveBotLimit('{_esc(inst)}')"
+                  >
+                    Guardar límite
+                  </button>
+                </div>
+
+                <div class="bot-control-field">
+                  <label>Recarga</label>
+
+                  <input
+                    id="bot_recharge_{_esc(inst)}"
+                    type="number"
+                    min="1"
+                    step="1"
+                    placeholder="Ej. 250"
+                  >
+
+                  <button
+                    class="btn btn-success"
+                    onclick="rechargeBotLimit('{_esc(inst)}')"
+                  >
+                    Recargar
+                  </button>
+                </div>
+
+                <div class="bot-control-actions">
+
+                  <button
+                    class="btn btn-light"
+                    onclick="resetBotUsage('{_esc(inst)}')"
+                  >
+                    Reset usadas
+                  </button>
+
+                  {
+                    f'<button class="btn btn-success" onclick="unblockBot(\'{_esc(inst)}\')">Desbloquear</button>'
+                    if bot_blocked
+                    else
+                    f'<button class="btn btn-danger" onclick="blockBot(\'{_esc(inst)}\')">Bloquear bot</button>'
+                  }
+
+                </div>
+
+              </div>
+            </details>
             """
-        
+
         html += """
-              </tbody>
-            </table>
           </div>
         </div>
         """
