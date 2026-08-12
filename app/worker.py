@@ -2084,7 +2084,65 @@ def _enabled_providers(db) -> list[str]:
         enabled.append("PROVIDER15")
 
     return enabled
-    
+
+
+def _pick_provider15_timeout_fallback(db: Session, req) -> str | None:
+    """
+    Elige un proveedor de respaldo cuando PROVIDER15 termina en timeout.
+
+    Reglas:
+    - nunca vuelve a elegir PROVIDER15;
+    - solo usa proveedores actualmente habilitados;
+    - respeta elegibilidad de Lázaro (P4/P10/P11);
+    - respeta restricciones de Escalante (P6);
+    - respeta exclusión de P4/P7 cuando están reservados a grupos test;
+    - conserva pesos del panel; si todos pesan 0 usa la rotación normal.
+    """
+    enabled = sorted(_enabled_providers(db))
+    candidates = [p for p in enabled if p != "PROVIDER15"]
+
+    if not _is_provider4_eligible(req.curp, req.act_type):
+        candidates = [
+            p for p in candidates
+            if p not in ("PROVIDER4", "PROVIDER10", "PROVIDER11")
+        ]
+
+    if "PROVIDER6" in candidates and not _is_provider6_allowed_request(
+        req.curp,
+        req.act_type,
+    ):
+        candidates = [p for p in candidates if p != "PROVIDER6"]
+
+    if PROVIDER4_TEST_GROUPS:
+        if not req.source_group_id or req.source_group_id not in PROVIDER4_TEST_GROUPS:
+            candidates = [p for p in candidates if p != "PROVIDER4"]
+
+    if PROVIDER7_TEST_GROUPS:
+        if not req.source_group_id or req.source_group_id not in PROVIDER7_TEST_GROUPS:
+            candidates = [p for p in candidates if p != "PROVIDER7"]
+
+    print(
+        "PROVIDER15_TIMEOUT_FALLBACK_CANDIDATES =",
+        {
+            "request_id": req.id,
+            "curp": req.curp,
+            "act_type": req.act_type,
+            "enabled": enabled,
+            "candidates": candidates,
+        },
+        flush=True,
+    )
+
+    if not candidates:
+        return None
+
+    weighted_chosen = _pick_provider_by_weight(db, candidates)
+
+    if weighted_chosen:
+        return weighted_chosen
+
+    idx = (req.id - 1) % len(candidates)
+    return candidates[idx]
 
 
 def _is_folio_type(act_type: str | None) -> bool:
@@ -4953,12 +5011,45 @@ def process_request(request_id: int):
         current_queue = _current_queue_name()
         existing_provider = (req.provider_name or "").strip().upper()
         
+        provider15_fallback_marker = (
+            (req.error_message or "")
+            .strip()
+            .upper()
+            .startswith(
+                "PROVIDER15_FAILED_FALLBACK_TO_"
+            )
+        )
+        
+        reuse_provider15_timeout_fallback = (
+            provider15_fallback_marker
+            and bool(existing_provider)
+            and existing_provider != "PROVIDER15"
+            and current_queue != SLOW_PROVIDER_QUEUE_NAME
+        )
+        
         reuse_existing_slow_provider = (
             current_queue == SLOW_PROVIDER_QUEUE_NAME
             and existing_provider in SLOW_PROVIDERS
         )
         
-        if reuse_existing_slow_provider:
+        if reuse_provider15_timeout_fallback:
+            provider_name = existing_provider
+            provider_group_id = req.provider_group_id
+            text_to_provider = req.provider_message
+        
+            print(
+                "PROVIDER15_TIMEOUT_FALLBACK_REUSING_PROVIDER =",
+                {
+                    "request_id": req.id,
+                    "provider_name": provider_name,
+                    "provider_group_id": provider_group_id,
+                    "queue": current_queue,
+                    "error_message": req.error_message,
+                },
+                flush=True,
+            )
+        
+        elif reuse_existing_slow_provider:
             if existing_provider in SLOW_PROVIDERS and not _is_provider4_eligible(req.curp, req.act_type):
                 print("SLOW_QUEUE_LAZARO_NOT_ELIGIBLE_REQUEUE_NORMAL =", {
                     "request_id": req.id,
@@ -5248,6 +5339,100 @@ def process_request(request_id: int):
                 
                     return
 
+                provider15_timeout = (
+                    err == "PROVIDER15_AGENT_TIMEOUT"
+                    or err.startswith("PROVIDER15_TIMEOUT:")
+                )
+        
+                if provider15_timeout:
+        
+                    if _current_mode_is_personal(
+                        db,
+                        req.instance_name,
+                    ):
+                        print(
+                            "PROVIDER15_TIMEOUT_PERSONAL_MODE_NO_GLOBAL_FALLBACK =",
+                            {
+                                "request_id": req.id,
+                                "instance_name": req.instance_name,
+                                "error": err[:300],
+                            },
+                            flush=True,
+                        )
+        
+                        raise
+        
+                    fallback_provider = (
+                        _pick_provider15_timeout_fallback(
+                            db,
+                            req,
+                        )
+                    )
+        
+                    if fallback_provider:
+                        req.provider_name = fallback_provider
+        
+                        req.provider_group_id = (
+                            _pick_provider_group(
+                                fallback_provider,
+                                req.curp,
+                                req.act_type,
+                                req.id,
+                            )
+                        )
+        
+                        req.provider_message = (
+                            _build_provider_message(
+                                fallback_provider,
+                                req.curp,
+                                req.act_type,
+                            )
+                        )
+        
+                        req.status = "QUEUED"
+        
+                        req.error_message = (
+                            f"PROVIDER15_FAILED_FALLBACK_TO_"
+                            f"{fallback_provider}:"
+                            f"{err[:500]}"
+                        )
+        
+                        req.updated_at = (
+                            _utc_now_naive()
+                        )
+        
+                        db.commit()
+        
+                        request_queue.enqueue_in(
+                            timedelta(seconds=3),
+                            process_request,
+                            req.id,
+                        )
+        
+                        print(
+                            "PROVIDER15_TIMEOUT_FALLBACK_REQUEUED =",
+                            {
+                                "request_id": req.id,
+                                "failed_provider": "PROVIDER15",
+                                "fallback_provider": fallback_provider,
+                                "provider_group_id": req.provider_group_id,
+                                "error": err[:300],
+                                "delay_sec": 3,
+                            },
+                            flush=True,
+                        )
+        
+                        return
+        
+                    print(
+                        "PROVIDER15_TIMEOUT_FALLBACK_NO_PROVIDER =",
+                        {
+                            "request_id": req.id,
+                            "error": err[:300],
+                        },
+                        flush=True,
+                    )
+        
                 raise
 
             pdf_bytes = _require_pdf_bytes(
