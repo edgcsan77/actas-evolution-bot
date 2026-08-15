@@ -3461,7 +3461,7 @@ def _send_provider14_request(req, db):
         result_ok = _provider14_wait_result(
             req.id,
             lock_token,
-            timeout_s=180.0,
+            timeout_s=600.0,
         )
 
         if not result_ok:
