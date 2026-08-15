@@ -20,7 +20,7 @@ from app.utils.curp import provider_label_for_type, is_chain
 from app.services.provider3 import Provider3Client, decode_pdf_base64
 from app.services.provider4 import Provider4Client
 from app.services.provider7 import Provider7Client
-from rq import get_current_job
+from rq import Queue, get_current_job
 from app.queue import redis_conn, request_queue, slow_request_queue
 from app.provider_status_cache import refresh_providers_status
 from app.utils.bot_limits import increment_bot_used_and_maybe_block
@@ -42,6 +42,14 @@ PROVIDER4_TEST_GROUPS = set()
 PROVIDER7_TEST_GROUPS = set()
 
 SLOW_PROVIDER_QUEUE_NAME = "actas_slow"
+
+# Cola FIFO exclusiva de E-BOT / PROVIDER14.
+# Debe existir UN SOLO worker consumidor.
+PROVIDER14_QUEUE_NAME = "actas_provider14"
+provider14_queue = Queue(
+    PROVIDER14_QUEUE_NAME,
+    connection=redis_conn,
+)
 SLOW_PROVIDERS = {"PROVIDER4", "PROVIDER10", "PROVIDER11"}
 
 PROVIDER4_NEW_FLOW_TTL_SEC = 60 * 20
@@ -5437,6 +5445,12 @@ def process_request(request_id: int):
         current_queue = _current_queue_name()
         existing_provider = (req.provider_name or "").strip().upper()
 
+        reuse_provider14_dedicated = (
+            current_queue == PROVIDER14_QUEUE_NAME
+            and existing_provider == "PROVIDER14"
+            and _provider_is_enabled(db, "PROVIDER14")
+        )
+
         provider14_busy_marker = (
             (req.error_message or "")
             .strip()
@@ -5472,7 +5486,23 @@ def process_request(request_id: int):
             and existing_provider in SLOW_PROVIDERS
         )
         
-        if reuse_provider14_busy:
+        if reuse_provider14_dedicated:
+            provider_name = "PROVIDER14"
+            provider_group_id = req.provider_group_id
+            text_to_provider = req.provider_message
+
+            print(
+                "PROVIDER14_DEDICATED_REUSING_PROVIDER =",
+                {
+                    "request_id": req.id,
+                    "provider_name": provider_name,
+                    "provider_group_id": provider_group_id,
+                    "queue": current_queue,
+                },
+                flush=True,
+            )
+
+        elif reuse_provider14_busy:
             provider_name = "PROVIDER14"
             provider_group_id = req.provider_group_id
             text_to_provider = req.provider_message
@@ -5621,6 +5651,38 @@ def process_request(request_id: int):
             flush=True,
         )
 
+        # PROVIDER14 jamás se procesa directamente en actas/actas_slow.
+        # Se manda a una cola FIFO exclusiva con un único consumidor.
+        if (
+            provider_name == "PROVIDER14"
+            and current_queue != PROVIDER14_QUEUE_NAME
+        ):
+            req.status = "QUEUED"
+            req.error_message = "PROVIDER14_DEDICATED_QUEUE"
+            req.updated_at = _utc_now_naive()
+            db.commit()
+
+            job = provider14_queue.enqueue(
+                process_request,
+                req.id,
+                job_timeout=660,
+            )
+
+            print(
+                "PROVIDER14_REROUTED_TO_DEDICATED_QUEUE =",
+                {
+                    "request_id": req.id,
+                    "curp": req.curp,
+                    "act_type": req.act_type,
+                    "from_queue": current_queue,
+                    "to_queue": PROVIDER14_QUEUE_NAME,
+                    "job_id": job.id,
+                },
+                flush=True,
+            )
+
+            return
+
         if _should_reroute_to_slow(provider_name) and current_queue != SLOW_PROVIDER_QUEUE_NAME:
             req.status = "QUEUED"
             req.updated_at = _utc_now_naive()
@@ -5701,10 +5763,10 @@ def process_request(request_id: int):
                         req.updated_at = _utc_now_naive()
                         db.commit()
 
-                        job = request_queue.enqueue_in(
-                            timedelta(seconds=8),
+                        job = provider14_queue.enqueue(
                             process_request,
                             req.id,
+                            job_timeout=660,
                         )
 
                         print(
@@ -5713,7 +5775,7 @@ def process_request(request_id: int):
                                 "request_id": req.id,
                                 "curp": req.curp,
                                 "act_type": req.act_type,
-                                "delay_sec": 8,
+                                "queue": PROVIDER14_QUEUE_NAME,
                                 "job_id": job.id,
                             },
                             flush=True,
