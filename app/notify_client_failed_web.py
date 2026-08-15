@@ -1,6 +1,7 @@
 from sqlalchemy import text
 from app.db import SessionLocal
 from app.services.evolution import send_group_text
+from app.client_messages import processing_error_message
 
 
 FAIL_PATTERNS = [
@@ -28,12 +29,16 @@ def _is_fail_error(error_message: str | None) -> bool:
 
 
 def _client_message(row) -> str:
-    return (
-        "❌ *Solicitud sin éxito*\n\n"
-        f"Dato: {row['curp']}\n"
-        f"Tipo: {row['act_type']}\n\n"
-        "No fue posible obtener el acta en el tiempo esperado.\n"
-        "Puedes volver a intentarlo o verificar el dato."
+    requester = (
+        str(row.get("requester_name") or "").strip()
+        or str(row.get("source_group_id") or "").strip()
+        or str(row.get("source_chat_id") or "").strip()
+        or "Usuario"
+    )
+
+    return processing_error_message(
+        requester=requester,
+        detail="Intenta nuevamente en unos minutos.",
     )
 
 
@@ -51,6 +56,7 @@ def main():
                 source_group_id,
                 source_chat_id,
                 instance_name,
+                requester_name,
                 updated_at
             FROM request_logs
             WHERE status = 'ERROR'

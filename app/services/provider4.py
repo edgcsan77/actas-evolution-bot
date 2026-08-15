@@ -2479,6 +2479,69 @@ class Provider4Client:
         not_ready_values = {"FALSE", "0", "NO", "NULL", "NONE", ""}
 
         if "ARCHIVO NO EXISTE" in text_up or text_up.strip().upper() in not_ready_values:
+            # verificarpdf.php responde "false" tanto cuando el PDF sigue
+            # pendiente como cuando el trámite ya terminó NO_LOCALIZADO.
+            #
+            # Antes de seguir esperando, confirmar contra vHistory.php.
+            # IMPORTANTE: filtrar por tipoa para que una fila de NACIMIENTO
+            # no afecte una solicitud de MATRIMONIO/DEFUNCION/DIVORCIO.
+            try:
+                history_html = self.get_history_html()
+
+                history_no_result = (
+                    self._detect_no_result(
+                        history_html,
+                        curp_clean,
+                        tipoa,
+                    )
+                    or self._detect_no_result_loose(
+                        history_html,
+                        curp_clean,
+                        tipoa,
+                    )
+                )
+
+                if history_no_result:
+                    print(
+                        "PROVIDER4_NEW_VERIFICAR_HISTORY_NO_LOCALIZADO_DETECTED =",
+                        {
+                            "term": curp_clean,
+                            "tipoa": tipoa,
+                            "verificarpdf_response": text_up.strip().upper(),
+                        },
+                        flush=True,
+                    )
+
+                    return {
+                        "ready": False,
+                        "code": "NO_LOCALIZADO",
+                        "reason": "NO_LOCALIZADO",
+                        "source": "vHistory",
+                    }
+
+                print(
+                    "PROVIDER4_NEW_VERIFICAR_HISTORY_STILL_PENDING =",
+                    {
+                        "term": curp_clean,
+                        "tipoa": tipoa,
+                        "verificarpdf_response": text_up.strip().upper(),
+                    },
+                    flush=True,
+                )
+
+            except Exception as history_error:
+                # Un fallo temporal leyendo el historial NO debe convertir
+                # una solicitud pendiente en error definitivo.
+                print(
+                    "PROVIDER4_NEW_VERIFICAR_HISTORY_CHECK_ERROR =",
+                    {
+                        "term": curp_clean,
+                        "tipoa": tipoa,
+                        "error": repr(history_error),
+                    },
+                    flush=True,
+                )
+
             return {
                 "ready": False,
                 "code": text_up.strip().upper() or "PDF_NOT_READY",

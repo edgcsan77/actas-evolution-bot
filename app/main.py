@@ -26,6 +26,18 @@ from app.config import settings
 from app.db import Base, engine, get_db, SessionLocal
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion, GroupAlias, GroupCategory, BotControl, BotRechargeLog, ApiClient, ApiCreditLog
 from app.queue import request_queue, slow_request_queue, redis_conn, broadcast_queue, ack_queue
+from app.client_messages import (
+    received_message,
+    duplicate_processing_message,
+    no_record_message,
+    service_unavailable_message,
+    processing_error_message,
+    blocked_message,
+    already_delivered_message,
+    attempt_limit_message,
+    provider_busy_message,
+)
+from rq import Retry
 from rq.registry import StartedJobRegistry, DeferredJobRegistry, ScheduledJobRegistry, FailedJobRegistry
 from app.worker import (
     process_request,
@@ -38,6 +50,7 @@ from app.worker import (
     _detect_pdf_act_type,
     _expected_act_type_group,
     retry_pdf_delivery,
+    retry_no_record_notification,
 )
 from app.services.provider3 import Provider3Client
 from app.services.provider4 import Provider4Client
@@ -46,6 +59,7 @@ from types import SimpleNamespace
 
 from app.utils.curp import (
     extract_request_terms,
+    extract_typed_request_terms,
     detect_act_type,
     normalize_text,
     extract_identifier_loose,
@@ -129,6 +143,18 @@ PANEL_STREAM_ENABLED = False
 CLEANUP_ENABLED_KEY = "cleanup:enabled"
 CLEANUP_MAX_AGE_MINUTES_KEY = "cleanup:max_age_minutes"
 CLEANUP_DEFAULT_MAX_AGE_MINUTES = 45
+
+# Mantener el msg_id de WhatsApp deduplicado por 48 h.
+# Evolution puede reemitir mensajes antiguos al reconectar una instancia;
+# 5 minutos era insuficiente y permitía reprocesar una CURP horas después.
+WEBHOOK_MSG_DEDUPE_TTL_SECONDS = int(
+    os.getenv("WEBHOOK_MSG_DEDUPE_TTL_SECONDS", "172800") or "172800"
+)
+
+# Un SIN REGISTRO no debe quedar cacheado durante todo HISTORY_DAYS.
+NO_RECORD_CACHE_HOURS = int(
+    os.getenv("NO_RECORD_CACHE_HOURS", "24") or "24"
+)
 
 EVOLUTION_BASE_URL = settings.EVOLUTION_BASE_URL.rstrip("/")
 EVOLUTION_APIKEY = settings.EVOLUTION_API_KEY
@@ -1179,6 +1205,9 @@ BOT_HIDDEN_NO_ACCOUNTING_GROUPS = {
         "120363407565721999@g.us",
         "120363408048979577@g.us",
         "120363424360403186@g.us",
+        "120363413638446089@g.us",
+        "120363428664968468@g.us",
+        "120363409720625189@g.us",
     },
 }
 
@@ -16848,12 +16877,71 @@ def _deliver_text_result(req: RequestLog, text: str, instance_name: str = None):
 
         print("NO_RECORD_WEB_NOTIFIED_ONCE =", dedupe_key, flush=True)
 
-    if req.source_group_id:
-        send_group_text(req.source_group_id, text, instance)
-    else:
-        send_text(req.requester_wa_id, text, instance)
+    try:
+        if req.source_group_id:
+            send_group_text(
+                req.source_group_id,
+                text,
+                instance,
+            )
+        else:
+            send_text(
+                req.requester_wa_id,
+                text,
+                instance,
+            )
 
-    return True
+        return True
+
+    except Exception:
+        # Si este era un aviso de SIN REGISTRO, todavía no debe
+        # quedar marcado como notificado.
+        if (
+            getattr(req, "id", None)
+            and "NO HAY REGISTROS DISPONIBLES" in text_up
+        ):
+            dedupe_key = f"no_record_notified:{req.id}"
+
+            try:
+                redis_conn.delete(dedupe_key)
+            except Exception as delete_exc:
+                print(
+                    "NO_RECORD_WEB_DEDUPE_RELEASE_ERROR =",
+                    {
+                        "request_id": req.id,
+                        "error": str(delete_exc),
+                    },
+                    flush=True,
+                )
+
+            try:
+                request_queue.enqueue_in(
+                    timedelta(seconds=20),
+                    retry_no_record_notification,
+                    req.id,
+                    1,
+                )
+
+                print(
+                    "NO_RECORD_WEB_NOTIFY_RETRY_SCHEDULED =",
+                    {
+                        "request_id": req.id,
+                        "delay_sec": 20,
+                    },
+                    flush=True,
+                )
+
+            except Exception as retry_exc:
+                print(
+                    "NO_RECORD_WEB_NOTIFY_RETRY_ENQUEUE_ERROR =",
+                    {
+                        "request_id": req.id,
+                        "error": str(retry_exc),
+                    },
+                    flush=True,
+                )
+
+        raise
 
 
 def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = None, instance_name: str = None):
@@ -17088,6 +17176,19 @@ def _provider_negative_response_info(text_body: str | None) -> dict:
         r"\bERROR!?\s+CURP\s+INV[ÁA]LIDA\b",
         r"\bNO\s+SE\s+HA\s+ENCONTRADO\b",
         r"\bNO\s+SE\s+ENCONTRARON\b",
+        r"\bNO\s+SE\s+LOCALIZA\b",
+        r"\bNO\s+DISPONIBLES?\b",
+        r"\bREGISTRO\s+NO\s+ENCONTRADO\b",
+        r"\bREGISTRO\s+NO\s+LOCALIZADO\b",
+        r"\bNO\s+LOCALIZAD[OA]\s+EN\s+(?:LA\s+)?BASE\s+DE\s+DATOS\b",
+        r"\bINV[ÁA]LIDA\b",
+        r"\bINFORMACI[ÓO]N!?\s+LO\s+SIENTO\b",
+        r"\bSIN\s+DISPONIBLE\b",
+        r"\bSIN\s+INFORMACI[ÓO]N\b",
+        r"\bNO\s+ENCONTRAD[OA]S?\b",
+        r"\bNO\s+HAY\s+RESULTADOS?\b",
+        r"\bNO\s+HAY\s+DATOS\b",
+        r"\bNO\s+HAY\s+INFORMACI[ÓO]N\b",
     ]
 
     has_long_negative = any(re.search(p, up) for p in long_negative_patterns)
@@ -17133,11 +17234,16 @@ def _provider_negative_response_info(text_body: str | None) -> dict:
 
 
 def _notify_client_no_record(open_req: RequestLog):
-    msg = (
-        f"❌ No hay registros disponibles.\n"
-        f"Dato: {open_req.curp}\n"
-        f"Tipo: {open_req.act_type}\n\n"
-        f"Verificar que la CURP esté certificada en RENAPO"
+    requester = (
+        (getattr(open_req, "requester_name", "") or "").strip()
+        or (getattr(open_req, "requester_wa_id", "") or "").strip()
+        or "Usuario"
+    )
+
+    msg = no_record_message(
+        act_type=getattr(open_req, "act_type", None),
+        requester=requester,
+        count=1,
     )
 
     _deliver_text_result(open_req, msg)
@@ -17378,6 +17484,48 @@ def _close_provider_negative_response(
             ),
             "curp_recent_explicit",
         )
+
+    # 4) Compatibilidad segura con PROVIDER8:
+    # históricamente puede responder solamente "SIN" sin CURP ni reply.
+    # Nunca elegir "la más reciente" si existen varias solicitudes:
+    # solo aceptar cuando hay exactamente UNA solicitud activa.
+    if (
+        not matched_requests
+        and info["is_short_negative_alone"]
+        and not info["identifiers"]
+        and not quoted_msg_id
+    ):
+        provider8_rows = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.provider_group_id == source_chat_id,
+                RequestLog.status.in_(["QUEUED", "PROCESSING"]),
+                RequestLog.provider_name == "PROVIDER8",
+            )
+            .order_by(
+                RequestLog.created_at.asc(),
+                RequestLog.id.asc(),
+            )
+            .limit(3)
+            .all()
+        )
+
+        print(
+            "PROVIDER8_SHORT_NEGATIVE_CANDIDATES =",
+            {
+                "source_chat_id": source_chat_id,
+                "candidate_ids": [row.id for row in provider8_rows],
+                "candidate_curps": [row.curp for row in provider8_rows],
+                "text": info["raw"][:180],
+            },
+            flush=True,
+        )
+
+        if len(provider8_rows) == 1:
+            _add_match(
+                provider8_rows[0],
+                "provider8_unique_active_short_negative",
+            )
 
     if not matched_requests:
         print("PROVIDER_NEGATIVE_WITHOUT_MATCH =", {
@@ -18724,7 +18872,12 @@ def webhook_msg_seen(msg_id: str, instance_name: str | None = None) -> bool:
     # Antes usaba instance_name + msg_id, pero Evolution puede mandar
     # el mismo mensaje por más de una instancia y eso duplicaba procesos.
     global_key = f"wa:webhook:msg:{msg_id}"
-    created_global = redis_conn.set(global_key, "1", ex=300, nx=True)
+    created_global = redis_conn.set(
+        global_key,
+        "1",
+        ex=WEBHOOK_MSG_DEDUPE_TTL_SECONDS,
+        nx=True,
+    )
 
     if not created_global:
         return True
@@ -18732,7 +18885,12 @@ def webhook_msg_seen(msg_id: str, instance_name: str | None = None) -> bool:
     # Llave secundaria solo para diagnóstico/compatibilidad.
     try:
         inst = (instance_name or "default").strip()
-        redis_conn.set(f"wa:webhook:msg_instance:{inst}:{msg_id}", "1", ex=300, nx=True)
+        redis_conn.set(
+            f"wa:webhook:msg_instance:{inst}:{msg_id}",
+            "1",
+            ex=WEBHOOK_MSG_DEDUPE_TTL_SECONDS,
+            nx=True,
+        )
     except Exception:
         pass
 
@@ -18784,6 +18942,90 @@ def release_webhook_msg_seen(
             },
             flush=True,
         )
+
+
+def _schedule_provider_webhook_retry(
+    payload: dict,
+    *,
+    msg_id: str,
+    instance_name: str,
+    reason: str,
+) -> bool:
+    """
+    Persiste un reintento real del webhook de proveedor. Liberar solamente
+    el dedupe NO basta: Evolution puede no volver a emitir el evento.
+    """
+    try:
+        current_attempt = int(
+            (payload or {}).get("_actas_provider_retry_attempt") or 0
+        )
+    except Exception:
+        current_attempt = 0
+
+    delays = (2, 8, 30, 90)
+
+    if current_attempt >= len(delays):
+        print(
+            "PROVIDER_WEBHOOK_RETRY_EXHAUSTED =",
+            {
+                "msg_id": msg_id,
+                "instance_name": instance_name,
+                "reason": reason,
+                "attempt": current_attempt,
+            },
+            flush=True,
+        )
+        return False
+
+    next_attempt = current_attempt + 1
+    retry_payload = dict(payload or {})
+    retry_payload["_actas_provider_retry_attempt"] = next_attempt
+
+    delay_seconds = delays[current_attempt]
+    job_id = (
+        f"provider-webhook-retry-{instance_name}-{msg_id}-{next_attempt}"
+        if msg_id
+        else None
+    )
+
+    try:
+        ack_queue.enqueue_in(
+            timedelta(seconds=delay_seconds),
+            "app.provider_webhook_retry.replay_provider_webhook",
+            retry_payload,
+            job_id=job_id,
+            job_timeout=120,
+            result_ttl=300,
+            failure_ttl=3600,
+        )
+
+        print(
+            "PROVIDER_WEBHOOK_RETRY_SCHEDULED =",
+            {
+                "msg_id": msg_id,
+                "instance_name": instance_name,
+                "reason": reason,
+                "attempt": next_attempt,
+                "delay_seconds": delay_seconds,
+                "job_id": job_id,
+            },
+            flush=True,
+        )
+        return True
+
+    except Exception as exc:
+        print(
+            "PROVIDER_WEBHOOK_RETRY_SCHEDULE_ERROR =",
+            {
+                "msg_id": msg_id,
+                "instance_name": instance_name,
+                "reason": reason,
+                "attempt": next_attempt,
+                "error": repr(exc),
+            },
+            flush=True,
+        )
+        return False
 
 
 def block_all_client_groups():
@@ -19710,9 +19952,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         
             if (instance_name or "").strip() == MAIN_PANEL_INSTANCE:
                 msg = (
-                    "🔒 *Grupo bloqueado*\n\n"
-                    "Este grupo tiene un pago pendiente.\n"
-                    "Para reactivar el servicio, por favor contacta al administrador."
+                    "🔒 Servicio pausado\n"
+                    "Este grupo tiene un pago pendiente.\n\n"
+                    "Contacta al administrador para reactivarlo."
                 )
                 
                 try:
@@ -20056,239 +20298,40 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         **negative_close,
                     }
 
-            # =========================
-            # MATCH ESPECIAL: RESPUESTAS NEGATIVAS
-            # 1) reply id
-            # 2) fallback por CURP en texto
-            # =========================
-            if not doc:
-                sin_values = {
-                    "SIN",
-                    "SIN REGISTRO",
-                    "SIN REGISTROS",
-                    "SIN DISPONIBLE",
-                    "SIN RESULTADO",
-                    "SIN RESULTADOS",
-                    "SIN DATOS",
-                    "SIN INFORMACION",
-                    "SIN INFORMACIÓN",
-                    "NO ESTA",
-                    "NO ESTÁ",
-                    "NO EXISTE",
-                    "NO ENCONTRADO",
-                    "NO ENCONTRADA",
-                    "NO ENCONTRADOS",
-                    "NO ENCONTRADAS",
-                    "NO SE ENCONTRO",
-                    "NO SE ENCONTRÓ",
-                    "NO SE ENCUENTRA",
-                    "NO SE LOCALIZA",
-                    "NO LOCALIZADO",
-                    "NO LOCALIZADA",
-                    "NO DISPONIBLE",
-                    "NO DISPONIBLES",
-                    "NO HAY REGISTRO",
-                    "NO HAY REGISTROS",
-                    "NO HAY RESULTADO",
-                    "NO HAY RESULTADOS",
-                    "NO HAY DATOS",
-                    "NO HAY INFORMACION",
-                    "NO HAY INFORMACIÓN",
-                    "REGISTRO NO ENCONTRADO",
-                    "REGISTRO NO LOCALIZADO",
-                    "NB",
-                    "VERI",
-                    "VERIFICAR",
-                    "NO SÉ ENCUENTRA EN EL SISTEMA",
-                    "NO SE ENCUENTRA EN EL SISTEMA",
-                    "NO LOCALIZADO EN LA BASE DE DATOS",
-                    "NO LOCALIZADA EN LA BASE DE DATOS",
-                    "NO LOCALIZADO EN BASE DE DATOS",
-                    "NO LOCALIZADA EN BASE DE DATOS",
-                    "INVALIDA",
-                    "INVÁLIDA",
-                    "INFORMACIÓN! LO SIENTO",
-                    "INFORMACION! LO SIENTO",
-                    "ACTA NO ENCONTRADA",
-                    "DOCUMENTO NO ENCONTRADO",
-                    "ERROR! CURP INVALIDA",
-                    "ERROR! CURP INVÁLIDA",
-                    "NO SE HA ENCONTRADO",
-                    "NO SE ENCONTRARON",
-                }
-
-                is_negative_text = any(
-                    re.search(rf"\b{re.escape(v)}\b", text_norm)
-                    for v in sin_values
-                )
-
-                # 1) MATCH POR REPLY ID
-                if quoted_msg_id and is_negative_text:
-                    open_req = (
-                        db.query(RequestLog)
-                        .filter(
-                            RequestLog.provider_group_id == source_chat_id,
-                            RequestLog.provider_message_id == quoted_msg_id,
-                            RequestLog.status == "PROCESSING",
-                            RequestLog.provider_name.in_(WHATSAPP_TEXT_PROVIDERS),
-                        )
-                        .order_by(RequestLog.created_at.desc())
-                        .first()
+                if negative_close.get("reason") == "negative_without_match":
+                    # El proveedor sí respondió con un negativo reconocido,
+                    # pero todavía no existe una coincidencia suficientemente
+                    # segura. No caer al matcher viejo ni elegir otra solicitud.
+                    # Reprocesar el mismo webhook unos segundos después.
+                    release_webhook_msg_seen(
+                        msg_id,
+                        instance_name,
                     )
 
-                    if open_req:
-                        print("PROVIDER_NEGATIVE_MATCHED_REQ_ID =", open_req.id, flush=True)
-                        negative_act_group = _text_mentions_act_type_group(text_norm)
-
-                        if negative_act_group and _expected_act_type_group(open_req.act_type) != negative_act_group:
-                            print("PROVIDER_NEGATIVE_REPLY_TYPE_MISMATCH_IGNORE =", {
-                                "req_id": open_req.id,
-                                "req_act_type": open_req.act_type,
-                                "negative_act_group": negative_act_group,
-                                "provider_id": provider_id,
-                            }, flush=True)
-                    
-                            return {"ok": True, "ignored": "negative_reply_type_mismatch"}
-                            
-                        print("PROVIDER_NEGATIVE_MATCHED_PROVIDER =", open_req.provider_name, flush=True)
-                        print("PROVIDER_NEGATIVE_MATCHED_CURP =", open_req.curp, flush=True)
-
-                        open_req.status = "ERROR"
-                        open_req.error_message = "SIN REGISTRO"
-                        open_req.updated_at = _utc_now_naive()
-                        db.commit()
-
-                        msg = (
-                            f"❌ No hay registros disponibles.\n"
-                            f"Dato: {open_req.curp}\n"
-                            f"Tipo: {open_req.act_type}\n\n"
-                            f"Verificar que la CURP esté certificada en RENAPO"
-                        )
-
-                        try:
-                            client_instance = open_req.instance_name or "docifybot8"
-                        
-                            if not _deliver_text_result(open_req, msg, instance_name=client_instance):
-                                return {"ok": True, "ignored": "no_record_duplicate"}
-                        
-                        except Exception as notify_exc:
-                            print("PROVIDER_NEGATIVE_NOTIFY_ERROR =", str(notify_exc), flush=True)
-
-                        return {"ok": True, "provider_result": "provider_negative_matched_by_reply_id"}
-
-                    print("PROVIDER5_SIN_WITHOUT_MATCH =", quoted_msg_id, flush=True)
-
-                # 2) FALLBACK POR CURP EN TEXTO
-                if provider_id and is_negative_text:
-                    negative_act_group = _text_mentions_act_type_group(text_norm)
-
-                    candidates = (
-                        db.query(RequestLog)
-                        .filter(
-                            RequestLog.provider_group_id == source_chat_id,
-                            RequestLog.curp == provider_id,
-                            RequestLog.status == "PROCESSING",
-                            RequestLog.provider_name.in_(WHATSAPP_TEXT_PROVIDERS),
-                        )
-                        .order_by(RequestLog.created_at.desc())
-                        .all()
+                    retry_scheduled = _schedule_provider_webhook_retry(
+                        payload,
+                        msg_id=msg_id,
+                        instance_name=instance_name,
+                        reason="provider_negative_without_safe_match_retryable",
                     )
-                    
-                    if negative_act_group:
-                        typed_candidates = [
-                            r for r in candidates
-                            if _expected_act_type_group(r.act_type) == negative_act_group
-                        ]
-                    
-                        print("PROVIDER_NEGATIVE_TYPED_CANDIDATES =", {
-                            "provider_id": provider_id,
-                            "negative_act_group": negative_act_group,
-                            "candidate_ids": [r.id for r in candidates],
-                            "candidate_types": [r.act_type for r in candidates],
-                            "typed_ids": [r.id for r in typed_candidates],
-                        }, flush=True)
-                    
-                        open_req = typed_candidates[0] if len(typed_candidates) == 1 else None
-                    else:
-                        open_req = candidates[0] if len(candidates) == 1 else None
-                    
-                        if len(candidates) > 1:
-                            print("PROVIDER_NEGATIVE_AMBIGUOUS_SAME_CURP_NO_TYPE =", {
-                                "provider_id": provider_id,
-                                "candidate_ids": [r.id for r in candidates],
-                                "candidate_types": [r.act_type for r in candidates],
-                            }, flush=True)
 
-                    if open_req:
-                        print("PROVIDER5_FALLBACK_MATCHED_REQ_ID =", open_req.id, flush=True)
-                        print("PROVIDER5_FALLBACK_MATCHED_CURP =", open_req.curp, flush=True)
-
-                        open_req.status = "ERROR"
-                        open_req.error_message = "SIN REGISTRO"
-                        open_req.updated_at = _utc_now_naive()
-                        db.commit()
-
-                        msg = (
-                            f"❌ No hay registros disponibles.\n"
-                            f"Dato: {open_req.curp}\n"
-                            f"Tipo: {open_req.act_type}\n\n"
-                            f"Verificar que la CURP esté certificada en RENAPO"
-                        )
-
-                        try:
-                            client_instance = open_req.instance_name or "docifybot8"
-                        
-                            if not _deliver_text_result(open_req, msg, instance_name=client_instance):
-                                return {"ok": True, "ignored": "no_record_duplicate"}
-                        
-                        except Exception as notify_exc:
-                            print("PROVIDER_NEGATIVE_NOTIFY_ERROR =", str(notify_exc), flush=True)
-
-                        return {"ok": True, "provider_result": "provider5_fallback_matched_by_curp"}
-
-                    print("PROVIDER5_FALLBACK_WITHOUT_MATCH =", provider_id, flush=True)
-
-                # 3) FALLBACK SOLO PROVIDER8: si manda solo "SIN" y no coincide reply ni CURP
-                if is_negative_text:
-                    open_req = (
-                        db.query(RequestLog)
-                        .filter(
-                            RequestLog.provider_group_id == source_chat_id,
-                            RequestLog.status == "PROCESSING",
-                            RequestLog.provider_name == "PROVIDER8",
-                        )
-                        .order_by(RequestLog.created_at.desc())
-                        .first()
+                    print(
+                        "PROVIDER_NEGATIVE_MATCH_RETRY =",
+                        {
+                            "msg_id": msg_id,
+                            "quoted_msg_id": quoted_msg_id,
+                            "source_chat_id": source_chat_id,
+                            "identifiers": negative_close.get("identifiers", []),
+                            "retry_scheduled": retry_scheduled,
+                        },
+                        flush=True,
                     )
-                
-                    if open_req:
-                        print("PROVIDER8_SIN_FALLBACK_MATCHED_REQ_ID =", open_req.id, flush=True)
-                        print("PROVIDER8_SIN_FALLBACK_MATCHED_CURP =", open_req.curp, flush=True)
-                
-                        open_req.status = "ERROR"
-                        open_req.error_message = "SIN REGISTRO"
-                        open_req.updated_at = _utc_now_naive()
-                        db.commit()
-                
-                        msg = (
-                            f"❌ No hay registros disponibles.\n"
-                            f"Dato: {open_req.curp}\n"
-                            f"Tipo: {open_req.act_type}\n\n"
-                            f"Verificar que la CURP esté certificada en RENAPO"
-                        )
-                
-                        try:
-                            client_instance = open_req.instance_name or "docifybot8"
-                        
-                            if not _deliver_text_result(open_req, msg, instance_name=client_instance):
-                                return {"ok": True, "ignored": "no_record_duplicate"}
-                        
-                        except Exception as notify_exc:
-                            print("PROVIDER_NEGATIVE_NOTIFY_ERROR =", str(notify_exc), flush=True)
-                                        
-                        return {"ok": True, "provider_result": "provider8_sin_fallback_last_processing"}
-                
-                    print("PROVIDER8_SIN_FALLBACK_WITHOUT_MATCH =", source_chat_id, flush=True)
+
+                    return {
+                        "ok": True,
+                        "ignored": "provider_negative_without_safe_match_retryable",
+                        "retry_scheduled": retry_scheduled,
+                    }
 
             if doc:
                 filename = doc.get("fileName") or ""
@@ -20373,6 +20416,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         msg_id,
                         instance_name,
                     )
+                    _schedule_provider_webhook_retry(
+                        payload,
+                        msg_id=msg_id,
+                        instance_name=instance_name,
+                        reason="provider_pdf_media_download_failed_retryable",
+                    )
                 
                     return {
                         "ok": True,
@@ -20410,6 +20459,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     release_webhook_msg_seen(
                         msg_id,
                         instance_name,
+                    )
+                    _schedule_provider_webhook_retry(
+                        payload,
+                        msg_id=msg_id,
+                        instance_name=instance_name,
+                        reason="provider_pdf_base64_empty_retryable",
                     )
                 
                     return {
@@ -20453,6 +20508,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         msg_id,
                         instance_name,
                     )
+                    _schedule_provider_webhook_retry(
+                        payload,
+                        msg_id=msg_id,
+                        instance_name=instance_name,
+                        reason="provider_pdf_base64_decode_failed_retryable",
+                    )
                 
                     return {
                         "ok": True,
@@ -20478,6 +20539,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     release_webhook_msg_seen(
                         msg_id,
                         instance_name,
+                    )
+                    _schedule_provider_webhook_retry(
+                        payload,
+                        msg_id=msg_id,
+                        instance_name=instance_name,
+                        reason="provider_pdf_invalid_binary_retryable",
                     )
                 
                     return {
@@ -20567,18 +20634,47 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                                 {
                                     "lookup_id": lookup_id,
                                     "active_count": active_count,
+                                    "msg_id": msg_id,
+                                    "instance_name": instance_name,
+                                    "source_chat_id": source_chat_id,
                                 },
                                 flush=True,
                             )
-                
-                            # No liberar en caso ambiguo:
-                            # podría entregar el mismo PDF a la solicitud incorrecta.
+
+                            # Nunca elegir arbitrariamente entre varias
+                            # solicitudes candidatas. Puede ser una situación
+                            # transitoria; reintentamos el mismo webhook para
+                            # volver a evaluar cuando el conjunto cambie.
+                            release_webhook_msg_seen(
+                                msg_id,
+                                instance_name,
+                            )
+
+                            retry_scheduled = _schedule_provider_webhook_retry(
+                                payload,
+                                msg_id=msg_id,
+                                instance_name=instance_name,
+                                reason="provider_pdf_ambiguous_match_retryable",
+                            )
+
+                            print(
+                                "PROVIDER_PDF_AMBIGUOUS_RETRY =",
+                                {
+                                    "msg_id": msg_id,
+                                    "lookup_id": lookup_id,
+                                    "active_count": active_count,
+                                    "retry_scheduled": retry_scheduled,
+                                },
+                                flush=True,
+                            )
+
                             return {
                                 "ok": True,
                                 "ignored": (
                                     "ambiguous_multiple_processing_"
-                                    "or_recent_timeout_requests"
+                                    "or_recent_timeout_requests_retryable"
                                 ),
+                                "retry_scheduled": retry_scheduled,
                             }
                 
                     else:
@@ -20588,6 +20684,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         release_webhook_msg_seen(
                             msg_id,
                             instance_name,
+                        )
+                        _schedule_provider_webhook_retry(
+                            payload,
+                            msg_id=msg_id,
+                            instance_name=instance_name,
+                            reason="provider_pdf_without_safe_match_retryable",
                         )
                 
                         print(
@@ -21139,14 +21241,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     open_req.updated_at = _utc_now_naive()
                     db.commit()
             
-                    _deliver_text_result(
-                        open_req,
-                        (
-                            f"❌ No hay registros disponibles.\n"
-                            f"Dato: {open_req.curp}\n"
-                            f"Tipo: {open_req.act_type}\n\n"
-                            f"Verificar que la CURP esté certificada en RENAPO"
-                        ),
+                    _notify_client_no_record(
+                        open_req
                     )
             
                     matched_req_ids.append(open_req.id)
@@ -21169,9 +21265,38 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     "text_body": text_body,
                     "ids_detected": no_record_ids,
                     "source_chat_id": source_chat_id,
+                    "msg_id": msg_id,
+                    "instance_name": instance_name,
                 }, flush=True)
-            
-                return {"ok": True, "ignored": "provider_no_record_without_match"}
+
+                release_webhook_msg_seen(
+                    msg_id,
+                    instance_name,
+                )
+
+                retry_scheduled = _schedule_provider_webhook_retry(
+                    payload,
+                    msg_id=msg_id,
+                    instance_name=instance_name,
+                    reason="provider_no_record_without_match_retryable",
+                )
+
+                print(
+                    "PROVIDER_NO_RECORD_MATCH_RETRY =",
+                    {
+                        "msg_id": msg_id,
+                        "ids_detected": no_record_ids,
+                        "source_chat_id": source_chat_id,
+                        "retry_scheduled": retry_scheduled,
+                    },
+                    flush=True,
+                )
+
+                return {
+                    "ok": True,
+                    "ignored": "provider_no_record_without_match_retryable",
+                    "retry_scheduled": retry_scheduled,
+                }
             
             print("PROVIDER_RAW_MESSAGE_KEYS =", list(message.keys()), flush=True)
             print("PROVIDER_RAW_MESSAGE =", message, flush=True)
@@ -21459,13 +21584,38 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         
             return {"ok": True, "ignored": "no_identifier"}
         
-        act_type = detect_act_type(text_body)
-        print("REQUEST_ACT_TYPE =", act_type, flush=True)
+        requester_display_name = (
+            (push_name or "").strip()
+            or requester_wa_id
+            or "Usuario"
+        )
+
+        typed_terms = extract_typed_request_terms(text_body)
+
+        # Fallback defensivo: nunca perder el comportamiento histórico
+        # si por alguna razón el parser tipado no devuelve resultados.
+        if not typed_terms:
+            fallback_act_type = detect_act_type(text_body)
+            typed_terms = [
+                (term, fallback_act_type)
+                for term in terms
+            ]
+
+        print("REQUEST_TYPED_TERMS =", typed_terms, flush=True)
 
         created_any = False
+        created_count = 0
+        created_act_types = []
 
-        for term in terms:
-            print("PROCESSING_TERM =", term, flush=True)
+        for term, act_type in typed_terms:
+            print(
+                "PROCESSING_TYPED_TERM =",
+                {
+                    "term": term,
+                    "act_type": act_type,
+                },
+                flush=True,
+            )
         
             #last_done = get_last_done_request(db, term, act_type)
             last_req = _get_latest_request(db, term, act_type, source_chat_id)
@@ -21484,10 +21634,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                 if last_req.status == "DONE":
                     if should_notify_done(source_group_id):
-                        done_msg = (
-                            f"✅ Esta acta ya fue entregada\n"
-                            f"Dato: {term}\n"
-                            f"Tipo: {act_type}"
+                        done_msg = already_delivered_message(
+                            act_type=act_type,
+                            requester=requester_display_name,
                         )
     
                         if source_group_id:
@@ -21497,11 +21646,93 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             send_text(requester_wa_id, done_msg, instance_name=instance_name)
     
                         continue
+
+                # La misma CURP/cadena ya está viva. NO crear otro RequestLog.
+                # Esto evita que un reenvío por falta de ACK genere dos solicitudes
+                # que luego compitan por el mismo PDF / SIN REGISTRO.
+                if last_req.status in {"QUEUED", "PROCESSING"}:
+                    # Si quedó QUEUED y el usuario insiste después de unos segundos,
+                    # reencolamos LA MISMA solicitud. El lock por request_id del
+                    # worker impide doble procesamiento real.
+                    try:
+                        age_seconds = max(
+                            0.0,
+                            (_utc_now_naive() - last_req.updated_at).total_seconds()
+                            if last_req.updated_at else 0.0,
+                        )
+                    except Exception:
+                        age_seconds = 0.0
+
+                    if last_req.status == "QUEUED" and age_seconds >= 20:
+                        try:
+                            _enqueue_process_request(
+                                last_req,
+                                "duplicate_nudge_existing_queued",
+                            )
+                            print(
+                                "EXISTING_QUEUED_REQUEST_NUDGED =",
+                                {
+                                    "request_id": last_req.id,
+                                    "term": term,
+                                    "act_type": act_type,
+                                    "age_seconds": round(age_seconds, 2),
+                                },
+                                flush=True,
+                            )
+                        except Exception as nudge_exc:
+                            print(
+                                "EXISTING_QUEUED_REQUEST_NUDGE_ERROR =",
+                                {
+                                    "request_id": last_req.id,
+                                    "error": repr(nudge_exc),
+                                },
+                                flush=True,
+                            )
+
+                    pending_msg = duplicate_processing_message(
+                        act_type=act_type,
+                        requester=requester_display_name,
+                        count=1,
+                    )
+
+                    if source_group_id:
+                        if should_send_extra_text(source_group_id):
+                            send_group_text(
+                                source_group_id,
+                                pending_msg,
+                                instance_name=instance_name,
+                            )
+                    else:
+                        send_text(
+                            requester_wa_id,
+                            pending_msg,
+                            instance_name=instance_name,
+                        )
+
+                    print(
+                        "EXISTING_ACTIVE_REQUEST_DUPLICATE_SUPPRESSED =",
+                        {
+                            "request_id": last_req.id,
+                            "status": last_req.status,
+                            "term": term,
+                            "act_type": act_type,
+                            "msg_id": msg_id,
+                        },
+                        flush=True,
+                    )
+                    continue
         
-            base_request_key = build_request_key(term, act_type, source_chat_id)
+            base_request_key = build_request_key(
+                term,
+                act_type,
+                source_chat_id,
+            )
+
             day_start, day_end = _bot_day_bounds()
-        
-            # contar intentos previos de ese mismo dato/tipo/grupo
+
+            # ============================================================
+            # MÁXIMO 3 INTENTOS POR DATO / TIPO / GRUPO / DÍA
+            # ============================================================
             same_requests_count = (
                 db.query(RequestLog)
                 .filter(
@@ -21513,31 +21744,55 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 )
                 .count()
             )
-        
-            # máximo 3 intentos
+
             if same_requests_count >= 3:
-                limit_msg = (
-                    f"⚠️ Ya alcanzaste el máximo de intentos para este dato.\n"
-                    f"Dato: {term}\n"
-                    f"Tipo: {act_type}"
+                limit_msg = attempt_limit_message(
+                    act_type=act_type,
+                    requester=requester_display_name,
                 )
-        
+
                 if source_group_id:
                     if should_send_extra_text(source_group_id):
-                        send_group_text(source_group_id, limit_msg, instance_name=instance_name)
+                        send_group_text(
+                            source_group_id,
+                            limit_msg,
+                            instance_name=instance_name,
+                        )
                 else:
-                    send_text(requester_wa_id, limit_msg, instance_name=instance_name)
-        
+                    send_text(
+                        requester_wa_id,
+                        limit_msg,
+                        instance_name=instance_name,
+                    )
+
                 continue
-        
-            # request_key único por intento
-            request_key = f"{base_request_key}:{_mx_now().strftime('%Y%m%d')}:try_{same_requests_count + 1}:{uuid.uuid4().hex[:6]}"
+
+            # ============================================================
+            # REQUEST KEY ÚNICO POR INTENTO
+            # ============================================================
+            request_key = (
+                f"{base_request_key}:"
+                f"{_mx_now().strftime('%Y%m%d')}:"
+                f"try_{same_requests_count + 1}:"
+                f"{uuid.uuid4().hex[:6]}"
+            )
 
             # ============================================================
             # RESULTADO DEFINITIVO PREVIO: SIN REGISTRO
-            # Se revisa antes de reutilizar errores o crear otra solicitud.
-            # Comparte el resultado entre grupos pertenecientes al mismo bot.
+            #
+            # Un SIN REGISTRO se reutiliza solamente durante
+            # NO_RECORD_CACHE_HOURS.
             # ============================================================
+            no_record_cutoff = (
+                _utc_now_naive()
+                - timedelta(
+                    hours=max(
+                        NO_RECORD_CACHE_HOURS,
+                        1,
+                    )
+                )
+            )
+
             no_record_existing = (
                 db.query(RequestLog)
                 .filter(
@@ -21545,6 +21800,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     RequestLog.act_type == act_type,
                     RequestLog.instance_name == instance_name,
                     RequestLog.status == "ERROR",
+                    RequestLog.updated_at >= no_record_cutoff,
                     or_(
                         RequestLog.error_message.ilike("%SIN REGISTRO%"),
                         RequestLog.error_message.ilike("%SIN_REGISTRO%"),
@@ -21566,15 +21822,14 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 )
                 .first()
             )
-            
+
             if no_record_existing:
-                no_record_msg = (
-                    "❌ No hay registros disponibles.\n"
-                    f"Dato: {term}\n"
-                    f"Tipo: {act_type}\n\n"
-                    "Verificar que la CURP esté certificada en RENAPO"
+                no_record_msg = no_record_message(
+                    act_type=act_type,
+                    requester=requester_display_name,
+                    count=1,
                 )
-            
+
                 print(
                     "GLOBAL_NO_RECORD_RETURNED_WITHOUT_RETRY =",
                     {
@@ -21588,7 +21843,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     },
                     flush=True,
                 )
-            
+
                 if source_group_id:
                     if should_send_extra_text(source_group_id):
                         send_group_text(
@@ -21602,10 +21857,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         no_record_msg,
                         instance_name=instance_name,
                     )
-            
+
                 continue
-        
-            # 2) si existe una anterior en ERROR, reutilizar SOLO la más reciente en error
+
+            # ============================================================
+            # REUTILIZAR SOLICITUD ANTERIOR EN ERROR
+            # ============================================================
             error_existing = (
                 db.query(RequestLog)
                 .filter(
@@ -21615,18 +21872,22 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     RequestLog.status == "ERROR",
                     or_(
                         RequestLog.error_message.is_(None),
-                        RequestLog.error_message != "AUTO_TIMEOUT_OPEN_REQUEST_DO_NOT_REUSE",
-                    )
+                        RequestLog.error_message
+                        != "AUTO_TIMEOUT_OPEN_REQUEST_DO_NOT_REUSE",
+                    ),
                 )
-                .order_by(RequestLog.created_at.desc())
+                .order_by(
+                    RequestLog.created_at.desc()
+                )
                 .first()
             )
-        
+
             if error_existing:
                 existing_error_upper = (
-                    error_existing.error_message or ""
+                    error_existing.error_message
+                    or ""
                 ).strip().upper()
-            
+
                 existing_is_no_record = any(
                     marker in existing_error_upper
                     for marker in (
@@ -21644,15 +21905,21 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         "CURP INEXISTENTE",
                     )
                 )
-            
-                if existing_is_no_record:
-                    no_record_msg = (
-                        "❌ No hay registros disponibles.\n"
-                        f"Dato: {term}\n"
-                        f"Tipo: {act_type}\n\n"
-                        "Verificar que la CURP esté certificada en RENAPO"
+
+                existing_no_record_is_fresh = bool(
+                    existing_is_no_record
+                    and error_existing.updated_at
+                    and error_existing.updated_at
+                    >= no_record_cutoff
+                )
+
+                if existing_no_record_is_fresh:
+                    no_record_msg = no_record_message(
+                        act_type=act_type,
+                        requester=requester_display_name,
+                        count=1,
                     )
-            
+
                     print(
                         "EXISTING_NO_RECORD_RETURNED_WITHOUT_RETRY =",
                         {
@@ -21664,7 +21931,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         },
                         flush=True,
                     )
-            
+
                     if source_group_id:
                         if should_send_extra_text(source_group_id):
                             send_group_text(
@@ -21678,12 +21945,13 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             no_record_msg,
                             instance_name=instance_name,
                         )
-            
-                    # Muy importante:
-                    # no cambiar el ERROR, no borrar error_message,
-                    # no poner QUEUED y no enviar nuevamente al proveedor.
+
+                    # No modificar el ERROR ni volver a consumir proveedor.
                     continue
-            
+
+                # --------------------------------------------------------
+                # REACTIVAR LA MISMA REQUEST
+                # --------------------------------------------------------
                 error_existing.request_key = request_key
                 error_existing.curp = term
                 error_existing.act_type = act_type
@@ -21692,53 +21960,64 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 error_existing.error_message = None
                 error_existing.evolution_message_id = msg_id
                 error_existing.requester_wa_id = requester_wa_id
-                error_existing.requester_name = ""
+                error_existing.requester_name = requester_display_name
                 error_existing.source_chat_id = source_chat_id
                 error_existing.source_group_id = source_group_id
                 error_existing.instance_name = instance_name
-                #error_existing.provider_name = None
-                #error_existing.provider_group_id = None
-                error_existing.provider_message = None
-                
-                now_utc = _utc_now_naive()
 
+                # Conservar provider_name/provider_group_id como funcionaba.
+                error_existing.provider_message = None
                 error_existing.provider_media_url = None
                 error_existing.pdf_url = None
-                
-                #error_existing.created_at = now_utc
+
+                now_utc = _utc_now_naive()
+
                 error_existing.updated_at = now_utc
-                error_existing.expires_at = now_utc + timedelta(days=settings.HISTORY_DAYS)
-                
-                db.commit()
-                
-                _enqueue_process_request(error_existing, "requeue_error_existing")
-                created_any = True
-        
-                print("REQUEUED_EXISTING_REQUEST_ID =", error_existing.id, flush=True)
-                print("REQUEUED_EXISTING_TERM =", error_existing.curp, flush=True)
-                print("REQUEUED_EXISTING_TYPE =", error_existing.act_type, flush=True)
-        
-                retry_msg = (
-                    f"🔁 Reintentando solicitud\n"
-                    f"Dato: {term}\n"
-                    f"Tipo: {act_type}"
+                error_existing.expires_at = (
+                    now_utc
+                    + timedelta(days=settings.HISTORY_DAYS)
                 )
-        
-                if source_group_id:
-                    if should_send_extra_text(source_group_id):
-                        send_group_text(source_group_id, retry_msg, instance_name=instance_name)
-                else:
-                    send_text(requester_wa_id, retry_msg, instance_name=instance_name)
-        
+
+                db.commit()
+
+                _enqueue_process_request(
+                    error_existing,
+                    "requeue_error_existing",
+                )
+
+                created_any = True
+                created_count += 1
+                created_act_types.append(act_type)
+
+                print(
+                    "REQUEUED_EXISTING_REQUEST_ID =",
+                    error_existing.id,
+                    flush=True,
+                )
+                print(
+                    "REQUEUED_EXISTING_TERM =",
+                    error_existing.curp,
+                    flush=True,
+                )
+                print(
+                    "REQUEUED_EXISTING_TYPE =",
+                    error_existing.act_type,
+                    flush=True,
+                )
+
+                # El ACK central al final del batch ya informa
+                # que volvió a procesamiento.
                 continue
-        
-            # 3) si no existe, crear nueva
+
+            # ============================================================
+            # SOLICITUD NUEVA
+            # ============================================================
             row = RequestLog(
                 request_key=request_key,
                 curp=term,
                 act_type=act_type,
                 requester_wa_id=requester_wa_id,
-                requester_name="",
+                requester_name=requester_display_name,
                 source_chat_id=source_chat_id,
                 source_group_id=source_group_id,
                 instance_name=instance_name,
@@ -21746,22 +22025,30 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 status="QUEUED",
                 created_at=_utc_now_naive(),
                 updated_at=_utc_now_naive(),
-                expires_at=_utc_now_naive() + timedelta(days=settings.HISTORY_DAYS),
+                expires_at=(
+                    _utc_now_naive()
+                    + timedelta(days=settings.HISTORY_DAYS)
+                ),
             )
-        
+
             db.add(row)
+
             try:
                 db.commit()
                 db.refresh(row)
+
             except IntegrityError:
                 db.rollback()
 
                 row = RequestLog(
-                    request_key=f"{base_request_key}:{uuid.uuid4().hex}",
+                    request_key=(
+                        f"{base_request_key}:"
+                        f"{uuid.uuid4().hex}"
+                    ),
                     curp=term,
                     act_type=act_type,
                     requester_wa_id=requester_wa_id,
-                    requester_name="",
+                    requester_name=requester_display_name,
                     source_chat_id=source_chat_id,
                     source_group_id=source_group_id,
                     instance_name=instance_name,
@@ -21769,15 +22056,24 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     status="QUEUED",
                     created_at=_utc_now_naive(),
                     updated_at=_utc_now_naive(),
-                    expires_at=_utc_now_naive() + timedelta(days=settings.HISTORY_DAYS),
+                    expires_at=(
+                        _utc_now_naive()
+                        + timedelta(days=settings.HISTORY_DAYS)
+                    ),
                 )
-            
+
                 db.add(row)
                 db.commit()
                 db.refresh(row)
-                    
-            _enqueue_process_request(row, "manual_requeue")
+
+            _enqueue_process_request(
+                row,
+                "manual_requeue",
+            )
+
             created_any = True
+            created_count += 1
+            created_act_types.append(act_type)
 
             print(
                 "WEBHOOK_TIMING_AFTER_ENQUEUE =",
@@ -21785,33 +22081,66 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     "request_id": row.id,
                     "term": row.curp,
                     "act_type": row.act_type,
-                    "elapsed": round(time.perf_counter() - webhook_t0, 3),
+                    "elapsed": round(
+                        time.perf_counter()
+                        - webhook_t0,
+                        3,
+                    ),
                 },
                 flush=True,
             )
-        
-            print("ENQUEUED_REQUEST_ID =", row.id, flush=True)
-            print("ENQUEUED_TERM =", row.curp, flush=True)
-            print("ENQUEUED_TYPE =", row.act_type, flush=True)
-            print("ENQUEUED_SOURCE_GROUP =", row.source_group_id, flush=True)
 
+            print(
+                "ENQUEUED_REQUEST_ID =",
+                row.id,
+                flush=True,
+            )
+            print(
+                "ENQUEUED_TERM =",
+                row.curp,
+                flush=True,
+            )
+            print(
+                "ENQUEUED_TYPE =",
+                row.act_type,
+                flush=True,
+            )
+            print(
+                "ENQUEUED_SOURCE_GROUP =",
+                row.source_group_id,
+                flush=True,
+            )
+
+        # ================================================================
+        # ACK ÚNICO DEL BATCH
+        # Filosofía RFC:
+        #
+        # 🔎 NACIMIENTO · 2 recibidas
+        # 👤 Aaron Santana
+        # ⏳ Se están procesando.
+        # ================================================================
         if created_any:
-            actor = push_name or requester_wa_id
-        
-            bot_name = BOT_LABELS.get(instance_name)
-        
-            if not bot_name:
-                bot_row = (
-                    db.query(BotControl)
-                    .filter(BotControl.instance_name == instance_name)
-                    .first()
-                )
-                bot_name = bot_row.label if bot_row and bot_row.label else "🚀 DOCU EXPRES"
-        
-            ack_msg = (
-                f"{bot_name}\n"
-                f"Solicitud recibida de {actor}.\n"
-                f"Esto puede tardar unos segundos..."
+            actor = requester_display_name
+
+            ack_count = max(
+                int(created_count or 0),
+                1,
+            )
+
+            unique_created_types = list(
+                dict.fromkeys(created_act_types)
+            )
+
+            ack_act_type = (
+                unique_created_types[0]
+                if len(unique_created_types) == 1
+                else "ACTAS"
+            )
+
+            ack_msg = received_message(
+                act_type=ack_act_type,
+                requester=actor,
+                count=ack_count,
             )
 
             ack_t0 = time.perf_counter()
@@ -21822,51 +22151,90 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     "source_group_id": source_group_id,
                     "requester_wa_id": requester_wa_id,
                     "instance_name": instance_name,
-                    "elapsed_before_ack": round(ack_t0 - webhook_t0, 3),
+                    "created_count": created_count,
+                    "elapsed_before_ack": round(
+                        ack_t0 - webhook_t0,
+                        3,
+                    ),
                 },
                 flush=True,
             )
-        
+
             try:
+                # IMPORTANTE:
+                # RQ no permite ":" en nuestro job_id.
+                ack_job_id = (
+                    f"actas-ack-{instance_name}-{msg_id}"
+                    if msg_id
+                    else None
+                )
+
+                ack_retry = Retry(
+                    max=3,
+                    interval=[2, 8, 20],
+                )
+
                 if source_group_id:
                     ack_queue.enqueue(
                         send_group_text,
                         source_group_id,
                         ack_msg,
                         instance_name=instance_name,
+                        job_id=ack_job_id,
+                        retry=ack_retry,
+                        result_ttl=300,
+                        failure_ttl=3600,
                         job_timeout=180,
                     )
+
                 else:
                     ack_queue.enqueue(
                         send_text,
                         requester_wa_id,
                         ack_msg,
                         instance_name=instance_name,
+                        job_id=ack_job_id,
+                        retry=ack_retry,
+                        result_ttl=300,
+                        failure_ttl=3600,
                         job_timeout=180,
                     )
-            
+
                 print(
                     "WEBHOOK_ACK_ENQUEUED =",
                     {
                         "source_group_id": source_group_id,
                         "requester_wa_id": requester_wa_id,
                         "instance_name": instance_name,
+                        "created_count": created_count,
                     },
                     flush=True,
                 )
-            
+
             except Exception as ack_enqueue_exc:
-                print("WEBHOOK_ACK_ENQUEUE_ERROR =", str(ack_enqueue_exc), flush=True)
+                print(
+                    "WEBHOOK_ACK_ENQUEUE_ERROR =",
+                    str(ack_enqueue_exc),
+                    flush=True,
+                )
 
             print(
                 "WEBHOOK_TIMING_ACK_DONE =",
                 {
-                    "ack_send_seconds": round(time.perf_counter() - ack_t0, 3),
-                    "total_webhook_seconds": round(time.perf_counter() - webhook_t0, 3),
+                    "ack_send_seconds": round(
+                        time.perf_counter()
+                        - ack_t0,
+                        3,
+                    ),
+                    "total_webhook_seconds": round(
+                        time.perf_counter()
+                        - webhook_t0,
+                        3,
+                    ),
                 },
                 flush=True,
             )
-            
+
         else:
             print("IGNORED_REASON = nothing_created", flush=True)
 

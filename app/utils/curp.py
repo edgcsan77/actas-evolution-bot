@@ -158,6 +158,223 @@ def _extract_identifier_from_line(line: str) -> str | None:
     return None
 
 
+
+def _explicit_act_type_from_line(line: str) -> str | None:
+    """
+    Devuelve tipo solamente si la línea contiene una indicación explícita
+    de tipo de acta.
+
+    IMPORTANTE:
+    una CURP sola NO cambia el tipo actual a NACIMIENTO.
+    """
+    t = normalize_text(line)
+
+    # Quitar identificadores para buscar únicamente palabras de tipo.
+    t_clean = re.sub(rf"\b{CURP_REGEX}\b", " ", t)
+    t_clean = re.sub(rf"\b{NUM20_REGEX}\b", " ", t_clean)
+    t_nospace = re.sub(r"\s+", "", t_clean)
+
+    has_folio = any(
+        x in t_nospace
+        for x in ("FOLIO", "FOLIADO", "FOLIADA")
+    )
+
+    has_specific_type = any(
+        x in t_nospace
+        for x in (
+            "MATRIMONIO",
+            "ACTADEMATRIMONIO",
+            "MATRI",
+            "DEFUNCION",
+            "ACTADEDEFUNCION",
+            "DEFUN",
+            "DIVORCIO",
+            "ACTADEDIVORCIO",
+            "DIVOR",
+            "NACIMIENTO",
+            "ACTADENACIMIENTO",
+            "NACIM",
+        )
+    )
+
+    if not has_folio and not has_specific_type:
+        return None
+
+    # FOLIO solo, sin tipo concreto ni identificador:
+    # guardar un marcador genérico para decidir posteriormente
+    # entre FOLIO (cadena) y NACIMIENTO FOLIO (CURP).
+    has_identifier = bool(
+        re.search(rf"\b{CURP_REGEX}\b", t)
+        or re.search(rf"\b{NUM20_REGEX}\b", t)
+    )
+
+    if has_folio and not has_specific_type and not has_identifier:
+        return "__FOLIO_GENERIC__"
+
+    return detect_act_type(line)
+
+
+def extract_typed_request_terms(text: str) -> list[tuple[str, str]]:
+    """
+    Extrae identificadores junto con su tipo de acta.
+
+    Formatos soportados:
+        TIPO
+        CURP
+
+        CURP TIPO
+
+        TIPO CURP
+
+        CURP
+        TIPO
+
+    También conserva contexto para lotes como:
+        NACIMIENTO
+        CURP1
+        DEFUNCION
+        CURP2
+
+    Reglas:
+    - CURP sin tipo explícito => NACIMIENTO.
+    - Cadena de 20 dígitos sin tipo explícito:
+        1 => NACIMIENTO
+        2 => DEFUNCION
+        3 => MATRIMONIO
+        4 => DIVORCIO
+    - Un tipo explícito siempre tiene prioridad.
+    - Si una línea contiene solamente un tipo y la línea anterior contenía
+      identificadores clasificados implícitamente, ese tipo se aplica
+      retroactivamente a esos identificadores.
+    """
+
+    def resolve_type(raw_type: str, term: str) -> str:
+        if raw_type == "__FOLIO_GENERIC__":
+            if len(term) == 20 and term.isdigit():
+                return "FOLIO"
+            return "NACIMIENTO FOLIO"
+
+        return raw_type
+
+    chain_type_by_prefix = {
+        "1": "NACIMIENTO",
+        "2": "DEFUNCION",
+        "3": "MATRIMONIO",
+        "4": "DIVORCIO",
+    }
+
+    current_type = "NACIMIENTO"
+    current_type_is_explicit = False
+
+    # Se usa metadata interna para poder corregir el tipo de la línea
+    # inmediatamente anterior cuando el cliente escribe:
+    #
+    # CURP
+    # MATRIMONIO
+    items: list[dict] = []
+
+    # Índices de los identificadores encontrados en la última línea
+    # que contenía identificadores.
+    previous_line_indices: list[int] = []
+
+    lines = [
+        line.strip()
+        for line in (text or "").splitlines()
+        if line.strip()
+    ]
+
+    for line in lines:
+        explicit_type = _explicit_act_type_from_line(line)
+        identifiers = extract_request_terms(line)
+
+        # ---------------------------------------------------------
+        # TIPO DESPUÉS DEL IDENTIFICADOR
+        #
+        # Ejemplo:
+        # PECF660614HCLRLR09
+        # MATRIMONIO
+        #
+        # Solo corregimos retroactivamente elementos cuyo tipo era
+        # implícito. Esto protege lotes como:
+        #
+        # NACIMIENTO
+        # CURP1
+        # DEFUNCION
+        # CURP2
+        #
+        # CURP1 ya tenía NACIMIENTO explícito, por lo que DEFUNCION
+        # será contexto para CURP2 y no modificará CURP1.
+        # ---------------------------------------------------------
+        if explicit_type and not identifiers and previous_line_indices:
+            for idx in previous_line_indices:
+                if not items[idx]["explicit"]:
+                    items[idx]["act_type"] = resolve_type(
+                        explicit_type,
+                        items[idx]["term"],
+                    )
+                    items[idx]["explicit"] = True
+
+        # Un tipo explícito también se convierte en contexto para
+        # identificadores posteriores.
+        if explicit_type:
+            current_type = explicit_type
+            current_type_is_explicit = True
+
+        current_line_indices: list[int] = []
+
+        for term in identifiers:
+            term = (term or "").strip().upper()
+            if not term:
+                continue
+
+            # Tipo escrito en la misma línea:
+            # CURP MATRIMONIO / MATRIMONIO CURP
+            if explicit_type:
+                term_type = resolve_type(explicit_type, term)
+                source_is_explicit = True
+
+            else:
+                term_type = resolve_type(current_type, term)
+                source_is_explicit = current_type_is_explicit
+
+                # Cadena sola: inferir tipo por primer dígito únicamente
+                # cuando no hay un tipo explícito gobernando el contexto.
+                if (
+                    len(term) == 20
+                    and term.isdigit()
+                    and not current_type_is_explicit
+                ):
+                    term_type = chain_type_by_prefix.get(
+                        term[0],
+                        term_type,
+                    )
+
+            items.append(
+                {
+                    "term": term,
+                    "act_type": term_type,
+                    "explicit": source_is_explicit,
+                }
+            )
+            current_line_indices.append(len(items) - 1)
+
+        # Importante: únicamente la línea inmediatamente anterior con
+        # identificadores puede recibir un tipo escrito después.
+        previous_line_indices = current_line_indices
+
+    # Deduplicar por IDENTIFICADOR + TIPO.
+    # La misma CURP puede solicitarse legítimamente con dos tipos distintos.
+    found: list[tuple[str, str]] = []
+
+    for item in items:
+        pair = (item["term"], item["act_type"])
+
+        if pair not in found:
+            found.append(pair)
+
+    return found
+
+
 def extract_request_terms(text: str) -> list[str]:
     text = text or ""
     lines = [x.strip() for x in text.splitlines() if x.strip()]

@@ -25,6 +25,12 @@ from app.queue import redis_conn, request_queue, slow_request_queue
 from app.provider_status_cache import refresh_providers_status
 from app.utils.bot_limits import increment_bot_used_and_maybe_block
 from app.pdf_storage import save_request_pdf_to_r2, generate_r2_presigned_download_url
+from app.client_messages import (
+    no_record_message,
+    service_unavailable_message,
+    processing_error_message,
+    provider_busy_message,
+)
 
 from zoneinfo import ZoneInfo
 
@@ -520,6 +526,9 @@ BOT_HIDDEN_NO_ACCOUNTING_GROUPS = {
         "120363407565721999@g.us",
         "120363408048979577@g.us",
         "120363424360403186@g.us",
+        "120363413638446089@g.us",
+        "120363428664968468@g.us",
+        "120363409720625189@g.us",
     },
 }
 
@@ -663,20 +672,34 @@ def should_send_extra_text(group_id: str | None) -> bool:
     return group_id not in NO_EXTRA_TEXT_GROUPS
 
 
-def _no_record_client_msg(req) -> str:
+def _client_requester_name(req) -> str:
     return (
-        "❌ No hay registros disponibles.\n"
-        f"Dato: {getattr(req, 'curp', '')}\n"
-        f"Tipo: {getattr(req, 'act_type', '')}\n\n"
-        "Verificar que la CURP esté certificada en RENAPO"
+        (getattr(req, "requester_name", "") or "").strip()
+        or (getattr(req, "requester_wa_id", "") or "").strip()
+        or "Usuario"
     )
 
 
-def _notify_client_no_record_once(req, label: str = "NO_RECORD") -> bool:
+def _no_record_client_msg(req) -> str:
+    return no_record_message(
+        act_type=getattr(req, "act_type", None),
+        requester=_client_requester_name(req),
+        count=1,
+    )
+
+
+def _notify_client_no_record_once(
+    req,
+    label: str = "NO_RECORD",
+    retry_attempt: int = 0,
+) -> bool:
     """
-    Blindaje global:
-    una solicitud solo puede avisar 'No hay registros disponibles' una vez.
-    Usa la misma llave que main.py: no_record_notified:{req.id}
+    Avisa SIN REGISTRO una sola vez por request.
+
+    send_text/send_group_text ya hacen sus propios intentos
+    internos. Si todos fallan:
+    - libera la llave de dedupe;
+    - programa un retry posterior del aviso.
     """
     if _is_api_request(req):
         print(f"{label}_API_SKIP_WHATSAPP_NOTIFY =", {
@@ -684,42 +707,160 @@ def _notify_client_no_record_once(req, label: str = "NO_RECORD") -> bool:
             "api_client_id": getattr(req, "api_client_id", None),
         }, flush=True)
         return False
-        
+
     req_id = getattr(req, "id", None)
+
+    if not req_id:
+        print(f"{label}_NO_REQUEST_ID =", flush=True)
+        return False
+
     dedupe_key = f"no_record_notified:{req_id}"
 
-    first_notify = True
+    try:
+        first_notify = redis_conn.set(
+            dedupe_key,
+            "1",
+            nx=True,
+            ex=86400,
+        )
+    except Exception as dedupe_exc:
+        print(
+            f"{label}_DEDUPE_REDIS_ERROR =",
+            str(dedupe_exc),
+            flush=True,
+        )
 
-    if req_id:
-        try:
-            first_notify = redis_conn.set(dedupe_key, "1", nx=True, ex=86400)
-        except Exception as dedupe_exc:
-            print(f"{label}_DEDUPE_REDIS_ERROR =", str(dedupe_exc), flush=True)
-            first_notify = True
+        # Si Redis está caído, intentamos avisar de todas formas.
+        first_notify = True
 
     if not first_notify:
-        print(f"{label}_DUPLICATE_IGNORED =", dedupe_key, flush=True)
+        print(
+            f"{label}_DUPLICATE_IGNORED =",
+            dedupe_key,
+            flush=True,
+        )
         return False
 
     msg = _no_record_client_msg(req)
-    instance = getattr(req, "instance_name", None) or settings.EVOLUTION_INSTANCE or "docifybot8"
+
+    instance = (
+        getattr(req, "instance_name", None)
+        or settings.EVOLUTION_INSTANCE
+        or "docifybot8"
+    )
 
     try:
         if getattr(req, "source_group_id", None):
-            send_group_text(req.source_group_id, msg, instance)
-        elif getattr(req, "requester_wa_id", None):
-            send_text(req.requester_wa_id, msg, instance_name=instance)
+            send_group_text(
+                req.source_group_id,
+                msg,
+                instance,
+            )
 
-        print(f"{label}_CLIENT_NOTIFIED_ONCE =", dedupe_key, flush=True)
+        elif getattr(req, "requester_wa_id", None):
+            send_text(
+                req.requester_wa_id,
+                msg,
+                instance_name=instance,
+            )
+
+        else:
+            raise RuntimeError(
+                "NO_RECORD_CLIENT_DESTINATION_MISSING"
+            )
+
+        print(f"{label}_CLIENT_NOTIFIED_ONCE =", {
+            "request_id": req_id,
+            "dedupe_key": dedupe_key,
+            "retry_attempt": retry_attempt,
+        }, flush=True)
+
         return True
 
     except Exception as send_exc:
         print(f"{label}_CLIENT_NOTIFY_ERROR =", {
             "request_id": req_id,
+            "retry_attempt": retry_attempt,
             "error": str(send_exc),
         }, flush=True)
+
+        # MUY IMPORTANTE:
+        # el mensaje NO fue confirmado como entregado.
+        # No dejar la llave bloqueando futuros intentos.
+        try:
+            redis_conn.delete(dedupe_key)
+        except Exception as delete_exc:
+            print(f"{label}_DEDUPE_RELEASE_ERROR =", {
+                "request_id": req_id,
+                "error": str(delete_exc),
+            }, flush=True)
+
+        if retry_attempt < 3:
+            delays = [20, 60, 180]
+            delay_sec = delays[
+                min(retry_attempt, len(delays) - 1)
+            ]
+
+            try:
+                request_queue.enqueue_in(
+                    timedelta(seconds=delay_sec),
+                    retry_no_record_notification,
+                    req_id,
+                    retry_attempt + 1,
+                )
+
+                print(f"{label}_CLIENT_NOTIFY_RETRY_SCHEDULED =", {
+                    "request_id": req_id,
+                    "next_attempt": retry_attempt + 1,
+                    "delay_sec": delay_sec,
+                }, flush=True)
+
+            except Exception as retry_exc:
+                print(f"{label}_CLIENT_NOTIFY_RETRY_ENQUEUE_ERROR =", {
+                    "request_id": req_id,
+                    "error": str(retry_exc),
+                }, flush=True)
+
         return False
-    
+
+
+def retry_no_record_notification(
+    request_id: int,
+    attempt: int = 1,
+):
+    db = SessionLocal()
+
+    try:
+        req = (
+            db.query(RequestLog)
+            .filter(RequestLog.id == request_id)
+            .first()
+        )
+
+        if not req:
+            print(
+                "NO_RECORD_NOTIFY_RETRY_REQUEST_NOT_FOUND =",
+                request_id,
+                flush=True,
+            )
+            return
+
+        _notify_client_no_record_once(
+            req,
+            label="NO_RECORD_NOTIFY_RETRY",
+            retry_attempt=attempt,
+        )
+
+    except Exception as exc:
+        print("NO_RECORD_NOTIFY_RETRY_ERROR =", {
+            "request_id": request_id,
+            "attempt": attempt,
+            "error": str(exc),
+        }, flush=True)
+
+    finally:
+        db.close()
+
 
 def _utc_now_naive():
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -1749,16 +1890,51 @@ def _deliver_pdf_base64_with_retries(
 
 
 def retry_pdf_delivery(request_id: int, attempt: int = 1):
+    # Evita que dos jobs de retry entreguen/contabilicen simultáneamente
+    # la misma solicitud.
+    lock_key = f"pdf_delivery_retry_lock:{request_id}"
+    lock_token = uuid.uuid4().hex
+
+    try:
+        lock_acquired = redis_conn.set(
+            lock_key,
+            lock_token,
+            nx=True,
+            ex=900,
+        )
+    except Exception as lock_exc:
+        print("RETRY_PDF_DELIVERY_LOCK_ERROR =", {
+            "request_id": request_id,
+            "attempt": attempt,
+            "error": str(lock_exc),
+        }, flush=True)
+
+        # Fail closed: si Redis no puede garantizar exclusión,
+        # no arriesgar doble PDF/doble contabilización.
+        return
+
+    if not lock_acquired:
+        print("RETRY_PDF_DELIVERY_LOCKED_SKIP =", {
+            "request_id": request_id,
+            "attempt": attempt,
+        }, flush=True)
+        return
+
     db = SessionLocal()
 
     try:
-        req = db.query(RequestLog).filter(RequestLog.id == request_id).first()
+        req = (
+            db.query(RequestLog)
+            .populate_existing()
+            .filter(RequestLog.id == request_id)
+            .first()
+        )
 
         if not req:
             print("RETRY_PDF_DELIVERY_REQUEST_NOT_FOUND =", request_id, flush=True)
             return
 
-        if req.status == "DONE":
+        if (req.status or "").upper() == "DONE":
             print("RETRY_PDF_DELIVERY_ALREADY_DONE =", request_id, flush=True)
             return
 
@@ -1770,11 +1946,20 @@ def retry_pdf_delivery(request_id: int, attempt: int = 1):
             }, flush=True)
             return
 
-        instance = req.instance_name or settings.EVOLUTION_INSTANCE or "docifybot8"
+        instance = (
+            req.instance_name
+            or settings.EVOLUTION_INSTANCE
+            or "docifybot8"
+        )
+
         filename = _default_pdf_filename(req)
 
         url = generate_r2_presigned_download_url(req.pdf_url)
-        r = requests.get(url, timeout=(5, 45))
+
+        r = requests.get(
+            url,
+            timeout=(5, 45),
+        )
         r.raise_for_status()
 
         pdf_bytes = r.content
@@ -1784,8 +1969,12 @@ def retry_pdf_delivery(request_id: int, attempt: int = 1):
 
         safe_media_b64 = base64.b64encode(pdf_bytes).decode()
 
-        caption_text = "📄 Reenvío automático de acta generada previamente."
+        caption_text = (
+            "📄 Reenvío automático de acta generada previamente."
+        )
 
+        # La capa Evolution lanza excepción si sendMedia no termina
+        # satisfactoriamente. Por eso no se llega a DONE si falla.
         _send_pdf_base64_to_client_once(
             req,
             safe_media_b64,
@@ -1794,21 +1983,71 @@ def retry_pdf_delivery(request_id: int, attempt: int = 1):
             instance,
         )
 
-        req.status = "DONE"
-        req.error_message = None
-        req.updated_at = _utc_now_naive()
+        # Recargar y bloquear la fila real antes de marcar DONE.
+        # Si otro proceso logró terminarla mientras enviábamos,
+        # no volver a contabilizar.
+        locked_req = (
+            db.query(RequestLog)
+            .populate_existing()
+            .filter(RequestLog.id == request_id)
+            .with_for_update()
+            .first()
+        )
+
+        if not locked_req:
+            raise RuntimeError(
+                f"RETRY_PDF_DELIVERY_REQUEST_DISAPPEARED:{request_id}"
+            )
+
+        if (locked_req.status or "").upper() == "DONE":
+            print("RETRY_PDF_DELIVERY_DONE_AFTER_SEND_SKIP_ACCOUNTING =", {
+                "request_id": request_id,
+                "attempt": attempt,
+            }, flush=True)
+
+            db.rollback()
+            return
+
+        locked_req.status = "DONE"
+        locked_req.error_message = None
+        locked_req.updated_at = _utc_now_naive()
         db.commit()
 
+        # Mismo candado que utiliza el relay principal de main.py.
         try:
-            _after_done_accounting(req, db)
+            redis_conn.set(
+                f"provider_pdf_done:{request_id}",
+                "1",
+                ex=3600,
+            )
+
+            redis_conn.delete(
+                f"provider_pdf_sending:{request_id}"
+            )
+
+        except Exception as done_key_exc:
+            print("RETRY_PDF_DELIVERY_DONE_KEY_ERROR =", {
+                "request_id": request_id,
+                "error": str(done_key_exc),
+            }, flush=True)
+
+        try:
+            _after_done_accounting(
+                locked_req,
+                db,
+            )
         except Exception as accounting_exc:
-            print("RETRY_PDF_DELIVERY_ACCOUNTING_ERROR =", str(accounting_exc), flush=True)
+            print(
+                "RETRY_PDF_DELIVERY_ACCOUNTING_ERROR =",
+                str(accounting_exc),
+                flush=True,
+            )
 
         print("RETRY_PDF_DELIVERY_OK =", {
             "request_id": request_id,
             "attempt": attempt,
             "instance": instance,
-            "source_group_id": req.source_group_id,
+            "source_group_id": locked_req.source_group_id,
         }, flush=True)
 
     except Exception as e:
@@ -1819,21 +2058,63 @@ def retry_pdf_delivery(request_id: int, attempt: int = 1):
         }, flush=True)
 
         try:
-            req = db.query(RequestLog).filter(RequestLog.id == request_id).first()
-            if req:
+            db.rollback()
+
+            req = (
+                db.query(RequestLog)
+                .populate_existing()
+                .filter(RequestLog.id == request_id)
+                .first()
+            )
+
+            if req and (req.status or "").upper() != "DONE":
                 req.status = "ERROR"
-                req.error_message = f"DELIVERY_FAILED_RETRY_{attempt}: {str(e)[:300]}"
+                req.error_message = (
+                    f"DELIVERY_FAILED_RETRY_{attempt}: "
+                    f"{str(e)[:300]}"
+                )
                 req.updated_at = _utc_now_naive()
                 db.commit()
+
         except Exception as db_exc:
-            print("RETRY_PDF_DELIVERY_DB_ERROR =", str(db_exc), flush=True)
+            print(
+                "RETRY_PDF_DELIVERY_DB_ERROR =",
+                str(db_exc),
+                flush=True,
+            )
 
         if attempt < 5:
-            next_delay = [60, 180, 300, 600][min(attempt - 1, 3)]
-            _schedule_delivery_retry(request_id, attempt=attempt + 1, delay_sec=next_delay)
+            next_delay = [60, 180, 300, 600][
+                min(attempt - 1, 3)
+            ]
+
+            _schedule_delivery_retry(
+                request_id,
+                attempt=attempt + 1,
+                delay_sec=next_delay,
+            )
 
     finally:
         db.close()
+
+        # Liberar solamente nuestro propio lock.
+        try:
+            current_token = redis_conn.get(lock_key)
+
+            if isinstance(current_token, bytes):
+                current_token = current_token.decode(
+                    "utf-8",
+                    errors="ignore",
+                )
+
+            if current_token == lock_token:
+                redis_conn.delete(lock_key)
+
+        except Exception as unlock_exc:
+            print("RETRY_PDF_DELIVERY_UNLOCK_ERROR =", {
+                "request_id": request_id,
+                "error": str(unlock_exc),
+            }, flush=True)
 
 
 def sweep_stuck_requests(max_age_minutes: int = 20, limit: int = 80):
@@ -4230,57 +4511,82 @@ def _handle_group_promotion_after_done(req, db):
 
     if crossed_0:
         msg = (
-            "❌ *Paquete agotado*\n\n"
-            "Tu paquete promocional ha sido consumido en su totalidad.\n"
-            "Saldo disponible: *0 actas*.\n\n"
-            f"{extra_shared_msg_block}"
-            "Quedamos atentos."
+            "⛔ Paquete agotado\n"
+            "📦 0 actas disponibles"
         )
+
+        if shared_key:
+            msg += (
+                "\n\n"
+                "Todos los grupos de esta bolsa quedaron pausados "
+                "hasta una nueva recarga."
+            )
+        else:
+            msg += (
+                "\n\n"
+                "El servicio de este grupo quedó pausado "
+                "hasta una nueva recarga."
+            )
+
         notify_level = "0"
+
         for row in rows:
             row.warning_sent_0 = True
             row.is_active = False
 
     elif crossed_10:
         msg = (
-            "🚨 *Saldo crítico*\n\n"
-            f"Tu paquete promocional cuenta actualmente con solo *{available_after} actas disponibles*.\n\n"
-            f"{extra_shared_msg_long}"
-            "Quedamos atentos."
+            "🚨 Saldo crítico\n"
+            f"📦 {available_after} actas disponibles"
         )
+
+        if shared_key:
+            msg += "\n\nEste saldo corresponde a la bolsa compartida."
+
         notify_level = "10"
+
         for row in rows:
             row.warning_sent_10 = True
 
     elif crossed_50:
         msg = (
-            "⚠️ *Aviso importante de saldo*\n\n"
-            f"Tu paquete promocional cuenta actualmente con *{available_after} actas disponibles*.\n\n"
-            f"{extra_shared_msg_long}"
-            "Quedamos atentos."
+            "⚠️ Saldo bajo\n"
+            f"📦 {available_after} actas disponibles"
         )
+
+        if shared_key:
+            msg += "\n\nEste saldo corresponde a la bolsa compartida."
+
         notify_level = "50"
+
         for row in rows:
             row.warning_sent_50 = True
 
     elif crossed_100:
         msg = (
-            "⚠️ *Aviso de saldo*\n\n"
-            f"Tu paquete promocional cuenta actualmente con *{available_after} actas disponibles*.\n\n"
-            f"{extra_shared_msg_long}"
-            "Quedamos atentos."
+            "⚠️ Aviso de saldo\n"
+            f"📦 {available_after} actas disponibles"
         )
+
+        if shared_key:
+            msg += "\n\nEste saldo corresponde a la bolsa compartida."
+
         notify_level = "100"
+
         for row in rows:
             row.warning_sent_100 = True
 
     elif crossed_200:
         msg = (
-            "ℹ️ *Aviso de saldo*\n\n"
-            f"Actualmente cuentas con *{available_after} actas disponibles* en tu paquete promocional.\n\n"
-            f"{extra_shared_msg_short}"
+            "ℹ️ Aviso de saldo\n"
+            f"📦 {available_after} actas disponibles"
         )
+
+        if shared_key:
+            msg += "\nEste saldo corresponde a la bolsa compartida."
+
         notify_level = "200"
+
         for row in rows:
             row.warning_sent_200 = True
 
@@ -4295,12 +4601,11 @@ def _handle_group_promotion_after_done(req, db):
         if limit_actas > 0 and used_group >= limit_actas:
             reached_individual_limit = True
             individual_limit_msg = (
-                f"⚠️ *Límite individual alcanzado*\n\n"
-                f"Este grupo alcanzó su límite individual dentro de la bolsa compartida.\n"
-                f"Límite del grupo: *{limit_actas} actas*.\n"
-                f"Consumidas por este grupo: *{used_group}*.\n\n"
-                f"El grupo quedará bloqueado automáticamente, "
-                f"pero la bolsa compartida general puede seguir disponible para los demás grupos."
+                "⚠️ Límite individual alcanzado\n"
+                f"📦 {used_group} de {limit_actas} actas utilizadas\n\n"
+                "Este grupo quedó pausado. "
+                "La bolsa compartida puede seguir disponible "
+                "para los demás grupos."
             )
 
     db.commit()
@@ -4983,11 +5288,11 @@ def process_request(request_id: int):
                     )
 
                     msg = (
-                        f"⚠️ *Límite individual alcanzado*\n\n"
-                        f"Este grupo ya consumió su límite individual dentro de la bolsa compartida.\n"
-                        f"Límite del grupo: *{int(promo_row.shared_group_limit_actas or 0)} actas*.\n"
-                        f"Consumidas por este grupo: *{int(promo_row.shared_group_used_actas or 0)}*.\n"
-                        f"Saldo disponible en la bolsa general: *{remaining_shared} actas*."
+                        "⚠️ Límite individual alcanzado\n"
+                        f"📦 {int(promo_row.shared_group_used_actas or 0)} "
+                        f"de {int(promo_row.shared_group_limit_actas or 0)} actas utilizadas\n"
+                        f"✅ Bolsa general: {remaining_shared} actas disponibles\n\n"
+                        "Este grupo permanece pausado."
                     )
 
                     try:
@@ -5283,11 +5588,9 @@ def process_request(request_id: int):
             ):
                 return
         
-            msg = (
-                f"⚠️ Solicitud sin éxito en Registro Civil\n"
-                f"Dato: {req.curp}\n"
-                f"Tipo: {req.act_type}\n\n"
-                f"Reenviar nuevamente en unos minutos"
+            msg = processing_error_message(
+                requester=_client_requester_name(req),
+                detail="Intenta nuevamente en unos minutos.",
             )
         
             try:
@@ -5342,6 +5645,11 @@ def process_request(request_id: int):
                 provider15_timeout = (
                     err == "PROVIDER15_AGENT_TIMEOUT"
                     or err.startswith("PROVIDER15_TIMEOUT:")
+                    or err.startswith("PROVIDER15_AGENT_CONNECTION_ERROR:")
+                    or err.startswith("PROVIDER15_AGENT_HTTP_500:")
+                    or err.startswith("PROVIDER15_AGENT_HTTP_502:")
+                    or err.startswith("PROVIDER15_AGENT_HTTP_503:")
+                    or err.startswith("PROVIDER15_AGENT_HTTP_504:")
                 )
         
                 if provider15_timeout:
@@ -5977,10 +6285,15 @@ def process_request(request_id: int):
                     
                             return
                     
-                        msg = (
-                            "⚠️ *Proveedor temporalmente no disponible*\n\n"
-                            "La búsqueda no pudo completarse correctamente en este momento.\n\n"
-                            "Intenta nuevamente más tarde."
+                        requester = (
+                            (getattr(req, "requester_name", "") or "").strip()
+                            or (getattr(req, "requester_wa_id", "") or "").strip()
+                            or "Usuario"
+                        )
+
+                        msg = service_unavailable_message(
+                            requester=requester,
+                            detail="Intenta nuevamente más tarde.",
                         )
                     
                         instance = req.instance_name or "docifybot8"
@@ -6118,28 +6431,14 @@ def process_request(request_id: int):
                     req.error_message = err[:1000]
                     req.updated_at = _utc_now_naive()
                     db.commit()
-        
-                    msg = (
-                        f"❌ No hay registros disponibles.\n"
-                        f"Dato: {req.curp}\n"
-                        f"Tipo: {req.act_type}\n\n"
-                        f"Verificar que la CURP esté certificada en RENAPO"
+
+                    _notify_client_no_record_once(
+                        req,
+                        label="PROVIDER7_NO_RECORD",
                     )
-        
-                    try:
-                        instance = req.instance_name or "docifybot8"
-        
-                        if req.source_group_id:
-                            send_group_text(req.source_group_id, msg, instance)
-                        else:
-                            from app.services.evolution import send_text
-                            send_text(req.requester_wa_id, msg, instance)
-        
-                    except Exception as notify_exc:
-                        print("CLIENT_NOTIFY_AFTER_PROVIDER7_NO_RESULTS_ERROR =", str(notify_exc), flush=True)
-        
+
                     return
-        
+
                 if not _worker_mark_generic_failure_if_allowed(
                     req,
                     generic_error=err[:1000],
@@ -6148,25 +6447,35 @@ def process_request(request_id: int):
                     return
         
                 try:
-                    msg = (
-                        f"⚠️ Solicitud sin éxito en Registro Civil\n"
-                        f"Dato: {req.curp}\n"
-                        f"Tipo: {req.act_type}\n\n"
-                        f"Reenviar nuevamente en unos minutos"
+                    msg = processing_error_message(
+                        requester=_client_requester_name(req),
+                        detail="Intenta nuevamente en unos minutos.",
                     )
-        
+
                     instance = req.instance_name or "docifybot8"
 
                     if req.source_group_id:
                         if should_send_extra_text(req.source_group_id):
-                            send_group_text(req.source_group_id, msg, instance)
+                            send_group_text(
+                                req.source_group_id,
+                                msg,
+                                instance,
+                            )
                     else:
                         from app.services.evolution import send_text
-                        send_text(req.requester_wa_id, msg, instance)
-        
+                        send_text(
+                            req.requester_wa_id,
+                            msg,
+                            instance,
+                        )
+
                 except Exception as notify_exc:
-                    print("CLIENT_NOTIFY_AFTER_PROVIDER7_FAIL_ERROR =", str(notify_exc), flush=True)
-        
+                    print(
+                        "CLIENT_NOTIFY_AFTER_PROVIDER7_FAIL_ERROR =",
+                        str(notify_exc),
+                        flush=True,
+                    )
+
                 _notify_support_error(req, "PROVIDER7_ERROR", err)
                 return
         
@@ -6263,11 +6572,12 @@ def process_request(request_id: int):
                 req.error_message = err
                 db.commit()
 
-                msg = (
-                    "⚠️ *Formato no disponible actualmente*\n\n"
-                    "Las consultas por *curp, cadena o código de verificación* "
-                    "no están disponibles en este momento.\n\n"
-                    "Intenta nuevamente más tarde o realiza la búsqueda por *CURP*."
+                msg = service_unavailable_message(
+                    requester=_client_requester_name(req),
+                    detail=(
+                        "Este formato no está disponible en este momento.\n"
+                        "Intenta nuevamente más tarde."
+                    ),
                 )
 
                 instance = req.instance_name or "docifybot8" 
@@ -6286,11 +6596,12 @@ def process_request(request_id: int):
                 req.error_message = err
                 db.commit()
 
-                msg = (
-                    "⚠️ *Formato no disponible actualmente*\n\n"
-                    "Las consultas por *curp, cadena o código de verificación* "
-                    "no están disponibles en este momento.\n\n"
-                    "Intenta nuevamente más tarde o realiza la búsqueda por *CURP*."
+                msg = service_unavailable_message(
+                    requester=_client_requester_name(req),
+                    detail=(
+                        "Este formato no está disponible en este momento.\n"
+                        "Intenta nuevamente más tarde."
+                    ),
                 )
 
                 instance = req.instance_name or "docifybot8"
@@ -6336,11 +6647,9 @@ def process_request(request_id: int):
                 ):
                     return
 
-                msg = (
-                    f"⚠️ Solicitud sin éxito en Registro Civil\n"
-                    f"Dato: {req.curp}\n"
-                    f"Tipo: {req.act_type}\n\n"
-                    f"Reenviar nuevamente en unos minutos"
+                msg = processing_error_message(
+                    requester=_client_requester_name(req),
+                    detail="Intenta nuevamente en unos minutos.",
                 )
 
                 instance = req.instance_name or "docifybot8"
@@ -6401,37 +6710,14 @@ def process_request(request_id: int):
             ):
                 req.status = "ERROR"
                 req.error_message = err
+                req.updated_at = _utc_now_naive()
                 db.commit()
-            
-                msg = (
-                    f"❌ No hay registros disponibles.\n"
-                    f"Dato: {req.curp}\n"
-                    f"Tipo: {req.act_type}\n\n"
-                    f"Verificar que la CURP esté certificada en RENAPO"
+
+                _notify_client_no_record_once(
+                    req,
+                    label="WEB_PROVIDER_NO_RECORD",
                 )
 
-                instance = req.instance_name or "docifybot8"
-
-                dedupe_key = f"no_record_notified:{req.id}"
-                
-                try:
-                    first_notify = redis_conn.set(dedupe_key, "1", nx=True, ex=86400)
-                except Exception as dedupe_exc:
-                    print("NO_RECORD_DEDUPE_REDIS_ERROR =", str(dedupe_exc), flush=True)
-                    first_notify = True
-                
-                if first_notify:
-                    if req.source_group_id:
-                        send_group_text(req.source_group_id, msg, instance)
-                    else:
-                        from app.services.evolution import send_text
-                        send_text(req.requester_wa_id, msg, instance)
-                
-                    print("NO_RECORD_NOTIFIED_ONCE =", dedupe_key, flush=True)
-                else:
-                    print("NO_RECORD_DUPLICATE_IGNORED =", dedupe_key, flush=True)
-
-                #_notify_support_error(req, err, msg)
                 return
 
             if err.startswith("PROVIDER3_RATE_LIMIT"):
@@ -6439,11 +6725,9 @@ def process_request(request_id: int):
                 req.error_message = err
                 db.commit()
 
-                msg = (
-                    f"⏳ El proveedor está saturado por demasiadas solicitudes.\n"
-                    f"Dato: {req.curp}\n"
-                    f"Tipo: {req.act_type}\n\n"
-                    f"Intenta nuevamente en unos minutos"
+                msg = provider_busy_message(
+                    act_type=req.act_type,
+                    requester=_client_requester_name(req),
                 )
                 
                 instance = req.instance_name or "docifybot8"
@@ -6468,11 +6752,9 @@ def process_request(request_id: int):
                 ):
                     return
     
-                msg = (
-                    f"⚠️ Solicitud sin éxito en Registro Civil\n"
-                    f"Dato: {req.curp}\n"
-                    f"Tipo: {req.act_type}\n\n"
-                    f"Reenviar nuevamente en unos minutos"
+                msg = processing_error_message(
+                    requester=_client_requester_name(req),
+                    detail="Intenta nuevamente en unos minutos.",
                 )
 
                 instance = req.instance_name or "docifybot8"

@@ -79,18 +79,19 @@ def cleanup_expired_and_mark_pending():
 
         print("CLEANUP_DELETED_EXPIRED =", deleted_count, flush=True)
 
-        # 2) marcar WHATSAPP vencidos a los 8 min y WEB vencidos a los 11 min.
-        # Estos se quedan desde settings porque son SLA normal del bot.
-        whatsapp_timeout_minutes = int(
-            getattr(settings, "REQUEST_TIMEOUT_MINUTES", 8) or 8
-        )
+        # 2) HARD TIMEOUT UNIFICADO.
+        #
+        # El valor configurado en el panel principal controla el cierre
+        # definitivo de TODAS las solicitudes: WhatsApp, WEB y API.
+        #
+        # Los timeouts/retries internos de cada proveedor siguen funcionando
+        # de forma independiente; cleanup solamente interviene cuando se
+        # alcanza este límite duro.
+        hard_timeout_minutes = _cleanup_max_age_minutes(db)
 
-        web_timeout_minutes = int(
-            getattr(settings, "WEB_REQUEST_TIMEOUT_MINUTES", 11) or 11
-        )
-
-        # API externa: este sí se controla desde el panel principal.
-        api_timeout_minutes = _cleanup_max_age_minutes(db)
+        whatsapp_timeout_minutes = hard_timeout_minutes
+        web_timeout_minutes = hard_timeout_minutes
+        api_timeout_minutes = hard_timeout_minutes
 
         whatsapp_limit = now - timedelta(minutes=whatsapp_timeout_minutes)
         web_limit = now - timedelta(minutes=web_timeout_minutes)
@@ -207,11 +208,16 @@ def cleanup_expired_and_mark_pending():
                     )
                     continue
 
+                requester = (
+                    (getattr(r, "requester_name", "") or "").strip()
+                    or (getattr(r, "requester_wa_id", "") or "").strip()
+                    or "Usuario"
+                )
+
                 msg = (
-                    f"⚠️ Solicitud sin éxito en Registro Civil\n"
-                    f"Dato: {r.curp}\n"
-                    f"Tipo: {r.act_type}\n\n"
-                    f"Reenviar nuevamente en unos minutos"
+                    "⚠️ No fue posible completar la solicitud\n"
+                    f"👤 {requester}\n\n"
+                    "Intenta nuevamente en unos minutos."
                 )
 
                 instance = r.instance_name or settings.EVOLUTION_INSTANCE
