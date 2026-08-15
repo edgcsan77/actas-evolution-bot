@@ -57,11 +57,33 @@ def _fallback_instance_label(instance_name: str | None) -> str:
 
 
 def _clean_bot_name(value: str | None) -> str:
+    import re
+    import unicodedata
+
     value = str(value or "").strip()
 
-    # El encabezado agrega un solo 🚀.
-    while value.startswith("🚀"):
-        value = value[1:].strip()
+    if not value:
+        return "DOCU EXPRES"
+
+    cleaned = []
+
+    for ch in value:
+        category = unicodedata.category(ch)
+
+        # So = símbolos/emoji (🚀 ⚡ 🤖 👽 ⏱ etc.)
+        # Sk = modificadores de emoji/piel
+        # Cf = ZWJ y caracteres invisibles de composición
+        if category in {"So", "Sk", "Cf"}:
+            continue
+
+        # Selectores de variante.
+        if ch in {"\ufe0e", "\ufe0f"}:
+            continue
+
+        cleaned.append(ch)
+
+    value = "".join(cleaned)
+    value = re.sub(r"\s+", " ", value).strip()
 
     return value or "DOCU EXPRES"
 
@@ -131,7 +153,7 @@ def _message(
     detail = str(detail or "").strip()
 
     lines = [
-        f"{bot_name}",
+        f"🚀 {bot_name} ⚡",
         title,
         f"_Tipo_: *{act_type}*",
         f"_Dato_: *{dato}*",
