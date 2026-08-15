@@ -131,7 +131,7 @@ def _message(
     detail = str(detail or "").strip()
 
     lines = [
-        f"🚀 {bot_name}",
+        f"{bot_name}",
         title,
         f"_Tipo_: *{act_type}*",
         f"_Dato_: *{dato}*",
