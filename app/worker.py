@@ -30,6 +30,7 @@ from app.client_messages import (
     service_unavailable_message,
     processing_error_message,
     provider_busy_message,
+    resolve_bot_name,
 )
 
 from zoneinfo import ZoneInfo
@@ -680,11 +681,19 @@ def _client_requester_name(req) -> str:
     )
 
 
+def _client_bot_name(req) -> str:
+    return resolve_bot_name(
+        getattr(req, "instance_name", None),
+    )
+
+
 def _no_record_client_msg(req) -> str:
     return no_record_message(
         act_type=getattr(req, "act_type", None),
         requester=_client_requester_name(req),
         count=1,
+        bot_name=_client_bot_name(req),
+        dato=getattr(req, "curp", None),
     )
 
 
@@ -5589,6 +5598,9 @@ def process_request(request_id: int):
                 return
         
             msg = processing_error_message(
+                act_type=getattr(req, "act_type", None),
+                bot_name=_client_bot_name(req),
+                dato=getattr(req, "curp", None),
                 requester=_client_requester_name(req),
                 detail="Intenta nuevamente en unos minutos.",
             )
@@ -6292,6 +6304,9 @@ def process_request(request_id: int):
                         )
 
                         msg = service_unavailable_message(
+                            act_type=getattr(req, "act_type", None),
+                            bot_name=_client_bot_name(req),
+                            dato=getattr(req, "curp", None),
                             requester=requester,
                             detail="Intenta nuevamente más tarde.",
                         )
@@ -6448,6 +6463,9 @@ def process_request(request_id: int):
         
                 try:
                     msg = processing_error_message(
+                        act_type=getattr(req, "act_type", None),
+                        bot_name=_client_bot_name(req),
+                        dato=getattr(req, "curp", None),
                         requester=_client_requester_name(req),
                         detail="Intenta nuevamente en unos minutos.",
                     )
@@ -6573,6 +6591,9 @@ def process_request(request_id: int):
                 db.commit()
 
                 msg = service_unavailable_message(
+                    act_type=getattr(req, "act_type", None),
+                    bot_name=_client_bot_name(req),
+                    dato=getattr(req, "curp", None),
                     requester=_client_requester_name(req),
                     detail=(
                         "Este formato no está disponible en este momento.\n"
@@ -6597,6 +6618,9 @@ def process_request(request_id: int):
                 db.commit()
 
                 msg = service_unavailable_message(
+                    act_type=getattr(req, "act_type", None),
+                    bot_name=_client_bot_name(req),
+                    dato=getattr(req, "curp", None),
                     requester=_client_requester_name(req),
                     detail=(
                         "Este formato no está disponible en este momento.\n"
@@ -6648,6 +6672,9 @@ def process_request(request_id: int):
                     return
 
                 msg = processing_error_message(
+                    act_type=getattr(req, "act_type", None),
+                    bot_name=_client_bot_name(req),
+                    dato=getattr(req, "curp", None),
                     requester=_client_requester_name(req),
                     detail="Intenta nuevamente en unos minutos.",
                 )
@@ -6726,6 +6753,8 @@ def process_request(request_id: int):
                 db.commit()
 
                 msg = provider_busy_message(
+                    bot_name=_client_bot_name(req),
+                    dato=getattr(req, "curp", None),
                     act_type=req.act_type,
                     requester=_client_requester_name(req),
                 )
@@ -6753,6 +6782,9 @@ def process_request(request_id: int):
                     return
     
                 msg = processing_error_message(
+                    act_type=getattr(req, "act_type", None),
+                    bot_name=_client_bot_name(req),
+                    dato=getattr(req, "curp", None),
                     requester=_client_requester_name(req),
                     detail="Intenta nuevamente en unos minutos.",
                 )

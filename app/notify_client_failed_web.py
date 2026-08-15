@@ -1,7 +1,7 @@
 from sqlalchemy import text
 from app.db import SessionLocal
 from app.services.evolution import send_group_text
-from app.client_messages import processing_error_message
+from app.client_messages import processing_error_message, resolve_bot_name
 
 
 FAIL_PATTERNS = [
@@ -39,6 +39,11 @@ def _client_message(row) -> str:
     return processing_error_message(
         requester=requester,
         detail="Intenta nuevamente en unos minutos.",
+        act_type=row.get("act_type"),
+        bot_name=resolve_bot_name(
+            row.get("instance_name"),
+        ),
+        dato=row.get("curp"),
     )
 
 

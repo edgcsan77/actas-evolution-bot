@@ -6,6 +6,7 @@ from app.db import SessionLocal
 from app.models import RequestLog, AppSetting
 from app.config import settings
 from app.services.evolution import send_group_text, send_text
+from app.client_messages import processing_error_message, resolve_bot_name
 
 NO_FAIL_NOTIFY_GROUPS = {
     "120363427267191472@g.us"
@@ -214,10 +215,14 @@ def cleanup_expired_and_mark_pending():
                     or "Usuario"
                 )
 
-                msg = (
-                    "⚠️ No fue posible completar la solicitud\n"
-                    f"👤 {requester}\n\n"
-                    "Intenta nuevamente en unos minutos."
+                msg = processing_error_message(
+                    requester=requester,
+                    detail="Intenta nuevamente en unos minutos.",
+                    act_type=getattr(r, "act_type", None),
+                    bot_name=resolve_bot_name(
+                        getattr(r, "instance_name", None),
+                    ),
+                    dato=getattr(r, "curp", None),
                 )
 
                 instance = r.instance_name or settings.EVOLUTION_INSTANCE

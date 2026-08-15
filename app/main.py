@@ -36,6 +36,7 @@ from app.client_messages import (
     already_delivered_message,
     attempt_limit_message,
     provider_busy_message,
+    resolve_bot_name,
 )
 from rq import Retry
 from rq.registry import StartedJobRegistry, DeferredJobRegistry, ScheduledJobRegistry, FailedJobRegistry
@@ -17244,6 +17245,11 @@ def _notify_client_no_record(open_req: RequestLog):
         act_type=getattr(open_req, "act_type", None),
         requester=requester,
         count=1,
+        bot_name=resolve_bot_name(
+            getattr(open_req, "instance_name", None),
+            BOT_LABELS,
+        ),
+        dato=getattr(open_req, "curp", None),
     )
 
     _deliver_text_result(open_req, msg)
@@ -21590,6 +21596,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             or "Usuario"
         )
 
+        client_bot_name = resolve_bot_name(
+            instance_name,
+            BOT_LABELS,
+        )
+
         typed_terms = extract_typed_request_terms(text_body)
 
         # Fallback defensivo: nunca perder el comportamiento histórico
@@ -21606,6 +21617,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         created_any = False
         created_count = 0
         created_act_types = []
+        created_terms = []
 
         for term, act_type in typed_terms:
             print(
@@ -21637,6 +21649,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         done_msg = already_delivered_message(
                             act_type=act_type,
                             requester=requester_display_name,
+                            bot_name=client_bot_name,
+                            dato=term,
                         )
     
                         if source_group_id:
@@ -21693,6 +21707,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         act_type=act_type,
                         requester=requester_display_name,
                         count=1,
+                        bot_name=client_bot_name,
+                        dato=term,
                     )
 
                     if source_group_id:
@@ -21749,6 +21765,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 limit_msg = attempt_limit_message(
                     act_type=act_type,
                     requester=requester_display_name,
+                    bot_name=client_bot_name,
+                    dato=term,
                 )
 
                 if source_group_id:
@@ -21828,6 +21846,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     act_type=act_type,
                     requester=requester_display_name,
                     count=1,
+                    bot_name=client_bot_name,
+                    dato=term,
                 )
 
                 print(
@@ -21918,6 +21938,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         act_type=act_type,
                         requester=requester_display_name,
                         count=1,
+                        bot_name=client_bot_name,
+                        dato=term,
                     )
 
                     print(
@@ -21988,6 +22010,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 created_any = True
                 created_count += 1
                 created_act_types.append(act_type)
+                created_terms.append(term)
 
                 print(
                     "REQUEUED_EXISTING_REQUEST_ID =",
@@ -22074,6 +22097,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             created_any = True
             created_count += 1
             created_act_types.append(act_type)
+            created_terms.append(term)
 
             print(
                 "WEBHOOK_TIMING_AFTER_ENQUEUE =",
@@ -22137,10 +22161,18 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 else "ACTAS"
             )
 
+            ack_dato = (
+                created_terms[0]
+                if len(created_terms) == 1
+                else " · ".join(created_terms)
+            )
+
             ack_msg = received_message(
                 act_type=ack_act_type,
                 requester=actor,
                 count=ack_count,
+                bot_name=client_bot_name,
+                dato=ack_dato,
             )
 
             ack_t0 = time.perf_counter()
