@@ -1350,7 +1350,13 @@ def _notify_support_error(req, err: str, extra_msg: str = ""):
         # Ejemplo: si el proveedor es ADMIN DIGITAL, también le cae a su grupo.
         provider_group = (getattr(req, "provider_group_id", "") or "").strip()
 
-        if provider_group and provider_group != support_group:
+        # PROVIDER14 / E-BOT usa un chat privado como canal de protocolo.
+        # Nunca contaminar ese chat con avisos administrativos de soporte.
+        if (
+            provider_group
+            and provider_group != support_group
+            and provider_name != "PROVIDER14"
+        ):
             try:
                 provider_msg = msg.replace(
                     "🚨 *ERROR SOPORTE ACTAS*",
