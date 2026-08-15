@@ -20180,24 +20180,28 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             .first()
                         )
 
-                    if not open_req:
-                        open_req = (
-                            db.query(RequestLog)
-                            .filter(
-                                RequestLog.provider_group_id == source_chat_id,
-                                RequestLog.status == "PROCESSING",
-                                RequestLog.provider_name == "PROVIDER14",
-                            )
-                            .order_by(RequestLog.created_at.desc())
-                            .first()
-                        )
-
                     print("PROVIDER14_CONFIRM_DETECTED =", {
                         "msg_id": msg_id,
                         "source_chat_id": source_chat_id,
                         "p14_term": p14_term,
                         "matched_req_id": getattr(open_req, "id", None),
                     }, flush=True)
+
+                    if not open_req:
+                        print(
+                            "PROVIDER14_CONFIRM_NO_EXACT_MATCH =",
+                            {
+                                "msg_id": msg_id,
+                                "source_chat_id": source_chat_id,
+                                "p14_term": p14_term,
+                            },
+                            flush=True,
+                        )
+
+                        return {
+                            "ok": True,
+                            "ignored": "provider14_confirm_no_exact_match",
+                        }
 
                     if open_req:
                         try:
@@ -20298,6 +20302,51 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 )
 
                 if negative_close.get("closed"):
+                    for closed_req_id in negative_close.get("request_ids", []):
+                        try:
+                            closed_req = (
+                                db.query(RequestLog)
+                                .filter(RequestLog.id == int(closed_req_id))
+                                .first()
+                            )
+
+                            if (
+                                closed_req
+                                and (closed_req.provider_name or "").strip().upper()
+                                == "PROVIDER14"
+                                and (closed_req.provider_group_id or "").strip()
+                                == source_chat_id
+                            ):
+                                result_key = (
+                                    f"provider14:result_received:{int(closed_req.id)}"
+                                )
+
+                                redis_conn.setex(
+                                    result_key,
+                                    300,
+                                    "NEGATIVE",
+                                )
+
+                                print(
+                                    "PROVIDER14_NEGATIVE_RESULT_SET =",
+                                    {
+                                        "request_id": closed_req.id,
+                                        "curp": closed_req.curp,
+                                        "key": result_key,
+                                    },
+                                    flush=True,
+                                )
+
+                        except Exception as e:
+                            print(
+                                "PROVIDER14_NEGATIVE_RESULT_SET_ERROR =",
+                                {
+                                    "request_id": closed_req_id,
+                                    "error": str(e),
+                                },
+                                flush=True,
+                            )
+
                     return {
                         "ok": True,
                         "provider_result": "provider_negative_closed",
@@ -20975,6 +21024,42 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                 print("PROVIDER_PDF_MATCHED_REQ_ID =", open_req.id, flush=True)
                 print("PROVIDER_PDF_MATCHED_CURP =", open_req.curp, flush=True)
+
+                if (
+                    (open_req.provider_name or "").strip().upper()
+                    == "PROVIDER14"
+                ):
+                    try:
+                        result_key = (
+                            f"provider14:result_received:{int(open_req.id)}"
+                        )
+
+                        redis_conn.setex(
+                            result_key,
+                            300,
+                            "PDF",
+                        )
+
+                        print(
+                            "PROVIDER14_PDF_RESULT_SET =",
+                            {
+                                "request_id": open_req.id,
+                                "curp": open_req.curp,
+                                "key": result_key,
+                            },
+                            flush=True,
+                        )
+
+                    except Exception as e:
+                        print(
+                            "PROVIDER14_PDF_RESULT_SET_ERROR =",
+                            {
+                                "request_id": open_req.id,
+                                "curp": open_req.curp,
+                                "error": str(e),
+                            },
+                            flush=True,
+                        )
 
                 print("PROVIDER1_RELAY_CONTEXT =", {
                     "req_id": open_req.id,

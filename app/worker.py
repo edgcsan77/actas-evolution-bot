@@ -3066,6 +3066,72 @@ def _provider14_lock_key() -> str:
     return "provider14:mode_send_lock"
 
 
+def _provider14_result_key(request_id: int) -> str:
+    return f"provider14:result_received:{int(request_id)}"
+
+
+def _provider14_wait_result(
+    request_id: int,
+    lock_token: str,
+    timeout_s: float = 180.0,
+) -> bool:
+    result_key = _provider14_result_key(request_id)
+    lock_key = _provider14_lock_key()
+    deadline = time.time() + timeout_s
+
+    while time.time() < deadline:
+        try:
+            result = redis_conn.get(result_key)
+
+            if result:
+                if isinstance(result, bytes):
+                    result = result.decode("utf-8", errors="ignore")
+
+                print(
+                    "PROVIDER14_RESULT_RECEIVED =",
+                    {
+                        "request_id": request_id,
+                        "key": result_key,
+                        "result": result,
+                    },
+                    flush=True,
+                )
+                return True
+
+            current_lock = redis_conn.get(lock_key)
+
+            if isinstance(current_lock, bytes):
+                current_lock = current_lock.decode(
+                    "utf-8",
+                    errors="ignore",
+                )
+
+            if current_lock == lock_token:
+                redis_conn.expire(lock_key, 240)
+
+        except Exception as e:
+            print(
+                "PROVIDER14_RESULT_WAIT_REDIS_ERROR =",
+                {
+                    "request_id": request_id,
+                    "error": str(e),
+                },
+                flush=True,
+            )
+
+        time.sleep(0.5)
+
+    print(
+        "PROVIDER14_RESULT_TIMEOUT =",
+        {
+            "request_id": request_id,
+            "timeout_s": timeout_s,
+        },
+        flush=True,
+    )
+    return False
+
+
 def _provider14_wait_mode_ack(mode_text: str, timeout_s: float = 12.0) -> bool:
     key = _provider14_mode_ack_key(mode_text)
     deadline = time.time() + timeout_s
@@ -3138,14 +3204,14 @@ def _provider14_wait_submit_ack(request_id: int, timeout_s: float = 25.0) -> boo
     return False
 
 
-def _provider14_acquire_lock(timeout_s: float = 20.0) -> str:
+def _provider14_acquire_lock(timeout_s: float = 2.0) -> str:
     token = uuid.uuid4().hex
     key = _provider14_lock_key()
     deadline = time.time() + timeout_s
 
     while time.time() < deadline:
         try:
-            ok = redis_conn.set(key, token, nx=True, ex=45)
+            ok = redis_conn.set(key, token, nx=True, ex=240)
             if ok:
                 print("PROVIDER14_LOCK_ACQUIRED =", token, flush=True)
                 return token
@@ -3184,6 +3250,26 @@ def _send_provider14_request(req, db):
     lock_token = _provider14_acquire_lock()
 
     try:
+        try:
+            redis_conn.delete(_provider14_result_key(req.id))
+            print(
+                "PROVIDER14_RESULT_KEY_CLEARED =",
+                {
+                    "request_id": req.id,
+                    "key": _provider14_result_key(req.id),
+                },
+                flush=True,
+            )
+        except Exception as e:
+            print(
+                "PROVIDER14_RESULT_KEY_CLEAR_ERROR =",
+                {
+                    "request_id": req.id,
+                    "error": str(e),
+                },
+                flush=True,
+            )
+
         ack_key = _provider14_mode_ack_key(mode_text)
         current_mode_value = _provider14_mode_value(mode_text)
 
@@ -3344,10 +3430,36 @@ def _send_provider14_request(req, db):
             "mode_text": mode_text,
         }, flush=True)
 
-        submit_ack_ok = _provider14_wait_submit_ack(req.id, timeout_s=25.0)
+        submit_ack_ok = _provider14_wait_submit_ack(
+            req.id,
+            timeout_s=25.0,
+        )
 
         if not submit_ack_ok:
-            raise RuntimeError(f"PROVIDER14_SUBMIT_ACK_TIMEOUT:{req.id}")
+            raise RuntimeError(
+                f"PROVIDER14_SUBMIT_ACK_TIMEOUT:{req.id}"
+            )
+
+        print(
+            "PROVIDER14_WAITING_RESULT =",
+            {
+                "request_id": req.id,
+                "curp": req.curp,
+                "act_type": req.act_type,
+            },
+            flush=True,
+        )
+
+        result_ok = _provider14_wait_result(
+            req.id,
+            lock_token,
+            timeout_s=180.0,
+        )
+
+        if not result_ok:
+            raise RuntimeError(
+                f"PROVIDER14_RESULT_TIMEOUT:{req.id}"
+            )
 
         return True
 
@@ -5324,6 +5436,20 @@ def process_request(request_id: int):
 
         current_queue = _current_queue_name()
         existing_provider = (req.provider_name or "").strip().upper()
+
+        provider14_busy_marker = (
+            (req.error_message or "")
+            .strip()
+            .upper()
+            == "PROVIDER14_BUSY_REQUEUE"
+        )
+
+        reuse_provider14_busy = (
+            provider14_busy_marker
+            and existing_provider == "PROVIDER14"
+            and current_queue != SLOW_PROVIDER_QUEUE_NAME
+            and _provider_is_enabled(db, "PROVIDER14")
+        )
         
         provider15_fallback_marker = (
             (req.error_message or "")
@@ -5346,7 +5472,23 @@ def process_request(request_id: int):
             and existing_provider in SLOW_PROVIDERS
         )
         
-        if reuse_provider15_timeout_fallback:
+        if reuse_provider14_busy:
+            provider_name = "PROVIDER14"
+            provider_group_id = req.provider_group_id
+            text_to_provider = req.provider_message
+
+            print(
+                "PROVIDER14_BUSY_REUSING_PROVIDER =",
+                {
+                    "request_id": req.id,
+                    "provider_name": provider_name,
+                    "provider_group_id": provider_group_id,
+                    "queue": current_queue,
+                },
+                flush=True,
+            )
+
+        elif reuse_provider15_timeout_fallback:
             provider_name = existing_provider
             provider_group_id = req.provider_group_id
             text_to_provider = req.provider_message
@@ -5549,6 +5691,35 @@ def process_request(request_id: int):
                 except Exception as e:
                     last_err = str(e)
                     print(f"PROVIDER_SEND_ATTEMPT_{attempt+1}_ERROR =", last_err, flush=True)
+
+                    if (
+                        provider_name == "PROVIDER14"
+                        and last_err == "PROVIDER14_LOCK_TIMEOUT"
+                    ):
+                        req.status = "QUEUED"
+                        req.error_message = "PROVIDER14_BUSY_REQUEUE"
+                        req.updated_at = _utc_now_naive()
+                        db.commit()
+
+                        job = request_queue.enqueue_in(
+                            timedelta(seconds=8),
+                            process_request,
+                            req.id,
+                        )
+
+                        print(
+                            "PROVIDER14_BUSY_REQUEUED =",
+                            {
+                                "request_id": req.id,
+                                "curp": req.curp,
+                                "act_type": req.act_type,
+                                "delay_sec": 8,
+                                "job_id": job.id,
+                            },
+                            flush=True,
+                        )
+
+                        return
                     if attempt < 2:
                         time.sleep(5 * (attempt + 1))
         
