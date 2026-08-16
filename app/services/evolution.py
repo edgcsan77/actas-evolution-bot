@@ -596,3 +596,72 @@ def send_group_document_base64(group_jid: str, media_b64: str, filename: str = "
         label="SEND_GROUP_DOCUMENT_BASE64",
         max_attempts=4,
     )
+
+
+
+def find_recent_messages(
+    instance_name: str,
+    remote_jid: str,
+    limit: int = 50,
+):
+    """
+    Consulta mensajes recientes de un chat en Evolution.
+    No envía ni modifica mensajes.
+    """
+    instance = instance_name or settings.EVOLUTION_INSTANCE
+
+    url = (
+        f"{settings.EVOLUTION_BASE_URL.rstrip('/')}"
+        f"/chat/findMessages/{instance}"
+    )
+
+    payload = {
+        "where": {
+            "key": {
+                "remoteJid": remote_jid,
+            }
+        },
+        "page": 1,
+        "offset": max(1, min(int(limit), 200)),
+    }
+
+    print(
+        "FIND_RECENT_MESSAGES_REQUEST =",
+        {
+            "instance": instance,
+            "remote_jid": remote_jid,
+            "limit": limit,
+        },
+        flush=True,
+    )
+
+    resp = requests.post(
+        url,
+        headers=_headers(),
+        json=payload,
+        timeout=(5, 20),
+    )
+
+    print(
+        "FIND_RECENT_MESSAGES_STATUS =",
+        resp.status_code,
+        flush=True,
+    )
+
+    if resp.status_code not in (200, 201):
+        raise RuntimeError(
+            f"FIND_RECENT_MESSAGES_HTTP_{resp.status_code}:"
+            f"{(resp.text or '')[:800]}"
+        )
+
+    data = resp.json()
+
+    if isinstance(data, dict):
+        messages = data.get("messages")
+
+        if isinstance(messages, dict):
+            records = messages.get("records")
+            if isinstance(records, list):
+                return records
+
+    return []

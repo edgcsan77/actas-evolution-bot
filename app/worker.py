@@ -1,3 +1,4 @@
+import os
 import base64
 import time
 import threading
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
 from app.models import RequestLog, ProviderSetting, AppSetting, GroupPromotion, ApiClient, ApiCreditLog
-from app.services.evolution import send_group_text, send_text, send_document_base64, send_group_document_base64
+from app.services.evolution import send_group_text, send_text, send_document_base64, send_group_document_base64, send_reaction, find_recent_messages
 from app.config import settings
 from app.utils.curp import provider_label_for_type, is_chain
 from app.services.provider3 import Provider3Client, decode_pdf_base64
@@ -3270,6 +3271,221 @@ def _provider14_wait_submit_ack(request_id: int, timeout_s: float = 25.0) -> boo
     return False
 
 
+def _provider14_lid() -> str:
+    # LID observado por Evolution v2.3.7 para el chat privado E-BOT.
+    # Puede sobreescribirse por variable de entorno si cambia.
+    return (
+        os.getenv(
+            "PROVIDER14_LID",
+            "92157750845479@lid",
+        )
+        or ""
+    ).strip()
+
+
+def _provider14_find_missing_confirmation(
+    req,
+    sender_instance: str,
+    provider_jid: str,
+    sent_ts: int,
+):
+    """
+    Busca en Evolution una confirmación de E-BOT cuyo webhook
+    no llegó a ACTAS.
+
+    Devuelve:
+        (reaction_remote_jid, message_id)
+    o:
+        None
+
+    Nunca reacciona aquí. Solo localiza una coincidencia segura.
+    """
+    import re
+
+    target = str(req.curp or "").strip().upper()
+    provider_lid = _provider14_lid()
+
+    if not target or not provider_lid:
+        return None
+
+    try:
+        records = find_recent_messages(
+            sender_instance,
+            provider_lid,
+            limit=80,
+        )
+    except Exception as exc:
+        print(
+            "PROVIDER14_ACK_RECOVERY_FIND_ERROR =",
+            {
+                "request_id": req.id,
+                "curp": target,
+                "error": repr(exc),
+            },
+            flush=True,
+        )
+        return None
+
+    now_ts = int(time.time())
+
+    # CURP estándar de 18 caracteres.
+    curp_re = re.compile(
+        r"\b[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d\b",
+        re.I,
+    )
+
+    matches = []
+
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+
+        key = record.get("key") or {}
+        if not isinstance(key, dict):
+            continue
+
+        # Debe venir DE E-BOT.
+        if key.get("fromMe") is not False:
+            continue
+
+        remote_jid = str(
+            key.get("remoteJid") or ""
+        ).strip()
+
+        remote_jid_alt = str(
+            key.get("remoteJidAlt") or ""
+        ).strip()
+
+        # Evolution guarda E-BOT entrante mediante LID,
+        # pero conserva el JID normal en remoteJidAlt.
+        if remote_jid != provider_lid:
+            continue
+
+        if remote_jid_alt != provider_jid:
+            continue
+
+        try:
+            msg_ts = int(
+                record.get("messageTimestamp") or 0
+            )
+        except Exception:
+            continue
+
+        # Debe haberse generado DESPUÉS de nuestro SEND.
+        # Permitimos 2 s de tolerancia por reloj/red.
+        if msg_ts < int(sent_ts) - 2:
+            continue
+
+        # No aceptar mensajes demasiado posteriores.
+        if msg_ts > now_ts + 5:
+            continue
+
+        # El rescue corre alrededor de 25 s después del SEND.
+        # 90 s deja margen sin permitir históricos.
+        if msg_ts > int(sent_ts) + 90:
+            continue
+
+        msg = record.get("message") or {}
+
+        if not isinstance(msg, dict):
+            continue
+
+        text = str(
+            msg.get("conversation") or ""
+        ).strip()
+
+        text_up = text.upper()
+
+        if "NUEVA SOLICITUD" not in text_up:
+            continue
+
+        if target not in text_up:
+            continue
+
+        found_curps = {
+            x.upper()
+            for x in curp_re.findall(text_up)
+        }
+
+        # PROTECCIÓN CRÍTICA:
+        # GATA sola = válida.
+        # GATA + LOMA = contaminada, jamás reaccionar.
+        if found_curps != {target}:
+            print(
+                "PROVIDER14_ACK_RECOVERY_REJECT_CONTAMINATED =",
+                {
+                    "request_id": req.id,
+                    "target": target,
+                    "message_id": key.get("id"),
+                    "found_curps": sorted(found_curps),
+                    "timestamp": msg_ts,
+                },
+                flush=True,
+            )
+            continue
+
+        message_id = str(
+            key.get("id") or ""
+        ).strip()
+
+        if not message_id:
+            continue
+
+        matches.append(
+            {
+                "message_id": message_id,
+                "remote_jid": remote_jid,
+                "remote_jid_alt": remote_jid_alt,
+                "timestamp": msg_ts,
+            }
+        )
+
+    # El mismo message_id no debe duplicarse.
+    unique = {
+        x["message_id"]: x
+        for x in matches
+    }
+
+    matches = list(unique.values())
+
+    if len(matches) != 1:
+        print(
+            "PROVIDER14_ACK_RECOVERY_NOT_UNIQUE =",
+            {
+                "request_id": req.id,
+                "curp": target,
+                "matches": len(matches),
+                "message_ids": [
+                    x["message_id"]
+                    for x in matches
+                ],
+                "sent_ts": sent_ts,
+            },
+            flush=True,
+        )
+        return None
+
+    match = matches[0]
+
+    print(
+        "PROVIDER14_ACK_RECOVERY_MATCH =",
+        {
+            "request_id": req.id,
+            "curp": target,
+            "message_id": match["message_id"],
+            "remote_jid": match["remote_jid"],
+            "remote_jid_alt": match["remote_jid_alt"],
+            "message_timestamp": match["timestamp"],
+            "sent_ts": sent_ts,
+        },
+        flush=True,
+    )
+
+    # Para sendReaction usamos el JID normal,
+    # igual que el flujo normal del webhook.
+    return provider_jid, match["message_id"]
+
+
 def _provider14_acquire_lock(timeout_s: float = 2.0) -> str:
     token = uuid.uuid4().hex
     key = _provider14_lock_key()
@@ -3469,6 +3685,8 @@ def _send_provider14_request(req, db):
             flush=True,
         )
         
+        provider14_send_ts = int(time.time())
+
         resp_json = send_text(
             provider_jid,
             text_to_provider,
@@ -3503,15 +3721,89 @@ def _send_provider14_request(req, db):
 
         if not submit_ack_ok:
             print(
-                "PROVIDER14_SUBMIT_ACK_MISSED_CONTINUE_RESULT_WAIT =",
+                "PROVIDER14_ACK_RECOVERY_START =",
                 {
                     "request_id": req.id,
                     "curp": req.curp,
                     "act_type": req.act_type,
-                    "reason": "NO_RESEND_AFTER_SEND_OK",
+                    "sent_ts": provider14_send_ts,
                 },
                 flush=True,
             )
+
+            recovered = (
+                _provider14_find_missing_confirmation(
+                    req,
+                    sender_instance,
+                    provider_jid,
+                    provider14_send_ts,
+                )
+            )
+
+            if recovered:
+                reaction_jid, reaction_message_id = recovered
+
+                try:
+                    print(
+                        "PROVIDER14_ACK_RECOVERY_REACTING =",
+                        {
+                            "request_id": req.id,
+                            "curp": req.curp,
+                            "reaction_jid": reaction_jid,
+                            "message_id": reaction_message_id,
+                        },
+                        flush=True,
+                    )
+
+                    send_reaction(
+                        reaction_jid,
+                        reaction_message_id,
+                        "🙌",
+                        instance_name=sender_instance,
+                        from_me=False,
+                    )
+
+                    redis_conn.setex(
+                        _provider14_submit_ack_key(req.id),
+                        900,
+                        reaction_message_id,
+                    )
+
+                    submit_ack_ok = True
+
+                    print(
+                        "PROVIDER14_ACK_RECOVERY_SUCCESS =",
+                        {
+                            "request_id": req.id,
+                            "curp": req.curp,
+                            "message_id": reaction_message_id,
+                        },
+                        flush=True,
+                    )
+
+                except Exception as reaction_exc:
+                    print(
+                        "PROVIDER14_ACK_RECOVERY_REACTION_ERROR =",
+                        {
+                            "request_id": req.id,
+                            "curp": req.curp,
+                            "message_id": reaction_message_id,
+                            "error": repr(reaction_exc),
+                        },
+                        flush=True,
+                    )
+
+            if not submit_ack_ok:
+                print(
+                    "PROVIDER14_SUBMIT_ACK_MISSED_CONTINUE_RESULT_WAIT =",
+                    {
+                        "request_id": req.id,
+                        "curp": req.curp,
+                        "act_type": req.act_type,
+                        "reason": "RECOVERY_NOT_SAFE_OR_NOT_FOUND",
+                    },
+                    flush=True,
+                )
 
         print(
             "PROVIDER14_WAITING_RESULT =",
