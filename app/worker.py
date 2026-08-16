@@ -5717,95 +5717,185 @@ def process_request(request_id: int):
         )
 
         # PROVIDER14 jamás se procesa directamente en actas/actas_slow.
-        # Máximo: 1 trabajando + 1 esperando.
-        # Si ya existe 1 esperando en actas_provider14, las nuevas
-        # se desbordan automáticamente a otro proveedor activo.
+        # Máximo real: 1 trabajando + 1 esperando.
+        #
+        # El guard evita que varios workers hagan al mismo tiempo:
+        # medir capacidad -> ver espacio -> encolar.
         if (
             provider_name == "PROVIDER14"
             and current_queue != PROVIDER14_QUEUE_NAME
         ):
-            p14_waiting = len(provider14_queue)
+            p14_guard = redis_conn.lock(
+                "provider14:enqueue_capacity_guard",
+                timeout=10,
+                blocking_timeout=5,
+            )
 
-            if p14_waiting >= 1:
-                fallback_provider = _pick_provider14_overflow_fallback(
-                    db,
-                    req,
-                )
+            guard_acquired = p14_guard.acquire(blocking=True)
 
-                if fallback_provider:
-                    provider_name = fallback_provider
-                    provider_group_id = _pick_provider_group(
-                        fallback_provider,
-                        req.curp,
-                        req.act_type,
-                        req.id,
-                    )
-                    text_to_provider = _build_provider_message(
-                        fallback_provider,
-                        req.curp,
-                        req.act_type,
-                    )
-
-                    req.provider_name = fallback_provider
-                    req.provider_group_id = provider_group_id
-                    req.provider_message = text_to_provider
-                    req.status = "QUEUED"
-                    req.error_message = (
-                        f"PROVIDER14_OVERFLOW_TO_{fallback_provider}"
-                    )
-                    req.updated_at = _utc_now_naive()
-                    db.commit()
-
-                    print(
-                        "PROVIDER14_QUEUE_OVERFLOW_FALLBACK =",
-                        {
-                            "request_id": req.id,
-                            "curp": req.curp,
-                            "act_type": req.act_type,
-                            "p14_waiting": p14_waiting,
-                            "fallback_provider": fallback_provider,
-                            "provider_group_id": provider_group_id,
-                        },
-                        flush=True,
-                    )
-
-                else:
-                    print(
-                        "PROVIDER14_QUEUE_OVERFLOW_NO_FALLBACK =",
-                        {
-                            "request_id": req.id,
-                            "p14_waiting": p14_waiting,
-                        },
-                        flush=True,
-                    )
-
-            if provider_name == "PROVIDER14":
-                req.status = "QUEUED"
-                req.error_message = "PROVIDER14_DEDICATED_QUEUE"
-                req.updated_at = _utc_now_naive()
-                db.commit()
-
-                job = provider14_queue.enqueue(
-                    process_request,
-                    req.id,
-                    job_timeout=900,
-                )
-
+            if not guard_acquired:
                 print(
-                    "PROVIDER14_REROUTED_TO_DEDICATED_QUEUE =",
+                    "PROVIDER14_CAPACITY_GUARD_TIMEOUT =",
                     {
                         "request_id": req.id,
                         "curp": req.curp,
                         "act_type": req.act_type,
-                        "from_queue": current_queue,
-                        "to_queue": PROVIDER14_QUEUE_NAME,
-                        "p14_waiting_before": p14_waiting,
-                        "job_id": job.id,
                     },
                     flush=True,
                 )
+                raise RuntimeError("PROVIDER14_CAPACITY_GUARD_TIMEOUT")
 
-                return
+            try:
+                p14_waiting = len(provider14_queue)
+                p14_lock_active = bool(
+                    redis_conn.exists("provider14:mode_send_lock")
+                )
+                p14_capacity_used = (
+                    p14_waiting + (1 if p14_lock_active else 0)
+                )
+
+                if p14_capacity_used >= 2:
+                    fallback_provider = _pick_provider14_overflow_fallback(
+                        db,
+                        req,
+                    )
+
+                    if fallback_provider:
+                        provider_name = fallback_provider
+                        provider_group_id = _pick_provider_group(
+                            fallback_provider,
+                            req.curp,
+                            req.act_type,
+                            req.id,
+                        )
+                        text_to_provider = _build_provider_message(
+                            fallback_provider,
+                            req.curp,
+                            req.act_type,
+                        )
+
+                        req.provider_name = fallback_provider
+                        req.provider_group_id = provider_group_id
+                        req.provider_message = text_to_provider
+                        req.status = "QUEUED"
+                        req.error_message = (
+                            f"PROVIDER14_OVERFLOW_TO_{fallback_provider}"
+                        )
+                        req.updated_at = _utc_now_naive()
+                        db.commit()
+
+                        print(
+                            "PROVIDER14_QUEUE_OVERFLOW_FALLBACK =",
+                            {
+                                "request_id": req.id,
+                                "curp": req.curp,
+                                "act_type": req.act_type,
+                                "p14_waiting": p14_waiting,
+                                "p14_lock_active": p14_lock_active,
+                                "p14_capacity_used": p14_capacity_used,
+                                "fallback_provider": fallback_provider,
+                                "provider_group_id": provider_group_id,
+                            },
+                            flush=True,
+                        )
+
+                    else:
+                        # P14 está lleno y no existe otro proveedor compatible
+                        # en este momento. No romper el límite de E-BOT:
+                        # liberar asignación y volver a evaluar por actas.
+                        req.provider_name = None
+                        req.provider_group_id = None
+                        req.provider_message = None
+                        req.status = "QUEUED"
+                        req.error_message = "PROVIDER14_OVERFLOW_WAITING_CAPACITY"
+                        req.updated_at = _utc_now_naive()
+                        db.commit()
+
+                        try:
+                            retry_job = request_queue.enqueue_in(
+                                timedelta(seconds=20),
+                                process_request,
+                                req.id,
+                                job_timeout=660,
+                            )
+
+                            print(
+                                "PROVIDER14_QUEUE_OVERFLOW_NO_FALLBACK =",
+                                {
+                                    "request_id": req.id,
+                                    "p14_waiting": p14_waiting,
+                                    "p14_lock_active": p14_lock_active,
+                                    "p14_capacity_used": p14_capacity_used,
+                                    "action": "REQUEUE_ACTAS_DELAYED",
+                                    "delay_sec": 20,
+                                    "job_id": retry_job.id,
+                                },
+                                flush=True,
+                            )
+
+                            return
+
+                        except Exception as overflow_retry_error:
+                            req.error_message = (
+                                "PROVIDER14_OVERFLOW_REQUEUE_ERROR | "
+                                + str(overflow_retry_error)
+                            )
+                            req.updated_at = _utc_now_naive()
+                            db.commit()
+
+                            print(
+                                "PROVIDER14_OVERFLOW_REQUEUE_ERROR =",
+                                {
+                                    "request_id": req.id,
+                                    "error": str(overflow_retry_error),
+                                },
+                                flush=True,
+                            )
+
+                            raise
+
+                if provider_name == "PROVIDER14":
+                    req.status = "QUEUED"
+                    req.error_message = "PROVIDER14_DEDICATED_QUEUE"
+                    req.updated_at = _utc_now_naive()
+                    db.commit()
+
+                    job = provider14_queue.enqueue(
+                        process_request,
+                        req.id,
+                        job_timeout=900,
+                    )
+
+                    print(
+                        "PROVIDER14_REROUTED_TO_DEDICATED_QUEUE =",
+                        {
+                            "request_id": req.id,
+                            "curp": req.curp,
+                            "act_type": req.act_type,
+                            "from_queue": current_queue,
+                            "to_queue": PROVIDER14_QUEUE_NAME,
+                            "p14_waiting_before": p14_waiting,
+                            "p14_lock_active": p14_lock_active,
+                            "p14_capacity_used_before": p14_capacity_used,
+                            "job_id": job.id,
+                        },
+                        flush=True,
+                    )
+
+                    return
+
+            finally:
+                try:
+                    p14_guard.release()
+                except Exception as guard_release_error:
+                    print(
+                        "PROVIDER14_CAPACITY_GUARD_RELEASE_ERROR =",
+                        {
+                            "request_id": req.id,
+                            "error": str(guard_release_error),
+                        },
+                        flush=True,
+                    )
 
         if _should_reroute_to_slow(provider_name) and current_queue != SLOW_PROVIDER_QUEUE_NAME:
             req.status = "QUEUED"
