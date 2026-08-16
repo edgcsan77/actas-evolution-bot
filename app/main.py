@@ -20030,6 +20030,99 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             if is_provider14_message:
                 text_norm_p14 = normalize_text(text_body or "")
 
+                # PROVIDER14: error temporal terminal de E-BOT.
+                # E-BOT ya tomó la solicitud: NO reenviar y NO marcar SIN REGISTRO.
+                p14_temp_error = any(
+                    marker in text_norm_p14
+                    for marker in (
+                        "OCURRIO UN ERROR AL ENVIAR",
+                        "INTENTE MAS TARDE",
+                        "CANT GENERATE PDF",
+                        "ERROR CONSULTANDO INFORMACION",
+                    )
+                )
+
+                if p14_temp_error:
+                    p14_term = _extract_provider_identifier_loose(text_body or "")
+
+                    temp_req = None
+
+                    if p14_term:
+                        temp_req = (
+                            db.query(RequestLog)
+                            .filter(
+                                RequestLog.provider_name == "PROVIDER14",
+                                RequestLog.provider_group_id == source_chat_id,
+                                RequestLog.curp == p14_term,
+                                RequestLog.status.in_(["QUEUED", "PROCESSING"]),
+                            )
+                            .order_by(RequestLog.id.desc())
+                            .first()
+                        )
+
+                    if temp_req:
+                        temp_req.status = "ERROR"
+                        temp_req.error_message = (
+                            "PROVIDER14_TEMPORARY_ERROR | "
+                            + (text_body or "")[:800]
+                        )
+                        db.commit()
+
+                        result_key = (
+                            f"provider14:result_received:{int(temp_req.id)}"
+                        )
+
+                        redis_conn.setex(
+                            result_key,
+                            900,
+                            "TEMP_ERROR",
+                        )
+
+                        print(
+                            "PROVIDER14_TEMP_ERROR_RESULT_SET =",
+                            {
+                                "request_id": temp_req.id,
+                                "curp": temp_req.curp,
+                                "key": result_key,
+                                "text": text_body,
+                            },
+                            flush=True,
+                        )
+
+                        try:
+                            _notify_support_error(
+                                temp_req,
+                                "PROVIDER14_TEMPORARY_ERROR",
+                                text_body or "",
+                            )
+                        except Exception as e:
+                            print(
+                                "PROVIDER14_TEMP_ERROR_SUPPORT_FAILED =",
+                                str(e),
+                                flush=True,
+                            )
+
+                        return {
+                            "ok": True,
+                            "provider_result": "provider14_temporary_error",
+                            "request_id": temp_req.id,
+                        }
+
+                    print(
+                        "PROVIDER14_TEMP_ERROR_WITHOUT_MATCH =",
+                        {
+                            "identifier": p14_term,
+                            "source_chat_id": source_chat_id,
+                            "text": text_body,
+                        },
+                        flush=True,
+                    )
+
+                    return {
+                        "ok": True,
+                        "ignored": "provider14_temp_error_without_safe_match",
+                    }
+
                 if (
                     "NO SE ENCUENTRA ACTIVO" in text_norm_p14
                     or "SERVICIO NO ESTA ACTIVO" in text_norm_p14

@@ -3373,7 +3373,7 @@ def _send_provider14_request(req, db):
                 "mode_text": mode_text,
             }, flush=True)
 
-            mode_ack_ok = _provider14_wait_mode_ack(mode_text, timeout_s=12.0)
+            mode_ack_ok = _provider14_wait_mode_ack(mode_text, timeout_s=60.0)
 
             if not mode_ack_ok:
                 raise RuntimeError(f"PROVIDER14_MODE_ACK_TIMEOUT:{mode_text}")
@@ -3450,8 +3450,15 @@ def _send_provider14_request(req, db):
         )
 
         if not submit_ack_ok:
-            raise RuntimeError(
-                f"PROVIDER14_SUBMIT_ACK_TIMEOUT:{req.id}"
+            print(
+                "PROVIDER14_SUBMIT_ACK_MISSED_CONTINUE_RESULT_WAIT =",
+                {
+                    "request_id": req.id,
+                    "curp": req.curp,
+                    "act_type": req.act_type,
+                    "reason": "NO_RESEND_AFTER_SEND_OK",
+                },
+                flush=True,
             )
 
         print(
@@ -5671,7 +5678,7 @@ def process_request(request_id: int):
             job = provider14_queue.enqueue(
                 process_request,
                 req.id,
-                job_timeout=660,
+                job_timeout=900,
             )
 
             print(
@@ -5772,7 +5779,7 @@ def process_request(request_id: int):
                         job = provider14_queue.enqueue(
                             process_request,
                             req.id,
-                            job_timeout=660,
+                            job_timeout=900,
                         )
 
                         print(
@@ -5788,6 +5795,24 @@ def process_request(request_id: int):
                         )
 
                         return
+
+                    # PROVIDER14 / E-BOT permite una sola solicitud activa.
+                    # Nunca repetir físicamente el mismo comando/CURP después
+                    # de un intento fallido o incierto.
+                    if provider_name == "PROVIDER14":
+                        print(
+                            "PROVIDER14_NO_AUTOMATIC_RESEND =",
+                            {
+                                "request_id": req.id,
+                                "curp": req.curp,
+                                "act_type": req.act_type,
+                                "attempt": attempt + 1,
+                                "error": last_err,
+                            },
+                            flush=True,
+                        )
+                        break
+
                     if attempt < 2:
                         time.sleep(5 * (attempt + 1))
         
