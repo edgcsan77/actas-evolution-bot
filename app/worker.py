@@ -2390,6 +2390,58 @@ def _enabled_providers(db) -> list[str]:
     return enabled
 
 
+def _pick_provider14_overflow_fallback(db: Session, req) -> str | None:
+    """
+    Cuando E-BOT ya tiene una solicitud esperando, manda las nuevas
+    a otro proveedor global activo y compatible.
+    """
+    enabled = sorted(_enabled_providers(db))
+    candidates = [p for p in enabled if p != "PROVIDER14"]
+
+    if not _is_provider4_eligible(req.curp, req.act_type):
+        candidates = [
+            p for p in candidates
+            if p not in ("PROVIDER4", "PROVIDER10", "PROVIDER11")
+        ]
+
+    if "PROVIDER6" in candidates and not _is_provider6_allowed_request(
+        req.curp,
+        req.act_type,
+    ):
+        candidates = [p for p in candidates if p != "PROVIDER6"]
+
+    if PROVIDER4_TEST_GROUPS:
+        if not req.source_group_id or req.source_group_id not in PROVIDER4_TEST_GROUPS:
+            candidates = [p for p in candidates if p != "PROVIDER4"]
+
+    if PROVIDER7_TEST_GROUPS:
+        if not req.source_group_id or req.source_group_id not in PROVIDER7_TEST_GROUPS:
+            candidates = [p for p in candidates if p != "PROVIDER7"]
+
+    print(
+        "PROVIDER14_OVERFLOW_CANDIDATES =",
+        {
+            "request_id": req.id,
+            "curp": req.curp,
+            "act_type": req.act_type,
+            "enabled": enabled,
+            "candidates": candidates,
+        },
+        flush=True,
+    )
+
+    if not candidates:
+        return None
+
+    weighted_chosen = _pick_provider_by_weight(db, candidates)
+
+    if weighted_chosen:
+        return weighted_chosen
+
+    idx = (req.id - 1) % len(candidates)
+    return candidates[idx]
+
+
 def _pick_provider15_timeout_fallback(db: Session, req) -> str | None:
     """
     Elige un proveedor de respaldo cuando PROVIDER15 termina en timeout.
@@ -5665,36 +5717,95 @@ def process_request(request_id: int):
         )
 
         # PROVIDER14 jamás se procesa directamente en actas/actas_slow.
-        # Se manda a una cola FIFO exclusiva con un único consumidor.
+        # Máximo: 1 trabajando + 1 esperando.
+        # Si ya existe 1 esperando en actas_provider14, las nuevas
+        # se desbordan automáticamente a otro proveedor activo.
         if (
             provider_name == "PROVIDER14"
             and current_queue != PROVIDER14_QUEUE_NAME
         ):
-            req.status = "QUEUED"
-            req.error_message = "PROVIDER14_DEDICATED_QUEUE"
-            req.updated_at = _utc_now_naive()
-            db.commit()
+            p14_waiting = len(provider14_queue)
 
-            job = provider14_queue.enqueue(
-                process_request,
-                req.id,
-                job_timeout=900,
-            )
+            if p14_waiting >= 1:
+                fallback_provider = _pick_provider14_overflow_fallback(
+                    db,
+                    req,
+                )
 
-            print(
-                "PROVIDER14_REROUTED_TO_DEDICATED_QUEUE =",
-                {
-                    "request_id": req.id,
-                    "curp": req.curp,
-                    "act_type": req.act_type,
-                    "from_queue": current_queue,
-                    "to_queue": PROVIDER14_QUEUE_NAME,
-                    "job_id": job.id,
-                },
-                flush=True,
-            )
+                if fallback_provider:
+                    provider_name = fallback_provider
+                    provider_group_id = _pick_provider_group(
+                        fallback_provider,
+                        req.curp,
+                        req.act_type,
+                        req.id,
+                    )
+                    text_to_provider = _build_provider_message(
+                        fallback_provider,
+                        req.curp,
+                        req.act_type,
+                    )
 
-            return
+                    req.provider_name = fallback_provider
+                    req.provider_group_id = provider_group_id
+                    req.provider_message = text_to_provider
+                    req.status = "QUEUED"
+                    req.error_message = (
+                        f"PROVIDER14_OVERFLOW_TO_{fallback_provider}"
+                    )
+                    req.updated_at = _utc_now_naive()
+                    db.commit()
+
+                    print(
+                        "PROVIDER14_QUEUE_OVERFLOW_FALLBACK =",
+                        {
+                            "request_id": req.id,
+                            "curp": req.curp,
+                            "act_type": req.act_type,
+                            "p14_waiting": p14_waiting,
+                            "fallback_provider": fallback_provider,
+                            "provider_group_id": provider_group_id,
+                        },
+                        flush=True,
+                    )
+
+                else:
+                    print(
+                        "PROVIDER14_QUEUE_OVERFLOW_NO_FALLBACK =",
+                        {
+                            "request_id": req.id,
+                            "p14_waiting": p14_waiting,
+                        },
+                        flush=True,
+                    )
+
+            if provider_name == "PROVIDER14":
+                req.status = "QUEUED"
+                req.error_message = "PROVIDER14_DEDICATED_QUEUE"
+                req.updated_at = _utc_now_naive()
+                db.commit()
+
+                job = provider14_queue.enqueue(
+                    process_request,
+                    req.id,
+                    job_timeout=900,
+                )
+
+                print(
+                    "PROVIDER14_REROUTED_TO_DEDICATED_QUEUE =",
+                    {
+                        "request_id": req.id,
+                        "curp": req.curp,
+                        "act_type": req.act_type,
+                        "from_queue": current_queue,
+                        "to_queue": PROVIDER14_QUEUE_NAME,
+                        "p14_waiting_before": p14_waiting,
+                        "job_id": job.id,
+                    },
+                    flush=True,
+                )
+
+                return
 
         if _should_reroute_to_slow(provider_name) and current_queue != SLOW_PROVIDER_QUEUE_NAME:
             req.status = "QUEUED"
