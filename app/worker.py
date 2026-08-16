@@ -5887,6 +5887,11 @@ def process_request(request_id: int):
                         req.updated_at = _utc_now_naive()
                         db.commit()
 
+                        # Evitar hot-loop cuando otro job todavía posee el lock.
+                        # El worker exclusivo es FIFO: esperar un poco antes
+                        # de volver a colocar la solicitud al final.
+                        time.sleep(15)
+
                         job = provider14_queue.enqueue(
                             process_request,
                             req.id,
@@ -5900,6 +5905,7 @@ def process_request(request_id: int):
                                 "curp": req.curp,
                                 "act_type": req.act_type,
                                 "queue": PROVIDER14_QUEUE_NAME,
+                                "backoff_s": 15,
                                 "job_id": job.id,
                             },
                             flush=True,
