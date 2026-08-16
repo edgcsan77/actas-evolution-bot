@@ -315,6 +315,99 @@ def send_reaction(
     raise last_error
 
 
+def find_recent_messages(
+    instance_name: str,
+    remote_jid: str,
+    limit: int = 30,
+):
+    instance = instance_name or settings.EVOLUTION_INSTANCE
+
+    urls = [
+        f"{settings.EVOLUTION_BASE_URL}/chat/findMessages/{instance}",
+        f"{settings.EVOLUTION_BASE_URL}/messages/findMessages/{instance}",
+    ]
+
+    payload = {
+        "where": {
+            "key": {
+                "remoteJid": remote_jid,
+            }
+        },
+        "limit": limit,
+    }
+
+    last_error = None
+
+    for url in urls:
+        try:
+            print(
+                "FIND_RECENT_MESSAGES_ATTEMPT =",
+                {
+                    "url": url,
+                    "instance": instance,
+                    "remote_jid": remote_jid,
+                    "limit": limit,
+                },
+                flush=True,
+            )
+
+            resp = requests.post(
+                url,
+                headers=_headers(),
+                json=payload,
+                timeout=(5, 20),
+            )
+
+            print(
+                "FIND_RECENT_MESSAGES_STATUS =",
+                {
+                    "url": url,
+                    "status": resp.status_code,
+                },
+                flush=True,
+            )
+
+            if resp.status_code not in (200, 201):
+                last_error = RuntimeError(
+                    f"HTTP {resp.status_code}: {(resp.text or '')[:500]}"
+                )
+                continue
+
+            data = resp.json()
+
+            if isinstance(data, list):
+                return data
+
+            if isinstance(data, dict):
+                for key in ("messages", "records", "data"):
+                    value = data.get(key)
+                    if isinstance(value, list):
+                        return value
+
+                # Algunas respuestas vienen anidadas.
+                for value in data.values():
+                    if isinstance(value, list):
+                        return value
+
+            return []
+
+        except Exception as exc:
+            last_error = exc
+            print(
+                "FIND_RECENT_MESSAGES_ERROR =",
+                {
+                    "url": url,
+                    "error": str(exc),
+                },
+                flush=True,
+            )
+
+    if last_error:
+        raise last_error
+
+    return []
+
+
 def send_document(number: str, pdf_url: str, filename: str = "acta.pdf", caption: str = "", instance_name: str = None):
     instance = instance_name or settings.EVOLUTION_INSTANCE
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{instance}"
