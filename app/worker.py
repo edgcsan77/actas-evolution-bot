@@ -1188,6 +1188,24 @@ def _humanize_support_code(err: str | None) -> str:
             msg += f"\nDetalle técnico: PROVIDER14_RESULT_TIMEOUT:{detail}"
         return msg
 
+    if code_up == "PROVIDER14_SUBMIT_NOT_CREATED":
+        msg = (
+            "La solicitud fue enviada a E-BOT, pero E-BOT no confirmó "
+            "que la hubiera registrado para procesamiento."
+        )
+        if detail:
+            msg += f"\nDetalle técnico: PROVIDER14_SUBMIT_NOT_CREATED:{detail}"
+        return msg
+
+    if code_up == "PROVIDER14_MODE_ACK_TIMEOUT":
+        msg = (
+            "El cambio de modo fue enviado a E-BOT, pero E-BOT no confirmó "
+            "el modo dentro del tiempo máximo de espera."
+        )
+        if detail:
+            msg += f"\nDetalle técnico: PROVIDER14_MODE_ACK_TIMEOUT:{detail}"
+        return msg
+
     if code_clean == "SEND_FAILED":
         msg = f"No se pudo enviar la solicitud al proveedor {provider_label or 'seleccionado'}."
         if detail:
@@ -6470,27 +6488,40 @@ def process_request(request_id: int):
             # No convertirlo falsamente a PROVIDER14_SEND_FAILED:
             # conservar el error real permite recuperar un PDF tardío
             # y evita mensajes de soporte engañosos.
-            provider14_result_timeout = (
+            # PROVIDER14 tiene varios estados inciertos que ocurren
+            # DESPUÉS de que Evolution aceptó el envío.
+            # No convertirlos falsamente a PROVIDER14_SEND_FAILED.
+            provider14_uncertain_error = (
                 provider_name == "PROVIDER14"
-                and last_err_text.startswith(
-                    "PROVIDER14_RESULT_TIMEOUT:"
+                and (
+                    last_err_text.startswith(
+                        "PROVIDER14_RESULT_TIMEOUT:"
+                    )
+                    or last_err_text.startswith(
+                        "PROVIDER14_SUBMIT_NOT_CREATED:"
+                    )
+                    or last_err_text.startswith(
+                        "PROVIDER14_MODE_ACK_TIMEOUT:"
+                    )
                 )
             )
 
             final_provider_error = (
                 last_err_text
-                if provider14_result_timeout
+                if provider14_uncertain_error
+                else f"{provider_name}_SEND_FAILED"
+            )
+
+            final_provider_label = (
+                last_err_text.split(":", 1)[0]
+                if provider14_uncertain_error
                 else f"{provider_name}_SEND_FAILED"
             )
 
             if not _worker_mark_generic_failure_if_allowed(
                 req,
                 generic_error=final_provider_error,
-                label=(
-                    "PROVIDER14_RESULT_TIMEOUT"
-                    if provider14_result_timeout
-                    else f"{provider_name}_SEND_FAILED"
-                ),
+                label=final_provider_label,
             ):
                 return
         
@@ -6519,12 +6550,12 @@ def process_request(request_id: int):
                 req,
                 (
                     last_err_text
-                    if provider14_result_timeout
+                    if provider14_uncertain_error
                     else f"{provider_name}_SEND_FAILED:{last_err or ''}"
                 ),
                 (
                     ""
-                    if provider14_result_timeout
+                    if provider14_uncertain_error
                     else (last_err or "")
                 ),
             )
