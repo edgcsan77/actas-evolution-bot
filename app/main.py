@@ -17820,6 +17820,75 @@ def _pick_matching_processing_req_for_pdf(
             return r
     
         if len(typed_candidates) > 1:
+            provider14_only = all(
+                (r.provider_name or "").strip().upper()
+                == "PROVIDER14"
+                for r in typed_candidates
+            )
+
+            provider14_processing = [
+                r
+                for r in typed_candidates
+                if (r.status or "").strip().upper()
+                == "PROCESSING"
+            ]
+
+            if (
+                provider14_only
+                and len(provider14_processing) == 1
+            ):
+                picked = provider14_processing[0]
+
+                picked_act_type = (
+                    picked.act_type or ""
+                ).strip().upper()
+
+                exact_same_type = all(
+                    (r.act_type or "").strip().upper()
+                    == picked_act_type
+                    for r in typed_candidates
+                )
+
+                if not exact_same_type:
+                    print(
+                        "PROVIDER14_PDF_PROCESSING_EXACT_TYPE_AMBIGUOUS =",
+                        {
+                            "lookup_id": lookup_id,
+                            "picked_req_id": picked.id,
+                            "candidate_ids": [
+                                r.id for r in typed_candidates
+                            ],
+                            "candidate_types": [
+                                r.act_type for r in typed_candidates
+                            ],
+                        },
+                        flush=True,
+                    )
+                else:
+                    print(
+                        "PROVIDER14_PDF_UNIQUE_PROCESSING_TYPED_MATCH =",
+                        {
+                            "lookup_id": lookup_id,
+                            "detected_pdf_type": detected_pdf_type,
+                            "picked_req_id": picked.id,
+                            "candidate_ids": [
+                                r.id for r in typed_candidates
+                            ],
+                            "candidate_statuses": [
+                                r.status for r in typed_candidates
+                            ],
+                            "picked_source_group_id": (
+                                picked.source_group_id
+                            ),
+                            "picked_instance_name": (
+                                picked.instance_name
+                            ),
+                        },
+                        flush=True,
+                    )
+
+                    return picked
+
             same_request_keys = {
                 (
                     (r.curp or "").strip().upper(),

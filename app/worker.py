@@ -3335,6 +3335,7 @@ def _provider14_find_missing_confirmation(
     )
 
     matches = []
+    unsafe_recovery_seen = False
 
     for record in records:
         if not isinstance(record, dict):
@@ -3411,6 +3412,8 @@ def _provider14_find_missing_confirmation(
         # GATA sola = válida.
         # GATA + LOMA = contaminada, jamás reaccionar.
         if found_curps != {target}:
+            unsafe_recovery_seen = True
+
             print(
                 "PROVIDER14_ACK_RECOVERY_REJECT_CONTAMINATED =",
                 {
@@ -3460,9 +3463,19 @@ def _provider14_find_missing_confirmation(
                     for x in matches
                 ],
                 "sent_ts": sent_ts,
+                "unsafe_recovery_seen": unsafe_recovery_seen,
             },
             flush=True,
         )
+
+        # Caso seguro:
+        # Evolution respondió correctamente, no hubo confirmación válida
+        # ni mensaje contaminado. E-BOT no creó la solicitud.
+        if len(matches) == 0 and not unsafe_recovery_seen:
+            return "__P14_RECOVERY_NOT_FOUND__"
+
+        # Si hubo contaminación o múltiples matches,
+        # conservamos el comportamiento prudente anterior.
         return None
 
     match = matches[0]
@@ -3740,7 +3753,10 @@ def _send_provider14_request(req, db):
                 )
             )
 
-            if recovered:
+            if (
+                isinstance(recovered, tuple)
+                and len(recovered) == 2
+            ):
                 reaction_jid, reaction_message_id = recovered
 
                 try:
@@ -3793,6 +3809,83 @@ def _send_provider14_request(req, db):
                         flush=True,
                     )
 
+            if (
+                recovered == "__P14_RECOVERY_NOT_FOUND__"
+                and not submit_ack_ok
+            ):
+                # Segunda comprobación corta:
+                # evita declarar "no creada" por una confirmación
+                # que llegue apenas después del primer recovery.
+                time.sleep(8)
+
+                recovered_second_check = (
+                    _provider14_find_missing_confirmation(
+                        req,
+                        sender_instance,
+                        provider_jid,
+                        provider14_send_ts,
+                    )
+                )
+
+                if (
+                    isinstance(recovered_second_check, tuple)
+                    and len(recovered_second_check) == 2
+                ):
+                    reaction_jid, reaction_message_id = (
+                        recovered_second_check
+                    )
+
+                    print(
+                        "PROVIDER14_ACK_RECOVERY_SECOND_CHECK_MATCH =",
+                        {
+                            "request_id": req.id,
+                            "curp": req.curp,
+                            "message_id": reaction_message_id,
+                        },
+                        flush=True,
+                    )
+
+                    send_reaction(
+                        reaction_jid,
+                        reaction_message_id,
+                        "🙌",
+                        instance_name=sender_instance,
+                        from_me=False,
+                    )
+
+                    redis_conn.setex(
+                        _provider14_submit_ack_key(req.id),
+                        900,
+                        reaction_message_id,
+                    )
+
+                    submit_ack_ok = True
+
+                elif recovered_second_check is None:
+                    # Resultado inseguro/ambiguo/error de consulta:
+                    # conservar comportamiento prudente.
+                    recovered = None
+
+            if (
+                recovered == "__P14_RECOVERY_NOT_FOUND__"
+                and not submit_ack_ok
+            ):
+                print(
+                    "PROVIDER14_SUBMIT_NOT_CREATED =",
+                    {
+                        "request_id": req.id,
+                        "curp": req.curp,
+                        "act_type": req.act_type,
+                        "sent_ts": provider14_send_ts,
+                        "reason": "EVOLUTION_HISTORY_ZERO_SAFE_MATCHES",
+                    },
+                    flush=True,
+                )
+
+                raise RuntimeError(
+                    f"PROVIDER14_SUBMIT_NOT_CREATED:{req.id}"
+                )
+
             if not submit_ack_ok:
                 print(
                     "PROVIDER14_SUBMIT_ACK_MISSED_CONTINUE_RESULT_WAIT =",
@@ -3800,7 +3893,7 @@ def _send_provider14_request(req, db):
                         "request_id": req.id,
                         "curp": req.curp,
                         "act_type": req.act_type,
-                        "reason": "RECOVERY_NOT_SAFE_OR_NOT_FOUND",
+                        "reason": "RECOVERY_UNSAFE_AMBIGUOUS_OR_LOOKUP_ERROR",
                     },
                     flush=True,
                 )
