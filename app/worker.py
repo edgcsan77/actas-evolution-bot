@@ -1176,6 +1176,18 @@ def _humanize_support_code(err: str | None) -> str:
         )
 
     # 3) Patrones generales por sufijo.
+    # PROVIDER14_RESULT_TIMEOUT ocurre DESPUÉS de SEND_OK:
+    # E-BOT recibió la solicitud pero no llegó PDF/negativo dentro
+    # del tiempo máximo. No describirlo como una falla de envío.
+    if code_up == "PROVIDER14_RESULT_TIMEOUT":
+        msg = (
+            "E-BOT recibió la solicitud, pero no se obtuvo un resultado "
+            "dentro del tiempo máximo de espera."
+        )
+        if detail:
+            msg += f"\nDetalle técnico: PROVIDER14_RESULT_TIMEOUT:{detail}"
+        return msg
+
     if code_clean == "SEND_FAILED":
         msg = f"No se pudo enviar la solicitud al proveedor {provider_label or 'seleccionado'}."
         if detail:
@@ -1300,7 +1312,15 @@ def _support_extra_es(extra_msg: str | None) -> str:
         text = text.replace(old, new)
 
     # Cambia códigos PROVIDER dentro del detalle por nombre real.
-    for code, label in PROVIDER_LABELS_SUPPORT.items():
+    # IMPORTANTE: reemplazar primero los nombres más largos.
+    # Si PROVIDER1 se procesa antes de PROVIDER14:
+    # PROVIDER14_RESULT_TIMEOUT -> ADMIN DIGITAL4_RESULT_TIMEOUT.
+    for code in sorted(
+        PROVIDER_LABELS_SUPPORT,
+        key=len,
+        reverse=True,
+    ):
+        label = PROVIDER_LABELS_SUPPORT[code]
         text = text.replace(code, label)
 
     return text
@@ -6446,10 +6466,31 @@ def process_request(request_id: int):
                 except Exception as retry_exc:
                     print("PROVIDER_SEND_REQUEUE_ERROR =", str(retry_exc), flush=True)
             
+            # PROVIDER14_RESULT_TIMEOUT ocurre después de SEND_OK.
+            # No convertirlo falsamente a PROVIDER14_SEND_FAILED:
+            # conservar el error real permite recuperar un PDF tardío
+            # y evita mensajes de soporte engañosos.
+            provider14_result_timeout = (
+                provider_name == "PROVIDER14"
+                and last_err_text.startswith(
+                    "PROVIDER14_RESULT_TIMEOUT:"
+                )
+            )
+
+            final_provider_error = (
+                last_err_text
+                if provider14_result_timeout
+                else f"{provider_name}_SEND_FAILED"
+            )
+
             if not _worker_mark_generic_failure_if_allowed(
                 req,
-                generic_error=f"{provider_name}_SEND_FAILED",
-                label=f"{provider_name}_SEND_FAILED",
+                generic_error=final_provider_error,
+                label=(
+                    "PROVIDER14_RESULT_TIMEOUT"
+                    if provider14_result_timeout
+                    else f"{provider_name}_SEND_FAILED"
+                ),
             ):
                 return
         
@@ -6476,8 +6517,16 @@ def process_request(request_id: int):
         
             _notify_support_error(
                 req,
-                f"{provider_name}_SEND_FAILED:{last_err or ''}",
-                last_err or ""
+                (
+                    last_err_text
+                    if provider14_result_timeout
+                    else f"{provider_name}_SEND_FAILED:{last_err or ''}"
+                ),
+                (
+                    ""
+                    if provider14_result_timeout
+                    else (last_err or "")
+                ),
             )
             return
 
