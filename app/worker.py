@@ -6053,6 +6053,23 @@ def process_request(request_id: int):
 
         terminal_error = (getattr(req, "error_message", "") or "").upper()
 
+        # Un request cerrado definitivamente por app.cleanup no debe
+        # revivir si quedó un job viejo pendiente en Redis/RQ.
+        if (
+            current_status == "ERROR"
+            and terminal_error.startswith("AUTO-CIERRE (>")
+            and terminal_error.endswith(" CLEANUP")
+        ):
+            print("PROCESS_REQUEST_CLEANUP_TERMINAL_SKIP =", {
+                "request_id": req.id,
+                "curp": req.curp,
+                "act_type": req.act_type,
+                "provider_name": req.provider_name,
+                "status": req.status,
+                "error_message": req.error_message,
+            }, flush=True)
+            return
+
         # Una API vencida ya no debe ser procesada otra vez aunque exista
         # un job viejo pendiente en Redis/RQ.
         if (
