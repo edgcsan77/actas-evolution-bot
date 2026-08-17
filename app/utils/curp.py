@@ -1,5 +1,6 @@
 import re
 import unicodedata
+from datetime import date
 
 
 def normalize_text(text: str) -> str:
@@ -11,6 +12,192 @@ def normalize_text(text: str) -> str:
 
 CURP_REGEX = r"[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2}"
 NUM20_REGEX = r"\d{20}"
+
+
+# Códigos de entidad utilizados dentro de la CURP.
+# NE = nacido en el extranjero.
+CURP_ENTITY_CODES = {
+    "AS", "BC", "BS", "CC", "CS", "CH", "CL", "CM",
+    "DF", "DG", "GT", "GR", "HG", "JC", "MC", "MN",
+    "MS", "NT", "NL", "OC", "PL", "QT", "QR", "SP",
+    "SL", "SR", "TC", "TS", "TL", "VZ", "YN", "ZS",
+    "NE",
+}
+
+
+_CURP_INTERNAL_CONSONANTS_RE = re.compile(
+    r"^[B-DF-HJ-NP-TV-Z]{3}$"
+)
+
+
+def validate_curp_structure(term: str) -> tuple[bool, str | None]:
+    """
+    Valida una CURP recibida como solicitud del cliente.
+
+    Esta validación es deliberadamente más estricta que CURP_REGEX:
+    - 18 caracteres exactos.
+    - Solo A-Z / 0-9.
+    - Primer bloque con estructura de CURP.
+    - Fecha AAMMDD válida.
+    - Sexo H/M.
+    - Entidad federativa válida.
+    - Consonantes internas en posiciones 14-16.
+    - Posición 17 alfanumérica.
+    - Posición 18 numérica.
+
+    IMPORTANTE:
+    no autocorrige O/0, I/1, E/3, A/4, etc.
+    Si el carácter está en una posición imposible, la CURP se rechaza.
+    """
+
+    curp = normalize_text(term)
+    curp = re.sub(r"\s+", "", curp)
+
+    if len(curp) != 18:
+        return False, "La CURP debe tener exactamente 18 caracteres."
+
+    if not re.fullmatch(r"[A-Z0-9]{18}", curp):
+        return False, "La CURP solo puede contener letras y números."
+
+    # --------------------------------------------------------
+    # POSICIONES 1-4
+    #
+    # 1: inicial del primer apellido
+    # 2: vocal interna del primer apellido
+    # 3: inicial del segundo apellido
+    # 4: inicial del nombre
+    #
+    # X se acepta en la posición 2 para casos especiales.
+    # --------------------------------------------------------
+    if not re.fullmatch(r"[A-Z][AEIOUX][A-Z]{2}", curp[:4]):
+        return (
+            False,
+            "Los primeros 4 caracteres no cumplen la estructura de una CURP.",
+        )
+
+    # --------------------------------------------------------
+    # POSICIONES 5-10 = AAMMDD
+    # --------------------------------------------------------
+    birth = curp[4:10]
+
+    if not birth.isdigit():
+        return (
+            False,
+            "La fecha de nacimiento de la CURP debe contener solo números.",
+        )
+
+    yy = int(birth[0:2])
+    mm = int(birth[2:4])
+    dd = int(birth[4:6])
+
+    # La posición 17 permite distinguir el siglo en el esquema
+    # tradicional: número para 1900 y letra para 2000.
+    century_char = curp[16]
+
+    if century_char.isdigit():
+        full_year = 1900 + yy
+    else:
+        full_year = 2000 + yy
+
+    try:
+        parsed_birth = date(full_year, mm, dd)
+    except ValueError:
+        return (
+            False,
+            "La fecha AAMMDD contenida en la CURP no es válida.",
+        )
+
+    if parsed_birth > date.today():
+        return (
+            False,
+            "La fecha de nacimiento contenida en la CURP está en el futuro.",
+        )
+
+    # --------------------------------------------------------
+    # POSICIÓN 11 = SEXO
+    # --------------------------------------------------------
+    if curp[10] not in {"H", "M"}:
+        return (
+            False,
+            "La posición de sexo de la CURP debe ser H o M.",
+        )
+
+    # --------------------------------------------------------
+    # POSICIONES 12-13 = ENTIDAD
+    # --------------------------------------------------------
+    entity = curp[11:13]
+
+    if entity not in CURP_ENTITY_CODES:
+        return (
+            False,
+            f"La clave de entidad '{entity}' no es válida para una CURP.",
+        )
+
+    # --------------------------------------------------------
+    # POSICIONES 14-16 = CONSONANTES INTERNAS
+    # --------------------------------------------------------
+    internal = curp[13:16]
+
+    if not _CURP_INTERNAL_CONSONANTS_RE.fullmatch(internal):
+        return (
+            False,
+            "Las posiciones 14 a 16 deben contener consonantes válidas.",
+        )
+
+    # --------------------------------------------------------
+    # POSICIÓN 17 = DIFERENCIADOR
+    # --------------------------------------------------------
+    if not re.fullmatch(r"[A-Z0-9]", curp[16]):
+        return (
+            False,
+            "El carácter diferenciador de la CURP no es válido.",
+        )
+
+    # --------------------------------------------------------
+    # POSICIÓN 18 = DÍGITO VERIFICADOR
+    # --------------------------------------------------------
+    if not curp[17].isdigit():
+        return (
+            False,
+            "El último carácter de la CURP debe ser un número.",
+        )
+
+    # Algoritmo oficial de dígito verificador:
+    # se calculan las primeras 17 posiciones y se compara
+    # contra la posición 18.
+    verification_chars = (
+        "0123456789ABCDEFGHIJKLMNÑOPQRSTUVWXYZ"
+    )
+
+    verification_sum = 0
+
+    for index, char in enumerate(curp[:17]):
+        try:
+            value = verification_chars.index(char)
+        except ValueError:
+            return (
+                False,
+                "La CURP contiene un carácter no válido.",
+            )
+
+        verification_sum += value * (18 - index)
+
+    expected_digit = (
+        10 - (verification_sum % 10)
+    ) % 10
+
+    if int(curp[17]) != expected_digit:
+        return (
+            False,
+            "El dígito verificador de la CURP no coincide.",
+        )
+
+    return True, None
+
+
+def is_strict_curp(term: str) -> bool:
+    ok, _reason = validate_curp_structure(term)
+    return ok
 
 
 def detect_act_type(text: str) -> str:
@@ -387,7 +574,17 @@ def extract_request_terms(text: str) -> list[str]:
     for line in lines:
         cleaned = _remove_type_words(line)
 
-        curps = re.findall(rf"\b({CURP_REGEX})\b", cleaned)
+        curp_candidates = re.findall(
+            r"(?<![A-Z0-9])([A-Z0-9]{18})(?![A-Z0-9])",
+            cleaned,
+        )
+
+        curps = [
+            token
+            for token in curp_candidates
+            if is_strict_curp(token)
+        ]
+
         nums20 = re.findall(rf"\b({NUM20_REGEX})\b", cleaned)
 
         for term in curps + nums20:
@@ -451,6 +648,7 @@ def seems_like_identifier_attempt(text: str) -> bool:
     t = normalize_text(raw_clean)
 
     keywords = [
+        "CURP",
         "IDENTIFICADOR",
         "IDENTIFICADOR ELECTRONICO",
         "CODIGO",
@@ -472,6 +670,20 @@ def seems_like_identifier_attempt(text: str) -> bool:
 
     if re.search(r"\b[A-Z]{2,5}\d{4,}[HM][A-Z0-9]{4,}\b", t):
         return True
+
+    # Intentos de CURP / clave de elector / identificadores
+    # alfanuméricos de longitud similar.
+    candidate_tokens = re.findall(
+        r"(?<![A-Z0-9])([A-Z0-9]{16,20})(?![A-Z0-9])",
+        t,
+    )
+
+    for token in candidate_tokens:
+        if (
+            re.search(r"[A-Z]", token)
+            and re.search(r"\d", token)
+        ):
+            return True
 
     return False
 
@@ -497,11 +709,15 @@ def detect_identifier_problem(text: str) -> str | None:
                 "4 letras, 6 dígitos, 6 letras y 2 caracteres alfanuméricos"
             )
 
-        if not re.fullmatch(CURP_REGEX, token):
+        curp_ok, curp_reason = validate_curp_structure(token)
+
+        if not curp_ok:
             return (
                 "⚠️ La CURP parece incompleta o incorrecta.\n\n"
-                "La CURP debe tener exactamente 18 caracteres:\n"
-                "4 letras, 6 dígitos, 6 letras y 2 caracteres alfanuméricos"
+                f"{curp_reason}\n\n"
+                "Revisa especialmente posibles confusiones entre "
+                "letras y números como O/0, I/1, E/3, A/4, "
+                "S/5, G/6, T/7, B/8 o Z/2."
             )
 
     # Solo cadena / identificador / código de verificación
@@ -540,19 +756,26 @@ def detect_identifier_problem(text: str) -> str | None:
     # Tokens parecidos a CURP pero mal
     tokens = re.findall(r"[A-Z0-9]{8,25}", cleaned)
     for token in tokens:
-        if re.fullmatch(CURP_REGEX, token):
-            continue
         if re.fullmatch(NUM20_REGEX, token):
             continue
 
         has_letters = bool(re.search(r"[A-Z]", token))
         has_digits = bool(re.search(r"\d", token))
 
-        if has_letters and has_digits:
-            return (
-                "⚠️ La CURP parece incompleta o incorrecta.\n\n"
-                "La CURP debe tener exactamente 18 caracteres:\n"
-                "4 letras, 6 dígitos, 6 letras y 2 caracteres alfanuméricos"
-            )
+        if not (has_letters and has_digits):
+            continue
+
+        if is_strict_curp(token):
+            continue
+
+        curp_ok, curp_reason = validate_curp_structure(token)
+
+        return (
+            "⚠️ La CURP parece incompleta o incorrecta.\n\n"
+            f"{curp_reason}\n\n"
+            "Revisa posibles confusiones entre letras y números "
+            "como O/0, I/1, E/3, A/4, S/5, G/6, "
+            "T/7, B/8 o Z/2."
+        )
 
     return None
