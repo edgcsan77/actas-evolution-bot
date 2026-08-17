@@ -22221,6 +22221,81 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     or ""
                 ).strip().upper()
 
+                # ========================================================
+                # PROVIDER14 - NO REENVIAR INMEDIATAMENTE SI LA CURP
+                # YA FUE ENVIADA A E-BOT PERO NO SE PUDO CONFIRMAR
+                # SU REGISTRO.
+                #
+                # SUBMIT_NOT_CREATED ocurre DESPUES de SEND_OK, por lo que
+                # un reenvio inmediato puede crear una solicitud duplicada
+                # en E-BOT si su confirmacion fue tardia o se perdio.
+                #
+                # MODE_ACK_TIMEOUT es distinto: ahi solo se envio el cambio
+                # de modo; la CURP todavia no fue enviada, por lo que NO
+                # se bloquea aqui.
+                # ========================================================
+                if (
+                    "PROVIDER14_SUBMIT_NOT_CREATED"
+                    in existing_error_upper
+                ):
+                    try:
+                        provider14_submit_age_seconds = max(
+                            0.0,
+                            (
+                                _utc_now_naive()
+                                - error_existing.updated_at
+                            ).total_seconds()
+                            if error_existing.updated_at
+                            else 999999.0,
+                        )
+                    except Exception:
+                        provider14_submit_age_seconds = 999999.0
+
+                    if provider14_submit_age_seconds < 15 * 60:
+                        pending_msg = (
+                            "⏳ E-BOT ya recibió esta solicitud, pero "
+                            "no confirmó su registro para procesamiento.\n"
+                            f"Dato: {term}\n"
+                            f"Tipo: {act_type}\n\n"
+                            "Por seguridad no se reenviará todavía para "
+                            "evitar una solicitud duplicada. "
+                            "Intenta nuevamente más tarde."
+                        )
+
+                        print(
+                            "PROVIDER14_SUBMIT_NOT_CREATED_DUPLICATE_SUPPRESSED =",
+                            {
+                                "request_id": error_existing.id,
+                                "term": term,
+                                "act_type": act_type,
+                                "source_chat_id": source_chat_id,
+                                "age_seconds": round(
+                                    provider14_submit_age_seconds,
+                                    3,
+                                ),
+                                "error_message": (
+                                    error_existing.error_message
+                                ),
+                            },
+                            flush=True,
+                        )
+
+                        if source_group_id:
+                            if should_send_extra_text(source_group_id):
+                                send_group_text(
+                                    source_group_id,
+                                    pending_msg,
+                                    instance_name=instance_name,
+                                )
+                        else:
+                            send_text(
+                                requester_wa_id,
+                                pending_msg,
+                                instance_name=instance_name,
+                            )
+
+                        continue
+
                 existing_is_no_record = any(
                     marker in existing_error_upper
                     for marker in (
