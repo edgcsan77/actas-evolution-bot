@@ -17686,6 +17686,7 @@ def _provider_pdf_match_status_filter():
             RequestLog.updated_at >= recent_limit,
             or_(
                 RequestLog.error_message.ilike("%Timeout automático%"),
+                RequestLog.error_message.ilike("%PROVIDER14_RESULT_TIMEOUT%"),
                 RequestLog.error_message.ilike("%DELIVERY_FAILED%"),
                 RequestLog.error_message.ilike("%Connection Closed%"),
                 RequestLog.error_message.ilike("%SEND_FAILED%"),
@@ -21985,6 +21986,71 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     )
                     continue
         
+            # ========================================================
+            # PROVIDER14 RESULT_TIMEOUT: VENTANA DE PDF TARDÍO
+            # ========================================================
+            if (
+                last_req
+                and last_req.status == "ERROR"
+                and "PROVIDER14_RESULT_TIMEOUT" in (
+                    last_req.error_message or ""
+                ).upper()
+            ):
+                try:
+                    timeout_age_seconds = max(
+                        0.0,
+                        (
+                            _utc_now_naive()
+                            - last_req.updated_at
+                        ).total_seconds()
+                        if last_req.updated_at
+                        else 999999.0,
+                    )
+                except Exception:
+                    timeout_age_seconds = 999999.0
+
+                if timeout_age_seconds < 15 * 60:
+                    pending_msg = (
+                        "⏳ E-BOT ya recibió esta solicitud, pero su "
+                        "resultado está tardando más de lo normal.\n"
+                        f"Dato: {term}\n"
+                        f"Tipo: {act_type}\n\n"
+                        "No es necesario reenviarla todavía. "
+                        "Si el PDF llega retrasado, el sistema intentará "
+                        "recuperarlo automáticamente."
+                    )
+
+                    if source_group_id:
+                        if should_send_extra_text(source_group_id):
+                            send_group_text(
+                                source_group_id,
+                                pending_msg,
+                                instance_name=instance_name,
+                            )
+                    else:
+                        send_text(
+                            requester_wa_id,
+                            pending_msg,
+                            instance_name=instance_name,
+                        )
+
+                    print(
+                        "PROVIDER14_RESULT_TIMEOUT_DUPLICATE_SUPPRESSED =",
+                        {
+                            "request_id": last_req.id,
+                            "term": term,
+                            "act_type": act_type,
+                            "age_seconds": round(
+                                timeout_age_seconds,
+                                2,
+                            ),
+                            "msg_id": msg_id,
+                        },
+                        flush=True,
+                    )
+
+                    continue
+
             base_request_key = build_request_key(
                 term,
                 act_type,
