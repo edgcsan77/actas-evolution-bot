@@ -18447,9 +18447,9 @@ def _cleanup_stuck_candidates(db: Session, older_than_minutes: int) -> list[Requ
         db.query(RequestLog)
         .filter(
             RequestLog.status.in_(["QUEUED", "PROCESSING"]),
-            RequestLog.created_at < cutoff,
+            RequestLog.updated_at < cutoff,
         )
-        .order_by(RequestLog.created_at.asc(), RequestLog.id.asc())
+        .order_by(RequestLog.updated_at.asc(), RequestLog.id.asc())
         .all()
     )
 
