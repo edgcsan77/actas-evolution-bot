@@ -704,20 +704,18 @@ def detect_identifier_problem(text: str) -> str | None:
 
         if not token:
             return (
-                "⚠️ No se detectó una CURP válida.\n\n"
-                "La CURP debe tener exactamente 18 caracteres:\n"
-                "4 letras, 6 dígitos, 6 letras y 2 caracteres alfanuméricos"
+                "⚠️ CURP incorrecta o incompleta.\n"
+                "Verifica que tenga 18 caracteres y que no haya confusiones "
+                "entre letras y números (O/0, I/1, E/3, A/4, etc.)."
             )
 
         curp_ok, curp_reason = validate_curp_structure(token)
 
         if not curp_ok:
             return (
-                "⚠️ La CURP parece incompleta o incorrecta.\n\n"
-                f"{curp_reason}\n\n"
-                "Revisa especialmente posibles confusiones entre "
-                "letras y números como O/0, I/1, E/3, A/4, "
-                "S/5, G/6, T/7, B/8 o Z/2."
+                "⚠️ CURP incorrecta o incompleta.\n"
+                "Verifica que tenga 18 caracteres y que no haya confusiones "
+                "entre letras y números (O/0, I/1, E/3, A/4, etc.)."
             )
 
     # Solo cadena / identificador / código de verificación
@@ -771,11 +769,9 @@ def detect_identifier_problem(text: str) -> str | None:
         curp_ok, curp_reason = validate_curp_structure(token)
 
         return (
-            "⚠️ La CURP parece incompleta o incorrecta.\n\n"
-            f"{curp_reason}\n\n"
-            "Revisa posibles confusiones entre letras y números "
-            "como O/0, I/1, E/3, A/4, S/5, G/6, "
-            "T/7, B/8 o Z/2."
+            "⚠️ CURP incorrecta o incompleta.\n"
+            "Verifica que tenga 18 caracteres y que no haya confusiones "
+            "entre letras y números (O/0, I/1, E/3, A/4, etc.)."
         )
 
     return None
