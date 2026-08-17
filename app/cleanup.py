@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import or_
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.db import SessionLocal
@@ -124,9 +125,12 @@ def cleanup_expired_and_mark_pending():
             .filter(
                 RequestLog.status.in_(["QUEUED", "PROCESSING"]),
                 RequestLog.api_client_id.is_(None),
-                RequestLog.created_at.is_not(None),
-                RequestLog.created_at <= whatsapp_limit,
-                RequestLog.provider_name.in_(whatsapp_providers),
+                RequestLog.updated_at.is_not(None),
+                RequestLog.updated_at <= whatsapp_limit,
+                or_(
+                    RequestLog.provider_name.in_(whatsapp_providers),
+                    RequestLog.provider_name.is_(None),
+                ),
             )
             .all()
         )
@@ -136,8 +140,8 @@ def cleanup_expired_and_mark_pending():
             .filter(
                 RequestLog.status.in_(["QUEUED", "PROCESSING"]),
                 RequestLog.api_client_id.is_(None),
-                RequestLog.created_at.is_not(None),
-                RequestLog.created_at <= web_limit,
+                RequestLog.updated_at.is_not(None),
+                RequestLog.updated_at <= web_limit,
                 RequestLog.provider_name.in_(web_providers),
             )
             .all()
@@ -148,8 +152,8 @@ def cleanup_expired_and_mark_pending():
             .filter(
                 RequestLog.status.in_(["QUEUED", "PROCESSING"]),
                 RequestLog.api_client_id.isnot(None),
-                RequestLog.created_at.is_not(None),
-                RequestLog.created_at <= api_limit,
+                RequestLog.updated_at.is_not(None),
+                RequestLog.updated_at <= api_limit,
                 RequestLog.api_charged == False,
             )
             .all()
