@@ -3179,10 +3179,24 @@ def _provider14_wait_result(
     request_id: int,
     lock_token: str,
     timeout_s: float = 180.0,
+    *,
+    target: str | None = None,
+    sent_ts: float | None = None,
+    sender_instance: str | None = None,
 ) -> bool:
     result_key = _provider14_result_key(request_id)
     lock_key = _provider14_lock_key()
     deadline = time.time() + timeout_s
+
+    target_norm = (target or "").strip().upper()
+    sender_instance = (
+        sender_instance
+        or settings.EVOLUTION_INSTANCE
+    )
+
+    # Damos tiempo al webhook normal. Recovery solamente entra
+    # si el PDF existe en Evolution pero el webhook no llegó.
+    next_recovery_check = time.time() + 15.0
 
     while time.time() < deadline:
         try:
@@ -3223,6 +3237,199 @@ def _provider14_wait_result(
                 },
                 flush=True,
             )
+
+        # =====================================================
+        # RECOVERY DE PDF PERDIDO
+        #
+        # Si Evolution ya tiene CURP.pdf pero messages.upsert
+        # se perdió, reinyectamos ESE MISMO mensaje al webhook.
+        # El webhook conserva matching, dedupe, R2, entrega y DONE.
+        # =====================================================
+        if (
+            target_norm
+            and sent_ts
+            and time.time() >= next_recovery_check
+        ):
+            next_recovery_check = time.time() + 8.0
+
+            try:
+                records = find_recent_messages(
+                    sender_instance,
+                    _provider14_lid(),
+                    limit=40,
+                )
+
+                candidates = []
+
+                for rec in records or []:
+                    if not isinstance(rec, dict):
+                        continue
+
+                    key = rec.get("key") or {}
+                    msg = rec.get("message") or {}
+
+                    if bool(key.get("fromMe")):
+                        continue
+
+                    remote_jid = str(
+                        key.get("remoteJid") or ""
+                    ).strip()
+
+                    if remote_jid != _provider14_lid():
+                        continue
+
+                    try:
+                        msg_ts = float(
+                            rec.get("messageTimestamp") or 0
+                        )
+                    except Exception:
+                        msg_ts = 0.0
+
+                    # Nunca recuperar un PDF anterior a nuestra solicitud.
+                    if msg_ts < (float(sent_ts) - 2.0):
+                        continue
+
+                    doc = msg.get("documentMessage") or {}
+                    if not isinstance(doc, dict):
+                        continue
+
+                    filename = str(
+                        doc.get("fileName") or ""
+                    ).strip()
+
+                    mimetype = str(
+                        doc.get("mimetype") or ""
+                    ).lower()
+
+                    if (
+                        target_norm not in filename.upper()
+                        or "pdf" not in mimetype
+                    ):
+                        continue
+
+                    msg_id = str(
+                        key.get("id") or ""
+                    ).strip()
+
+                    if not msg_id:
+                        continue
+
+                    candidates.append(
+                        (msg_ts, msg_id, rec, filename)
+                    )
+
+                if candidates:
+                    candidates.sort(
+                        key=lambda x: x[0],
+                        reverse=True,
+                    )
+
+                    msg_ts, msg_id, rec, filename = candidates[0]
+
+                    print(
+                        "PROVIDER14_PDF_RECOVERY_FOUND =",
+                        {
+                            "request_id": request_id,
+                            "target": target_norm,
+                            "msg_id": msg_id,
+                            "filename": filename,
+                            "message_ts": msg_ts,
+                            "sent_ts": sent_ts,
+                        },
+                        flush=True,
+                    )
+
+                    # No replicamos la lógica de entrega aquí.
+                    # Reinyectamos el mensaje al webhook normal.
+                    from app.provider_webhook_retry import (
+                        replay_provider_webhook,
+                    )
+
+                    # findMessages devuelve los chats privados de P14
+                    # con remoteJid=@lid y el JID telefónico real en
+                    # remoteJidAlt. El webhook normal identifica al
+                    # proveedor por el JID telefónico, por lo que
+                    # normalizamos una COPIA antes de reinyectarla.
+                    import copy
+
+                    replay_rec = copy.deepcopy(rec)
+
+                    replay_key = replay_rec.get("key") or {}
+                    remote_jid_alt = str(
+                        replay_key.get("remoteJidAlt") or ""
+                    ).strip()
+
+                    if remote_jid_alt.endswith(
+                        "@s.whatsapp.net"
+                    ):
+                        replay_key["remoteJid"] = (
+                            remote_jid_alt
+                        )
+                        replay_rec["key"] = replay_key
+
+                    payload = {
+                        "event": "messages.upsert",
+                        "instance": sender_instance,
+                        "data": replay_rec,
+                    }
+
+                    replay_result = replay_provider_webhook(
+                        payload
+                    )
+
+                    print(
+                        "PROVIDER14_PDF_RECOVERY_REPLAYED =",
+                        {
+                            "request_id": request_id,
+                            "msg_id": msg_id,
+                            "filename": filename,
+                            "result": replay_result,
+                        },
+                        flush=True,
+                    )
+
+                    # El webhook puede tardar un instante en poner
+                    # provider14:result_received:<id>.
+                    for _ in range(20):
+                        recovered = redis_conn.get(
+                            result_key
+                        )
+
+                        if recovered:
+                            if isinstance(
+                                recovered,
+                                bytes,
+                            ):
+                                recovered = recovered.decode(
+                                    "utf-8",
+                                    errors="ignore",
+                                )
+
+                            print(
+                                "PROVIDER14_PDF_RECOVERY_CONFIRMED =",
+                                {
+                                    "request_id": request_id,
+                                    "msg_id": msg_id,
+                                    "result": recovered,
+                                },
+                                flush=True,
+                            )
+                            return True
+
+                        time.sleep(0.25)
+
+            except Exception as recovery_exc:
+                # findMessages puede dar HTTP 500 intermitente.
+                # NO mata la solicitud: vuelve a intentar 8 s después.
+                print(
+                    "PROVIDER14_PDF_RECOVERY_ERROR =",
+                    {
+                        "request_id": request_id,
+                        "target": target_norm,
+                        "error": str(recovery_exc),
+                    },
+                    flush=True,
+                )
 
         time.sleep(0.5)
 
@@ -3947,10 +4154,13 @@ def _send_provider14_request(req, db):
         )
 
         result_ok = _provider14_wait_result(
-            req.id,
-            lock_token,
-            timeout_s=600.0,
-        )
+                req.id,
+                lock_token,
+                timeout_s=600.0,
+                target=req.curp,
+                sent_ts=sent_ts,
+                sender_instance=sender_instance,
+            )
 
         if not result_ok:
             raise RuntimeError(
