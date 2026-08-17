@@ -4158,7 +4158,7 @@ def _send_provider14_request(req, db):
                 lock_token,
                 timeout_s=600.0,
                 target=req.curp,
-                sent_ts=sent_ts,
+                sent_ts=provider14_send_ts,
                 sender_instance=sender_instance,
             )
 
