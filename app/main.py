@@ -210,7 +210,13 @@ def _set_bot_provider_mode(db: Session, instance_name: str, mode: str):
     inst = _norm_instance(instance_name)
     mode = (mode or "GLOBAL_POOL").strip().upper()
 
-    if mode not in BOT_PROVIDER_OPTIONS:
+    allowed_options = (
+        MAYA_PROVIDER_OPTIONS
+        if inst == "docifybot8maya"
+        else BOT_PROVIDER_OPTIONS
+    )
+
+    if mode not in allowed_options:
         raise ValueError("Modo de proveedor inválido")
 
     return _set_app_setting(db, f"{BOT_PROVIDER_MODE_KEY_PREFIX}{inst}", mode)
