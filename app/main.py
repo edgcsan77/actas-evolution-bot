@@ -200,6 +200,12 @@ def _bot_provider_mode(db: Session, instance_name: str | None) -> str:
     return (mode or default or "GLOBAL_POOL").strip().upper()
 
 
+MAYA_PROVIDER_OPTIONS = {
+    "GLOBAL_POOL": "AUTOMÁTICO",
+    "PERSONAL:MAYAPROVIDER": "PERSONAL:MAYAPROVIDER",
+}
+
+
 def _set_bot_provider_mode(db: Session, instance_name: str, mode: str):
     inst = _norm_instance(instance_name)
     mode = (mode or "GLOBAL_POOL").strip().upper()
@@ -8449,8 +8455,8 @@ def botpanel_get_provider_mode(token: str, db: Session = Depends(get_db)):
         "ok": True,
         "instance_name": instance_name,
         "mode": mode,
-        "label": BOT_PROVIDER_OPTIONS.get(mode, mode),
-        "options": BOT_PROVIDER_OPTIONS,
+        "label": MAYA_PROVIDER_OPTIONS.get(mode, mode),
+        "options": MAYA_PROVIDER_OPTIONS,
     }
 
 
@@ -8467,6 +8473,12 @@ async def botpanel_set_provider_mode(token: str, request: Request, db: Session =
         payload = await request.json()
         mode = (payload.get("mode") or "GLOBAL_POOL").strip().upper()
 
+        if mode not in MAYA_PROVIDER_OPTIONS:
+            return {
+                "ok": False,
+                "error": "Modo no permitido para Gestoría Maya",
+            }
+
         _set_bot_provider_mode(db, instance_name, mode)
 
         _clear_panel_cache()
@@ -8476,7 +8488,7 @@ async def botpanel_set_provider_mode(token: str, request: Request, db: Session =
             "ok": True,
             "instance_name": instance_name,
             "mode": mode,
-            "label": BOT_PROVIDER_OPTIONS.get(mode, mode),
+            "label": MAYA_PROVIDER_OPTIONS.get(mode, mode),
         }
 
     except Exception as e:
@@ -8495,11 +8507,11 @@ def botpanel_provider_mode_ui(token: str, db: Session = Depends(get_db)):
         return HTMLResponse("<h3>Este ajuste solo está disponible para Gestoría Maya.</h3>", status_code=403)
 
     mode = _bot_provider_mode(db, instance_name)
-    label = BOT_PROVIDER_OPTIONS.get(mode, mode)
+    label = MAYA_PROVIDER_OPTIONS.get(mode, mode)
     title = _bot_title(db, instance_name)
 
     options_html = ""
-    for value, text in BOT_PROVIDER_OPTIONS.items():
+    for value, text in MAYA_PROVIDER_OPTIONS.items():
         selected = "selected" if value == mode else ""
         options_html += f'<option value="{_esc(value)}" {selected}>{_esc(text)}</option>'
 
