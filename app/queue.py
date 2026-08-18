@@ -18,6 +18,12 @@ request_queue = Queue(
     default_timeout=REQUEST_TIMEOUT,
 )
 
+maya_request_queue = Queue(
+    "actas_maya",
+    connection=redis_conn,
+    default_timeout=REQUEST_TIMEOUT,
+)
+
 slow_request_queue = Queue(
     "actas_slow",
     connection=redis_conn,

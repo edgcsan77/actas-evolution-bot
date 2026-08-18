@@ -25,7 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.db import Base, engine, get_db, SessionLocal
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion, GroupAlias, GroupCategory, BotControl, BotRechargeLog, ApiClient, ApiCreditLog
-from app.queue import request_queue, slow_request_queue, redis_conn, broadcast_queue, ack_queue
+from app.queue import request_queue, slow_request_queue, maya_request_queue, redis_conn, broadcast_queue, ack_queue
 from app.client_messages import (
     received_message,
     duplicate_processing_message,
@@ -347,8 +347,36 @@ WHATSAPP_TEXT_PROVIDERS = [
 
 def _enqueue_process_request(req, reason: str = ""):
     provider = (getattr(req, "provider_name", None) or "").strip().upper()
+    instance_name = _norm_instance(
+        getattr(req, "instance_name", None)
+    )
 
-    if provider in SLOW_REQUEST_PROVIDERS:
+    maya_private = False
+
+    if instance_name == "docifybot8maya":
+        try:
+            db = SessionLocal()
+            try:
+                maya_private = (
+                    _bot_provider_mode(db, instance_name)
+                    == "PERSONAL:MAYAPROVIDER"
+                )
+            finally:
+                db.close()
+        except Exception as exc:
+            print(
+                "MAYA_QUEUE_MODE_LOOKUP_ERROR =",
+                {
+                    "request_id": getattr(req, "id", None),
+                    "error": str(exc),
+                },
+                flush=True,
+            )
+
+    if maya_private or provider == "MAYAPROVIDER":
+        queue_name = "actas_maya"
+        queue = maya_request_queue
+    elif provider in SLOW_REQUEST_PROVIDERS:
         queue_name = "actas_slow"
         queue = slow_request_queue
     else:
