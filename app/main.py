@@ -201,8 +201,8 @@ def _bot_provider_mode(db: Session, instance_name: str | None) -> str:
 
 
 MAYA_PROVIDER_OPTIONS = {
-    "GLOBAL_POOL": "AUTOMÁTICO",
-    "PERSONAL:MAYAPROVIDER": "PERSONAL:MAYAPROVIDER",
+    "GLOBAL_POOL": "GLOBAL",
+    "PERSONAL:MAYAPROVIDER": "PRIVADO",
 }
 
 
