@@ -14,6 +14,8 @@ from app.db import SessionLocal
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
+from sqlalchemy import text
+
 from app.models import RequestLog, ProviderSetting, AppSetting, GroupPromotion, ApiClient, ApiCreditLog
 from app.services.evolution import send_group_text, send_text, send_document_base64, send_group_document_base64, send_reaction, find_recent_messages
 from app.config import settings
@@ -5264,6 +5266,16 @@ def _handle_group_promotion_after_done(req, db):
     )
 
     if not current:
+        print(
+            "PROMOTION_ACCOUNTING_NO_ACTIVE_PROMO =",
+            {
+                "request_id": getattr(req, "id", None),
+                "group_jid": source_group_id,
+                "provider_name": getattr(req, "provider_name", None),
+                "status": getattr(req, "status", None),
+            },
+            flush=True,
+        )
         return
 
     shared_key = (current.shared_key or "").strip()
@@ -5301,6 +5313,79 @@ def _handle_group_promotion_after_done(req, db):
     available_before = max(0, total_before - used_before)
     used_after = used_before + 1
     available_after = max(0, total_before - used_after)
+
+    # =========================================================
+    # ACCOUNTING EXACTAMENTE-UNA-VEZ POR request_id
+    #
+    # La fila de promoción ya está bloqueada con FOR UPDATE.
+    # Registramos el request dentro de LA MISMA transacción.
+    #
+    # Si el request_id ya existe, esta solicitud YA consumió
+    # promoción y jamás debe incrementar used_actas otra vez.
+    # =========================================================
+    accounting_inserted = db.execute(
+        text(
+            '''
+            INSERT INTO promotion_consumptions (
+                request_id,
+                promotion_id,
+                group_jid,
+                shared_key,
+                used_before,
+                used_after,
+                created_at
+            )
+            VALUES (
+                :request_id,
+                :promotion_id,
+                :group_jid,
+                :shared_key,
+                :used_before,
+                :used_after,
+                (NOW() AT TIME ZONE 'UTC')
+            )
+            ON CONFLICT (request_id) DO NOTHING
+            RETURNING request_id
+            '''
+        ),
+        {
+            "request_id": int(req.id),
+            "promotion_id": int(leader.id),
+            "group_jid": source_group_id,
+            "shared_key": shared_key or None,
+            "used_before": used_before,
+            "used_after": used_after,
+        },
+    ).scalar_one_or_none()
+
+    if accounting_inserted is None:
+        print(
+            "PROMOTION_ACCOUNTING_DUPLICATE_SKIPPED =",
+            {
+                "request_id": req.id,
+                "promotion_id": leader.id,
+                "group_jid": source_group_id,
+                "used_current": used_before,
+            },
+            flush=True,
+        )
+
+        # Liberar FOR UPDATE sin modificar la promoción.
+        db.commit()
+        return
+
+    print(
+        "PROMOTION_ACCOUNTING_PREPARED =",
+        {
+            "request_id": req.id,
+            "promotion_id": leader.id,
+            "group_jid": source_group_id,
+            "shared_key": shared_key or None,
+            "used_before": used_before,
+            "used_after": used_after,
+        },
+        flush=True,
+    )
 
     current_group_row = None
 
@@ -5436,6 +5521,20 @@ def _handle_group_promotion_after_done(req, db):
             )
 
     db.commit()
+
+    print(
+        "PROMOTION_ACCOUNTING_COMMITTED =",
+        {
+            "request_id": req.id,
+            "promotion_id": leader.id,
+            "group_jid": source_group_id,
+            "shared_key": shared_key or None,
+            "used_before": used_before,
+            "used_after": used_after,
+            "available_after": available_after,
+        },
+        flush=True,
+    )
 
     # 5) Acciones posteriores al commit
     if reached_individual_limit and current_group_row and current_group_row.group_jid:
