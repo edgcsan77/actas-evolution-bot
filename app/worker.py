@@ -595,6 +595,12 @@ def _provider_from_mode(mode: str | None) -> str | None:
     provider_name = provider_name.strip().upper()
 
     if provider_name in {
+        "MAYAPROVIDER_REYES",
+        "MAYAPROVIDER_HERNANDEZ",
+    }:
+        return "MAYAPROVIDER"
+
+    if provider_name in {
         "PROVIDER1",
         "PROVIDER2",
         "PROVIDER3",
@@ -4251,17 +4257,94 @@ def _pick_provider_group(
         return None
 
     if provider_name == "MAYAPROVIDER":
-        provider11_groups = [
-            settings.MAYAPROVIDER_GROUP_1,
-            settings.MAYAPROVIDER_GROUP_2,
-        ]
-        provider11_groups = [g for g in provider11_groups if g]
-    
-        if not provider11_groups:
-            raise RuntimeError("MAYAPROVIDER_GROUPS_NOT_CONFIGURED")
-    
-        idx = (request_id - 1) % len(provider11_groups)
-        return provider11_groups[idx]
+        group_reyes = (
+            getattr(settings, "MAYAPROVIDER_GROUP_1", "") or ""
+        ).strip()
+
+        group_hernandez = (
+            getattr(settings, "MAYAPROVIDER_GROUP_2", "") or ""
+        ).strip()
+
+        maya_mode = ""
+
+        try:
+            with SessionLocal() as maya_db:
+                req_row = (
+                    maya_db.query(RequestLog)
+                    .filter(RequestLog.id == request_id)
+                    .first()
+                )
+
+                if req_row:
+                    maya_mode = _bot_provider_mode(
+                        maya_db,
+                        req_row.instance_name,
+                    )
+
+        except Exception as exc:
+            print(
+                "MAYAPROVIDER_MODE_LOOKUP_ERROR =",
+                {
+                    "request_id": request_id,
+                    "error": str(exc),
+                },
+                flush=True,
+            )
+
+        if maya_mode == "PERSONAL:MAYAPROVIDER_REYES":
+            if not group_reyes:
+                raise RuntimeError(
+                    "MAYAPROVIDER_GROUPS_NOT_CONFIGURED"
+                )
+
+            selected_group = group_reyes
+            selected_private = "REYES"
+
+        elif maya_mode == "PERSONAL:MAYAPROVIDER_HERNANDEZ":
+            if not group_hernandez:
+                raise RuntimeError(
+                    "MAYAPROVIDER_GROUPS_NOT_CONFIGURED"
+                )
+
+            selected_group = group_hernandez
+            selected_private = "HERNANDEZ"
+
+        else:
+            maya_groups = [
+                g
+                for g in (
+                    group_reyes,
+                    group_hernandez,
+                )
+                if g
+            ]
+
+            if not maya_groups:
+                raise RuntimeError(
+                    "MAYAPROVIDER_GROUPS_NOT_CONFIGURED"
+                )
+
+            idx = (request_id - 1) % len(maya_groups)
+            selected_group = maya_groups[idx]
+
+            selected_private = (
+                "REYES"
+                if selected_group == group_reyes
+                else "HERNANDEZ"
+            )
+
+        print(
+            "MAYAPROVIDER_PRIVATE_SELECTED =",
+            {
+                "request_id": request_id,
+                "mode": maya_mode,
+                "private": selected_private,
+                "group_id": selected_group,
+            },
+            flush=True,
+        )
+
+        return selected_group
 
     raise RuntimeError("UNKNOWN_PROVIDER")
 

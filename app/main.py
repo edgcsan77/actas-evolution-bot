@@ -201,8 +201,10 @@ def _bot_provider_mode(db: Session, instance_name: str | None) -> str:
 
 
 MAYA_PROVIDER_OPTIONS = {
-    "GLOBAL_POOL": "GLOBAL",
-    "PERSONAL:MAYAPROVIDER": "PRIVADO",
+    "GLOBAL_POOL": "GLOBAL MESINO",
+    "PERSONAL:MAYAPROVIDER": "PRIVADOS 50/50",
+    "PERSONAL:MAYAPROVIDER_REYES": "PRIVADO REYES",
+    "PERSONAL:MAYAPROVIDER_HERNANDEZ": "PRIVADO HERNANDEZ",
 }
 
 
@@ -234,6 +236,12 @@ def _provider_from_mode(mode: str | None) -> str | None:
 
     _, provider_name = mode.split(":", 1)
     provider_name = provider_name.strip().upper()
+
+    if provider_name in {
+        "MAYAPROVIDER_REYES",
+        "MAYAPROVIDER_HERNANDEZ",
+    }:
+        return "MAYAPROVIDER"
 
     if provider_name in {
         "PROVIDER1",
@@ -359,7 +367,11 @@ def _enqueue_process_request(req, reason: str = ""):
             try:
                 maya_private = (
                     _bot_provider_mode(db, instance_name)
-                    == "PERSONAL:MAYAPROVIDER"
+                    in {
+                        "PERSONAL:MAYAPROVIDER",
+                        "PERSONAL:MAYAPROVIDER_REYES",
+                        "PERSONAL:MAYAPROVIDER_HERNANDEZ",
+                    }
                 )
             finally:
                 db.close()
@@ -3232,6 +3244,182 @@ def panel_instances(db: Session = Depends(get_db)):
 
     items.sort(key=lambda x: x["instance_name"])
     return {"ok": True, "items": items}
+
+
+@app.post("/panel/instances/block-all")
+def panel_block_all_instances(
+    token: str = "",
+    db: Session = Depends(get_db),
+):
+    if token != settings.ADMIN_PANEL_TOKEN:
+        return {
+            "ok": False,
+            "error": "UNAUTHORIZED",
+        }
+
+    instances = set()
+
+    # 1. Todas las instancias conocidas por BotControl.
+    rows = (
+        db.query(BotControl.instance_name)
+        .filter(BotControl.instance_name.isnot(None))
+        .all()
+    )
+
+    for row in rows:
+        inst = (row[0] or "").strip()
+        if inst:
+            instances.add(inst)
+
+    # 2. Instancias presentes en solicitudes, por seguridad.
+    rows = (
+        db.query(RequestLog.instance_name)
+        .filter(RequestLog.instance_name.isnot(None))
+        .distinct()
+        .all()
+    )
+
+    for row in rows:
+        inst = (row[0] or "").strip()
+        if inst:
+            instances.add(inst)
+
+    blocked = []
+    skipped = []
+
+    for inst in sorted(instances):
+
+        # Gestoría Maya queda fuera del bloqueo masivo
+        # mientras esté usando cualquiera de sus modos privados.
+        if _norm_instance(inst) == "docifybot8maya":
+            maya_mode = _bot_provider_mode(
+                db,
+                inst,
+            )
+
+            if maya_mode in {
+                "PERSONAL:MAYAPROVIDER",
+                "PERSONAL:MAYAPROVIDER_REYES",
+                "PERSONAL:MAYAPROVIDER_HERNANDEZ",
+            }:
+                skipped.append({
+                    "instance_name": inst,
+                    "reason": "MAYA_PRIVATE_MODE",
+                    "mode": maya_mode,
+                })
+                continue
+
+        admin_block_instance(inst)
+        blocked.append(inst)
+
+    _clear_panel_cache()
+
+    print(
+        "ADMIN_ALL_INSTANCES_BLOCKED =",
+        {
+            "count": len(blocked),
+            "instances": blocked,
+        },
+        flush=True,
+    )
+
+    return {
+        "ok": True,
+        "blocked": len(blocked),
+        "instances": blocked,
+        "skipped": skipped,
+    }
+
+
+@app.post("/panel/instances/unblock-all")
+def panel_unblock_all_instances(
+    token: str = "",
+    db: Session = Depends(get_db),
+):
+    if token != settings.ADMIN_PANEL_TOKEN:
+        return {
+            "ok": False,
+            "error": "UNAUTHORIZED",
+        }
+
+    instances = set()
+
+    # Todas las instancias conocidas por BotControl.
+    rows = (
+        db.query(BotControl.instance_name)
+        .filter(BotControl.instance_name.isnot(None))
+        .all()
+    )
+
+    for row in rows:
+        inst = (row[0] or "").strip()
+        if inst:
+            instances.add(inst)
+
+    # También las que tengan solicitudes históricas.
+    rows = (
+        db.query(RequestLog.instance_name)
+        .filter(RequestLog.instance_name.isnot(None))
+        .distinct()
+        .all()
+    )
+
+    for row in rows:
+        inst = (row[0] or "").strip()
+        if inst:
+            instances.add(inst)
+
+    # Y cualquier instancia que siga administrativamente
+    # bloqueada en Redis.
+    try:
+        raw_values = (
+            redis_conn.smembers(
+                ADMIN_BLOCKED_INSTANCES_KEY
+            )
+            or set()
+        )
+
+        for value in raw_values:
+            if isinstance(value, bytes):
+                value = value.decode(
+                    "utf-8",
+                    errors="ignore",
+                )
+
+            inst = str(value or "").strip()
+
+            if inst:
+                instances.add(inst)
+
+    except Exception as exc:
+        print(
+            "ADMIN_BLOCK_ALL_READ_ERROR =",
+            str(exc),
+            flush=True,
+        )
+
+    unblocked = []
+
+    for inst in sorted(instances):
+        admin_unblock_instance(inst)
+        unblocked.append(inst)
+
+    _clear_panel_cache()
+
+    print(
+        "ADMIN_ALL_INSTANCES_UNBLOCKED =",
+        {
+            "count": len(unblocked),
+            "instances": unblocked,
+        },
+        flush=True,
+    )
+
+    return {
+        "ok": True,
+        "unblocked": len(unblocked),
+        "instances": unblocked,
+    }
 
 
 @app.post("/panel/instance/{instance_name}/block")
@@ -12354,9 +12542,27 @@ def panel_actas(
               </div>
             </div>
 
-            <span class="badge badge-success">
-              Todos los bots
-            </span>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+              <button
+                type="button"
+                class="btn btn-danger"
+                onclick="blockAllBots()"
+              >
+                🔒 Bloquear todos
+              </button>
+
+              <button
+                type="button"
+                class="btn btn-success"
+                onclick="unblockAllBots()"
+              >
+                🔓 Desbloquear todos
+              </button>
+
+              <span class="badge badge-success">
+                Todos los bots
+              </span>
+            </div>
           </div>
 
           <div class="bot-control-grid">
@@ -13878,6 +14084,80 @@ def panel_actas(
           }}
         }}
         
+        async function blockAllBots() {{
+          const ok = confirm(
+            "¿Seguro que deseas BLOQUEAR TODOS los bots para nuevas solicitudes?"
+          );
+
+          if (!ok) return;
+
+          const panelToken = getPanelToken();
+
+          try {{
+            const res = await fetch(
+              `/panel/instances/block-all?token=${{encodeURIComponent(panelToken)}}`,
+              {{
+                method: "POST"
+              }}
+            );
+
+            const data = await res.json();
+
+            if (data.ok) {{
+              alert(
+                `Bots bloqueados: ${{data.blocked}}`
+              );
+              location.reload();
+            }} else {{
+              alert(
+                data.error ||
+                "No se pudieron bloquear todos los bots."
+              );
+            }}
+          }} catch (e) {{
+            alert(
+              "Error de conexión al bloquear todos los bots."
+            );
+          }}
+        }}
+
+        async function unblockAllBots() {{
+          const ok = confirm(
+            "¿Seguro que deseas DESBLOQUEAR TODOS los bots?"
+          );
+
+          if (!ok) return;
+
+          const panelToken = getPanelToken();
+
+          try {{
+            const res = await fetch(
+              `/panel/instances/unblock-all?token=${{encodeURIComponent(panelToken)}}`,
+              {{
+                method: "POST"
+              }}
+            );
+
+            const data = await res.json();
+
+            if (data.ok) {{
+              alert(
+                `Bots desbloqueados: ${{data.unblocked}}`
+              );
+              location.reload();
+            }} else {{
+              alert(
+                data.error ||
+                "No se pudieron desbloquear todos los bots."
+              );
+            }}
+          }} catch (e) {{
+            alert(
+              "Error de conexión al desbloquear todos los bots."
+            );
+          }}
+        }}
+
         async function blockBot(instanceName) {{
           const ok = confirm(`¿Bloquear ${{instanceName}} para nuevas solicitudes?`);
           if (!ok) return;
@@ -18957,6 +19237,129 @@ def _providers_status_text(db: Session) -> str:
     return text
 
 
+_EVOLUTION_BOT_OWNERS_CACHE = {
+    "expires_at": 0.0,
+    "owners": set(),
+}
+
+
+def _normalize_bot_owner_jid(value: str | None) -> str:
+    raw = (value or "").strip().lower()
+
+    if not raw:
+        return ""
+
+    number = raw.split("@", 1)[0]
+    number = "".join(ch for ch in number if ch.isdigit())
+
+    # Evolution suele exponer números MX como 521XXXXXXXXXX,
+    # mientras algunos webhooks pueden resolverlos sin el "1".
+    if number.startswith("521") and len(number) == 13:
+        number = "52" + number[3:]
+
+    return number
+
+
+def _evolution_bot_owner_ids() -> set[str]:
+    import time
+
+    now = time.time()
+
+    cached = _EVOLUTION_BOT_OWNERS_CACHE.get("owners") or set()
+    expires_at = float(
+        _EVOLUTION_BOT_OWNERS_CACHE.get("expires_at") or 0
+    )
+
+    if cached and now < expires_at:
+        return cached
+
+    owners = set()
+
+    try:
+        status, payload = _evolution_get(
+            "/instance/fetchInstances",
+            timeout=5,
+        )
+
+        if status == 200:
+            if isinstance(payload, list):
+                rows = payload
+            elif isinstance(payload, dict):
+                rows = (
+                    payload.get("instances")
+                    or payload.get("data")
+                    or payload.get("response")
+                    or []
+                )
+            else:
+                rows = []
+
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+
+                nested = row.get("instance")
+                if not isinstance(nested, dict):
+                    nested = {}
+
+                owner = (
+                    row.get("ownerJid")
+                    or row.get("owner")
+                    or row.get("number")
+                    or nested.get("ownerJid")
+                    or nested.get("owner")
+                    or nested.get("number")
+                    or ""
+                )
+
+                owner_norm = _normalize_bot_owner_jid(owner)
+
+                if owner_norm:
+                    owners.add(owner_norm)
+
+        if owners:
+            _EVOLUTION_BOT_OWNERS_CACHE["owners"] = owners
+
+    except Exception as exc:
+        print(
+            "BOT_OWNER_CACHE_REFRESH_ERROR =",
+            str(exc),
+            flush=True,
+        )
+
+    # Si Evolution falla temporalmente, conserva la última lista conocida.
+    final_owners = (
+        owners
+        or _EVOLUTION_BOT_OWNERS_CACHE.get("owners")
+        or set()
+    )
+
+    _EVOLUTION_BOT_OWNERS_CACHE["expires_at"] = now + 60
+
+    return set(final_owners)
+
+
+def _is_message_from_another_bot(
+    requester_wa_id: str | None,
+    remote_jid: str | None,
+) -> bool:
+    # NUNCA aplicar este bloqueo dentro de grupos proveedor.
+    # Hay flujos proveedor/bot que sí son intencionales.
+    remote = (remote_jid or "").strip()
+
+    if remote and remote in _all_provider_groups():
+        return False
+
+    requester_norm = _normalize_bot_owner_jid(
+        requester_wa_id
+    )
+
+    if not requester_norm:
+        return False
+
+    return requester_norm in _evolution_bot_owner_ids()
+
+
 def _resolve_requester_wa_id(data: dict, key: dict, is_group: bool) -> str:
     participant = key.get("participant", "") or ""
     remote_jid = key.get("remoteJid", "") or ""
@@ -19899,6 +20302,42 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             },
             flush=True,
         )
+
+
+        # =====================================================
+        # BLOQUEO BOT -> BOT
+        # =====================================================
+        #
+        # Si otra instancia Evolution envía texto a un grupo
+        # cliente/gestor, este bot NO debe interpretarlo como
+        # solicitud ni responderle.
+        #
+        # Los grupos proveedor están excluidos deliberadamente.
+        # =====================================================
+        if (
+            not from_me
+            and _is_message_from_another_bot(
+                requester_wa_id,
+                remote_jid,
+            )
+        ):
+            print(
+                "IGNORED_BOT_TO_BOT =",
+                {
+                    "instance_name": instance_name,
+                    "msg_id": msg_id,
+                    "remote_jid": remote_jid,
+                    "participant": participant,
+                    "requester_wa_id": requester_wa_id,
+                    "text": text_body[:180],
+                },
+                flush=True,
+            )
+
+            return {
+                "ok": True,
+                "ignored": "bot_to_bot",
+            }
 
         # Evolution puede emitir primero una variante vacía/incompleta
         # y posteriormente el mismo msg_id con el contenido real.
