@@ -17,7 +17,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy import text
 
 from app.models import RequestLog, ProviderSetting, AppSetting, GroupPromotion, ApiClient, ApiCreditLog
-from app.services.evolution import send_group_text, send_text, send_document_base64, send_group_document_base64, send_reaction, find_recent_messages
+from app.services.evolution import send_group_text, send_text, send_document_base64, send_group_document_base64, send_reaction, find_recent_messages, _is_retryable_evolution_error
 from app.config import settings
 from app.utils.curp import provider_label_for_type, is_chain
 from app.services.provider3 import Provider3Client, decode_pdf_base64
@@ -2437,6 +2437,121 @@ def _enabled_providers(db) -> list[str]:
     return enabled
 
 
+
+def _failover_failed_key(request_id: int) -> str:
+    return f"provider_failover_failed:{request_id}"
+
+
+def _mark_provider_failed_for_request(
+    request_id: int,
+    provider_name: str,
+) -> None:
+    provider_name = (provider_name or "").strip().upper()
+
+    if not provider_name:
+        return
+
+    key = _failover_failed_key(request_id)
+
+    try:
+        redis_conn.sadd(
+            key,
+            provider_name,
+        )
+        redis_conn.expire(
+            key,
+            3600,
+        )
+
+        print(
+            "PROVIDER_FAILOVER_MARKED_FAILED =",
+            {
+                "request_id": request_id,
+                "provider_name": provider_name,
+            },
+            flush=True,
+        )
+
+    except Exception as exc:
+        print(
+            "PROVIDER_FAILOVER_MARK_FAILED_ERROR =",
+            {
+                "request_id": request_id,
+                "provider_name": provider_name,
+                "error": str(exc),
+            },
+            flush=True,
+        )
+
+
+def _failed_providers_for_request(
+    request_id: int,
+) -> set[str]:
+    key = _failover_failed_key(request_id)
+
+    try:
+        raw_values = redis_conn.smembers(key)
+
+        return {
+            (
+                value.decode(
+                    "utf-8",
+                    errors="ignore",
+                )
+                if isinstance(value, bytes)
+                else str(value)
+            )
+            .strip()
+            .upper()
+            for value in raw_values
+            if value
+        }
+
+    except Exception as exc:
+        print(
+            "PROVIDER_FAILOVER_READ_FAILED_ERROR =",
+            {
+                "request_id": request_id,
+                "error": str(exc),
+            },
+            flush=True,
+        )
+
+        return set()
+
+
+def _exclude_failed_providers(
+    request_id: int,
+    candidates,
+):
+    failed = _failed_providers_for_request(
+        request_id,
+    )
+
+    if not failed:
+        return list(candidates)
+
+    filtered = [
+        provider
+        for provider in candidates
+        if (provider or "").strip().upper()
+        not in failed
+    ]
+
+    print(
+        "PROVIDER_FAILOVER_ANTI_LOOP_FILTER =",
+        {
+            "request_id": request_id,
+            "failed": sorted(failed),
+            "before": list(candidates),
+            "after": filtered,
+        },
+        flush=True,
+    )
+
+    return filtered
+
+
 def _pick_provider14_overflow_fallback(db: Session, req) -> str | None:
     """
     Cuando E-BOT ya tiene una solicitud esperando, manda las nuevas
@@ -2444,6 +2559,11 @@ def _pick_provider14_overflow_fallback(db: Session, req) -> str | None:
     """
     enabled = sorted(_enabled_providers(db))
     candidates = [p for p in enabled if p != "PROVIDER14"]
+
+    candidates = _exclude_failed_providers(
+        req.id,
+        candidates,
+    )
 
     if not _is_provider4_eligible(req.curp, req.act_type):
         candidates = [
@@ -2503,6 +2623,11 @@ def _pick_provider15_timeout_fallback(db: Session, req) -> str | None:
     """
     enabled = sorted(_enabled_providers(db))
     candidates = [p for p in enabled if p != "PROVIDER15"]
+
+    candidates = _exclude_failed_providers(
+        req.id,
+        candidates,
+    )
 
     if not _is_provider4_eligible(req.curp, req.act_type):
         candidates = [
@@ -2770,6 +2895,16 @@ def _pick_provider_name(
 
     # GLOBAL_POOL => usa el pool normal del panel principal y SÍ cuenta
     enabled = sorted(_enabled_providers(db))
+
+    enabled = _exclude_failed_providers(
+        request_id,
+        enabled,
+    )
+
+    if not enabled:
+        raise RuntimeError(
+            "NO_PROVIDER_AFTER_FAILOVER_EXCLUSION"
+        )
 
     print("PICK_PROVIDER_ENABLED_RAW =", enabled, flush=True)
     print("PICK_PROVIDER_SOURCE_GROUP_ID =", repr(source_group_id), flush=True)
@@ -6378,6 +6513,31 @@ def process_request(request_id: int):
             and current_queue != SLOW_PROVIDER_QUEUE_NAME
         )
         
+        provider1_transient_fallback_marker = (
+            (req.error_message or "")
+            .strip()
+            .upper()
+            .startswith("PROVIDER1_FAILED_FALLBACK_TO_")
+        )
+
+        reuse_provider1_transient_fallback = (
+            provider1_transient_fallback_marker
+            and bool(existing_provider)
+            and existing_provider != "PROVIDER1"
+            and current_queue != SLOW_PROVIDER_QUEUE_NAME
+            and _provider_is_enabled(
+                db,
+                existing_provider,
+            )
+        )
+
+        provider15_wait_fallback_marker = (
+            (req.error_message or "")
+            .strip()
+            .upper()
+            .startswith("PROVIDER15_WAITING_FOR_FALLBACK:")
+        )
+
         reuse_existing_slow_provider = (
             current_queue == SLOW_PROVIDER_QUEUE_NAME
             and existing_provider in SLOW_PROVIDERS
@@ -6432,6 +6592,113 @@ def process_request(request_id: int):
                 flush=True,
             )
         
+        elif reuse_provider1_transient_fallback:
+            provider_name = existing_provider
+            provider_group_id = req.provider_group_id
+            text_to_provider = req.provider_message
+
+            print(
+                "PROVIDER1_TRANSIENT_FALLBACK_REUSING_PROVIDER =",
+                {
+                    "request_id": req.id,
+                    "provider_name": provider_name,
+                    "provider_group_id": provider_group_id,
+                    "queue": current_queue,
+                },
+                flush=True,
+            )
+
+        elif provider15_wait_fallback_marker:
+            fallback_provider = _pick_provider15_timeout_fallback(
+                db,
+                req,
+            )
+
+            if fallback_provider:
+                provider_name = fallback_provider
+                provider_group_id = _pick_provider_group(
+                    fallback_provider,
+                    req.curp,
+                    req.act_type,
+                    req.id,
+                )
+                text_to_provider = _build_provider_message(
+                    fallback_provider,
+                    req.curp,
+                    req.act_type,
+                )
+
+                req.provider_name = fallback_provider
+                req.provider_group_id = provider_group_id
+                req.provider_message = text_to_provider
+                req.status = "QUEUED"
+                req.error_message = (
+                    f"PROVIDER15_FAILED_FALLBACK_TO_"
+                    f"{fallback_provider}:RECOVERED_AFTER_WAITING"
+                )
+                req.updated_at = _utc_now_naive()
+                db.commit()
+
+                print(
+                    "PROVIDER15_WAITING_FALLBACK_FOUND =",
+                    {
+                        "request_id": req.id,
+                        "fallback_provider": fallback_provider,
+                        "provider_group_id": provider_group_id,
+                    },
+                    flush=True,
+                )
+
+            else:
+                marker_text = (
+                    (req.error_message or "")
+                    .strip()
+                    .upper()
+                )
+
+                try:
+                    wait_attempt = int(
+                        marker_text.rsplit(":", 1)[1]
+                    )
+                except Exception:
+                    wait_attempt = 1
+
+                if wait_attempt < 5:
+                    next_attempt = wait_attempt + 1
+
+                    req.provider_name = "PROVIDER15"
+                    req.provider_group_id = None
+                    req.provider_message = None
+                    req.status = "QUEUED"
+                    req.error_message = (
+                        f"PROVIDER15_WAITING_FOR_FALLBACK:"
+                        f"{next_attempt}"
+                    )
+                    req.updated_at = _utc_now_naive()
+                    db.commit()
+
+                    request_queue.enqueue_in(
+                        timedelta(seconds=20),
+                        process_request,
+                        req.id,
+                    )
+
+                    print(
+                        "PROVIDER15_WAITING_FALLBACK_REQUEUED =",
+                        {
+                            "request_id": req.id,
+                            "retry_number": next_attempt,
+                            "retry_in_seconds": 20,
+                        },
+                        flush=True,
+                    )
+
+                    return
+
+                raise RuntimeError(
+                    "PROVIDER15_NO_FALLBACK_AFTER_WAIT_RETRIES"
+                )
+
         elif reuse_existing_slow_provider:
             if existing_provider in SLOW_PROVIDERS and not _is_provider4_eligible(req.curp, req.act_type):
                 print("SLOW_QUEUE_LAZARO_NOT_ELIGIBLE_REQUEUE_NORMAL =", {
@@ -6766,8 +7033,15 @@ def process_request(request_id: int):
         
             send_ok = False
             last_err = None
-        
-            for attempt in range(3):
+            last_exc = None
+
+            outer_send_attempts = (
+                1
+                if provider_name == "PROVIDER1"
+                else 3
+            )
+
+            for attempt in range(outer_send_attempts):
                 try:
                     sender_instance = _provider_sender_instance(provider_name, req)
                     print("PROVIDER_SENDER_INSTANCE =", sender_instance, flush=True)
@@ -6797,6 +7071,7 @@ def process_request(request_id: int):
                     print("PROVIDER_SENT_MSG_ID =", provider_sent_msg_id, flush=True)
                     break
                 except Exception as e:
+                    last_exc = e
                     last_err = str(e)
                     print(f"PROVIDER_SEND_ATTEMPT_{attempt+1}_ERROR =", last_err, flush=True)
 
@@ -6852,7 +7127,7 @@ def process_request(request_id: int):
                         )
                         break
 
-                    if attempt < 2:
+                    if attempt < outer_send_attempts - 1:
                         time.sleep(5 * (attempt + 1))
         
             if send_ok:
@@ -6862,8 +7137,201 @@ def process_request(request_id: int):
             is_connection_closed = "CONNECTION CLOSED" in last_err_text.upper()
             
             retry_key = f"provider_send_retry:{req.id}"
+
+            if provider_name == "PROVIDER1":
+                provider1_status_code = getattr(
+                    getattr(last_exc, "response", None),
+                    "status_code",
+                    None,
+                )
+
+                provider1_is_transient = (
+                    _is_retryable_evolution_error(
+                        provider1_status_code,
+                        last_err_text,
+                        last_exc,
+                    )
+                )
+
+                provider1_global_fallback_allowed = (
+                    not _current_mode_is_personal(
+                        db,
+                        req.instance_name,
+                    )
+                )
+
+                if (
+                    provider1_is_transient
+                    and provider1_global_fallback_allowed
+                ):
+                    _mark_provider_failed_for_request(
+                        req.id,
+                        "PROVIDER1",
+                    )
+
+                    enabled_now = sorted(
+                        _enabled_providers(db)
+                    )
+
+                    candidates = [
+                        provider
+                        for provider in enabled_now
+                        if provider != "PROVIDER1"
+                    ]
+
+                    candidates = _exclude_failed_providers(
+                        req.id,
+                        candidates,
+                    )
+
+                    if not _is_provider4_eligible(
+                        req.curp,
+                        req.act_type,
+                    ):
+                        candidates = [
+                            provider
+                            for provider in candidates
+                            if provider not in (
+                                "PROVIDER4",
+                                "PROVIDER10",
+                                "PROVIDER11",
+                            )
+                        ]
+
+                    if (
+                        "PROVIDER6" in candidates
+                        and not _is_provider6_allowed_request(
+                            req.curp,
+                            req.act_type,
+                        )
+                    ):
+                        candidates = [
+                            provider
+                            for provider in candidates
+                            if provider != "PROVIDER6"
+                        ]
+
+                    if (
+                        "PROVIDER15" in candidates
+                        and not _is_provider15_allowed_request(
+                            req.curp,
+                            req.act_type,
+                        )
+                    ):
+                        candidates = [
+                            provider
+                            for provider in candidates
+                            if provider != "PROVIDER15"
+                        ]
+
+                    if PROVIDER4_TEST_GROUPS:
+                        if (
+                            not req.source_group_id
+                            or req.source_group_id
+                            not in PROVIDER4_TEST_GROUPS
+                        ):
+                            candidates = [
+                                provider
+                                for provider in candidates
+                                if provider != "PROVIDER4"
+                            ]
+
+                    if PROVIDER7_TEST_GROUPS:
+                        if (
+                            not req.source_group_id
+                            or req.source_group_id
+                            not in PROVIDER7_TEST_GROUPS
+                        ):
+                            candidates = [
+                                provider
+                                for provider in candidates
+                                if provider != "PROVIDER7"
+                            ]
+
+                    print(
+                        "PROVIDER1_TRANSIENT_FALLBACK_CANDIDATES =",
+                        {
+                            "request_id": req.id,
+                            "enabled": enabled_now,
+                            "candidates": candidates,
+                            "status_code": provider1_status_code,
+                        },
+                        flush=True,
+                    )
+
+                    if candidates:
+                        fallback_provider = (
+                            _pick_provider_by_weight(
+                                db,
+                                candidates,
+                            )
+                            or candidates[
+                                (req.id - 1) % len(candidates)
+                            ]
+                        )
+
+                        req.provider_name = fallback_provider
+                        req.provider_group_id = (
+                            _pick_provider_group(
+                                fallback_provider,
+                                req.curp,
+                                req.act_type,
+                                req.id,
+                            )
+                        )
+                        req.provider_message = (
+                            _build_provider_message(
+                                fallback_provider,
+                                req.curp,
+                                req.act_type,
+                            )
+                        )
+                        req.status = "QUEUED"
+                        req.error_message = (
+                            f"PROVIDER1_FAILED_FALLBACK_TO_"
+                            f"{fallback_provider}:"
+                            f"{last_err_text[:400]}"
+                        )
+                        req.updated_at = _utc_now_naive()
+                        db.commit()
+
+                        request_queue.enqueue_in(
+                            timedelta(seconds=3),
+                            process_request,
+                            req.id,
+                        )
+
+                        print(
+                            "PROVIDER1_TRANSIENT_FALLBACK_REQUEUED =",
+                            {
+                                "request_id": req.id,
+                                "failed_provider": "PROVIDER1",
+                                "fallback_provider": fallback_provider,
+                                "provider_group_id": req.provider_group_id,
+                                "delay_sec": 3,
+                                "status_code": provider1_status_code,
+                                "error": last_err_text[:300],
+                            },
+                            flush=True,
+                        )
+
+                        return
+
+                    print(
+                        "PROVIDER1_TRANSIENT_FALLBACK_NO_PROVIDER =",
+                        {
+                            "request_id": req.id,
+                            "status_code": provider1_status_code,
+                            "error": last_err_text[:300],
+                        },
+                        flush=True,
+                    )
+
             
-            if is_connection_closed:
+            if (
+                is_connection_closed
+                and provider_name != "PROVIDER14"
+            ):
                 try:
                     already_retried = redis_conn.get(retry_key)
             
@@ -7027,6 +7495,11 @@ def process_request(request_id: int):
         
                         raise
         
+                    _mark_provider_failed_for_request(
+                        req.id,
+                        "PROVIDER15",
+                    )
+
                     fallback_provider = (
                         _pick_provider15_timeout_fallback(
                             db,
@@ -7097,7 +7570,36 @@ def process_request(request_id: int):
                         },
                         flush=True,
                     )
-        
+
+                    req.provider_name = "PROVIDER15"
+                    req.provider_group_id = None
+                    req.provider_message = None
+                    req.status = "QUEUED"
+                    req.error_message = (
+                        "PROVIDER15_WAITING_FOR_FALLBACK:1"
+                    )
+                    req.updated_at = _utc_now_naive()
+                    db.commit()
+
+                    request_queue.enqueue_in(
+                        timedelta(seconds=20),
+                        process_request,
+                        req.id,
+                    )
+
+                    print(
+                        "PROVIDER15_WAITING_FALLBACK_REQUEUED =",
+                        {
+                            "request_id": req.id,
+                            "retry_number": 1,
+                            "retry_in_seconds": 20,
+                            "error": err[:300],
+                        },
+                        flush=True,
+                    )
+
+                    return
+
                 raise
 
             pdf_bytes = _require_pdf_bytes(
@@ -7544,6 +8046,11 @@ def process_request(request_id: int):
                         print("PERSONAL_MODE_NO_GLOBAL_FALLBACK =", req.id, flush=True)
                         raise
                 
+                    _mark_provider_failed_for_request(
+                        req.id,
+                        provider_name,
+                    )
+
                     whatsapp_fallbacks = [
                         p for p in enabled
                         if p in {
@@ -7561,6 +8068,11 @@ def process_request(request_id: int):
                         and not (p == "PROVIDER6" and not _is_provider6_allowed_request(req.curp, req.act_type))
                     ]
                 
+                    whatsapp_fallbacks = _exclude_failed_providers(
+                        req.id,
+                        whatsapp_fallbacks,
+                    )
+
                     if whatsapp_fallbacks:
                         fallback_provider = _pick_provider_by_weight(db, whatsapp_fallbacks) or whatsapp_fallbacks[0]
                 
@@ -7607,11 +8119,30 @@ def process_request(request_id: int):
                             except Exception as fallback_send_exc:
                                 fallback_send_err = str(fallback_send_exc)
 
-                                if "CONNECTION CLOSED" in fallback_send_err.upper():
+                                fallback_status_code = getattr(
+                                    getattr(fallback_send_exc, "response", None),
+                                    "status_code",
+                                    None,
+                                )
+
+                                fallback_is_transient = (
+                                    _is_retryable_evolution_error(
+                                        fallback_status_code,
+                                        fallback_send_err,
+                                        fallback_send_exc,
+                                    )
+                                )
+
+                                if fallback_is_transient:
+                                    _mark_provider_failed_for_request(
+                                        req.id,
+                                        fallback_provider,
+                                    )
+
                                     req.status = "QUEUED"
                                     req.error_message = (
                                         f"{provider_name}_FAILED_FALLBACK_TO_"
-                                        f"{fallback_provider}_SEND_RETRY_CONNECTION_CLOSED:"
+                                        f"{fallback_provider}_SEND_RETRY_TRANSIENT_EVOLUTION:"
                                         f"{p4_err[:300]}"
                                     )
                                     req.updated_at = _utc_now_naive()
@@ -7624,12 +8155,13 @@ def process_request(request_id: int):
                                     )
 
                                     print(
-                                        "LAZARO_FALLBACK_CONNECTION_CLOSED_REQUEUED =",
+                                        "LAZARO_FALLBACK_TRANSIENT_EVOLUTION_REQUEUED =",
                                         {
                                             "req_id": req.id,
                                             "failed_provider": provider_name,
                                             "fallback_provider": fallback_provider,
                                             "retry_in_seconds": 20,
+                                            "status_code": fallback_status_code,
                                             "error": fallback_send_err[:300],
                                         },
                                         flush=True,
