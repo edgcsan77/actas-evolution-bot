@@ -7598,12 +7598,46 @@ def process_request(request_id: int):
                         if fallback_provider == "PROVIDER14":
                             _send_provider14_request(req, db)
                         else:
-                            send_group_text(
-                                req.provider_group_id,
-                                req.provider_message,
-                                _provider_sender_instance(fallback_provider, req),
-                            )
-                
+                            try:
+                                send_group_text(
+                                    req.provider_group_id,
+                                    req.provider_message,
+                                    _provider_sender_instance(fallback_provider, req),
+                                )
+                            except Exception as fallback_send_exc:
+                                fallback_send_err = str(fallback_send_exc)
+
+                                if "CONNECTION CLOSED" in fallback_send_err.upper():
+                                    req.status = "QUEUED"
+                                    req.error_message = (
+                                        f"{provider_name}_FAILED_FALLBACK_TO_"
+                                        f"{fallback_provider}_SEND_RETRY_CONNECTION_CLOSED:"
+                                        f"{p4_err[:300]}"
+                                    )
+                                    req.updated_at = _utc_now_naive()
+                                    db.commit()
+
+                                    request_queue.enqueue_in(
+                                        timedelta(seconds=20),
+                                        process_request,
+                                        req.id,
+                                    )
+
+                                    print(
+                                        "LAZARO_FALLBACK_CONNECTION_CLOSED_REQUEUED =",
+                                        {
+                                            "req_id": req.id,
+                                            "failed_provider": provider_name,
+                                            "fallback_provider": fallback_provider,
+                                            "retry_in_seconds": 20,
+                                            "error": fallback_send_err[:300],
+                                        },
+                                        flush=True,
+                                    )
+                                    return
+
+                                raise
+
                         print(
                             "LAZARO_FALLBACK_SENT_TO_WHATSAPP_PROVIDER =",
                             {

@@ -18032,6 +18032,7 @@ def _provider_pdf_match_status_filter():
                 RequestLog.error_message.ilike("%Connection Closed%"),
                 RequestLog.error_message.ilike("%SEND_FAILED%"),
                 RequestLog.error_message.ilike("%sendMedia%"),
+                RequestLog.error_message.ilike("%Auto-cierre (>45 min) WHATSAPP cleanup%"),
             ),
         ),
     )
