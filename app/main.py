@@ -12635,10 +12635,22 @@ def panel_actas(
                     f'</option>'
                 )
 
-            provider_mode_label = BOT_PROVIDER_OPTIONS.get(
-                provider_mode,
-                provider_mode,
+            maya_private_hidden = (
+                _norm_instance(inst) == "docifybot8maya"
+                and provider_mode in {
+                    "PERSONAL:MAYAPROVIDER",
+                    "PERSONAL:MAYAPROVIDER_REYES",
+                    "PERSONAL:MAYAPROVIDER_HERNANDEZ",
+                }
             )
+
+            if maya_private_hidden:
+                provider_mode_label = "CONFIGURADO"
+            else:
+                provider_mode_label = BOT_PROVIDER_OPTIONS.get(
+                    provider_mode,
+                    provider_mode,
+                )
 
             bot_credit = _bot_credit_stats(
                 db,
@@ -12658,11 +12670,14 @@ def panel_actas(
                 inst
             )
 
-            status_badge = (
-                '<span class="badge badge-danger">BLOQUEADO</span>'
-                if bot_blocked
-                else '<span class="badge badge-success">ACTIVO</span>'
-            )
+            if maya_private_hidden:
+                status_badge = ""
+            else:
+                status_badge = (
+                    '<span class="badge badge-danger">BLOQUEADO</span>'
+                    if bot_blocked
+                    else '<span class="badge badge-success">ACTIVO</span>'
+                )
 
             request_total = int(
                 b.get("total_requests")
@@ -20250,6 +20265,19 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 message = nested_message
                 break
         
+        # =====================================================
+        # DESCARTE TEMPRANO DE EVENTOS VACIOS DE EVOLUTION
+        # =====================================================
+        # Los upsert sin contenido procesable se descartan aqui,
+        # antes de resolver JID, auditoria, bot-to-bot, dedupe o DB.
+        # No consumen dedupe porque Evolution puede enviar despues
+        # el mismo msg_id con contenido real.
+        if not _webhook_message_has_processable_content(message):
+            return {
+                "ok": True,
+                "ignored": "empty_or_incomplete_upsert",
+            }
+
         remote_jid = key.get("remoteJid", "")
         from_me = key.get("fromMe", False)
         participant = key.get("participant", "")
@@ -20338,27 +20366,6 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 "ok": True,
                 "ignored": "bot_to_bot",
             }
-
-        # Evolution puede emitir primero una variante vacía/incompleta
-        # y posteriormente el mismo msg_id con el contenido real.
-        # Una variante vacía NO debe consumir el deduplicador.
-        if not _webhook_message_has_processable_content(message):
-            print(
-                "WEBHOOK_EMPTY_OR_INCOMPLETE_UPSERT_IGNORED =",
-                {
-                    "instance_name": instance_name,
-                    "msg_id": msg_id,
-                    "remote_jid": remote_jid,
-                    "message_keys": message_keys,
-                },
-                flush=True,
-            )
-
-            return {
-                "ok": True,
-                "ignored": "empty_or_incomplete_upsert",
-                "msg_id": msg_id,
-            }
             
         # =========================
         # BLOQUEO DE BUCLE ENTRE BOTS
@@ -20374,6 +20381,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             "LA CURP PARECE INCOMPLETA O INCORRECTA",
             "NO SE DETECTO UNA CURP VALIDA",
             "LA CURP DEBE TENER EXACTAMENTE 18 CARACTERES",
+            "CURP INCORRECTA O INCOMPLETA",
+            "CADENA INCORRECTA O INCOMPLETA",
         ]
         
         if any(p in text_upper for p in BOT_WARNING_PHRASES):
@@ -22044,14 +22053,89 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
         if not terms and not is_admin_command:
             if problem:
+                bot_name = bot_label(instance_name, db)
+
+                # Quitar emoji/prefijo del label para usar formato uniforme.
+                bot_name = re.sub(
+                    r"^[^A-ZÁÉÍÓÚÜÑ0-9]+",
+                    "",
+                    bot_name or "",
+                    flags=re.IGNORECASE,
+                ).strip()
+
+                act_type = detect_act_type(text_body)
+
+                invalid_data = ""
+
+                candidates = re.findall(
+                    r"(?<![A-Z0-9])([A-Z0-9]{16,20})(?![A-Z0-9])",
+                    normalize_text(text_body),
+                )
+
+                if candidates:
+                    invalid_data = candidates[0]
+                else:
+                    invalid_data = normalize_text(text_body).strip()
+
+                if "CURP INCORRECTA O INCOMPLETA" in problem.upper():
+                    problem_msg = (
+                        f"🚀 {bot_name} ⚡\n"
+                        "¡Resultado de búsqueda!\n"
+                        f"_Tipo_: *{act_type}*\n"
+                        f"_Dato_: *{invalid_data}*\n"
+                        "_Estatus_: *CURP INCORRECTA O INCOMPLETA*\n"
+                        "*Verifica que tenga 18 caracteres y que no haya confusiones "
+                        "entre letras y números.*"
+                    )
+
+                elif (
+                    "CADENA" in problem.upper()
+                    or "IDENTIFICADOR ELECTRÓNICO" in problem.upper()
+                    or "IDENTIFICADOR ELECTRONICO" in problem.upper()
+                    or "CÓDIGO DE VERIFICACIÓN" in problem.upper()
+                    or "CODIGO DE VERIFICACION" in problem.upper()
+                    or "20 DÍGITOS" in problem.upper()
+                    or "20 DIGITOS" in problem.upper()
+                ):
+                    digit_runs = re.findall(
+                        r"\d{8,25}",
+                        normalize_text(text_body),
+                    )
+
+                    if digit_runs:
+                        invalid_data = max(
+                            digit_runs,
+                            key=len,
+                        )
+
+                    problem_msg = (
+                        f"🚀 {bot_name} ⚡\n"
+                        "¡Resultado de búsqueda!\n"
+                        f"_Tipo_: *{act_type}*\n"
+                        f"_Dato_: *{invalid_data}*\n"
+                        "_Estatus_: *CADENA INCORRECTA O INCOMPLETA*\n"
+                        "*Verifica que tenga exactamente 20 dígitos.*"
+                    )
+
+                else:
+                    problem_msg = problem
+
                 if source_group_id:
                     if should_send_extra_text(source_group_id):
-                        send_group_text(source_group_id, problem, instance_name=instance_name)
+                        send_group_text(
+                            source_group_id,
+                            problem_msg,
+                            instance_name=instance_name,
+                        )
                 else:
-                    send_text(requester_wa_id, problem, instance_name=instance_name)
-        
+                    send_text(
+                        requester_wa_id,
+                        problem_msg,
+                        instance_name=instance_name,
+                    )
+
                 return {"ok": True, "ignored": "invalid_identifier"}
-        
+
             # Conversación natural: no marcar como error
             return {"ok": True, "ignored": "natural_text"}
 
