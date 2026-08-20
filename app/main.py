@@ -11920,6 +11920,8 @@ def panel_actas(
                       </div>
                     </div>
 
+                    <div class="provider-row-break"></div>
+
                     <div class="provider-card">
                       <div class="provider-name">HERNANDEZ</div>
                       <div style="margin:6px 0;">
