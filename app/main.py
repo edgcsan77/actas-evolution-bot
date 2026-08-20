@@ -19325,83 +19325,60 @@ def _normalize_bot_owner_jid(value: str | None) -> str:
 
 
 def _evolution_bot_owner_ids() -> set[str]:
-    import time
+    """
+    IDs conocidos de las instancias Evolution.
 
-    now = time.time()
+    IMPORTANTE:
+    No consultar /instance/fetchInstances desde el webhook.
+    Ese endpoint agrega COUNT(*) de Message/Contact/Chat y,
+    con millones de mensajes, puede saturar Evolution/PostgreSQL.
+    """
 
-    cached = _EVOLUTION_BOT_OWNERS_CACHE.get("owners") or set()
-    expires_at = float(
-        _EVOLUTION_BOT_OWNERS_CACHE.get("expires_at") or 0
-    )
+    owner_jids = {
+        "5215656989954@s.whatsapp.net",
+        "5213351500669@s.whatsapp.net",
+        "5219981436282@s.whatsapp.net",
+        "5217442351977@s.whatsapp.net",
+        "5217441318920@s.whatsapp.net",
+        "5218139692987@s.whatsapp.net",
+        "5218120001044@s.whatsapp.net",
+        "5213318801543@s.whatsapp.net",
+        "5215549085126@s.whatsapp.net",
+        "5214434599649@s.whatsapp.net",
+        "5215615026084@s.whatsapp.net",
+        "5213322286699@s.whatsapp.net",
+        "5214811206450@s.whatsapp.net",
+        "5215639040557@s.whatsapp.net",
+        "5218441325864@s.whatsapp.net",
+        "5215612190627@s.whatsapp.net",
+        "5214531502386@s.whatsapp.net",
+        "5215540980670@s.whatsapp.net",
+        "5215651856823@s.whatsapp.net",
+        "5212289882382@s.whatsapp.net",
+        "5218994942426@s.whatsapp.net",
+        "5218143998744@s.whatsapp.net",
+        "5217711714872@s.whatsapp.net",
+        "5218331382218@s.whatsapp.net",
+        "5213221989268@s.whatsapp.net",
+        "5218116559351@s.whatsapp.net",
+        "19293424689@s.whatsapp.net",
+        "5217451367879@s.whatsapp.net",
+        "5215647748807@s.whatsapp.net",
+        "5217444255333@s.whatsapp.net",
+        "5215540636004@s.whatsapp.net",
+        "5213318229560@s.whatsapp.net",
+        "18574918514@s.whatsapp.net",
+        "5217712903134@s.whatsapp.net",
+        "5217581093388@s.whatsapp.net",
+    }
 
-    if cached and now < expires_at:
-        return cached
-
-    owners = set()
-
-    try:
-        status, payload = _evolution_get(
-            "/instance/fetchInstances",
-            timeout=5,
+    return {
+        normalized
+        for value in owner_jids
+        if (
+            normalized := _normalize_bot_owner_jid(value)
         )
-
-        if status == 200:
-            if isinstance(payload, list):
-                rows = payload
-            elif isinstance(payload, dict):
-                rows = (
-                    payload.get("instances")
-                    or payload.get("data")
-                    or payload.get("response")
-                    or []
-                )
-            else:
-                rows = []
-
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-
-                nested = row.get("instance")
-                if not isinstance(nested, dict):
-                    nested = {}
-
-                owner = (
-                    row.get("ownerJid")
-                    or row.get("owner")
-                    or row.get("number")
-                    or nested.get("ownerJid")
-                    or nested.get("owner")
-                    or nested.get("number")
-                    or ""
-                )
-
-                owner_norm = _normalize_bot_owner_jid(owner)
-
-                if owner_norm:
-                    owners.add(owner_norm)
-
-        if owners:
-            _EVOLUTION_BOT_OWNERS_CACHE["owners"] = owners
-
-    except Exception as exc:
-        print(
-            "BOT_OWNER_CACHE_REFRESH_ERROR =",
-            str(exc),
-            flush=True,
-        )
-
-    # Si Evolution falla temporalmente, conserva la última lista conocida.
-    final_owners = (
-        owners
-        or _EVOLUTION_BOT_OWNERS_CACHE.get("owners")
-        or set()
-    )
-
-    _EVOLUTION_BOT_OWNERS_CACHE["expires_at"] = now + 60
-
-    return set(final_owners)
-
+    }
 
 def _is_message_from_another_bot(
     requester_wa_id: str | None,

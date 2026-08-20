@@ -313,6 +313,19 @@ def recovery_cycle():
 
     authorized = _authorized_groups_by_instance()
 
+    # Recovery pesado de Evolution solo para instancias que
+    # reciben PDFs desde proveedores WhatsApp.
+    recovery_instances = {
+        "docifybot8",
+        "docifybot8maya",
+    }
+
+    authorized = {
+        instance_name: allowed_groups
+        for instance_name, allowed_groups in authorized.items()
+        if instance_name in recovery_instances
+    }
+
     for instance_name, allowed_groups in sorted(
         authorized.items()
     ):
