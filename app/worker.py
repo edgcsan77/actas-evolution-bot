@@ -3026,8 +3026,71 @@ def _is_folio_act(act_type: str | None) -> bool:
     )
 
 
+PROVIDER1_GROUP_ENABLED_KEYS = {
+    "NACIMIENTO_1": "PROVIDER1_GROUP_ENABLED:NACIMIENTO_1",
+    "NACIMIENTO_2": "PROVIDER1_GROUP_ENABLED:NACIMIENTO_2",
+    "NACIMIENTO_3": "PROVIDER1_GROUP_ENABLED:NACIMIENTO_3",
+    "NACIMIENTO_4": "PROVIDER1_GROUP_ENABLED:NACIMIENTO_4",
+    "ESPECIALES": "PROVIDER1_GROUP_ENABLED:ESPECIALES",
+    "FOLIADAS": "PROVIDER1_GROUP_ENABLED:FOLIADAS",
+    "CADENA": "PROVIDER1_GROUP_ENABLED:CADENA",
+}
+
+
+def _provider1_group_enabled_map() -> dict[str, bool]:
+    enabled = {
+        key: True
+        for key in PROVIDER1_GROUP_ENABLED_KEYS
+    }
+
+    db = None
+
+    try:
+        db = SessionLocal()
+
+        for slot, setting_key in PROVIDER1_GROUP_ENABLED_KEYS.items():
+            raw = _get_app_setting(
+                db,
+                setting_key,
+                "1",
+            )
+
+            enabled[slot] = (
+                str(raw or "")
+                .strip()
+                .lower()
+                in {
+                    "1",
+                    "true",
+                    "yes",
+                    "si",
+                    "sí",
+                    "on",
+                    "enabled",
+                }
+            )
+
+        return enabled
+
+    except Exception as exc:
+        print(
+            "PROVIDER1_GROUP_ENABLED_LOOKUP_ERROR =",
+            repr(exc),
+            flush=True,
+        )
+
+        # Fail-open para no romper ADMIN si falla DB.
+        return enabled
+
+    finally:
+        if db is not None:
+            db.close()
+
+
 def _pick_provider1_group(term: str | None, act_type: str, request_id: int) -> str:
     act_type_up = (act_type or "").upper().strip()
+
+    group_enabled = _provider1_group_enabled_map()
 
     nacimiento_group_1 = (settings.PROVIDER_GROUP_NACIMIENTO_1 or "").strip()
     nacimiento_group_2 = (settings.PROVIDER_GROUP_NACIMIENTO_2 or "").strip()
@@ -3047,26 +3110,26 @@ def _pick_provider1_group(term: str | None, act_type: str, request_id: int) -> s
     # Debe ir antes de FOLIADAS para que una cadena jamás termine
     # en el grupo de foliadas aunque el tipo tenga la palabra FOLIO.
     if is_cadena_req:
-        if not cadena_group:
+        if not cadena_group or not group_enabled["CADENA"]:
             raise RuntimeError("NO_CADENA_PROVIDER_GROUP_CONFIGURED")
         return cadena_group
 
     # 2. FOLIADAS -> grupo exclusivo de foliadas.
     if is_folio_req:
-        if not foliadas_group:
+        if not foliadas_group or not group_enabled["FOLIADAS"]:
             raise RuntimeError("NO_FOLIADAS_PROVIDER_GROUP_CONFIGURED")
         return foliadas_group
     # 3. NACIMIENTO POR CURP -> repartir entre grupos nacimiento 1, 2, 3 y 4
     if is_nacimiento and is_curp_req:
         nacimiento_groups = [
             group
-            for group in (
-                nacimiento_group_1,
-                nacimiento_group_2,
-                nacimiento_group_3,
-                nacimiento_group_4,
+            for slot, group in (
+                ("NACIMIENTO_1", nacimiento_group_1),
+                ("NACIMIENTO_2", nacimiento_group_2),
+                ("NACIMIENTO_3", nacimiento_group_3),
+                ("NACIMIENTO_4", nacimiento_group_4),
             )
-            if group
+            if group and group_enabled[slot]
         ]
 
         if not nacimiento_groups:
@@ -3076,12 +3139,18 @@ def _pick_provider1_group(term: str | None, act_type: str, request_id: int) -> s
 
     # 4. NACIMIENTO que NO sea CURP -> grupo 1 normal
     if is_nacimiento:
-        if not nacimiento_group_1:
+        if (
+            not nacimiento_group_1
+            or not group_enabled["NACIMIENTO_1"]
+        ):
             raise RuntimeError("NO_BIRTH_PROVIDER_GROUP_CONFIGURED")
         return nacimiento_group_1
 
     # 5. MAT / DEF / DIV normales -> grupo especiales
-    if not especiales_group:
+    if (
+        not especiales_group
+        or not group_enabled["ESPECIALES"]
+    ):
         raise RuntimeError("NO_SPECIAL_PROVIDER_GROUP_CONFIGURED")
     return especiales_group
 
@@ -6792,15 +6861,92 @@ def process_request(request_id: int):
                 req.act_type,
                 req.instance_name,
             )
-            provider_group_id = _pick_provider_group(provider_name, req.curp, req.act_type, req.id)
-            text_to_provider = _build_provider_message(provider_name, req.curp, req.act_type)
-        
+
+            try:
+                provider_group_id = _pick_provider_group(
+                    provider_name,
+                    req.curp,
+                    req.act_type,
+                    req.id,
+                )
+
+            except RuntimeError as pick_group_exc:
+                pick_group_err = str(pick_group_exc).strip().upper()
+
+                provider1_group_unavailable_errors = {
+                    "NO_CADENA_PROVIDER_GROUP_CONFIGURED",
+                    "NO_FOLIADAS_PROVIDER_GROUP_CONFIGURED",
+                    "NO_BIRTH_PROVIDER_GROUP_CONFIGURED",
+                    "NO_SPECIAL_PROVIDER_GROUP_CONFIGURED",
+                }
+
+                if (
+                    provider_name == "PROVIDER1"
+                    and pick_group_err in provider1_group_unavailable_errors
+                ):
+                    _mark_provider_failed_for_request(
+                        req.id,
+                        "PROVIDER1",
+                    )
+
+                    print(
+                        "PROVIDER1_GROUP_UNAVAILABLE_FAILOVER =",
+                        {
+                            "request_id": req.id,
+                            "curp": req.curp,
+                            "act_type": req.act_type,
+                            "reason": pick_group_err,
+                        },
+                        flush=True,
+                    )
+
+                    provider_name = _pick_provider_name(
+                        db,
+                        req.id,
+                        req.source_group_id,
+                        req.curp,
+                        req.act_type,
+                        req.instance_name,
+                    )
+
+                    if provider_name == "PROVIDER1":
+                        raise RuntimeError(
+                            "PROVIDER1_GROUP_UNAVAILABLE_NO_FALLBACK"
+                        )
+
+                    provider_group_id = _pick_provider_group(
+                        provider_name,
+                        req.curp,
+                        req.act_type,
+                        req.id,
+                    )
+
+                    print(
+                        "PROVIDER1_GROUP_UNAVAILABLE_FALLBACK_SELECTED =",
+                        {
+                            "request_id": req.id,
+                            "fallback_provider": provider_name,
+                            "provider_group_id": provider_group_id,
+                            "origin_error": pick_group_err,
+                        },
+                        flush=True,
+                    )
+
+                else:
+                    raise
+
+            text_to_provider = _build_provider_message(
+                provider_name,
+                req.curp,
+                req.act_type,
+            )
+
             req.provider_name = provider_name
             req.provider_group_id = provider_group_id
             req.provider_message = text_to_provider
             req.updated_at = _utc_now_naive()
             db.commit()
-        
+
         print("WORKER_PROVIDER_NAME =", provider_name, flush=True)
         print("WORKER_PROVIDER_GROUP_ID =", provider_group_id, flush=True)
         print("WORKER_TEXT_TO_PROVIDER =", text_to_provider, flush=True)

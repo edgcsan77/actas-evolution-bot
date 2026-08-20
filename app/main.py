@@ -10001,6 +10001,38 @@ def panel_actas(
             r.provider_name: float(r.weight or 0)
             for r in db.query(ProviderSetting).all()
         }
+
+        provider1_group_enabled = {}
+
+        for slot in (
+            "NACIMIENTO_1",
+            "NACIMIENTO_2",
+            "NACIMIENTO_3",
+            "NACIMIENTO_4",
+            "ESPECIALES",
+            "FOLIADAS",
+            "CADENA",
+        ):
+            raw = _get_app_setting(
+                db,
+                f"PROVIDER1_GROUP_ENABLED:{slot}",
+                "1",
+            )
+
+            provider1_group_enabled[slot] = (
+                str(raw or "")
+                .strip()
+                .lower()
+                in {
+                    "1",
+                    "true",
+                    "yes",
+                    "si",
+                    "sí",
+                    "on",
+                    "enabled",
+                }
+            )
         
         for name, st, cnt in by_provider_raw:
             name = name or "NO IDENTIFICADO"
@@ -11857,6 +11889,58 @@ def panel_actas(
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER1','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER1','off')">Desactivar</button>
                       </div>
+
+                      <div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(148,163,184,.35);">
+                        <div style="font-size:12px;font-weight:800;margin-bottom:8px;">
+                          Grupos ADMIN
+                        </div>
+
+                        <div style="display:grid;grid-template-columns:1fr auto;gap:6px 8px;font-size:11px;align-items:center;">
+
+                          <span>Nacimiento 1</span>
+                          <button class="btn {'btn-success' if provider1_group_enabled['NACIMIENTO_1'] else 'btn-danger'}"
+                            onclick="toggleProvider1Group('NACIMIENTO_1', {'false' if provider1_group_enabled['NACIMIENTO_1'] else 'true'})">
+                            {'🟢 Activo' if provider1_group_enabled['NACIMIENTO_1'] else '🔴 Inactivo'}
+                          </button>
+
+                          <span>Nacimiento 2</span>
+                          <button class="btn {'btn-success' if provider1_group_enabled['NACIMIENTO_2'] else 'btn-danger'}"
+                            onclick="toggleProvider1Group('NACIMIENTO_2', {'false' if provider1_group_enabled['NACIMIENTO_2'] else 'true'})">
+                            {'🟢 Activo' if provider1_group_enabled['NACIMIENTO_2'] else '🔴 Inactivo'}
+                          </button>
+
+                          <span>Nacimiento 3</span>
+                          <button class="btn {'btn-success' if provider1_group_enabled['NACIMIENTO_3'] else 'btn-danger'}"
+                            onclick="toggleProvider1Group('NACIMIENTO_3', {'false' if provider1_group_enabled['NACIMIENTO_3'] else 'true'})">
+                            {'🟢 Activo' if provider1_group_enabled['NACIMIENTO_3'] else '🔴 Inactivo'}
+                          </button>
+
+                          <span>Nacimiento 4</span>
+                          <button class="btn {'btn-success' if provider1_group_enabled['NACIMIENTO_4'] else 'btn-danger'}"
+                            onclick="toggleProvider1Group('NACIMIENTO_4', {'false' if provider1_group_enabled['NACIMIENTO_4'] else 'true'})">
+                            {'🟢 Activo' if provider1_group_enabled['NACIMIENTO_4'] else '🔴 Inactivo'}
+                          </button>
+
+                          <span>Especiales</span>
+                          <button class="btn {'btn-success' if provider1_group_enabled['ESPECIALES'] else 'btn-danger'}"
+                            onclick="toggleProvider1Group('ESPECIALES', {'false' if provider1_group_enabled['ESPECIALES'] else 'true'})">
+                            {'🟢 Activo' if provider1_group_enabled['ESPECIALES'] else '🔴 Inactivo'}
+                          </button>
+
+                          <span>Foliadas</span>
+                          <button class="btn {'btn-success' if provider1_group_enabled['FOLIADAS'] else 'btn-danger'}"
+                            onclick="toggleProvider1Group('FOLIADAS', {'false' if provider1_group_enabled['FOLIADAS'] else 'true'})">
+                            {'🟢 Activo' if provider1_group_enabled['FOLIADAS'] else '🔴 Inactivo'}
+                          </button>
+
+                          <span>Cadena</span>
+                          <button class="btn {'btn-success' if provider1_group_enabled['CADENA'] else 'btn-danger'}"
+                            onclick="toggleProvider1Group('CADENA', {'false' if provider1_group_enabled['CADENA'] else 'true'})">
+                            {'🟢 Activo' if provider1_group_enabled['CADENA'] else '🔴 Inactivo'}
+                          </button>
+
+                        </div>
+                      </div>
                     </div>
 
                     <div class="provider-card">
@@ -13562,6 +13646,28 @@ def panel_actas(
           }}
         }}
     
+        async function toggleProvider1Group(slot, enable) {{
+          const action = enable ? "on" : "off";
+          const token = new URLSearchParams(window.location.search).get("token") || "";
+          const url = `/panel/provider1/group/${{slot}}/${{action}}?token=${{encodeURIComponent(token)}}`;
+
+          try {{
+            const res = await fetch(url, {{
+              method: "POST"
+            }});
+
+            const data = await res.json();
+
+            if (data.ok) {{
+              location.reload();
+            }} else {{
+              alert(data.error || "No se pudo cambiar el grupo ADMIN");
+            }}
+          }} catch (e) {{
+            alert("No se pudo conectar con el servidor");
+          }}
+        }}
+
         async function refreshSID() {{
           const sid = prompt("Pega el nuevo PHPSESSID");
           if (!sid) return;
@@ -15493,6 +15599,62 @@ def update_provider7_credentials(
     return {
         "ok": True,
         "message": "Credenciales de Provider 7 actualizadas",
+    }
+
+
+@app.post("/panel/provider1/group/{slot}/{action}")
+def panel_provider1_group_toggle(
+    slot: str,
+    action: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not _is_valid_admin_panel_token(request):
+        return {
+            "ok": False,
+            "error": "No autorizado",
+        }
+
+    slot = (slot or "").strip().upper()
+    action = (action or "").strip().lower()
+
+    allowed_slots = {
+        "NACIMIENTO_1",
+        "NACIMIENTO_2",
+        "NACIMIENTO_3",
+        "NACIMIENTO_4",
+        "ESPECIALES",
+        "FOLIADAS",
+        "CADENA",
+    }
+
+    if slot not in allowed_slots:
+        return {
+            "ok": False,
+            "error": "Grupo ADMIN inválido",
+        }
+
+    if action not in {"on", "off"}:
+        return {
+            "ok": False,
+            "error": "Acción inválida",
+        }
+
+    enabled = action == "on"
+
+    _set_app_setting(
+        db,
+        f"PROVIDER1_GROUP_ENABLED:{slot}",
+        "1" if enabled else "0",
+    )
+
+    _clear_panel_cache()
+
+    return {
+        "ok": True,
+        "provider": "PROVIDER1",
+        "slot": slot,
+        "enabled": enabled,
     }
 
 
