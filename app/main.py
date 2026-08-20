@@ -74,6 +74,8 @@ from app.services.evolution import (
     send_document,
     send_group_document,
     send_group_text,
+    send_text_ack_fast,
+    send_group_text_ack_fast,
     send_document_base64,
     send_group_document_base64,
     get_media_base64,
@@ -22861,35 +22863,28 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     else None
                 )
 
-                ack_retry = Retry(
-                    max=3,
-                    interval=[2, 8, 20],
-                )
-
                 if source_group_id:
                     ack_queue.enqueue(
-                        send_group_text,
+                        send_group_text_ack_fast,
                         source_group_id,
                         ack_msg,
                         instance_name=instance_name,
                         job_id=ack_job_id,
-                        retry=ack_retry,
                         result_ttl=300,
                         failure_ttl=3600,
-                        job_timeout=180,
+                        job_timeout=15,
                     )
 
                 else:
                     ack_queue.enqueue(
-                        send_text,
+                        send_text_ack_fast,
                         requester_wa_id,
                         ack_msg,
                         instance_name=instance_name,
                         job_id=ack_job_id,
-                        retry=ack_retry,
                         result_ttl=300,
                         failure_ttl=3600,
-                        job_timeout=180,
+                        job_timeout=15,
                     )
 
                 print(

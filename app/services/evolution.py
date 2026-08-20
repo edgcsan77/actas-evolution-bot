@@ -128,6 +128,7 @@ def _post_send_text_with_retries(
     *,
     label: str,
     max_attempts: int = 5,
+    timeout=(5, 35),
 ):
     last_error = None
     delays = [2, 4, 8, 15]
@@ -141,11 +142,20 @@ def _post_send_text_with_retries(
         try:
             print(f"{label}_ATTEMPT =", attempt, flush=True)
 
+            request_started = time.monotonic()
+
             resp = requests.post(
                 url,
                 headers=_headers(),
                 json=payload,
-                timeout=(5, 35),
+                timeout=timeout,
+            )
+
+            request_elapsed = time.monotonic() - request_started
+            print(
+                f"{label}_HTTP_SECONDS =",
+                round(request_elapsed, 3),
+                flush=True,
             )
 
             body_text = resp.text or ""
@@ -367,6 +377,45 @@ def send_group_text(group_jid: str, text: str, instance_name: str = None):
         payload,
         label="SEND_GROUP_TEXT",
         max_attempts=5,
+    )
+
+
+def send_text_ack_fast(number: str, text: str, instance_name: str = None):
+    instance = instance_name or settings.EVOLUTION_INSTANCE
+    url = f"{settings.EVOLUTION_BASE_URL}/message/sendText/{instance}"
+
+    payload = {
+        "number": _normalize_number(number),
+        "text": (text or "").strip(),
+    }
+
+    return _post_send_text_with_retries(
+        url,
+        payload,
+        label="SEND_ACK_FAST",
+        max_attempts=1,
+        timeout=(2.5, 8),
+    )
+
+
+def send_group_text_ack_fast(group_jid: str, text: str, instance_name: str = None):
+    if _is_internal_api_group(group_jid):
+        return {"ok": True, "skipped": "internal_api_group"}
+
+    instance = instance_name or settings.EVOLUTION_INSTANCE
+    url = f"{settings.EVOLUTION_BASE_URL}/message/sendText/{instance}"
+
+    payload = {
+        "number": _normalize_number(group_jid),
+        "text": (text or "").strip(),
+    }
+
+    return _post_send_text_with_retries(
+        url,
+        payload,
+        label="SEND_ACK_FAST",
+        max_attempts=1,
+        timeout=(2.5, 8),
     )
 
 
