@@ -225,7 +225,8 @@ def _candidate(record, allowed_groups):
     if not isinstance(message, dict):
         return False
 
-    # Recovery solo para mensajes con texto procesable.
+    # Recovery para mensajes procesables por el webhook:
+    # texto O documentos/PDF de proveedores.
     has_text = bool(
         (message.get("conversation") or "").strip()
         or
@@ -238,7 +239,12 @@ def _candidate(record, allowed_groups):
         ).strip()
     )
 
-    if not has_text:
+    has_document = isinstance(
+        message.get("documentMessage"),
+        dict,
+    )
+
+    if not (has_text or has_document):
         return False
 
     if _msg_seen(msg_id):
