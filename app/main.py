@@ -424,9 +424,11 @@ def _evolution_get(path: str, timeout: int = 8):
 
 def _evolution_instance_state(instance_name: str) -> dict:
     """
-    Estado de Evolution con cache corto para acelerar panel principal y mini panel.
-    No depende de update_evolution_state_cache.py.
-    Si no hay cache, consulta directo al Evolution nuevo y guarda por 25 segundos.
+    Estado de Evolution SOLO desde cache Redis.
+
+    El panel principal y mini panel nunca deben consultar
+    /instance/connectionState directamente durante una recarga.
+    El cache se mantiene en segundo plano.
     """
     inst = (instance_name or "").strip()
 
@@ -438,355 +440,19 @@ def _evolution_instance_state(instance_name: str) -> dict:
         }
 
     cache_key = f"panel:evolution_state:{inst}"
-
     cached = _cache_get_json(cache_key)
+
     if isinstance(cached, dict) and cached.get("state"):
         cached["cached"] = True
         return cached
 
-    try:
-        url = f"{EVOLUTION_BASE_URL}/instance/connectionState/{inst}"
-
-        r = requests.get(
-            url,
-            headers={"apikey": EVOLUTION_APIKEY},
-            timeout=2.5,
-        )
-
-        try:
-            data = r.json()
-        except Exception:
-            data = {"raw": (r.text or "")[:300]}
-
-        state = "unknown"
-
-        if isinstance(data, dict):
-            state = (
-                data.get("instance", {}).get("state")
-                or data.get("state")
-                or data.get("connectionState")
-                or data.get("status")
-                or "unknown"
-            )
-
-        result = {
-            "ok": r.status_code < 400,
-            "state": str(state or "unknown").strip().lower(),
-            "direct": True,
-        }
-
-        _cache_set_json(cache_key, result, ttl=25)
-        return result
-
-    except Exception as e:
-        print("EVOLUTION_STATE_ERROR =", inst, repr(e), flush=True)
-
-        result = {
-            "ok": False,
-            "state": "unknown",
-            "error": str(e),
-            "direct": True,
-        }
-
-        _cache_set_json(cache_key, result, ttl=8)
-        return result
-
-    
-def _extract_qr_from_evolution_payload(payload) -> str:
-    """
-    Extrae QR/base64 aunque Evolution lo mande con estructura distinta.
-    Soporta:
-    - {"base64": "..."}
-    - {"qrcode": {"base64": "..."}}
-    - {"qrcode": "..."}
-    - {"qr": "..."}
-    - {"qrCode": "..."}
-    - {"code": "..."}
-    - {"instance": {"qrcode": "..."}}
-    - listas con un dict adentro
-    """
-    if isinstance(payload, list):
-        for item in payload:
-            qr = _extract_qr_from_evolution_payload(item)
-            if qr:
-                return qr
-        return ""
-
-    if not isinstance(payload, dict):
-        return ""
-
-    candidates = []
-
-    candidates.extend([
-        payload.get("base64"),
-        payload.get("qr"),
-        payload.get("qrCode"),
-        payload.get("code"),
-        payload.get("pairingCode"),
-    ])
-
-    qrcode = payload.get("qrcode")
-    if isinstance(qrcode, dict):
-        candidates.extend([
-            qrcode.get("base64"),
-            qrcode.get("code"),
-            qrcode.get("qr"),
-            qrcode.get("qrCode"),
-        ])
-    elif isinstance(qrcode, str):
-        candidates.append(qrcode)
-
-    instance = payload.get("instance")
-    if isinstance(instance, dict):
-        candidates.extend([
-            instance.get("qrcode"),
-            instance.get("qr"),
-            instance.get("qrCode"),
-            instance.get("base64"),
-        ])
-
-    for value in candidates:
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-
-    return ""
-
-
-def _evolution_set_webhook(instance_name: str) -> dict:
-    """
-    Configura o restaura el webhook de una instancia de Evolution.
-    Se utiliza al crear una instancia y al solicitar Reconectar / QR.
-    """
-    inst = (instance_name or "").strip()
-
-    if not inst:
-        return {
-            "ok": False,
-            "error": "EMPTY_INSTANCE",
-        }
-
-    webhook_url = f"{EVOLUTION_BASE_URL}/webhook/set/{inst}"
-
-    try:
-        response = requests.post(
-            webhook_url,
-            headers={
-                "apikey": EVOLUTION_APIKEY,
-                "Content-Type": "application/json",
-            },
-            json={
-                "webhook": {
-                    "url": "http://187.127.248.94:8000/webhook/evolution",
-                    "enabled": True,
-                    "webhook_by_events": False,
-                    "events": [
-                        "MESSAGES_UPSERT",
-                    ],
-                }
-            },
-            timeout=30,
-        )
-
-        try:
-            data = response.json()
-        except Exception:
-            data = {
-                "raw": (response.text or "")[:500],
-            }
-
-        print(
-            "SET_EVOLUTION_WEBHOOK =",
-            {
-                "instance_name": inst,
-                "status_code": response.status_code,
-                "response": data,
-            },
-            flush=True,
-        )
-
-        return {
-            "ok": response.status_code in (200, 201),
-            "status_code": response.status_code,
-            "data": data,
-        }
-
-    except Exception as exc:
-        print(
-            "SET_EVOLUTION_WEBHOOK_ERROR =",
-            {
-                "instance_name": inst,
-                "error": repr(exc),
-            },
-            flush=True,
-        )
-
-        return {
-            "ok": False,
-            "error": str(exc),
-        }
-
-
-def _evolution_create_instance_if_needed(instance_name: str) -> dict:
-    """
-    Crea/recrea la instancia en Evolution si connect responde count:0
-    o si la instancia no existe realmente en Evolution.
-    """
-    url = f"{EVOLUTION_BASE_URL}/instance/create"
-
-    r = requests.post(
-        url,
-        headers={
-            "apikey": EVOLUTION_APIKEY,
-            "Content-Type": "application/json",
-        },
-        json={
-            "instanceName": instance_name,
-            "qrcode": True,
-            "integration": "WHATSAPP-BAILEYS",
-        },
-        timeout=30,
-    )
-
-    try:
-        data = r.json()
-    except Exception:
-        data = {"raw": r.text}
-
-    print(
-        "EVOLUTION_CREATE_FOR_QR =",
-        instance_name,
-        r.status_code,
-        data,
-        flush=True,
-    )
-
     return {
-        "ok": r.status_code in (200, 201, 403, 409),
-        "status_code": r.status_code,
-        "data": data,
+        "ok": False,
+        "state": "unknown",
+        "cached": False,
+        "error": "state_cache_missing",
     }
 
-
-def _evolution_connect_qr(instance_name: str) -> dict:
-    inst = (instance_name or "").strip()
-
-    if not inst:
-        return {
-            "ok": False,
-            "error": "EMPTY_INSTANCE",
-        }
-
-    def _connect_once() -> dict:
-        url = f"{EVOLUTION_BASE_URL}/instance/connect/{inst}"
-
-        r = requests.get(
-            url,
-            headers={"apikey": EVOLUTION_APIKEY},
-            timeout=20,
-        )
-
-        try:
-            data = r.json()
-        except Exception:
-            data = {"raw": r.text}
-
-        qr = _extract_qr_from_evolution_payload(data)
-
-        print(
-            "EVOLUTION_QR_DEBUG =",
-            inst,
-            r.status_code,
-            data,
-            "qr_found=",
-            bool(qr),
-            flush=True,
-        )
-
-        return {
-            "http_ok": r.status_code < 400,
-            "status_code": r.status_code,
-            "data": data,
-            "qr": qr,
-        }
-
-    try:
-        webhook_before_connect = _evolution_set_webhook(inst)
-        first = _connect_once()
-
-        # Caso exacto de tu pantalla: Evolution responde {"count": 0}
-        # Tu código antes lo trataba como ok, pero realmente NO trae QR.
-        first_data = first.get("data") or {}
-        first_qr = first.get("qr") or ""
-
-        no_qr = not first_qr
-        count_zero = isinstance(first_data, dict) and int(first_data.get("count") or 0) == 0
-
-        if no_qr and count_zero:
-            created = _evolution_create_instance_if_needed(inst)
-
-            if not created.get("ok"):
-                return {
-                    "ok": False,
-                    "error": "EVOLUTION_CREATE_FAILED_BEFORE_QR",
-                    "create_status_code": created.get("status_code"),
-                    "create_response": created.get("data"),
-                    "connect_response": first_data,
-                }
-
-            webhook_after_create = _evolution_set_webhook(inst)
-
-            if not webhook_after_create.get("ok"):
-                return {
-                    "ok": False,
-                    "error": "EVOLUTION_WEBHOOK_FAILED_AFTER_CREATE",
-                    "webhook_response": webhook_after_create,
-                    "create_response": created.get("data"),
-                }
-
-            time.sleep(1.5)
-            second = _connect_once()
-
-            if second.get("qr"):
-                return {
-                    "ok": True,
-                    "status_code": second.get("status_code"),
-                    "qr": second.get("qr"),
-                    "qr_image": second.get("qr"),
-                    "data": second.get("data"),
-                    "created_before_qr": True,
-                }
-
-            return {
-                "ok": False,
-                "error": "EVOLUTION_NO_QR_AFTER_CREATE",
-                "connect_response": second.get("data"),
-                "create_response": created.get("data"),
-            }
-
-        if first_qr:
-            return {
-                "ok": True,
-                "status_code": first.get("status_code"),
-                "qr": first_qr,
-                "qr_image": first_qr,
-                "data": first.get("data"),
-                "created_before_qr": False,
-            }
-
-        return {
-            "ok": False,
-            "error": "EVOLUTION_NO_QR_RETURNED",
-            "status_code": first.get("status_code"),
-            "data": first_data,
-        }
-
-    except Exception as e:
-        print("EVOLUTION_QR_ERROR =", inst, repr(e), flush=True)
-        return {
-            "ok": False,
-            "error": str(e),
-        }
-        
 
 def _bot_status_rows_uncached(db: Session) -> list[dict]:
     static_bots = set(BOT_LABELS.keys()) | set(BOT_PANEL_TOKENS.values())
@@ -3791,6 +3457,17 @@ def _clear_panel_cache():
         batch = []
 
         for key in redis_conn.scan_iter(match="panel:*", count=200):
+            key_text = (
+                key.decode("utf-8", errors="ignore")
+                if isinstance(key, bytes)
+                else str(key)
+            )
+
+            # Los botones del panel NO deben borrar el estado de Evolution.
+            # Ese cache es independiente de ventas/grupos/promociones.
+            if key_text.startswith("panel:evolution_state:"):
+                continue
+
             batch.append(key)
 
             if len(batch) >= 500:
