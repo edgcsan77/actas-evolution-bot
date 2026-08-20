@@ -170,15 +170,11 @@ DEFAULT_BOT_PROVIDER_MODE = {
 BOT_PROVIDER_OPTIONS = {
     "GLOBAL_POOL": "Automático",
 
-    "GLOBAL:PROVIDER6": "ESCALANTE",
     "GLOBAL:PROVIDER1": "ADMIN",
-    "GLOBAL:PROVIDER5": "LUIS",
-    "GLOBAL:PROVIDER12": "VILLAFUERTE",
-    "GLOBAL:PROVIDER13": "RL",
+    "GLOBAL:PROVIDER5": "HERNANDEZ",
     
     "GLOBAL:PROVIDER14": "E-BOT",
     "GLOBAL:PROVIDER15": "E-WEB",
-    "GLOBAL:PROVIDER9": "EMILIANO",
     
     "GLOBAL:PROVIDER4": "LAZARO WEB 1",
     "GLOBAL:PROVIDER10": "LAZARO WEB 2",
@@ -11854,25 +11850,6 @@ def panel_actas(
                   <div class="provider-grid">
 
                     <div class="provider-card">
-                      <div class="provider-name">ESCALANTE</div>
-                      <div style="margin:6px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
-                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
-                          <div style="display:flex;align-items:center;gap:6px;">
-                            <input id="weight_PROVIDER6" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER6', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
-                            <span style="font-size:12px;opacity:.7;">nivel</span>
-                          </div>
-                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER6')">Aplicar</button>
-                        </div>
-                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
-                      </div>
-                      <div class="provider-actions">
-                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER6','on')">Activar</button>
-                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER6','off')">Desactivar</button>
-                      </div>
-                    </div>
-
-                    <div class="provider-card">
                       <div class="provider-name">ADMIN</div>
                       <div style="margin:6px 0;">
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
@@ -11944,7 +11921,7 @@ def panel_actas(
                     </div>
 
                     <div class="provider-card">
-                      <div class="provider-name">LUIS</div>
+                      <div class="provider-name">HERNANDEZ</div>
                       <div style="margin:6px 0;">
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
@@ -11959,76 +11936,6 @@ def panel_actas(
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER5','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER5','off')">Desactivar</button>
-                      </div>
-                    </div>
-
-                    <div class="provider-card">
-                      <div class="provider-name">VILLAFUERTE</div>
-                      <div style="margin:6px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
-                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
-                          <div style="display:flex;align-items:center;gap:6px;">
-                            <input id="weight_PROVIDER12" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER12', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
-                            <span style="font-size:12px;opacity:.7;">nivel</span>
-                          </div>
-                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER12')">Aplicar</button>
-                        </div>
-                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
-                      </div>
-                      <div class="provider-actions">
-                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER12','on')">Activar</button>
-                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER12','off')">Desactivar</button>
-                      </div>
-                    </div>
-
-                    <div class="provider-card">
-                      <div class="provider-name">RL</div>
-                    
-                      <div style="margin:6px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
-                          Prioridad de uso
-                        </div>
-                    
-                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
-                          <div style="display:flex;align-items:center;gap:6px;">
-                            <input
-                              id="weight_PROVIDER13"
-                              type="number"
-                              min="0"
-                              step="0.1"
-                              value="{provider_weight_map.get('PROVIDER13', 0)}"
-                              style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;"
-                            >
-                            <span style="font-size:12px;opacity:.7;">nivel</span>
-                          </div>
-                    
-                          <button
-                            class="btn btn-primary"
-                            onclick="saveProviderWeight('PROVIDER13')"
-                          >
-                            Aplicar
-                          </button>
-                        </div>
-                    
-                        <div style="font-size:11px;opacity:.6;margin-top:4px;">
-                          Más alto = este proveedor se usa más seguido
-                        </div>
-                      </div>
-                    
-                      <div class="provider-actions">
-                        <button
-                          class="btn btn-success"
-                          onclick="toggleProvider('PROVIDER13','on')"
-                        >
-                          Activar
-                        </button>
-                    
-                        <button
-                          class="btn btn-danger"
-                          onclick="toggleProvider('PROVIDER13','off')"
-                        >
-                          Desactivar
-                        </button>
                       </div>
                     </div>
 
@@ -12135,25 +12042,6 @@ def panel_actas(
                         >
                           Desactivar
                         </button>
-                      </div>
-                    </div>
-
-                    <div class="provider-card">
-                      <div class="provider-name">EMILIANO</div>
-                      <div style="margin:6px 0;">
-                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
-                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
-                          <div style="display:flex;align-items:center;gap:6px;">
-                            <input id="weight_PROVIDER9" type="number" min="0" step="0.1" value="{provider_weight_map.get('PROVIDER9', 0)}" style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;">
-                            <span style="font-size:12px;opacity:.7;">nivel</span>
-                          </div>
-                          <button class="btn btn-primary" onclick="saveProviderWeight('PROVIDER9')">Aplicar</button>
-                        </div>
-                        <div style="font-size:11px;opacity:.6;margin-top:4px;">Más alto = este proveedor se usa más seguido</div>
-                      </div>
-                      <div class="provider-actions">
-                        <button class="btn btn-success" onclick="toggleProvider('PROVIDER9','on')">Activar</button>
-                        <button class="btn btn-danger" onclick="toggleProvider('PROVIDER9','off')">Desactivar</button>
                       </div>
                     </div>
 
@@ -19399,17 +19287,13 @@ def _providers_status_text(db: Session) -> str:
         )
 
     text = (
-        f"ESCALANTE:      {s6}{provider6_extra}\n"
-        f"ADMIN:          {s1}{provider1_extra}\n"
-        f"LUIS:           {s5}{provider5_extra}\n"
-        f"VILLAFUERTE:    {s12}{provider12_extra}\n"
-        f"RL:             {s13}{provider13_extra}\n"
-        f"E-BOT:          {s14}{provider14_extra}\n"
-        f"E-WEB:          {s15}{provider15_extra}\n"
-        f"EMILIANO:       {s9}{provider9_extra}\n"
-        f"LAZARO 1:       {s4}{provider4_extra}\n"
-        f"LAZARO 2:       {s10}{provider10_extra}\n"
-        f"LAZARO 3:       {s11}{provider11_extra}"
+        f"ADMIN:          {s1}\n"
+        f"HERNANDEZ:      {s5}\n"
+        f"E-BOT:          {s14}\n"
+        f"E-WEB:          {s15}\n"
+        f"LAZARO 1:       {s4}\n"
+        f"LAZARO 2:       {s10}\n"
+        f"LAZARO 3:       {s11}"
     )
 
     return text
