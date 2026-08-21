@@ -1853,7 +1853,15 @@ def _require_pdf_bytes(result, provider_name: str, req) -> bytes:
     return pdf_bytes
 
 
-def _send_pdf_base64_to_client_once(req, safe_media_b64: str, filename: str, caption_text: str, instance: str):
+def _send_pdf_base64_to_client_once(
+    req,
+    safe_media_b64: str,
+    filename: str,
+    caption_text: str,
+    instance: str,
+    *,
+    max_attempts: int = 4,
+):
     if req.source_group_id:
         return send_group_document_base64(
             req.source_group_id,
@@ -1861,6 +1869,7 @@ def _send_pdf_base64_to_client_once(req, safe_media_b64: str, filename: str, cap
             filename=filename,
             caption=caption_text,
             instance_name=instance,
+            max_attempts=max_attempts,
         )
 
     return send_document_base64(
@@ -1869,6 +1878,7 @@ def _send_pdf_base64_to_client_once(req, safe_media_b64: str, filename: str, cap
         filename=filename,
         caption=caption_text,
         instance_name=instance,
+        max_attempts=max_attempts,
     )
 
 
@@ -2102,6 +2112,7 @@ def retry_pdf_delivery(
             filename,
             caption_text,
             instance,
+            max_attempts=1,
         )
 
         # Recargar y bloquear la fila real antes de marcar DONE.

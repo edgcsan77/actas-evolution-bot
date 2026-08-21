@@ -639,7 +639,7 @@ def get_media_base64(
     )
 
 
-def send_document_base64(number: str, media_b64: str, filename: str = "acta.pdf", caption: str = "", instance_name: str = None):
+def send_document_base64(number: str, media_b64: str, filename: str = "acta.pdf", caption: str = "", instance_name: str = None, max_attempts: int = 4):
     instance = instance_name or settings.EVOLUTION_INSTANCE
     url = f"{settings.EVOLUTION_BASE_URL}/message/sendMedia/{instance}"
 
@@ -667,11 +667,11 @@ def send_document_base64(number: str, media_b64: str, filename: str = "acta.pdf"
         url,
         payload,
         label="SEND_DOCUMENT_BASE64",
-        max_attempts=4,
+        max_attempts=max_attempts,
     )
 
 
-def send_group_document_base64(group_jid: str, media_b64: str, filename: str = "acta.pdf", caption: str = "", instance_name: str = None):
+def send_group_document_base64(group_jid: str, media_b64: str, filename: str = "acta.pdf", caption: str = "", instance_name: str = None, max_attempts: int = 4):
     if _is_internal_api_group(group_jid):
         print("SEND_GROUP_DOCUMENT_BASE64_SKIPPED_INTERNAL_API_GROUP =", group_jid, flush=True)
         return {"ok": True, "skipped": "internal_api_group"}
@@ -703,7 +703,7 @@ def send_group_document_base64(group_jid: str, media_b64: str, filename: str = "
         url,
         payload,
         label="SEND_GROUP_DOCUMENT_BASE64",
-        max_attempts=4,
+        max_attempts=max_attempts,
     )
 
 
