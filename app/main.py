@@ -52,6 +52,7 @@ from app.worker import (
     _expected_act_type_group,
     retry_pdf_delivery,
     retry_no_record_notification,
+    _enqueue_pdf_delivery_now,
 )
 from app.services.provider3 import Provider3Client
 from app.services.provider4 import Provider4Client
@@ -21443,80 +21444,238 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             filename=filename or f"{open_req.curp}.pdf",
                             origin=f"provider_whatsapp_before_delivery:{open_req.provider_name or ''}",
                         )
+
                         db.commit()
+
                         print("R2_SAVE_BEFORE_DELIVERY_OK =", {
                             "req_id": getattr(open_req, "id", None),
                             "provider_name": getattr(open_req, "provider_name", None),
                             "filename": filename or f"{open_req.curp}.pdf",
-                            "pdf_url": getattr(open_req, "pdf_url", None),
+                            "pdf_storage_key": getattr(
+                                open_req,
+                                "pdf_storage_key",
+                                None,
+                            ),
                         }, flush=True)
-                
+
                     except Exception as r2_exc:
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
+
                         print("R2_SAVE_BEFORE_DELIVERY_ERROR =", {
                             "req_id": getattr(open_req, "id", None),
                             "provider_name": getattr(open_req, "provider_name", None),
                             "filename": filename,
                             "error": str(r2_exc),
                         }, flush=True)
-                
-                    _deliver_pdf_result(
-                        open_req,
-                        safe_media_b64,
-                        filename=filename or f"{open_req.curp}.pdf",
-                    )
-                    print("T_DELIVER_PDF_RESULT =", round(time.perf_counter() - t4, 3), flush=True)
-                
+
+                        raise
+
+                    # API interna conserva exactamente su flujo:
+                    # almacenar resultado y NO enviar WhatsApp.
+                    if getattr(open_req, "api_client_id", None):
+                        _deliver_pdf_result(
+                            open_req,
+                            safe_media_b64,
+                            filename=filename or f"{open_req.curp}.pdf",
+                        )
+
+                        print(
+                            "T_DELIVER_PDF_RESULT =",
+                            round(
+                                time.perf_counter() - t4,
+                                3,
+                            ),
+                            flush=True,
+                        )
+
+                    else:
+                        # Mismo caption que utilizaba _deliver_pdf_result.
+                        caption_text = ""
+
+                        if open_req.created_at:
+                            created_at = open_req.created_at
+
+                            if created_at.tzinfo is None:
+                                created_at = created_at.replace(
+                                    tzinfo=timezone.utc
+                                )
+
+                            now_local = datetime.now(
+                                ZoneInfo("America/Monterrey")
+                            )
+
+                            created_at_local = created_at.astimezone(
+                                ZoneInfo("America/Monterrey")
+                            )
+
+                            delta = now_local - created_at_local
+                            total_seconds = max(
+                                0.0,
+                                delta.total_seconds(),
+                            )
+
+                            if total_seconds >= 60:
+                                minutes = int(
+                                    total_seconds // 60
+                                )
+                                seconds = total_seconds % 60
+                                tiempo = (
+                                    f"{minutes} min "
+                                    f"{seconds:.2f} segundos"
+                                )
+                            else:
+                                tiempo = (
+                                    f"{total_seconds:.2f} segundos"
+                                )
+
+                            no_time_caption_groups = {
+                                "120363408668441985@g.us",
+                                "120363421166637606@g.us",
+                                "120363427267191472@g.us",
+                            }
+
+                            if (
+                                open_req.source_group_id
+                                not in no_time_caption_groups
+                            ):
+                                caption_text = (
+                                    f"⏱️ Tiempo total: {tiempo}"
+                                )
+
+                        # Guardar tiempo de proveedor antes de liberar webhook.
+                        try:
+                            if open_req.created_at:
+                                created_ts = (
+                                    open_req.created_at.timestamp()
+                                )
+
+                                open_req.provider_processing_time = round(
+                                    pdf_received_ts - created_ts,
+                                    3,
+                                )
+
+                                db.commit()
+
+                        except Exception as metric_exc:
+                            print(
+                                "PROVIDER_PROCESSING_TIME_BEFORE_DELIVERY_QUEUE_ERROR =",
+                                str(metric_exc),
+                                flush=True,
+                            )
+
+                        _enqueue_pdf_delivery_now(
+                            open_req,
+                            db,
+                            caption_text,
+                            "BASE64_FROM_MEDIA_MESSAGE",
+                        )
+
+                        print(
+                            "MAIN_PDF_FIRST_DELIVERY_ENQUEUED =",
+                            {
+                                "req_id": open_req.id,
+                                "provider_name": open_req.provider_name,
+                                "instance_name": open_req.instance_name,
+                                "source_group_id": open_req.source_group_id,
+                                "pdf_storage_key": open_req.pdf_storage_key,
+                            },
+                            flush=True,
+                        )
+
+                        # El worker de actas_delivery hará:
+                        # sendMedia -> DONE -> accounting.
+                        return {
+                            "ok": True,
+                            "provider_result": "pdf_delivery_enqueued",
+                        }
+
                 except Exception as delivery_exc:
-                    print("DELIVERY_FAILED =", str(delivery_exc), flush=True)
-                
+                    print(
+                        "DELIVERY_QUEUE_PREPARE_FAILED =",
+                        str(delivery_exc),
+                        flush=True,
+                    )
+
                     open_req.status = "ERROR"
-                    open_req.error_message = f"DELIVERY_FAILED_PENDING_RETRY: {str(delivery_exc)[:300]}"
+                    open_req.error_message = (
+                        "DELIVERY_FAILED_PENDING_RETRY: "
+                        f"{str(delivery_exc)[:300]}"
+                    )
                     open_req.updated_at = _utc_now_naive()
                     db.commit()
-                
+
                     try:
-                        if getattr(open_req, "pdf_storage_key", None):
+                        if getattr(
+                            open_req,
+                            "pdf_storage_key",
+                            None,
+                        ):
                             delivery_queue.enqueue_in(
                                 timedelta(seconds=30),
                                 retry_pdf_delivery,
                                 open_req.id,
                                 1,
                             )
-                
-                            print("MAIN_DELIVERY_FAILED_RETRY_SCHEDULED =", {
-                                "req_id": open_req.id,
-                                "pdf_url": open_req.pdf_url,
-                                "instance": open_req.instance_name,
-                                "source_group_id": open_req.source_group_id,
-                            }, flush=True)
-                        else:
-                            print("MAIN_DELIVERY_FAILED_NO_PDF_URL_FOR_RETRY =", {
-                                "req_id": open_req.id,
-                                "provider_media_url": open_req.provider_media_url,
-                            }, flush=True)
+
+                            print(
+                                "MAIN_DELIVERY_FAILED_RETRY_SCHEDULED =",
+                                {
+                                    "req_id": open_req.id,
+                                    "pdf_storage_key": open_req.pdf_storage_key,
+                                    "instance": open_req.instance_name,
+                                    "source_group_id": open_req.source_group_id,
+                                },
+                                flush=True,
+                            )
+
                     except Exception as retry_exc:
-                        print("MAIN_DELIVERY_FAILED_RETRY_SCHEDULE_ERROR =", str(retry_exc), flush=True)
-                
+                        print(
+                            "MAIN_DELIVERY_FAILED_RETRY_SCHEDULE_ERROR =",
+                            str(retry_exc),
+                            flush=True,
+                        )
+
                     try:
                         redis_conn.delete(pdf_dedupe_key)
                     except Exception as redis_del_exc:
-                        print("PDF_DEDUPE_DELETE_AFTER_DELIVERY_FAILED_ERROR =", str(redis_del_exc), flush=True)
-                
+                        print(
+                            "PDF_DEDUPE_DELETE_AFTER_DELIVERY_FAILED_ERROR =",
+                            str(redis_del_exc),
+                            flush=True,
+                        )
+
                     try:
                         redis_conn.delete(sending_key)
                     except Exception as redis_del_exc:
-                        print("PDF_SENDING_DELETE_AFTER_DELIVERY_FAILED_ERROR =", str(redis_del_exc), flush=True)
-                
+                        print(
+                            "PDF_SENDING_DELETE_AFTER_DELIVERY_FAILED_ERROR =",
+                            str(redis_del_exc),
+                            flush=True,
+                        )
+
                     try:
                         _notify_support_error(
                             open_req,
                             "DELIVERY_FAILED",
-                            f"filename={filename} | error={str(delivery_exc)[:500]}"
+                            (
+                                f"filename={filename} | "
+                                f"error={str(delivery_exc)[:500]}"
+                            ),
                         )
                     except Exception as support_exc:
-                        print("DELIVERY_FAILED_SUPPORT_NOTIFY_ERROR =", str(support_exc), flush=True)
-                
-                    return {"ok": True, "ignored": "delivery_failed"}
+                        print(
+                            "DELIVERY_FAILED_SUPPORT_NOTIFY_ERROR =",
+                            str(support_exc),
+                            flush=True,
+                        )
+
+                    return {
+                        "ok": True,
+                        "ignored": "delivery_failed",
+                    }
 
                 open_req.status = "DONE"
                 open_req.error_message = None
@@ -22920,6 +23079,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         result_ttl=300,
                         failure_ttl=3600,
                         job_timeout=45,
+                        retry=Retry(
+                            max=3,
+                            interval=[5, 15, 30],
+                        ),
                     )
 
                 else:
@@ -22932,6 +23095,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         result_ttl=300,
                         failure_ttl=3600,
                         job_timeout=45,
+                        retry=Retry(
+                            max=3,
+                            interval=[5, 15, 30],
+                        ),
                     )
 
                 print(
