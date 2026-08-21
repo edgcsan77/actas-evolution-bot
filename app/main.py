@@ -22482,6 +22482,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         RequestLog.error_message
                         != "AUTO_TIMEOUT_OPEN_REQUEST_DO_NOT_REUSE",
                     ),
+                    or_(
+                        RequestLog.error_message.is_(None),
+                        RequestLog.error_message.notilike(
+                            "ADMIN_PURGE_STALE%"
+                        ),
+                    ),
                 )
                 .order_by(
                     RequestLog.created_at.desc()

@@ -6443,8 +6443,15 @@ def process_request(request_id: int):
         # revivir si quedó un job viejo pendiente en Redis/RQ.
         if (
             current_status == "ERROR"
-            and terminal_error.startswith("AUTO-CIERRE (>")
-            and terminal_error.endswith(" CLEANUP")
+            and (
+                (
+                    terminal_error.startswith("AUTO-CIERRE (>")
+                    and terminal_error.endswith(" CLEANUP")
+                )
+                or terminal_error.startswith(
+                    "ADMIN_PURGE_STALE"
+                )
+            )
         ):
             print("PROCESS_REQUEST_CLEANUP_TERMINAL_SKIP =", {
                 "request_id": req.id,
