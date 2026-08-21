@@ -129,6 +129,7 @@ def _post_send_text_with_retries(
     label: str,
     max_attempts: int = 5,
     timeout=(5, 35),
+    extra_headers: dict = None,
 ):
     last_error = None
     delays = [2, 4, 8, 15]
@@ -144,9 +145,14 @@ def _post_send_text_with_retries(
 
             request_started = time.monotonic()
 
+            request_headers = _headers()
+
+            if extra_headers:
+                request_headers.update(extra_headers)
+
             resp = requests.post(
                 url,
-                headers=_headers(),
+                headers=request_headers,
                 json=payload,
                 timeout=timeout,
             )
@@ -394,7 +400,8 @@ def send_text_ack_fast(number: str, text: str, instance_name: str = None):
         payload,
         label="SEND_ACK_FAST",
         max_attempts=1,
-        timeout=(2.5, 8),
+        timeout=(2.5, 20),
+        extra_headers={"X-Actas-Priority": "ack"},
     )
 
 
@@ -415,7 +422,8 @@ def send_group_text_ack_fast(group_jid: str, text: str, instance_name: str = Non
         payload,
         label="SEND_ACK_FAST",
         max_attempts=1,
-        timeout=(2.5, 8),
+        timeout=(2.5, 20),
+        extra_headers={"X-Actas-Priority": "ack"},
     )
 
 
