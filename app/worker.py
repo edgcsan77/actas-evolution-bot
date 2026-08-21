@@ -1526,27 +1526,22 @@ def _fallback_to_provider3_web(req, db, process_started_ts):
     if _store_api_pdf_result(req, db, safe_media_b64, filename, "BASE64_PROVIDER3_API"):
         return
 
-    delivered = _deliver_pdf_base64_with_retries(
+    save_request_pdf_to_r2(
         req,
         db,
-        safe_media_b64,
-        filename,
-        caption_text,
-        instance,
-        label="PROVIDER3_FALLBACK",
+        pdf_bytes,
+        filename=filename,
+        origin="worker:PROVIDER3_FALLBACK",
     )
-    
-    if not delivered:
-        return
 
-    req.provider_media_url = "BASE64_PROVIDER3"
-    #req.pdf_url = None
-    req.status = "DONE"
-    req.error_message = None
-    req.updated_at = _utc_now_naive()
-    db.commit()
-    
-    _after_done_accounting(req, db)
+    _enqueue_pdf_delivery_now(
+        req,
+        db,
+        caption_text,
+        "BASE64_PROVIDER3",
+    )
+    return
+
 
 
 def _promo_client_key(group_jid: str | None, promo_name: str | None = None, client_key: str | None = None) -> str:
@@ -1877,13 +1872,21 @@ def _send_pdf_base64_to_client_once(req, safe_media_b64: str, filename: str, cap
     )
 
 
-def _schedule_delivery_retry(request_id: int, attempt: int = 1, delay_sec: int = 30):
+def _schedule_delivery_retry(
+    request_id: int,
+    attempt: int = 1,
+    delay_sec: int = 30,
+    caption_text: str | None = None,
+    provider_media_label: str | None = None,
+):
     try:
         delivery_queue.enqueue_in(
             timedelta(seconds=delay_sec),
             retry_pdf_delivery,
             request_id,
             attempt,
+            caption_text,
+            provider_media_label,
         )
 
         print("PDF_DELIVERY_RETRY_SCHEDULED =", {
@@ -1898,6 +1901,43 @@ def _schedule_delivery_retry(request_id: int, attempt: int = 1, delay_sec: int =
             "attempt": attempt,
             "error": str(e),
         }, flush=True)
+
+
+def _enqueue_pdf_delivery_now(
+    req,
+    db,
+    caption_text: str = "",
+    provider_media_label: str | None = None,
+):
+    if not getattr(req, "pdf_storage_key", None):
+        raise RuntimeError(
+            f"PDF_DELIVERY_R2_KEY_REQUIRED:{getattr(req, 'id', None)}"
+        )
+
+    label = (
+        provider_media_label
+        or f"BASE64_{(getattr(req, 'provider_name', '') or 'PROVIDER').upper()}"
+    )
+
+    req.status = "PROCESSING"
+    req.error_message = "DELIVERY_PENDING"
+    req.updated_at = _utc_now_naive()
+    db.commit()
+
+    delivery_queue.enqueue(
+        retry_pdf_delivery,
+        int(req.id),
+        1,
+        caption_text or "",
+        label,
+    )
+
+    print("PDF_FIRST_DELIVERY_ENQUEUED =", {
+        "request_id": req.id,
+        "provider": req.provider_name,
+        "pdf_storage_key": req.pdf_storage_key,
+        "provider_media_label": label,
+    }, flush=True)
 
 
 def _deliver_pdf_base64_with_retries(
@@ -1959,7 +1999,12 @@ def _deliver_pdf_base64_with_retries(
     return False
 
 
-def retry_pdf_delivery(request_id: int, attempt: int = 1):
+def retry_pdf_delivery(
+    request_id: int,
+    attempt: int = 1,
+    caption_text: str | None = None,
+    provider_media_label: str | None = None,
+):
     # Evita que dos jobs de retry entreguen/contabilicen simultáneamente
     # la misma solicitud.
     lock_key = f"pdf_delivery_retry_lock:{request_id}"
@@ -2022,7 +2067,10 @@ def retry_pdf_delivery(request_id: int, attempt: int = 1):
             or "docifybot8"
         )
 
-        filename = _default_pdf_filename(req)
+        filename = (
+            req.pdf_filename
+            or _default_pdf_filename(req)
+        )
 
         url = generate_r2_presigned_download_url(
             req.pdf_storage_key
@@ -2041,9 +2089,10 @@ def retry_pdf_delivery(request_id: int, attempt: int = 1):
 
         safe_media_b64 = base64.b64encode(pdf_bytes).decode()
 
-        caption_text = (
-            "📄 Reenvío automático de acta generada previamente."
-        )
+        if caption_text is None:
+            caption_text = (
+                "📄 Reenvío automático de acta generada previamente."
+            )
 
         # La capa Evolution lanza excepción si sendMedia no termina
         # satisfactoriamente. Por eso no se llega a DONE si falla.
@@ -2080,6 +2129,11 @@ def retry_pdf_delivery(request_id: int, attempt: int = 1):
             db.rollback()
             return
 
+        locked_req.provider_media_url = (
+            provider_media_label
+            or locked_req.provider_media_url
+            or f"BASE64_{(locked_req.provider_name or 'PROVIDER').upper()}"
+        )
         locked_req.status = "DONE"
         locked_req.error_message = None
         locked_req.updated_at = _utc_now_naive()
@@ -2164,6 +2218,8 @@ def retry_pdf_delivery(request_id: int, attempt: int = 1):
                 request_id,
                 attempt=attempt + 1,
                 delay_sec=next_delay,
+                caption_text=caption_text,
+                provider_media_label=provider_media_label,
             )
 
     finally:
@@ -7861,45 +7917,14 @@ def process_request(request_id: int):
                 )
                 return
 
-            delivered = (
-                _deliver_pdf_base64_with_retries(
-                    req,
-                    db,
-                    safe_media_b64,
-                    filename,
-                    caption_text,
-                    instance,
-                    label="PROVIDER15",
-                )
-            )
-
-            if not delivered:
-                return
-
-            redis_conn.set(
-                delivery_key,
-                "1",
-                ex=3600,
-            )
-
-            req.provider_media_url = (
-                "BASE64_PROVIDER15"
-            )
-
-            req.status = "DONE"
-            req.error_message = None
-            req.updated_at = (
-                _utc_now_naive()
-            )
-
-            db.commit()
-
-            _after_done_accounting(
+            _enqueue_pdf_delivery_now(
                 req,
                 db,
+                caption_text,
+                "BASE64_PROVIDER15",
             )
-
             return
+
 
         if provider_name == "PROVIDER3":
             try:
@@ -8006,6 +8031,7 @@ def process_request(request_id: int):
                     "filename": filename,
                     "error": str(r2_exc),
                 }, flush=True)
+                raise
             
             instance = req.instance_name or "docifybot8"
             
@@ -8016,31 +8042,14 @@ def process_request(request_id: int):
             print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
             print("PROVIDER3_SEND_INSTANCE =", instance, flush=True)
         
-            delivered = _deliver_pdf_base64_with_retries(
+            _enqueue_pdf_delivery_now(
                 req,
                 db,
-                safe_media_b64,
-                filename,
                 caption_text,
-                instance,
-                label="PROVIDER3",
+                "BASE64_PROVIDER3",
             )
-            
-            if not delivered:
-                return
-        
-            redis_conn.set(delivery_key, "1", ex=3600)
-        
-            req.provider_media_url = "BASE64_PROVIDER3"
-            #req.pdf_url = None
-            req.status = "DONE"
-            req.error_message = None
-            req.updated_at = _utc_now_naive()
-            db.commit()
-
-            _after_done_accounting(req, db)
-        
             return
+
 
         if provider_name in ("PROVIDER4", "PROVIDER10", "PROVIDER11"):
             provider4_started_ts = time.perf_counter()
@@ -8464,6 +8473,7 @@ def process_request(request_id: int):
                     "filename": filename,
                     "error": str(r2_exc),
                 }, flush=True)
+                raise
 
             instance = req.instance_name or "docifybot8"
 
@@ -8474,31 +8484,14 @@ def process_request(request_id: int):
             print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
             print(f"{provider_name}_SEND_INSTANCE =", instance, flush=True)
         
-            delivered = _deliver_pdf_base64_with_retries(
+            _enqueue_pdf_delivery_now(
                 req,
                 db,
-                safe_media_b64,
-                filename,
                 caption_text,
-                instance,
-                label=provider_name,
+                f"BASE64_{provider_name}",
             )
-            
-            if not delivered:
-                return
-        
-            redis_conn.set(delivery_key, "1", ex=3600)
-        
-            req.provider_media_url = f"BASE64_{provider_name}"
-            #req.pdf_url = None
-            req.status = "DONE"
-            req.error_message = None
-            req.updated_at = _utc_now_naive()
-            db.commit()
-
-            _after_done_accounting(req, db)
-        
             return
+
 
         if provider_name == "PROVIDER7":
             try:
@@ -8589,6 +8582,7 @@ def process_request(request_id: int):
                     "filename": filename,
                     "error": str(r2_exc),
                 }, flush=True)
+                raise
 
             instance = req.instance_name or "docifybot8"
 
@@ -8605,29 +8599,14 @@ def process_request(request_id: int):
             print("REQ_SOURCE_GROUP_ID =", req.source_group_id, flush=True)
             print("PROVIDER7_SEND_INSTANCE =", instance, flush=True)
         
-            delivered = _deliver_pdf_base64_with_retries(
+            _enqueue_pdf_delivery_now(
                 req,
                 db,
-                safe_media_b64,
-                filename,
                 caption_text,
-                instance,
-                label="PROVIDER7",
+                "BASE64_PROVIDER7",
             )
-            
-            if not delivered:
-                return
-        
-            req.provider_media_url = "BASE64_PROVIDER7"
-            #req.pdf_url = None
-            req.status = "DONE"
-            req.error_message = None
-            req.updated_at = _utc_now_naive()
-            db.commit()
-
-            _after_done_accounting(req, db)
-        
             return
+
 
         raise RuntimeError("UNKNOWN_PROVIDER")
 
