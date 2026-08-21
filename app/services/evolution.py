@@ -59,6 +59,18 @@ def _is_retryable_evolution_error(status_code: int | None, body_text: str = "", 
     return any(t in body_up or t in exc_up for t in retry_texts)
 
 
+def _is_gateway_busy_response(status_code: int | None, body_text: str = "") -> bool:
+    return (
+        status_code == 503
+        and "EVOLUTION_GATEWAY_BUSY" in (body_text or "").upper()
+    )
+
+
+def _gateway_busy_retry_delay(attempt: int) -> int:
+    delays = [10, 20, 30, 45]
+    return delays[min(attempt - 1, len(delays) - 1)]
+
+
 def _post_send_media_with_retries(url: str, payload: dict, *, label: str, max_attempts: int = 4):
     last_error = None
     delays = [2, 5, 10]
@@ -95,6 +107,26 @@ def _post_send_media_with_retries(url: str, payload: dict, *, label: str, max_at
                     return resp.json()
                 except Exception:
                     return {"ok": True, "raw": body_text[:1000]}
+
+            if _is_gateway_busy_response(resp.status_code, body_text):
+                last_error = requests.HTTPError(
+                    f"{resp.status_code} Gateway Busy for url: {url} | body={body_text[:1000]}",
+                    response=resp,
+                )
+
+                if attempt >= max_attempts:
+                    break
+
+                delay = _gateway_busy_retry_delay(attempt)
+
+                print(
+                    f"{label}_GATEWAY_BUSY_SLEEP =",
+                    delay,
+                    flush=True,
+                )
+
+                time.sleep(delay)
+                continue
 
             last_error = requests.HTTPError(
                 f"{resp.status_code} Server Error for url: {url} | body={body_text[:1000]}",
@@ -174,6 +206,26 @@ def _post_send_text_with_retries(
                     return resp.json()
                 except Exception:
                     return {"ok": True, "raw": body_text[:1000]}
+
+            if _is_gateway_busy_response(resp.status_code, body_text):
+                last_error = requests.HTTPError(
+                    f"{resp.status_code} Gateway Busy for url: {url} | body={body_text[:1000]}",
+                    response=resp,
+                )
+
+                if attempt >= max_attempts:
+                    break
+
+                delay = _gateway_busy_retry_delay(attempt)
+
+                print(
+                    f"{label}_GATEWAY_BUSY_SLEEP =",
+                    delay,
+                    flush=True,
+                )
+
+                time.sleep(delay)
+                continue
 
             last_error = requests.HTTPError(
                 f"{resp.status_code} Server Error for url: {url} | body={body_text[:1000]}",
@@ -400,7 +452,7 @@ def send_text_ack_fast(number: str, text: str, instance_name: str = None):
         payload,
         label="SEND_ACK_FAST",
         max_attempts=1,
-        timeout=(2.5, 20),
+        timeout=(2.5, 35),
         extra_headers={"X-Actas-Priority": "ack"},
     )
 
@@ -422,7 +474,7 @@ def send_group_text_ack_fast(group_jid: str, text: str, instance_name: str = Non
         payload,
         label="SEND_ACK_FAST",
         max_attempts=1,
-        timeout=(2.5, 20),
+        timeout=(2.5, 35),
         extra_headers={"X-Actas-Priority": "ack"},
     )
 

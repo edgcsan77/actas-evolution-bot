@@ -22872,7 +22872,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         job_id=ack_job_id,
                         result_ttl=300,
                         failure_ttl=3600,
-                        job_timeout=30,
+                        job_timeout=45,
                     )
 
                 else:
@@ -22884,7 +22884,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         job_id=ack_job_id,
                         result_ttl=300,
                         failure_ttl=3600,
-                        job_timeout=30,
+                        job_timeout=45,
                     )
 
                 print(
