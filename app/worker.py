@@ -2099,7 +2099,63 @@ def retry_pdf_delivery(
 
         safe_media_b64 = base64.b64encode(pdf_bytes).decode()
 
-        if caption_text is None:
+        # Calcular el tiempo TOTAL justo antes del intento real de
+        # entrega por WhatsApp. Así incluye cualquier espera en
+        # actas_delivery y también el tiempo de reintentos anteriores.
+        if req.created_at:
+            created_at = req.created_at
+
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(
+                    tzinfo=timezone.utc
+                )
+
+            now_local = datetime.now(
+                ZoneInfo("America/Monterrey")
+            )
+
+            created_at_local = created_at.astimezone(
+                ZoneInfo("America/Monterrey")
+            )
+
+            delta = now_local - created_at_local
+            total_seconds = max(
+                0.0,
+                delta.total_seconds(),
+            )
+
+            if total_seconds >= 60:
+                minutes = int(total_seconds // 60)
+                seconds = total_seconds % 60
+                tiempo = (
+                    f"{minutes} min "
+                    f"{seconds:.2f} segundos"
+                )
+            else:
+                tiempo = f"{total_seconds:.2f} segundos"
+
+            if req.source_group_id in NO_TIME_CAPTION_GROUPS:
+                caption_text = ""
+            else:
+                caption_text = (
+                    f"⏱️ Tiempo total: {tiempo}"
+                )
+
+            print(
+                "PDF_DELIVERY_FINAL_CAPTION =",
+                {
+                    "request_id": req.id,
+                    "attempt": attempt,
+                    "caption": caption_text,
+                    "total_seconds": round(
+                        total_seconds,
+                        3,
+                    ),
+                },
+                flush=True,
+            )
+
+        elif caption_text is None:
             caption_text = (
                 "📄 Reenvío automático de acta generada previamente."
             )
