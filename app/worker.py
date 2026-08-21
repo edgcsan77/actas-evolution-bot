@@ -24,7 +24,7 @@ from app.services.provider3 import Provider3Client, decode_pdf_base64
 from app.services.provider4 import Provider4Client
 from app.services.provider7 import Provider7Client
 from rq import Queue, get_current_job
-from app.queue import redis_conn, request_queue, slow_request_queue
+from app.queue import redis_conn, request_queue, slow_request_queue, delivery_queue
 from app.provider_status_cache import refresh_providers_status
 from app.utils.bot_limits import increment_bot_used_and_maybe_block
 from app.pdf_storage import save_request_pdf_to_r2, generate_r2_presigned_download_url
@@ -1879,7 +1879,7 @@ def _send_pdf_base64_to_client_once(req, safe_media_b64: str, filename: str, cap
 
 def _schedule_delivery_retry(request_id: int, attempt: int = 1, delay_sec: int = 30):
     try:
-        request_queue.enqueue_in(
+        delivery_queue.enqueue_in(
             timedelta(seconds=delay_sec),
             retry_pdf_delivery,
             request_id,

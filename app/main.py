@@ -25,7 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.db import Base, engine, get_db, SessionLocal
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion, GroupAlias, GroupCategory, BotControl, BotRechargeLog, ApiClient, ApiCreditLog
-from app.queue import request_queue, slow_request_queue, maya_request_queue, redis_conn, broadcast_queue, ack_queue
+from app.queue import request_queue, slow_request_queue, maya_request_queue, redis_conn, broadcast_queue, ack_queue, delivery_queue
 from app.client_messages import (
     received_message,
     duplicate_processing_message,
@@ -21476,7 +21476,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 
                     try:
                         if getattr(open_req, "pdf_storage_key", None):
-                            request_queue.enqueue_in(
+                            delivery_queue.enqueue_in(
                                 timedelta(seconds=30),
                                 retry_pdf_delivery,
                                 open_req.id,

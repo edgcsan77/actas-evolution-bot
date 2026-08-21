@@ -41,3 +41,9 @@ ack_queue = Queue(
     connection=redis_conn,
     default_timeout=120,
 )
+
+delivery_queue = Queue(
+    "actas_delivery",
+    connection=redis_conn,
+    default_timeout=900,
+)
