@@ -21475,7 +21475,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     db.commit()
                 
                     try:
-                        if getattr(open_req, "pdf_url", None):
+                        if getattr(open_req, "pdf_storage_key", None):
                             request_queue.enqueue_in(
                                 timedelta(seconds=30),
                                 retry_pdf_delivery,

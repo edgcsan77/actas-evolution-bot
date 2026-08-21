@@ -1938,10 +1938,10 @@ def _deliver_pdf_base64_with_retries(
     req.updated_at = _utc_now_naive()
     db.commit()
 
-    if getattr(req, "pdf_url", None):
+    if getattr(req, "pdf_storage_key", None):
         _schedule_delivery_retry(req.id, attempt=1, delay_sec=30)
     else:
-        print("PDF_DELIVERY_FAILED_NO_R2_URL =", {
+        print("PDF_DELIVERY_FAILED_NO_R2_KEY =", {
             "request_id": req.id,
             "curp": req.curp,
             "provider": req.provider_name,
@@ -2008,8 +2008,8 @@ def retry_pdf_delivery(request_id: int, attempt: int = 1):
             print("RETRY_PDF_DELIVERY_ALREADY_DONE =", request_id, flush=True)
             return
 
-        if not req.pdf_url:
-            print("RETRY_PDF_DELIVERY_NO_PDF_URL =", {
+        if not req.pdf_storage_key:
+            print("RETRY_PDF_DELIVERY_NO_R2_KEY =", {
                 "request_id": request_id,
                 "status": req.status,
                 "error_message": req.error_message,
@@ -2024,7 +2024,9 @@ def retry_pdf_delivery(request_id: int, attempt: int = 1):
 
         filename = _default_pdf_filename(req)
 
-        url = generate_r2_presigned_download_url(req.pdf_url)
+        url = generate_r2_presigned_download_url(
+            req.pdf_storage_key
+        )
 
         r = requests.get(
             url,
@@ -2289,7 +2291,7 @@ def sweep_stuck_requests(max_age_minutes: int = 20, limit: int = 80):
                 # =====================================================
                 # WHATSAPP / FLUJO NORMAL EXISTENTE
                 # =====================================================
-                if req.pdf_url:
+                if req.pdf_storage_key:
                     req.status = "ERROR"
                     req.error_message = (
                         "DELIVERY_FAILED_PENDING_RETRY: "
