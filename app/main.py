@@ -22168,6 +22168,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                 if last_req.status == "DONE":
                     if should_notify_done(source_group_id):
+                        db.commit()
+                        print(
+                            "WEBHOOK_DB_READ_TXN_CLOSED_BEFORE_EVOLUTION = LAST_DONE",
+                            flush=True,
+                        )
                         done_msg = already_delivered_message(
                             act_type=act_type,
                             requester=requester_display_name,
@@ -22187,6 +22192,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 # Esto evita que un reenvío por falta de ACK genere dos solicitudes
                 # que luego compitan por el mismo PDF / SIN REGISTRO.
                 if last_req.status in {"QUEUED", "PROCESSING"}:
+                    db.commit()
+                    print(
+                        "WEBHOOK_DB_READ_TXN_CLOSED_BEFORE_EVOLUTION = ACTIVE_DUPLICATE",
+                        flush=True,
+                    )
+
                     # Si quedó QUEUED y el usuario insiste después de unos segundos,
                     # reencolamos LA MISMA solicitud. El lock por request_id del
                     # worker impide doble procesamiento real.
@@ -22284,6 +22295,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     timeout_age_seconds = 999999.0
 
                 if timeout_age_seconds < 15 * 60:
+                    db.commit()
+                    print(
+                        "WEBHOOK_DB_READ_TXN_CLOSED_BEFORE_EVOLUTION = PROVIDER14_RESULT_TIMEOUT",
+                        flush=True,
+                    )
+
                     pending_msg = (
                         "⏳ E-BOT ya recibió esta solicitud, pero su "
                         "resultado está tardando más de lo normal.\n"
@@ -22349,6 +22366,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             )
 
             if same_requests_count >= 3:
+                db.commit()
+                print(
+                    "WEBHOOK_DB_READ_TXN_CLOSED_BEFORE_EVOLUTION = ATTEMPT_LIMIT",
+                    flush=True,
+                )
+
                 limit_msg = attempt_limit_message(
                     act_type=act_type,
                     requester=requester_display_name,
@@ -22429,6 +22452,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             )
 
             if no_record_existing:
+                db.commit()
+                print(
+                    "WEBHOOK_DB_READ_TXN_CLOSED_BEFORE_EVOLUTION = GLOBAL_NO_RECORD",
+                    flush=True,
+                )
+
                 no_record_msg = no_record_message(
                     act_type=act_type,
                     requester=requester_display_name,
@@ -22532,6 +22561,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         provider14_submit_age_seconds = 999999.0
 
                     if provider14_submit_age_seconds < 15 * 60:
+                        db.commit()
+                        print(
+                            "WEBHOOK_DB_READ_TXN_CLOSED_BEFORE_EVOLUTION = PROVIDER14_SUBMIT_PENDING",
+                            flush=True,
+                        )
+
                         pending_msg = (
                             "⏳ E-BOT ya recibió esta solicitud, pero "
                             "no confirmó su registro para procesamiento.\n"
@@ -22602,6 +22637,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 )
 
                 if existing_no_record_is_fresh:
+                    db.commit()
+                    print(
+                        "WEBHOOK_DB_READ_TXN_CLOSED_BEFORE_EVOLUTION = EXISTING_NO_RECORD",
+                        flush=True,
+                    )
+
                     no_record_msg = no_record_message(
                         act_type=act_type,
                         requester=requester_display_name,
@@ -22942,6 +22983,15 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         return {"ok": True}
 
     except Exception as e:
+        try:
+            db.rollback()
+        except Exception as db_rollback_exc:
+            print(
+                "WEBHOOK_GLOBAL_DB_ROLLBACK_ERROR =",
+                repr(db_rollback_exc),
+                flush=True,
+            )
+
         try:
             release_webhook_msg_seen(
                 locals().get("msg_id", ""),
