@@ -12,6 +12,8 @@ from io import BytesIO
 from pypdf import PdfReader, PdfWriter, Transformation, PageObject
 from pathlib import Path
 
+from app.queue import redis_conn
+
 from app.services.provider7 import (
     _enmarcar_pdf_frente as _enmarcar_pdf_frente_provider7,
     _unir_pdfs_bytes,
@@ -91,6 +93,53 @@ class Provider4Client:
             "X-Requested-With": "XMLHttpRequest",
             "Referer": self.MANUAL_PAGE_URL,
         })
+
+
+    LAZARO_HTTP_INTERVAL_MS = 2000
+
+    def _wait_lazaro_rate_slot(self, operation: str) -> None:
+        """
+        Máximo 1 petición cada 2 segundos POR WEB/HID.
+        Web1, Web2 y Web3 son independientes.
+        Redis hace que todos los workers compartan el límite.
+        """
+        key = f"lazaro:http_rate:{self.HID}"
+
+        while True:
+            try:
+                acquired = redis_conn.set(
+                    key,
+                    f"{operation}:{time.time()}",
+                    nx=True,
+                    px=self.LAZARO_HTTP_INTERVAL_MS,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    f"LAZARO_RATE_LIMIT_REDIS_ERROR:{exc}"
+                ) from exc
+
+            if acquired:
+                print(
+                    "LAZARO_RATE_SLOT =",
+                    {
+                        "hid": self.HID,
+                        "operation": operation,
+                    },
+                    flush=True,
+                )
+                return
+
+            ttl_ms = redis_conn.pttl(key)
+
+            if not isinstance(ttl_ms, (int, float)) or ttl_ms <= 0:
+                ttl_ms = 100
+
+            time.sleep(
+                min(
+                    max(ttl_ms / 1000.0, 0.05),
+                    2.0,
+                )
+            )
 
     def _b64(self, value: str) -> str:
         return base64.b64encode((value or "").encode("utf-8")).decode("ascii")
@@ -2361,6 +2410,8 @@ class Provider4Client:
             "_identifier_kind": identifier_kind,
         }, flush=True)
 
+        self._wait_lazaro_rate_slot("peticion")
+
         r = self.session.get(
             self.NEW_PETICION_URL,
             params=params,
@@ -2436,16 +2487,59 @@ class Provider4Client:
             "_identifier_kind": identifier_kind,
         }, flush=True)
 
-        r = self.session.get(
-            self.NEW_VERIFICAR_PDF_URL,
-            params=params,
-            timeout=(8, 40),
-            headers={
-                "User-Agent": self.session.headers.get("User-Agent", "Mozilla/5.0"),
-                "Accept": "application/pdf,*/*",
-                "Referer": self.MANUAL_PAGE_URL,
-            },
-        )
+        transient_statuses = {502, 503, 504}
+        max_transient_attempts = 4
+
+        for transient_attempt in range(1, max_transient_attempts + 1):
+
+            # Cada reintento respeta también el throttle global
+            # de 1 llamada cada 2 segundos por Web/HID.
+            self._wait_lazaro_rate_slot("verificarpdf")
+
+            r = self.session.get(
+                self.NEW_VERIFICAR_PDF_URL,
+                params=params,
+                timeout=(8, 40),
+                headers={
+                    "User-Agent": self.session.headers.get(
+                        "User-Agent",
+                        "Mozilla/5.0",
+                    ),
+                    "Accept": "application/pdf,*/*",
+                    "Referer": self.MANUAL_PAGE_URL,
+                },
+            )
+
+            if r.status_code not in transient_statuses:
+                break
+
+            print(
+                "PROVIDER4_NEW_VERIFICAR_TRANSIENT_HTTP =",
+                {
+                    "hid": self.HID,
+                    "curp": curp_clean,
+                    "status": r.status_code,
+                    "attempt": transient_attempt,
+                    "max_attempts": max_transient_attempts,
+                },
+                flush=True,
+            )
+
+            if transient_attempt >= max_transient_attempts:
+                break
+
+            print(
+                "PROVIDER4_NEW_VERIFICAR_TRANSIENT_RETRY_IN =",
+                {
+                    "curp": curp_clean,
+                    "status": r.status_code,
+                    "seconds": 5,
+                    "next_attempt": transient_attempt + 1,
+                },
+                flush=True,
+            )
+
+            time.sleep(5)
 
         content_type = (r.headers.get("Content-Type") or "").lower()
         content = r.content or b""

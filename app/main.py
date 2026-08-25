@@ -425,6 +425,298 @@ def _evolution_get(path: str, timeout: int = 8):
     return r.status_code, data
 
 
+def _extract_qr_from_evolution_payload(payload) -> str:
+    """
+    Extrae QR/base64 aunque Evolution lo mande con estructura distinta.
+    Soporta:
+    - {"base64": "..."}
+    - {"qrcode": {"base64": "..."}}
+    - {"qrcode": "..."}
+    - {"qr": "..."}
+    - {"qrCode": "..."}
+    - {"code": "..."}
+    - {"instance": {"qrcode": "..."}}
+    - listas con un dict adentro
+    """
+    if isinstance(payload, list):
+        for item in payload:
+            qr = _extract_qr_from_evolution_payload(item)
+            if qr:
+                return qr
+        return ""
+
+    if not isinstance(payload, dict):
+        return ""
+
+    candidates = []
+
+    candidates.extend([
+        payload.get("base64"),
+        payload.get("qr"),
+        payload.get("qrCode"),
+        payload.get("code"),
+        payload.get("pairingCode"),
+    ])
+
+    qrcode = payload.get("qrcode")
+    if isinstance(qrcode, dict):
+        candidates.extend([
+            qrcode.get("base64"),
+            qrcode.get("code"),
+            qrcode.get("qr"),
+            qrcode.get("qrCode"),
+        ])
+    elif isinstance(qrcode, str):
+        candidates.append(qrcode)
+
+    instance = payload.get("instance")
+    if isinstance(instance, dict):
+        candidates.extend([
+            instance.get("qrcode"),
+            instance.get("qr"),
+            instance.get("qrCode"),
+            instance.get("base64"),
+        ])
+
+    for value in candidates:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    return ""
+
+def _evolution_set_webhook(instance_name: str) -> dict:
+    """
+    Configura o restaura el webhook de una instancia de Evolution.
+    Se utiliza al crear una instancia y al solicitar Reconectar / QR.
+    """
+    inst = (instance_name or "").strip()
+
+    if not inst:
+        return {
+            "ok": False,
+            "error": "EMPTY_INSTANCE",
+        }
+
+    webhook_url = f"{EVOLUTION_BASE_URL}/webhook/set/{inst}"
+
+    try:
+        response = requests.post(
+            webhook_url,
+            headers={
+                "apikey": EVOLUTION_APIKEY,
+                "Content-Type": "application/json",
+            },
+            json={
+                "webhook": {
+                    "url": "http://187.127.248.94:8000/webhook/evolution",
+                    "enabled": True,
+                    "webhook_by_events": False,
+                    "events": [
+                        "MESSAGES_UPSERT",
+                    ],
+                }
+            },
+            timeout=30,
+        )
+
+        try:
+            data = response.json()
+        except Exception:
+            data = {
+                "raw": (response.text or "")[:500],
+            }
+
+        print(
+            "SET_EVOLUTION_WEBHOOK =",
+            {
+                "instance_name": inst,
+                "status_code": response.status_code,
+                "response": data,
+            },
+            flush=True,
+        )
+
+        return {
+            "ok": response.status_code in (200, 201),
+            "status_code": response.status_code,
+            "data": data,
+        }
+
+    except Exception as exc:
+        print(
+            "SET_EVOLUTION_WEBHOOK_ERROR =",
+            {
+                "instance_name": inst,
+                "error": repr(exc),
+            },
+            flush=True,
+        )
+
+        return {
+            "ok": False,
+            "error": str(exc),
+        }
+
+def _evolution_create_instance_if_needed(instance_name: str) -> dict:
+    """
+    Crea/recrea la instancia en Evolution si connect responde count:0
+    o si la instancia no existe realmente en Evolution.
+    """
+    url = f"{EVOLUTION_BASE_URL}/instance/create"
+
+    r = requests.post(
+        url,
+        headers={
+            "apikey": EVOLUTION_APIKEY,
+            "Content-Type": "application/json",
+        },
+        json={
+            "instanceName": instance_name,
+            "qrcode": True,
+            "integration": "WHATSAPP-BAILEYS",
+        },
+        timeout=30,
+    )
+
+    try:
+        data = r.json()
+    except Exception:
+        data = {"raw": r.text}
+
+    print(
+        "EVOLUTION_CREATE_FOR_QR =",
+        instance_name,
+        r.status_code,
+        data,
+        flush=True,
+    )
+
+    return {
+        "ok": r.status_code in (200, 201, 403, 409),
+        "status_code": r.status_code,
+        "data": data,
+    }
+
+def _evolution_connect_qr(instance_name: str) -> dict:
+    inst = (instance_name or "").strip()
+
+    if not inst:
+        return {
+            "ok": False,
+            "error": "EMPTY_INSTANCE",
+        }
+
+    def _connect_once() -> dict:
+        url = f"{EVOLUTION_BASE_URL}/instance/connect/{inst}"
+
+        r = requests.get(
+            url,
+            headers={"apikey": EVOLUTION_APIKEY},
+            timeout=20,
+        )
+
+        try:
+            data = r.json()
+        except Exception:
+            data = {"raw": r.text}
+
+        qr = _extract_qr_from_evolution_payload(data)
+
+        print(
+            "EVOLUTION_QR_DEBUG =",
+            inst,
+            r.status_code,
+            data,
+            "qr_found=",
+            bool(qr),
+            flush=True,
+        )
+
+        return {
+            "http_ok": r.status_code < 400,
+            "status_code": r.status_code,
+            "data": data,
+            "qr": qr,
+        }
+
+    try:
+        webhook_before_connect = _evolution_set_webhook(inst)
+        first = _connect_once()
+
+        # Caso exacto de tu pantalla: Evolution responde {"count": 0}
+        # Tu código antes lo trataba como ok, pero realmente NO trae QR.
+        first_data = first.get("data") or {}
+        first_qr = first.get("qr") or ""
+
+        no_qr = not first_qr
+        count_zero = isinstance(first_data, dict) and int(first_data.get("count") or 0) == 0
+
+        if no_qr and count_zero:
+            created = _evolution_create_instance_if_needed(inst)
+
+            if not created.get("ok"):
+                return {
+                    "ok": False,
+                    "error": "EVOLUTION_CREATE_FAILED_BEFORE_QR",
+                    "create_status_code": created.get("status_code"),
+                    "create_response": created.get("data"),
+                    "connect_response": first_data,
+                }
+
+            webhook_after_create = _evolution_set_webhook(inst)
+
+            if not webhook_after_create.get("ok"):
+                return {
+                    "ok": False,
+                    "error": "EVOLUTION_WEBHOOK_FAILED_AFTER_CREATE",
+                    "webhook_response": webhook_after_create,
+                    "create_response": created.get("data"),
+                }
+
+            time.sleep(1.5)
+            second = _connect_once()
+
+            if second.get("qr"):
+                return {
+                    "ok": True,
+                    "status_code": second.get("status_code"),
+                    "qr": second.get("qr"),
+                    "qr_image": second.get("qr"),
+                    "data": second.get("data"),
+                    "created_before_qr": True,
+                }
+
+            return {
+                "ok": False,
+                "error": "EVOLUTION_NO_QR_AFTER_CREATE",
+                "connect_response": second.get("data"),
+                "create_response": created.get("data"),
+            }
+
+        if first_qr:
+            return {
+                "ok": True,
+                "status_code": first.get("status_code"),
+                "qr": first_qr,
+                "qr_image": first_qr,
+                "data": first.get("data"),
+                "created_before_qr": False,
+            }
+
+        return {
+            "ok": False,
+            "error": "EVOLUTION_NO_QR_RETURNED",
+            "status_code": first.get("status_code"),
+            "data": first_data,
+        }
+
+    except Exception as e:
+        print("EVOLUTION_QR_ERROR =", inst, repr(e), flush=True)
+        return {
+            "ok": False,
+            "error": str(e),
+        }
+
 def _evolution_instance_state(instance_name: str) -> dict:
     """
     Estado de Evolution SOLO desde cache Redis.
@@ -4512,6 +4804,91 @@ async def panel_recent_requests_stream():
     )
     
 
+@app.get("/panel/live-status")
+def panel_live_status(
+    view: str = "day",
+    group_jid: str = "",
+    provider_name: str = "",
+    status: str = "",
+    act_type: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    db: Session = Depends(get_db),
+):
+    """
+    Resumen LIVE ligero del panel.
+
+    Solo consulta PostgreSQL.
+    No consulta Evolution.
+    No carga todas las solicitudes en memoria.
+    """
+    time_min, time_max, view = _panel_period_bounds(
+        view,
+        date_from,
+        date_to,
+    )
+
+    q = _query_requests_for_panel(
+        db=db,
+        time_min=time_min,
+        time_max=time_max,
+        group_jid=group_jid or None,
+        provider_name=provider_name or None,
+        status=status or None,
+        act_type=act_type or None,
+    )
+
+    row = (
+        q.with_entities(
+            func.count(RequestLog.id).label("total"),
+            func.sum(
+                case(
+                    (RequestLog.status == "QUEUED", 1),
+                    else_=0,
+                )
+            ).label("queued"),
+            func.sum(
+                case(
+                    (RequestLog.status == "PROCESSING", 1),
+                    else_=0,
+                )
+            ).label("processing"),
+            func.sum(
+                case(
+                    (RequestLog.status == "DONE", 1),
+                    else_=0,
+                )
+            ).label("done"),
+            func.sum(
+                case(
+                    (RequestLog.status == "ERROR", 1),
+                    else_=0,
+                )
+            ).label("error"),
+            func.max(RequestLog.updated_at).label(
+                "latest_updated_at"
+            ),
+            func.max(RequestLog.id).label("latest_id"),
+        )
+        .one()
+    )
+
+    return {
+        "ok": True,
+        "summary": {
+            "total": int(row.total or 0),
+            "queued": int(row.queued or 0),
+            "processing": int(row.processing or 0),
+            "done": int(row.done or 0),
+            "error": int(row.error or 0),
+        },
+        "marker": (
+            f"{int(row.latest_id or 0)}:"
+            f"{row.latest_updated_at.isoformat() if row.latest_updated_at else ''}"
+        ),
+    }
+
+
 @app.get("/panel/recent-requests")
 def panel_recent_requests(
     view: str = "day",
@@ -4521,6 +4898,7 @@ def panel_recent_requests(
     act_type: str = "",
     date_from: str = "",
     date_to: str = "",
+    fresh: int = 0,
     db: Session = Depends(get_db),
 ):
     cache_key = "panel:recent_requests_html:" + "|".join([
@@ -4533,7 +4911,10 @@ def panel_recent_requests(
         (act_type or "").strip(),
     ])
 
-    cached_html = redis_conn.get(cache_key)
+    cached_html = None
+    if not fresh:
+        cached_html = redis_conn.get(cache_key)
+
     if cached_html:
         if isinstance(cached_html, bytes):
             cached_html = cached_html.decode("utf-8", errors="ignore")
@@ -12156,27 +12537,27 @@ def panel_actas(
           <div class="cards" style="padding:16px; grid-template-columns: repeat(5, minmax(0, 1fr));">
             <div class="card">
               <div class="label">Total</div>
-              <div class="value">{summary["total"]}</div>
+              <div class="value" id="liveStatTotal">{summary["total"]}</div>
             </div>
         
             <div class="card">
               <div class="label">En cola</div>
-              <div class="value">{summary["queued"]}</div>
+              <div class="value" id="liveStatQueued">{summary["queued"]}</div>
             </div>
         
             <div class="card">
               <div class="label">Procesando</div>
-              <div class="value">{summary["processing"]}</div>
+              <div class="value" id="liveStatProcessing">{summary["processing"]}</div>
             </div>
         
             <div class="card">
               <div class="label">Hecho</div>
-              <div class="value">{summary["done"]}</div>
+              <div class="value" id="liveStatDone">{summary["done"]}</div>
             </div>
         
             <div class="card">
               <div class="label">Error</div>
-              <div class="value">{summary["error"]}</div>
+              <div class="value" id="liveStatError">{summary["error"]}</div>
             </div>
           </div>
         </div>
@@ -14472,6 +14853,9 @@ def panel_actas(
           }}
         
           filterSharedPromoGroups();
+
+          startPanelLive();
+
           if (PANEL_STREAM_ENABLED && !document.hidden) {{
             startRecentRequestsStream();
           }}
@@ -14559,6 +14943,105 @@ def panel_actas(
           }}
         }}
 
+        let panelLiveTimer = null;
+        let panelLiveBusy = false;
+        let panelLiveMarker = null;
+
+        function panelLiveParams() {{
+          return new URLSearchParams({{
+            view: document.querySelector('input[name="view"]')?.value || "day",
+            group_jid: document.querySelector('input[name="group_jid"]')?.value || "",
+            provider_name: document.querySelector('input[name="provider_name"]')?.value || "",
+            status: document.querySelector('input[name="status"]')?.value || "",
+            act_type: document.querySelector('input[name="act_type"]')?.value || "",
+            date_from: document.querySelector('input[name="date_from"]')?.value || "",
+            date_to: document.querySelector('input[name="date_to"]')?.value || "",
+          }});
+        }}
+
+        async function refreshPanelLive() {{
+          if (document.hidden || panelLiveBusy) return;
+
+          panelLiveBusy = true;
+
+          try {{
+            const params = panelLiveParams();
+
+            const res = await fetch(
+              `/panel/live-status?${{params.toString()}}`,
+              {{
+                cache: "no-store",
+                headers: {{
+                  "Cache-Control": "no-cache"
+                }}
+              }}
+            );
+
+            if (!res.ok) {{
+              throw new Error("No se pudo actualizar panel live");
+            }}
+
+            const data = await res.json();
+
+            if (!data || !data.ok) return;
+
+            const summary = data.summary || {{}};
+
+            const values = {{
+              liveStatTotal: summary.total,
+              liveStatQueued: summary.queued,
+              liveStatProcessing: summary.processing,
+              liveStatDone: summary.done,
+              liveStatError: summary.error,
+            }};
+
+            Object.entries(values).forEach(([id, value]) => {{
+              const el = document.getElementById(id);
+
+              if (el && value !== undefined && value !== null) {{
+                const txt = String(value);
+
+                if (el.textContent !== txt) {{
+                  el.textContent = txt;
+                }}
+              }}
+            }});
+
+            const marker = data.marker || "";
+
+            const firstLoad = panelLiveMarker === null;
+            const markerChanged = (
+              panelLiveMarker !== null &&
+              marker &&
+              marker !== panelLiveMarker
+            );
+
+            if (firstLoad || markerChanged) {{
+              await refreshRecentRequests();
+            }}
+
+            panelLiveMarker = marker;
+
+          }} catch (e) {{
+            console.error("PANEL_LIVE_REFRESH_ERROR =", e);
+          }} finally {{
+            panelLiveBusy = false;
+          }}
+        }}
+
+        function startPanelLive() {{
+          if (panelLiveTimer) {{
+            clearInterval(panelLiveTimer);
+          }}
+
+          refreshPanelLive();
+
+          panelLiveTimer = setInterval(
+            refreshPanelLive,
+            3000
+          );
+        }}
+
         async function refreshRecentRequests() {{
           const wrap = document.getElementById("recentRequestsWrap");
           if (!wrap) return;
@@ -14573,8 +15056,13 @@ def panel_actas(
             date_to: document.querySelector('input[name="date_to"]')?.value || "",
           }});
         
+          params.set("fresh", "1");
+
           try {{
-            const res = await fetch(`/panel/recent-requests?${{params.toString()}}`);
+            const res = await fetch(
+              `/panel/recent-requests?${{params.toString()}}`,
+              {{ cache: "no-store" }}
+            );
             if (!res.ok) throw new Error("No se pudo actualizar solicitudes recientes");
         
             const html = await res.text();
