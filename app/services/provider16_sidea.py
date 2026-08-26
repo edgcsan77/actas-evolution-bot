@@ -3379,15 +3379,60 @@ def _sidea_prod_response_for_oid(
     return None
 
 
+def _sidea_prod_monitor_has_structure(
+    html: str,
+) -> bool:
+    """
+    Confirma que el HTML realmente corresponde
+    al monitor SIDEA que nuestro parser entiende.
+
+    Un monitor válido puede no incluir logoutAction.do,
+    pero sí debe declarar ambos datasets.
+    """
+
+    html = html or ""
+
+    has_petitions = bool(
+        re.search(
+            r"\bvar\s+dsOption\s*=",
+            html,
+            flags=re.I,
+        )
+    )
+
+    has_responses = bool(
+        re.search(
+            r"\bvar\s+dsOption2\s*=",
+            html,
+            flags=re.I,
+        )
+    )
+
+    return bool(
+        has_petitions
+        and has_responses
+    )
+
+
 def _sidea_prod_monitor_get(
     session,
 ) -> str:
+    """
+    Obtiene monitoreo.do evitando falsos NEED_LOGIN.
+
+    La estructura real del monitor es la señal primaria.
+    Si la respuesta no parece un monitor válido,
+    se confirma la sesión mediante /solicitudes.do
+    y se reintenta MONITOR una sola vez.
+    """
+
+    monitor_url = (
+        f"{SIDEA_BASE_URL}"
+        "/monitoreo.do"
+    )
 
     response = session.get(
-        (
-            f"{SIDEA_BASE_URL}"
-            "/monitoreo.do"
-        ),
+        monitor_url,
         timeout=(
             SIDEA_HTTP_CONNECT_TIMEOUT,
             SIDEA_HTTP_READ_TIMEOUT,
@@ -3399,15 +3444,113 @@ def _sidea_prod_monitor_get(
 
     html = response.text or ""
 
-    if not _sidea_html_is_authenticated(
+    # ========================================================
+    # Un MONITOR real es suficiente aunque no contenga
+    # logoutAction.do.
+    # ========================================================
+
+    if _sidea_prod_monitor_has_structure(
         html
+    ):
+        return html
+
+    # ========================================================
+    # La primera respuesta NO parece un monitor real.
+    #
+    # Confirmar si la sesión sigue viva utilizando una
+    # página autenticada conocida y LA MISMA Session.
+    # ========================================================
+
+    verify_response = session.get(
+        (
+            f"{SIDEA_BASE_URL}"
+            "/solicitudes.do"
+        ),
+        timeout=(
+            SIDEA_HTTP_CONNECT_TIMEOUT,
+            SIDEA_HTTP_READ_TIMEOUT,
+        ),
+        allow_redirects=True,
+    )
+
+    verify_response.raise_for_status()
+
+    verify_html = (
+        verify_response.text
+        or ""
+    )
+
+    if not _sidea_html_is_authenticated(
+        verify_html
     ):
         raise SideaNeedLogin(
             "SIDEA_NEED_LOGIN:"
-            "MONITOR"
+            "MONITOR_CONFIRMED"
         )
 
-    return html
+    # ========================================================
+    # Sesión confirmada viva.
+    # Reintentar MONITOR exactamente una vez.
+    # ========================================================
+
+    retry_response = session.get(
+        monitor_url,
+        timeout=(
+            SIDEA_HTTP_CONNECT_TIMEOUT,
+            SIDEA_HTTP_READ_TIMEOUT,
+        ),
+        allow_redirects=True,
+    )
+
+    retry_response.raise_for_status()
+
+    retry_html = (
+        retry_response.text
+        or ""
+    )
+
+    if _sidea_prod_monitor_has_structure(
+        retry_html
+    ):
+        print(
+            "SIDEA_MONITOR_RECOVERED =",
+            {
+                "http_status": (
+                    retry_response.status_code
+                ),
+            },
+            flush=True,
+        )
+
+        return retry_html
+
+    # ========================================================
+    # IMPORTANTE:
+    #
+    # La sesión está viva, pero MONITOR respondió dos veces
+    # sin la estructura que nuestro parser necesita.
+    #
+    # NO destruir sesión.
+    # NO enviar HTML inválido al parser.
+    # ========================================================
+
+    print(
+        "SIDEA_MONITOR_INVALID_RESPONSE_"
+        "SESSION_VALID =",
+        {
+            "http_status": (
+                retry_response.status_code
+            ),
+            "html_length": len(
+                retry_html
+            ),
+        },
+        flush=True,
+    )
+
+    raise SideaError(
+        "SIDEA_MONITOR_INVALID_RESPONSE"
+    )
 
 
 def _sidea_prod_candidate_accounts(
