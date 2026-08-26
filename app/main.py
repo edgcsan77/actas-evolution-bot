@@ -9822,6 +9822,23 @@ def panel_sidea_accounts(
         or ""
     ).strip()
 
+
+    # SIDEA_PANEL_FOCUS_V1
+    focus_slot = (
+        request.query_params.get("focus")
+        or ""
+    ).strip().lower()
+
+    if focus_slot not in {
+        "sidea1",
+        "sidea2",
+        "sidea3",
+        "sidea4",
+        "sidea5",
+        "sidea6",
+    }:
+        focus_slot = ""
+
     from urllib.parse import quote
 
     from app.services.provider16_accounts import (
@@ -9925,9 +9942,19 @@ def panel_sidea_accounts(
             else "Contraseña pendiente"
         )
 
+        open_attr = (
+            " open"
+            if slot == focus_slot
+            else ""
+        )
+
         cards.append(
             f"""
-            <details class="sidea-account-card">
+            <details
+              id="{slot}"
+              class="sidea-account-card"
+              {open_attr}
+            >
               <summary>
                 <div class="sidea-summary-main">
                   <div class="sidea-name-line">
@@ -10892,6 +10919,363 @@ def panel_provider_weight(payload: dict, db: Session = Depends(get_db)):
         "provider_name": provider_name,
         "weight": row.weight,
     }
+
+
+
+# ============================================================
+# PROVIDER16_MAIN_DASHBOARD_V1
+# Resumen SIDEA1..SIDEA6 para panel principal
+# ============================================================
+
+def _sidea_main_panel_html(
+    db: Session,
+    current_token: str,
+) -> str:
+
+    from html import escape
+    from urllib.parse import quote
+
+    try:
+        from app.services.provider16_accounts import (
+            get_sidea_accounts_for_panel,
+        )
+        from app.services.provider16_sidea import (
+            SideaPool,
+        )
+
+        rows = get_sidea_accounts_for_panel(
+            db
+        )
+
+        pool = SideaPool(
+            redis_conn
+        )
+
+        configured = 0
+        ready = 0
+        need_login = 0
+        disabled = 0
+        unknown = 0
+        exhausted = 0
+
+        used_total = 0
+        ready_remaining = 0
+
+        attention_slots = []
+
+        for row in rows:
+
+            slot = (
+                row.get("slot")
+                or ""
+            ).strip().lower()
+
+            is_configured = bool(
+                row.get("configured")
+            )
+
+            enabled = bool(
+                row.get("enabled")
+            )
+
+            limit = int(
+                row.get("daily_limit")
+                or 1000
+            )
+
+            if not is_configured:
+                continue
+
+            configured += 1
+
+            usage = pool.usage(
+                slot
+            )
+
+            used_total += usage
+
+            if not enabled:
+                disabled += 1
+                continue
+
+            status = (
+                pool.get_status(slot)
+                or "UNKNOWN"
+            ).strip().upper()
+
+            remaining = max(
+                0,
+                limit - usage,
+            )
+
+            if usage >= limit:
+                exhausted += 1
+
+            if status == "READY":
+                ready += 1
+
+                ready_remaining += (
+                    remaining
+                )
+
+            elif status in {
+                "NEED_LOGIN",
+                "SESSION_EXPIRED",
+            }:
+                need_login += 1
+
+                attention_slots.append(
+                    slot
+                )
+
+            else:
+                unknown += 1
+
+                attention_slots.append(
+                    slot
+                )
+
+        unconfigured = max(
+            0,
+            6 - configured,
+        )
+
+        token_q = quote(
+            current_token or "",
+            safe="",
+        )
+
+        manage_url = (
+            "/panel/sidea?token="
+            + token_q
+        )
+
+        attention_html = ""
+
+        if attention_slots:
+
+            first_slot = (
+                attention_slots[0]
+            )
+
+            label = (
+                first_slot.upper()
+            )
+
+            focus_url = (
+                "/panel/sidea?token="
+                + token_q
+                + "&focus="
+                + quote(
+                    first_slot,
+                    safe="",
+                )
+                + "#"
+                + quote(
+                    first_slot,
+                    safe="",
+                )
+            )
+
+            attention_html = f"""
+              <a
+                href="{escape(focus_url, quote=True)}"
+                style="
+                  display:flex;
+                  align-items:center;
+                  justify-content:center;
+                  margin-top:8px;
+                  padding:7px 8px;
+                  border-radius:7px;
+                  background:#dc2626;
+                  color:white;
+                  text-decoration:none;
+                  font-size:10px;
+                  font-weight:800;
+                  white-space:nowrap;
+                "
+              >
+                🔐 Resolver {escape(label)}
+              </a>
+            """
+
+        if need_login > 0:
+            header_color = "#f87171"
+            header_text = (
+                "⚠ REQUIERE ATENCIÓN"
+            )
+            border_color = (
+                "rgba(239,68,68,.38)"
+            )
+            background = (
+                "rgba(127,29,29,.12)"
+            )
+
+        elif ready > 0:
+            header_color = "#4ade80"
+            header_text = (
+                "● OPERATIVO"
+            )
+            border_color = (
+                "rgba(34,197,94,.25)"
+            )
+            background = (
+                "rgba(20,83,45,.09)"
+            )
+
+        elif configured == 0:
+            header_color = "#94a3b8"
+            header_text = (
+                "○ SIN CONFIGURAR"
+            )
+            border_color = (
+                "rgba(148,163,184,.22)"
+            )
+            background = (
+                "rgba(30,41,59,.14)"
+            )
+
+        else:
+            header_color = "#fbbf24"
+            header_text = (
+                "● REVISAR"
+            )
+            border_color = (
+                "rgba(245,158,11,.30)"
+            )
+            background = (
+                "rgba(120,53,15,.10)"
+            )
+
+        return f"""
+        <div style="
+          margin-top:9px;
+          padding:9px;
+          border:1px solid {border_color};
+          border-radius:9px;
+          background:{background};
+        ">
+
+          <div style="
+            color:{header_color};
+            font-size:10px;
+            font-weight:900;
+            letter-spacing:.03em;
+            margin-bottom:7px;
+          ">
+            {header_text}
+          </div>
+
+          <div style="
+            display:grid;
+            grid-template-columns:1fr 1fr;
+            gap:5px 7px;
+            font-size:10px;
+          ">
+
+            <div style="
+              display:flex;
+              justify-content:space-between;
+            ">
+              <span style="opacity:.72;">
+                🟢 READY
+              </span>
+              <strong>{ready}</strong>
+            </div>
+
+            <div style="
+              display:flex;
+              justify-content:space-between;
+            ">
+              <span style="opacity:.72;">
+                🔴 LOGIN
+              </span>
+              <strong>{need_login}</strong>
+            </div>
+
+            <div style="
+              display:flex;
+              justify-content:space-between;
+            ">
+              <span style="opacity:.72;">
+                ⚪ Vacías
+              </span>
+              <strong>{unconfigured}</strong>
+            </div>
+
+            <div style="
+              display:flex;
+              justify-content:space-between;
+            ">
+              <span style="opacity:.72;">
+                ⚫ OFF
+              </span>
+              <strong>{disabled}</strong>
+            </div>
+
+          </div>
+
+          <div style="
+            margin-top:7px;
+            padding-top:7px;
+            border-top:1px solid rgba(148,163,184,.15);
+            display:grid;
+            grid-template-columns:1fr 1fr;
+            gap:6px;
+            font-size:10px;
+          ">
+
+            <div>
+              <div style="opacity:.60;">
+                Usadas hoy
+              </div>
+              <strong>
+                {used_total}
+              </strong>
+            </div>
+
+            <div>
+              <div style="opacity:.60;">
+                Disponibles READY
+              </div>
+              <strong>
+                {ready_remaining}
+              </strong>
+            </div>
+
+          </div>
+
+          {attention_html}
+
+        </div>
+        """
+
+    except Exception as exc:
+
+        print(
+            "SIDEA_MAIN_PANEL_STATUS_ERROR =",
+            {
+                "error":
+                    f"{type(exc).__name__}:"
+                    f"{exc}",
+            },
+            flush=True,
+        )
+
+        return """
+        <div style="
+          margin-top:9px;
+          padding:8px;
+          border:1px solid rgba(245,158,11,.3);
+          border-radius:8px;
+          background:rgba(120,53,15,.08);
+          color:#fbbf24;
+          font-size:10px;
+          font-weight:800;
+        ">
+          ⚠ Estado SIDEA no disponible
+        </div>
+        """
 
 
 @app.get("/panel", response_class=HTMLResponse)
@@ -13203,6 +13587,9 @@ def panel_actas(
                         <div style="font-size:11px;opacity:.6;margin-top:4px;">
                           Solo CURP + NACIMIENTO · Papel Bond + reverso
                         </div>
+
+                        {_sidea_main_panel_html(db, current_token)}
+
 
 
                         <div style="margin-top:9px;">
