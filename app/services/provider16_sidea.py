@@ -745,6 +745,129 @@ class SideaPool:
             )
         )
 
+    # PROVIDER16_REQUEST_GUARD_V2
+    def reserve_one_for_request(
+        self,
+        account: SideaAccount,
+        request_id: int,
+    ) -> int | None:
+        """
+        Reserva cuota SIDEA de manera atomica
+        junto con un guard por RequestLog.id.
+
+        Si el request ya habia reservado SIDEA,
+        JAMAS incrementa nuevamente una cuenta.
+        """
+
+        request_id = int(
+            request_id
+        )
+
+        usage_key = self._usage_key(
+            account.key
+        )
+
+        guard_key = (
+            "provider16:sidea:"
+            "request_guard:v2:"
+            f"{request_id}"
+        )
+
+        lua = """
+        local previous = redis.call(
+            'GET',
+            KEYS[2]
+        )
+
+        if previous then
+            local current = tonumber(
+                redis.call(
+                    'GET',
+                    KEYS[1]
+                ) or '0'
+            )
+
+            return {
+                -1,
+                current
+            }
+        end
+
+        local current = tonumber(
+            redis.call(
+                'GET',
+                KEYS[1]
+            ) or '0'
+        )
+
+        local hard_limit = tonumber(
+            ARGV[1]
+        )
+
+        if current >= hard_limit then
+            return {
+                0,
+                current
+            }
+        end
+
+        local new_value = current + 1
+
+        redis.call(
+            'SET',
+            KEYS[1],
+            new_value,
+            'EX',
+            172800
+        )
+
+        redis.call(
+            'SET',
+            KEYS[2],
+            ARGV[2] .. ':' ..
+            tostring(new_value),
+            'EX',
+            2592000
+        )
+
+        return {
+            1,
+            new_value
+        }
+        """
+
+        result = self.redis.eval(
+            lua,
+            2,
+            usage_key,
+            guard_key,
+            int(
+                account.daily_limit
+            ),
+            account.key,
+        )
+
+        code = int(
+            result[0]
+        )
+
+        value = int(
+            result[1]
+        )
+
+        if code == -1:
+            raise SideaSubmitUncertain(
+                "SIDEA_REQUEST_ALREADY_"
+                "RESERVED_OR_SUBMITTED:"
+                f"{request_id}"
+            )
+
+        if code == 0:
+            return None
+
+        return value
+
+
     def pick_and_reserve(
         self,
         accounts: list[SideaAccount],
@@ -3842,6 +3965,7 @@ def sidea_generate_pdf(
     acto: str | int = "1",
     tipo: str | int = "1",
     accounts: list[SideaAccount] | None = None,
+    request_id: int | None = None,
     oid_poll_attempts: int = 20,
     oid_poll_delay_sec: float = 2.0,
     response_poll_attempts: int = 45,
@@ -3900,6 +4024,105 @@ def sidea_generate_pdf(
         raise SideaError(
             "SIDEA_EMPTY_CURP"
         )
+
+    # PROVIDER16_REQUEST_GUARD_V2
+    request_id_int = None
+    request_guard_key = None
+    request_audit_key = None
+
+    if request_id is not None:
+
+        request_id_int = int(
+            request_id
+        )
+
+        request_guard_key = (
+            "provider16:sidea:"
+            "request_guard:v2:"
+            f"{request_id_int}"
+        )
+
+        request_audit_key = (
+            "provider16:sidea:"
+            "request_audit:v2:"
+            f"{request_id_int}"
+        )
+
+        # Evita incluso volver a buscar/baseline
+        # si este mismo RequestLog ya consumio
+        # una reserva en un intento anterior.
+        if pool.redis.exists(
+            request_guard_key
+        ):
+            raise SideaSubmitUncertain(
+                "SIDEA_REQUEST_ALREADY_"
+                "RESERVED_OR_SUBMITTED:"
+                f"{request_id_int}"
+            )
+
+    def _write_request_audit(
+        state_name: str,
+        account_key: str = "",
+        usage_value: int | None = None,
+    ) -> None:
+
+        if not request_audit_key:
+            return
+
+        payload = {
+            "request_id": (
+                request_id_int
+            ),
+            "account": (
+                account_key
+                or ""
+            ),
+            "usage": (
+                usage_value
+            ),
+            "state": (
+                str(
+                    state_name
+                )
+                .strip()
+                .upper()
+            ),
+            "updated_at": (
+                datetime.now(
+                    ZoneInfo(
+                        SIDEA_TIMEZONE
+                    )
+                ).isoformat()
+            ),
+        }
+
+        try:
+            pool.redis.setex(
+                request_audit_key,
+                2592000,
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                ),
+            )
+
+        except Exception as audit_exc:
+            print(
+                "PROVIDER16_SIDEA_"
+                "AUDIT_WRITE_ERROR =",
+                {
+                    "request_id": (
+                        request_id_int
+                    ),
+                    "state": (
+                        state_name
+                    ),
+                    "error": str(
+                        audit_exc
+                    )[:200],
+                },
+                flush=True,
+            )
 
     if accounts is None:
         accounts = (
@@ -3998,6 +4221,79 @@ def sidea_generate_pdf(
                 )
 
             # =================================================
+            # PREFLIGHT REVERSO
+            #
+            # search["entidad"] proviene del registro
+            # localizado por SIDEA.
+            #
+            # Validamos existencia + PDF de una pagina
+            # ANTES de reserve_one().
+            # =================================================
+
+            preflight_entity = str(
+                search.get(
+                    "entidad"
+                )
+                or payload.get(
+                    "entidad"
+                )
+                or search.get(
+                    "resolved_search_entity"
+                )
+                or entidad
+                or ""
+            ).strip()
+
+            preflight_rear_path = (
+                sidea_rear_path(
+                    preflight_entity
+                )
+            )
+
+            try:
+                preflight_rear_reader = (
+                    PdfReader(
+                        str(
+                            preflight_rear_path
+                        )
+                    )
+                )
+
+            except Exception as exc:
+                raise SideaPdfError(
+                    "SIDEA_REAR_INVALID:"
+                    f"{preflight_rear_path}:"
+                    f"{exc}"
+                ) from exc
+
+            if len(
+                preflight_rear_reader.pages
+            ) != 1:
+                raise SideaPdfError(
+                    "SIDEA_REAR_UNEXPECTED_"
+                    "PAGE_COUNT:"
+                    f"{preflight_rear_path}:"
+                    f"{len(preflight_rear_reader.pages)}"
+                )
+
+            print(
+                "PROVIDER16_SIDEA_"
+                "REAR_PREFLIGHT_OK =",
+                {
+                    "request_id": (
+                        request_id_int
+                    ),
+                    "entity": (
+                        preflight_entity
+                    ),
+                    "asset": (
+                        preflight_rear_path.name
+                    ),
+                },
+                flush=True,
+            )
+
+            # =================================================
             # 2. SESIÓN HTTP + BASELINE
             #    todavía SIN reservar cuota
             # =================================================
@@ -4050,16 +4346,39 @@ def sidea_generate_pdf(
             #    Desde aquí hay consumo local.
             # =================================================
 
-            reserved = pool.reserve_one(
-                account
-            )
+            if request_id_int is None:
+
+                # Compatibilidad con herramientas
+                # manuales antiguas que no pasan
+                # RequestLog.id.
+                reserved = pool.reserve_one(
+                    account
+                )
+
+            else:
+
+                reserved = (
+                    pool.reserve_one_for_request(
+                        account,
+                        request_id_int,
+                    )
+                )
 
             if reserved is None:
                 continue
 
+            _write_request_audit(
+                "RESERVED",
+                account.key,
+                reserved,
+            )
+
             print(
                 "PROVIDER16_SIDEA_RESERVED =",
                 {
+                    "request_id": (
+                        request_id_int
+                    ),
                     "account": (
                         account.key
                     ),
@@ -4079,6 +4398,12 @@ def sidea_generate_pdf(
             submit_uncertain = False
 
             try:
+
+                _write_request_audit(
+                    "POST_ATTEMPTED",
+                    account.key,
+                    reserved,
+                )
 
                 submit = session.post(
                     (
@@ -4538,9 +4863,18 @@ def sidea_generate_pdf(
                 "READY",
             )
 
+            _write_request_audit(
+                "SUCCESS",
+                account.key,
+                reserved,
+            )
+
             print(
                 "PROVIDER16_SIDEA_SUCCESS =",
                 {
+                    "request_id": (
+                        request_id_int
+                    ),
                     "account": (
                         account.key
                     ),
@@ -5207,6 +5541,7 @@ def sidea_generate_pdf_from_chain(
     cadena: str,
     accounts: list[SideaAccount] | None = None,
     expected_acto: str | int | None = None,
+    request_id: int | None = None,
 ) -> dict:
     """
     Cadena Digital -> registro real -> flujo normal SIDEA.
@@ -5248,6 +5583,7 @@ def sidea_generate_pdf_from_chain(
         acto=real_acto,
         tipo="1",
         accounts=accounts,
+        request_id=request_id,
     )
 
     result = dict(result)

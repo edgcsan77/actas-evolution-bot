@@ -53,6 +53,220 @@ provider14_queue = Queue(
     PROVIDER14_QUEUE_NAME,
     connection=redis_conn,
 )
+# Cola dedicada de SIDEA / PROVIDER16.
+#
+# La prioridad REAL no depende del orden accidental en que los
+# workers de "actas" alcancen esta cola.
+#
+# Redis ZSET mantiene el orden canonico por created_at + id.
+#
+# Ejecutar un worker dedicado por cada cuenta SIDEA activa:
+# actualmente 2; escalable hasta 6.
+PROVIDER16_QUEUE_NAME = "actas_provider16"
+
+PROVIDER16_FIFO_ZSET_KEY = (
+    "provider16:fifo:waiting:v1"
+)
+
+provider16_queue = Queue(
+    PROVIDER16_QUEUE_NAME,
+    connection=redis_conn,
+)
+
+
+def _provider16_fifo_score(req) -> float:
+    """
+    Prioridad cronologica original del request.
+
+    created_at manda.
+    Si dos requests tienen exactamente el mismo timestamp,
+    Redis desempata lexicograficamente por el member, que
+    contiene el id con ancho fijo.
+    """
+
+    created_at = getattr(
+        req,
+        "created_at",
+        None,
+    )
+
+    if created_at is None:
+        # RequestLog.created_at no debería ser NULL.
+        # Fallback defensivo: tratarlo como nuevo.
+        return float(time.time())
+
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(
+            tzinfo=timezone.utc
+        )
+
+    return float(
+        created_at.timestamp()
+    )
+
+
+def _provider16_fifo_member(
+    request_id: int,
+) -> str:
+    # Ancho fijo para que, si dos timestamps empatan,
+    # el id menor quede primero lexicograficamente.
+    return f"{int(request_id):020d}"
+
+
+def _provider16_fifo_add_request(
+    req,
+    *,
+    ticket_at_front: bool = False,
+):
+    """
+    Inserta el request en la espera canonica P16.
+
+    ZADD NX hace idempotente la inserción:
+    un job viejo/duplicado no crea dos requests en espera.
+
+    El job RQ es solo un "ticket" que despierta a un worker.
+    El ticket NO decide qué request procesar:
+    ZPOPMIN siempre entrega el más antiguo.
+    """
+
+    member = _provider16_fifo_member(
+        req.id
+    )
+
+    score = _provider16_fifo_score(
+        req
+    )
+
+    added = redis_conn.zadd(
+        PROVIDER16_FIFO_ZSET_KEY,
+        {
+            member: score,
+        },
+        nx=True,
+    )
+
+    job = provider16_queue.enqueue(
+        process_provider16_fifo_ticket,
+        job_timeout=900,
+        at_front=ticket_at_front,
+    )
+
+    print(
+        "PROVIDER16_FIFO_ADDED =",
+        {
+            "request_id": req.id,
+            "created_at": (
+                req.created_at.isoformat()
+                if req.created_at
+                else None
+            ),
+            "added_new": bool(added),
+            "fifo_waiting": int(
+                redis_conn.zcard(
+                    PROVIDER16_FIFO_ZSET_KEY
+                )
+            ),
+            "ticket_job_id": job.id,
+        },
+        flush=True,
+    )
+
+    return job
+
+
+def process_provider16_fifo_ticket():
+    """
+    Un ticket consume exactamente el request P16
+    más antiguo disponible.
+
+    ZPOPMIN es atómico, por lo que varios workers P16
+    pueden consumir simultáneamente sin escoger
+    el mismo request.
+    """
+
+    popped = redis_conn.zpopmin(
+        PROVIDER16_FIFO_ZSET_KEY,
+        count=1,
+    )
+
+    if not popped:
+        print(
+            "PROVIDER16_FIFO_TICKET_EMPTY",
+            flush=True,
+        )
+        return
+
+    member, score = popped[0]
+
+    if isinstance(member, bytes):
+        member = member.decode(
+            "utf-8",
+            errors="strict",
+        )
+
+    request_id = int(member)
+
+    print(
+        "PROVIDER16_FIFO_POP_OLDEST =",
+        {
+            "request_id": request_id,
+            "score": float(score),
+            "remaining": int(
+                redis_conn.zcard(
+                    PROVIDER16_FIFO_ZSET_KEY
+                )
+            ),
+        },
+        flush=True,
+    )
+
+    # process_request verá como current_queue
+    # "actas_provider16", porque este ticket está
+    # siendo ejecutado por ese worker.
+    result = process_request(
+        request_id
+    )
+
+    if result == "REQUEST_LOCK_UNAVAILABLE":
+        # El request fue sacado mediante ZPOPMIN, pero otro
+        # job todavía conserva su lock.
+        #
+        # Se devuelve con EXACTAMENTE el mismo score para
+        # conservar su antigüedad original.
+        redis_conn.zadd(
+            PROVIDER16_FIFO_ZSET_KEY,
+            {
+                member: float(score),
+            },
+            nx=True,
+        )
+
+        retry_job = provider16_queue.enqueue_in(
+            timedelta(seconds=1),
+            process_provider16_fifo_ticket,
+            job_timeout=900,
+        )
+
+        print(
+            "PROVIDER16_FIFO_LOCK_BUSY_RESTORED =",
+            {
+                "request_id": request_id,
+                "score": float(score),
+                "fifo_waiting": int(
+                    redis_conn.zcard(
+                        PROVIDER16_FIFO_ZSET_KEY
+                    )
+                ),
+                "retry_in_seconds": 1,
+                "retry_job_id": retry_job.id,
+            },
+            flush=True,
+        )
+
+        return
+
+    return result
+
 SLOW_PROVIDERS = {"PROVIDER4", "PROVIDER10", "PROVIDER11"}
 
 PROVIDER4_NEW_FLOW_TTL_SEC = 60 * 20
@@ -6041,6 +6255,7 @@ def _process_provider16(req, db):
                 pool=pool,
                 cadena=term,
                 expected_acto=expected_acto,
+                request_id=req.id,
             )
         )
 
@@ -6068,6 +6283,7 @@ def _process_provider16(req, db):
                 entidad=None,
                 acto="1",
                 tipo="1",
+                request_id=req.id,
             )
 
         else:
@@ -6085,6 +6301,7 @@ def _process_provider16(req, db):
                     pool=pool,
                     cadena=resolved["cadena"],
                     expected_acto=acto,
+                    request_id=req.id,
                 )
             )
 
@@ -7045,7 +7262,12 @@ def process_request(request_id: int):
         print("PROCESS_REQUEST_DUPLICATE_OR_LOCK_UNAVAILABLE_SKIP =", {
             "request_id": request_id,
         }, flush=True)
-        return
+
+        # PROVIDER16_FIFO_LOCK_RETRY_V1
+        #
+        # El caller P16 necesita distinguir este caso para
+        # devolver el request a su FIFO y no perderlo.
+        return "REQUEST_LOCK_UNAVAILABLE"
 
     db = SessionLocal()
 
@@ -7197,6 +7419,16 @@ def process_request(request_id: int):
             and _provider_is_enabled(db, "PROVIDER14")
         )
 
+        # PROVIDER16_DEDICATED_FIFO_REUSE_V1
+        reuse_provider16_dedicated = (
+            current_queue == PROVIDER16_QUEUE_NAME
+            and existing_provider == "PROVIDER16"
+            and _provider_is_enabled(
+                db,
+                "PROVIDER16",
+            )
+        )
+
         provider14_busy_marker = (
             (req.error_message or "")
             .strip()
@@ -7315,6 +7547,22 @@ def process_request(request_id: int):
                     "provider_name": provider_name,
                     "provider_group_id": provider_group_id,
                     "queue": current_queue,
+                },
+                flush=True,
+            )
+
+        elif reuse_provider16_dedicated:
+            provider_name = "PROVIDER16"
+            provider_group_id = None
+            text_to_provider = None
+
+            print(
+                "PROVIDER16_DEDICATED_REUSING_PROVIDER =",
+                {
+                    "request_id": req.id,
+                    "provider_name": provider_name,
+                    "queue": current_queue,
+                    "error_message": req.error_message,
                 },
                 flush=True,
             )
@@ -7879,6 +8127,51 @@ def process_request(request_id: int):
                         },
                         flush=True,
                     )
+
+        # ====================================================
+        # PROVIDER16_DEDICATED_FIFO_V1
+        #
+        # P16 jamás procesa directamente desde "actas".
+        # Primero se coloca en su cola dedicada FIFO.
+        #
+        # Esto evita que las solicitudes nuevas compitan contra
+        # solicitudes antiguas que estaban esperando una cuenta SIDEA.
+        # ====================================================
+        if (
+            provider_name == "PROVIDER16"
+            and current_queue != PROVIDER16_QUEUE_NAME
+        ):
+            req.provider_name = "PROVIDER16"
+            req.provider_group_id = None
+            req.provider_message = None
+            req.status = "QUEUED"
+            req.error_message = "PROVIDER16_DEDICATED_QUEUE"
+            req.updated_at = _utc_now_naive()
+            db.commit()
+
+            job = _provider16_fifo_add_request(
+                req,
+            )
+
+            print(
+                "PROVIDER16_REROUTED_TO_DEDICATED_FIFO =",
+                {
+                    "request_id": req.id,
+                    "curp": req.curp,
+                    "act_type": req.act_type,
+                    "from_queue": current_queue,
+                    "to_queue": PROVIDER16_QUEUE_NAME,
+                    "waiting_after": int(
+                        redis_conn.zcard(
+                            PROVIDER16_FIFO_ZSET_KEY
+                        )
+                    ),
+                    "job_id": job.id,
+                },
+                flush=True,
+            )
+
+            return
 
         if _should_reroute_to_slow(provider_name) and current_queue != SLOW_PROVIDER_QUEUE_NAME:
             req.status = "QUEUED"
@@ -8458,97 +8751,66 @@ def process_request(request_id: int):
 
                 err = str(exc)
 
-                busy_key = (
-                    f"provider16_busy_retry:"
-                    f"{req.id}"
+                # SIDEA_BUSY significa capacidad ocupada, no falla
+                # del acta ni del proveedor.
+                #
+                # La solicitud permanece esperando indefinidamente
+                # dentro de la FIFO de PROVIDER16.
+                req.provider_name = "PROVIDER16"
+                req.provider_group_id = None
+                req.provider_message = None
+                req.status = "QUEUED"
+                req.error_message = (
+                    "PROVIDER16_BUSY_WAITING_CAPACITY:"
+                    f"{err[:500]}"
+                )
+                req.updated_at = _utc_now_naive()
+                db.commit()
+
+                if current_queue == PROVIDER16_QUEUE_NAME:
+                    # Caso excepcional: un lock SIDEA externo /
+                    # keepalive coincidió con este worker.
+                    #
+                    # Esperamos brevemente y devolvemos ESTA MISMA
+                    # solicitud al frente para no perder antigüedad.
+                    time.sleep(2)
+
+                    job = _provider16_fifo_add_request(
+                        req,
+                        ticket_at_front=True,
+                    )
+
+                    action = "FIFO_ORDERED_RETRY"
+
+                else:
+                    # Compatibilidad durante migración:
+                    # jobs viejos que todavía vengan de actas
+                    # ingresan a la espera cronológica.
+                    job = _provider16_fifo_add_request(
+                        req,
+                    )
+
+                    action = "MIGRATE_TO_ORDERED_FIFO"
+
+                print(
+                    "PROVIDER16_BUSY_FIFO_WAIT =",
+                    {
+                        "request_id": req.id,
+                        "queue": current_queue,
+                        "action": action,
+                        "fifo_waiting": int(
+                            redis_conn.zcard(
+                                PROVIDER16_FIFO_ZSET_KEY
+                            )
+                        ),
+                        "job_id": job.id,
+                        "error": err[:300],
+                    },
+                    flush=True,
                 )
 
-                try:
-                    busy_retry = int(
-                        redis_conn.incr(
-                            busy_key
-                        )
-                        or 1
-                    )
+                return
 
-                    redis_conn.expire(
-                        busy_key,
-                        1800,
-                    )
-
-                except Exception as busy_redis_exc:
-                    busy_retry = 1
-
-                    print(
-                        "PROVIDER16_BUSY_REDIS_ERROR =",
-                        {
-                            "request_id": req.id,
-                            "error": str(
-                                busy_redis_exc
-                            ),
-                        },
-                        flush=True,
-                    )
-
-                # Hasta 5 minutos aprox.
-                if busy_retry <= 20:
-
-                    req.provider_name = (
-                        "PROVIDER16"
-                    )
-                    req.provider_group_id = None
-                    req.provider_message = None
-                    req.status = "QUEUED"
-
-                    req.error_message = (
-                        f"PROVIDER16_BUSY_RETRY_"
-                        f"{busy_retry}:"
-                        f"{err[:500]}"
-                    )
-
-                    req.updated_at = (
-                        _utc_now_naive()
-                    )
-
-                    db.commit()
-
-                    request_queue.enqueue_in(
-                        timedelta(seconds=15),
-                        process_request,
-                        req.id,
-                    )
-
-                    print(
-                        "PROVIDER16_BUSY_REQUEUED =",
-                        {
-                            "request_id": req.id,
-                            "retry": busy_retry,
-                            "delay_sec": 15,
-                            "error": err[:300],
-                        },
-                        flush=True,
-                    )
-
-                    return
-
-                # Si lleva demasiado tiempo ocupado,
-                # sale a otro proveedor, nunca reimprime P16.
-                if _provider16_requeue_fallback(
-                    "BUSY_EXHAUSTED",
-                    err,
-                ):
-                    return
-
-                raise
-
-
-            # ====================================================
-            # NO RECORD
-            #
-            # P16 no encontró el acta. Primero probar otro
-            # proveedor. Solo declarar SIN REGISTRO cuando
-            # realmente ya no hay fallback.
-            # ====================================================
 
             except SideaNoRecord as exc:
 
