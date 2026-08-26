@@ -944,7 +944,7 @@ PROVIDER_LABELS_SUPPORT = {
     "PROVIDER2": "ACTAS DEL SURESTE",
     "PROVIDER3": "AUSTRAM WEB",
     "PROVIDER4": "LAZARO WEB 1",
-    "PROVIDER5": "LUIS SID",
+    "PROVIDER5": "ACTAS CARAS",
     "PROVIDER6": "ACTAS ESCALANTE",
     "PROVIDER7": "MESINO SID",
     "PROVIDER8": "ANGEL",
@@ -972,7 +972,7 @@ SUPPORT_ERROR_LABELS_ES = {
     "NO_PROVIDER6_ESPECIALES_GROUP_CONFIGURED": "No hay grupo de especiales configurado para ACTAS ESCALANTE.",
     "NO_PROVIDER6_NACIMIENTO_GROUP_CONFIGURED": "No hay grupo de nacimiento configurado para ACTAS ESCALANTE.",
     "PROVIDER2_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para ACTAS DEL SURESTE.",
-    "PROVIDER5_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para LUIS SID.",
+    "PROVIDER5_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para ACTAS CARAS.",
     "PROVIDER8_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para ANGEL.",
     "PROVIDER9_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para EMILIANO.",
     "MAYAPROVIDER_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para el proveedor de MAYA.",
@@ -1030,8 +1030,8 @@ SUPPORT_ERROR_LABELS_ES = {
         "La solicitud debe reintentarse automáticamente con otro proveedor; "
         "no significa que el acta quedó perdida definitivamente."
     ),
-    "PROVIDER5_NACIMIENTO_GROUP_NOT_CONFIGURED": "No hay grupo de nacimiento configurado para LUIS SID.",
-    "PROVIDER5_ESPECIALES_GROUP_NOT_CONFIGURED": "No hay grupo de especiales configurado para LUIS SID.",
+    "PROVIDER5_NACIMIENTO_GROUP_NOT_CONFIGURED": "No hay grupo de nacimiento configurado para ACTAS CARAS.",
+    "PROVIDER5_ESPECIALES_GROUP_NOT_CONFIGURED": "No hay grupo de especiales configurado para ACTAS CARAS.",
     "PROVIDER12_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para VILLAFUERTE.",
     "PROVIDER12_NACIMIENTO_GROUP_NOT_CONFIGURED": "No hay grupo de nacimiento configurado para VILLAFUERTE.",
     "PROVIDER12_ESPECIALES_GROUP_NOT_CONFIGURED": "No hay grupo de especiales configurado para VILLAFUERTE.",
@@ -2522,6 +2522,7 @@ def _enabled_providers(db) -> list[str]:
     p13 = _get_or_create_provider(db, "PROVIDER13", False)
     p14 = _get_or_create_provider(db, "PROVIDER14", False)
     p15 = _get_or_create_provider(db, "PROVIDER15", False)
+    p16 = _get_or_create_provider(db, "PROVIDER16", False)
     p_maya = _get_or_create_provider(db, "MAYAPROVIDER", False)
 
     enabled = []
@@ -2558,6 +2559,13 @@ def _enabled_providers(db) -> list[str]:
         and settings.PROVIDER15_NODE_ENABLED
     ):
         enabled.append("PROVIDER15")
+
+    # PROVIDER16 / SIDEA
+    # Se crea APAGADO por defecto.
+    # Solo entra al pool cuando se habilite
+    # explícitamente desde ProviderSetting.
+    if p16.is_enabled:
+        enabled.append("PROVIDER16")
 
     return enabled
 
@@ -2702,6 +2710,19 @@ def _pick_provider14_overflow_fallback(db: Session, req) -> str | None:
     ):
         candidates = [p for p in candidates if p != "PROVIDER6"]
 
+    if (
+        "PROVIDER16" in candidates
+        and not _is_provider16_allowed_request(
+            req.curp,
+            req.act_type,
+        )
+    ):
+        candidates = [
+            p
+            for p in candidates
+            if p != "PROVIDER16"
+        ]
+
     if PROVIDER4_TEST_GROUPS:
         if not req.source_group_id or req.source_group_id not in PROVIDER4_TEST_GROUPS:
             candidates = [p for p in candidates if p != "PROVIDER4"]
@@ -2766,6 +2787,19 @@ def _pick_provider15_timeout_fallback(db: Session, req) -> str | None:
     ):
         candidates = [p for p in candidates if p != "PROVIDER6"]
 
+    if (
+        "PROVIDER16" in candidates
+        and not _is_provider16_allowed_request(
+            req.curp,
+            req.act_type,
+        )
+    ):
+        candidates = [
+            p
+            for p in candidates
+            if p != "PROVIDER16"
+        ]
+
     if PROVIDER4_TEST_GROUPS:
         if not req.source_group_id or req.source_group_id not in PROVIDER4_TEST_GROUPS:
             candidates = [p for p in candidates if p != "PROVIDER4"]
@@ -2795,6 +2829,128 @@ def _pick_provider15_timeout_fallback(db: Session, req) -> str | None:
         return weighted_chosen
 
     idx = (req.id - 1) % len(candidates)
+    return candidates[idx]
+
+
+def _pick_provider16_fallback(
+    db: Session,
+    req,
+) -> str | None:
+    """
+    Elige un proveedor alternativo cuando
+    PROVIDER16 / SIDEA no puede completar.
+
+    No vuelve a escoger PROVIDER16.
+    """
+
+    enabled = sorted(
+        _enabled_providers(db)
+    )
+
+    candidates = [
+        p
+        for p in enabled
+        if p != "PROVIDER16"
+    ]
+
+    candidates = _exclude_failed_providers(
+        req.id,
+        candidates,
+    )
+
+    if not _is_provider4_eligible(
+        req.curp,
+        req.act_type,
+    ):
+        candidates = [
+            p
+            for p in candidates
+            if p not in (
+                "PROVIDER4",
+                "PROVIDER10",
+                "PROVIDER11",
+            )
+        ]
+
+    if (
+        "PROVIDER6" in candidates
+        and not _is_provider6_allowed_request(
+            req.curp,
+            req.act_type,
+        )
+    ):
+        candidates = [
+            p
+            for p in candidates
+            if p != "PROVIDER6"
+        ]
+
+    if (
+        "PROVIDER15" in candidates
+        and not _is_provider15_allowed_request(
+            req.curp,
+            req.act_type,
+        )
+    ):
+        candidates = [
+            p
+            for p in candidates
+            if p != "PROVIDER15"
+        ]
+
+    if PROVIDER4_TEST_GROUPS:
+        if (
+            not req.source_group_id
+            or req.source_group_id
+            not in PROVIDER4_TEST_GROUPS
+        ):
+            candidates = [
+                p
+                for p in candidates
+                if p != "PROVIDER4"
+            ]
+
+    if PROVIDER7_TEST_GROUPS:
+        if (
+            not req.source_group_id
+            or req.source_group_id
+            not in PROVIDER7_TEST_GROUPS
+        ):
+            candidates = [
+                p
+                for p in candidates
+                if p != "PROVIDER7"
+            ]
+
+    print(
+        "PROVIDER16_FALLBACK_CANDIDATES =",
+        {
+            "request_id": req.id,
+            "curp": req.curp,
+            "act_type": req.act_type,
+            "enabled": enabled,
+            "candidates": candidates,
+        },
+        flush=True,
+    )
+
+    if not candidates:
+        return None
+
+    weighted_chosen = (
+        _pick_provider_by_weight(
+            db,
+            candidates,
+        )
+    )
+
+    if weighted_chosen:
+        return weighted_chosen
+
+    idx = (
+        req.id - 1
+    ) % len(candidates)
+
     return candidates[idx]
 
 
@@ -2957,6 +3113,27 @@ def _pick_provider_name(
                 "NO_PROVIDER_FOR_SPECIAL_FORMAT"
             )
     
+        if (
+            forced_provider == "PROVIDER16"
+            and not _is_provider16_allowed_request(
+                term,
+                act_type,
+            )
+        ):
+            print(
+                "BOT_PROVIDER_FORCED_PROVIDER16_NOT_ALLOWED =",
+                {
+                    "instance_name": instance_name,
+                    "term": term,
+                    "act_type": act_type,
+                },
+                flush=True,
+            )
+
+            raise RuntimeError(
+                "NO_PROVIDER_FOR_SPECIAL_FORMAT"
+            )
+
         if forced_provider in ("PROVIDER4", "PROVIDER10", "PROVIDER11") and not _is_provider4_eligible(term, act_type):
             print("BOT_PROVIDER_FORCED_LAZARO_NOT_ALLOWED_FALLBACK_TO_GLOBAL =", {
                 "forced_provider": forced_provider,
@@ -2974,6 +3151,24 @@ def _pick_provider_name(
             if not enabled:
                 raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
         
+            if (
+                "PROVIDER16" in enabled
+                and not _is_provider16_allowed_request(
+                    term,
+                    act_type,
+                )
+            ):
+                enabled = [
+                    p
+                    for p in enabled
+                    if p != "PROVIDER16"
+                ]
+
+            if not enabled:
+                raise RuntimeError(
+                    "NO_PROVIDER_FOR_SPECIAL_FORMAT"
+                )
+
             print("PICK_PROVIDER_ENABLED_FINAL_AFTER_FORCED_LAZARO_BLOCK =", enabled, flush=True)
         
             weighted_chosen = _pick_provider_by_weight(db, enabled)
@@ -3004,6 +3199,24 @@ def _pick_provider_name(
             if not enabled:
                 raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
     
+            if (
+                "PROVIDER16" in enabled
+                and not _is_provider16_allowed_request(
+                    term,
+                    act_type,
+                )
+            ):
+                enabled = [
+                    p
+                    for p in enabled
+                    if p != "PROVIDER16"
+                ]
+
+            if not enabled:
+                raise RuntimeError(
+                    "NO_PROVIDER_FOR_SPECIAL_FORMAT"
+                )
+
             print("PICK_PROVIDER_ENABLED_FINAL_AFTER_FORCED_PROVIDER6_BLOCK =", enabled, flush=True)
     
             weighted_chosen = _pick_provider_by_weight(db, enabled)
@@ -3099,6 +3312,36 @@ def _pick_provider_name(
                 "NO_PROVIDER_FOR_SPECIAL_FORMAT"
             )
 
+    # PROVIDER16 / SIDEA:
+    # inicialmente solo CURP + NACIMIENTO.
+    if (
+        "PROVIDER16" in enabled
+        and not _is_provider16_allowed_request(
+            term,
+            act_type,
+        )
+    ):
+        enabled = [
+            p
+            for p in enabled
+            if p != "PROVIDER16"
+        ]
+
+        print(
+            "PROVIDER16_REMOVED_NOT_ALLOWED_REQUEST =",
+            {
+                "enabled": enabled,
+                "term": term,
+                "act_type": act_type,
+            },
+            flush=True,
+        )
+
+        if not enabled:
+            raise RuntimeError(
+                "NO_PROVIDER_FOR_SPECIAL_FORMAT"
+            )
+
     print("PICK_PROVIDER_ENABLED_FINAL =", enabled, flush=True)
 
     # PROVIDER4 forzado solo en grupos test
@@ -3141,6 +3384,35 @@ def _pick_provider_name(
     
     print("PICK_PROVIDER_NORMAL_CHOSEN =", chosen, flush=True)
     return chosen
+
+
+def _is_provider16_allowed_request(
+    term: str | None,
+    act_type: str | None,
+) -> bool:
+    """
+    PROVIDER16 / SIDEA inicialmente SOLO:
+    - CURP válida
+    - NACIMIENTO normal
+    - no cadena
+    - no foliada
+    - no especiales
+    """
+
+    term_clean = (
+        term
+        or ""
+    ).strip().upper()
+
+    act_type_up = (
+        act_type
+        or ""
+    ).strip().upper()
+
+    if not _is_curp_term(term_clean):
+        return False
+
+    return act_type_up == "NACIMIENTO"
 
 
 def _is_folio_act(act_type: str | None) -> bool:
@@ -3339,15 +3611,13 @@ def _is_birth_request(term: str | None, act_type: str | None) -> bool:
 
 
 def _pick_provider5_group(term: str | None, act_type: str | None, request_id: int) -> str:
-    if _is_birth_request(term, act_type):
-        group = (settings.PROVIDER5_GROUP_NACIMIENTO or "").strip()
-        if not group:
-            raise RuntimeError("PROVIDER5_NACIMIENTO_GROUP_NOT_CONFIGURED")
-        return group
-
+    # ACTAS CARAS usa un solo grupo para todos los tipos de acta:
+    # nacimiento, matrimonio, defuncion, divorcio, etc.
     group = (settings.PROVIDER5_GROUP_ESPECIALES or "").strip()
+
     if not group:
         raise RuntimeError("PROVIDER5_ESPECIALES_GROUP_NOT_CONFIGURED")
+
     return group
 
 
@@ -4585,6 +4855,9 @@ def _pick_provider_group(
     if provider_name == "PROVIDER15":
         return None
 
+    if provider_name == "PROVIDER16":
+        return None
+
     if provider_name == "MAYAPROVIDER":
         group_reyes = (
             getattr(settings, "MAYAPROVIDER_GROUP_1", "") or ""
@@ -4707,6 +4980,9 @@ def _build_provider_message(provider_name: str, term: str, act_type: str) -> str
         return _provider14_message(term, act_type)
 
     if provider_name == "PROVIDER15":
+        return None
+
+    if provider_name == "PROVIDER16":
         return None
 
     if provider_name == "PROVIDER3":
@@ -5632,6 +5908,90 @@ def _process_provider15(req, db):
     )
 
 
+def _process_provider16(req, db):
+    """
+    PROVIDER16 / SIDEA.
+
+    SIDEA resuelve automáticamente la entidad inicial
+    desde la CURP y genera:
+
+        página frontal SIDEA
+        + reverso estatal
+        = PDF final de 2 páginas
+
+    La reserva de cuota y la protección contra
+    duplicados viven dentro de sidea_generate_pdf().
+    """
+
+    from app.services.provider16_sidea import (
+        SideaPool,
+        sidea_generate_pdf,
+    )
+
+    term = (
+        req.curp
+        or ""
+    ).strip().upper()
+
+    if not _is_provider16_allowed_request(
+        term,
+        req.act_type,
+    ):
+        raise RuntimeError(
+            "PROVIDER16_NOT_ALLOWED_REQUEST"
+        )
+
+    pool = SideaPool(
+        redis_conn
+    )
+
+    result = sidea_generate_pdf(
+        pool=pool,
+        curp=term,
+        entidad=None,
+        acto="1",
+        tipo="1",
+    )
+
+    pdf_bytes = (
+        result.get("pdf_bytes")
+        or b""
+    )
+
+    if not pdf_bytes:
+        raise RuntimeError(
+            "PROVIDER16_EMPTY_PDF"
+        )
+
+    return {
+        "pdf_bytes": pdf_bytes,
+        "account_key": result.get(
+            "account_key"
+        ),
+        "usage_reserved": result.get(
+            "usage_reserved"
+        ),
+        "peticion_oid": result.get(
+            "peticion_oid"
+        ),
+        "respuesta_oid": result.get(
+            "respuesta_oid"
+        ),
+        "registration_entity": result.get(
+            "registration_entity"
+        ),
+        "cadena": result.get(
+            "cadena"
+        ),
+        "front_pages": result.get(
+            "front_pages"
+        ),
+        "final_pages": result.get(
+            "final_pages"
+        ),
+    }
+
+
 def _process_provider7(req, db):
     access_token = _get_app_setting(db, "PROVIDER7_ACCESS_TOKEN", settings.PROVIDER7_ACCESS_TOKEN)
     jsessionid = _get_app_setting(db, "PROVIDER7_JSESSIONID", settings.PROVIDER7_JSESSIONID)
@@ -6469,6 +6829,7 @@ NO_TIME_CAPTION_GROUPS = {
     "120363408668441985@g.us",
     "120363421166637606@g.us",
     "120363427267191472@g.us",
+    "120363429406837130@g.us",
 }
 
 
@@ -6714,6 +7075,52 @@ def process_request(request_id: int):
             and current_queue != SLOW_PROVIDER_QUEUE_NAME
         )
         
+        # PROVIDER16_REQUEUE_REUSE_V1
+        provider16_error_marker = (
+            (req.error_message or "")
+            .strip()
+            .upper()
+        )
+
+        provider16_fallback_marker = (
+            provider16_error_marker.startswith(
+                "PROVIDER16_"
+            )
+            and "_FALLBACK_TO_"
+            in provider16_error_marker
+        )
+
+        reuse_provider16_fallback = (
+            provider16_fallback_marker
+            and bool(existing_provider)
+            and existing_provider
+            != "PROVIDER16"
+            and current_queue
+            != SLOW_PROVIDER_QUEUE_NAME
+            and _provider_is_enabled(
+                db,
+                existing_provider,
+            )
+        )
+
+        provider16_busy_retry_marker = (
+            provider16_error_marker.startswith(
+                "PROVIDER16_BUSY_RETRY_"
+            )
+        )
+
+        reuse_provider16_busy = (
+            provider16_busy_retry_marker
+            and existing_provider
+            == "PROVIDER16"
+            and current_queue
+            != SLOW_PROVIDER_QUEUE_NAME
+            and _provider_is_enabled(
+                db,
+                "PROVIDER16",
+            )
+        )
+
         provider1_transient_fallback_marker = (
             (req.error_message or "")
             .strip()
@@ -6793,6 +7200,53 @@ def process_request(request_id: int):
                 flush=True,
             )
         
+        elif reuse_provider16_fallback:
+            provider_name = existing_provider
+            provider_group_id = (
+                req.provider_group_id
+            )
+            text_to_provider = (
+                req.provider_message
+            )
+
+            print(
+                "PROVIDER16_FALLBACK_REUSING_PROVIDER =",
+                {
+                    "request_id": req.id,
+                    "provider_name": (
+                        provider_name
+                    ),
+                    "provider_group_id": (
+                        provider_group_id
+                    ),
+                    "queue": current_queue,
+                    "error_message": (
+                        req.error_message
+                    ),
+                },
+                flush=True,
+            )
+
+        elif reuse_provider16_busy:
+            provider_name = "PROVIDER16"
+            provider_group_id = None
+            text_to_provider = None
+
+            print(
+                "PROVIDER16_BUSY_REUSING_PROVIDER =",
+                {
+                    "request_id": req.id,
+                    "provider_name": (
+                        provider_name
+                    ),
+                    "queue": current_queue,
+                    "error_message": (
+                        req.error_message
+                    ),
+                },
+                flush=True,
+            )
+
         elif reuse_provider1_transient_fallback:
             provider_name = existing_provider
             provider_group_id = req.provider_group_id
@@ -7715,6 +8169,524 @@ def process_request(request_id: int):
                 ),
             )
             return
+
+        # PROVIDER16_PROCESS_BRANCH_V1
+        if provider_name == "PROVIDER16":
+
+            from app.services.provider16_sidea import (
+                SideaError,
+                SideaNeedLogin,
+                SideaDailyLimit,
+                SideaNoReadyAccount,
+                SideaPdfError,
+                SideaNoRecord,
+                SideaSubmitUncertain,
+                SideaResponseTimeout,
+                SideaBusy,
+            )
+
+            # ----------------------------------------------------
+            # FALLBACK COMUN P16 -> OTRO PROVEEDOR
+            # ----------------------------------------------------
+
+            def _provider16_requeue_fallback(
+                reason: str,
+                err: str,
+                delay_sec: int = 3,
+            ) -> bool:
+
+                _mark_provider_failed_for_request(
+                    req.id,
+                    "PROVIDER16",
+                )
+
+                fallback_provider = (
+                    _pick_provider16_fallback(
+                        db,
+                        req,
+                    )
+                )
+
+                if not fallback_provider:
+                    print(
+                        "PROVIDER16_FALLBACK_NO_PROVIDER =",
+                        {
+                            "request_id": req.id,
+                            "reason": reason,
+                            "error": err[:300],
+                        },
+                        flush=True,
+                    )
+
+                    return False
+
+                req.provider_name = (
+                    fallback_provider
+                )
+
+                req.provider_group_id = (
+                    _pick_provider_group(
+                        fallback_provider,
+                        req.curp,
+                        req.act_type,
+                        req.id,
+                    )
+                )
+
+                req.provider_message = (
+                    _build_provider_message(
+                        fallback_provider,
+                        req.curp,
+                        req.act_type,
+                    )
+                )
+
+                req.status = "QUEUED"
+
+                req.error_message = (
+                    f"PROVIDER16_{reason}_FALLBACK_TO_"
+                    f"{fallback_provider}:"
+                    f"{err[:500]}"
+                )
+
+                req.updated_at = (
+                    _utc_now_naive()
+                )
+
+                db.commit()
+
+                request_queue.enqueue_in(
+                    timedelta(
+                        seconds=delay_sec
+                    ),
+                    process_request,
+                    req.id,
+                )
+
+                print(
+                    "PROVIDER16_FALLBACK_REQUEUED =",
+                    {
+                        "request_id": req.id,
+                        "reason": reason,
+                        "failed_provider": (
+                            "PROVIDER16"
+                        ),
+                        "fallback_provider": (
+                            fallback_provider
+                        ),
+                        "provider_group_id": (
+                            req.provider_group_id
+                        ),
+                        "delay_sec": delay_sec,
+                        "error": err[:300],
+                    },
+                    flush=True,
+                )
+
+                return True
+
+
+            try:
+                provider16_result = (
+                    _process_provider16(
+                        req,
+                        db,
+                    )
+                )
+
+
+            # ====================================================
+            # BUSY
+            #
+            # No hubo impresión: simplemente otra solicitud
+            # está usando la cuenta SIDEA.
+            # ====================================================
+
+            except SideaBusy as exc:
+
+                err = str(exc)
+
+                busy_key = (
+                    f"provider16_busy_retry:"
+                    f"{req.id}"
+                )
+
+                try:
+                    busy_retry = int(
+                        redis_conn.incr(
+                            busy_key
+                        )
+                        or 1
+                    )
+
+                    redis_conn.expire(
+                        busy_key,
+                        1800,
+                    )
+
+                except Exception as busy_redis_exc:
+                    busy_retry = 1
+
+                    print(
+                        "PROVIDER16_BUSY_REDIS_ERROR =",
+                        {
+                            "request_id": req.id,
+                            "error": str(
+                                busy_redis_exc
+                            ),
+                        },
+                        flush=True,
+                    )
+
+                # Hasta 5 minutos aprox.
+                if busy_retry <= 20:
+
+                    req.provider_name = (
+                        "PROVIDER16"
+                    )
+                    req.provider_group_id = None
+                    req.provider_message = None
+                    req.status = "QUEUED"
+
+                    req.error_message = (
+                        f"PROVIDER16_BUSY_RETRY_"
+                        f"{busy_retry}:"
+                        f"{err[:500]}"
+                    )
+
+                    req.updated_at = (
+                        _utc_now_naive()
+                    )
+
+                    db.commit()
+
+                    request_queue.enqueue_in(
+                        timedelta(seconds=15),
+                        process_request,
+                        req.id,
+                    )
+
+                    print(
+                        "PROVIDER16_BUSY_REQUEUED =",
+                        {
+                            "request_id": req.id,
+                            "retry": busy_retry,
+                            "delay_sec": 15,
+                            "error": err[:300],
+                        },
+                        flush=True,
+                    )
+
+                    return
+
+                # Si lleva demasiado tiempo ocupado,
+                # sale a otro proveedor, nunca reimprime P16.
+                if _provider16_requeue_fallback(
+                    "BUSY_EXHAUSTED",
+                    err,
+                ):
+                    return
+
+                raise
+
+
+            # ====================================================
+            # NO RECORD
+            #
+            # P16 no encontró el acta. Primero probar otro
+            # proveedor. Solo declarar SIN REGISTRO cuando
+            # realmente ya no hay fallback.
+            # ====================================================
+
+            except SideaNoRecord as exc:
+
+                err = str(exc)
+
+                if _provider16_requeue_fallback(
+                    "NO_RECORD",
+                    err,
+                ):
+                    return
+
+                req.status = "ERROR"
+                req.error_message = err[:1000]
+                req.updated_at = (
+                    _utc_now_naive()
+                )
+                db.commit()
+
+                _notify_client_no_record_once(
+                    req,
+                    label=(
+                        "PROVIDER16_NO_RECORD"
+                    ),
+                )
+
+                return
+
+
+            # ====================================================
+            # IMPRESION INCIERTA / RESPUESTA TARDIA
+            #
+            # Aquí el POST pudo haber creado una impresión.
+            # JAMAS volver a seleccionar P16 para ese request.
+            # Sí puede salir a OTRO proveedor.
+            # ====================================================
+
+            except (
+                SideaSubmitUncertain,
+                SideaResponseTimeout,
+            ) as exc:
+
+                err = str(exc)
+
+                _notify_support_error(
+                    req,
+                    "PROVIDER16_SIDEA_UNCERTAIN",
+                    err,
+                )
+
+                if _provider16_requeue_fallback(
+                    "UNCERTAIN",
+                    err,
+                ):
+                    return
+
+                # Sin fallback: subir al manejador genérico.
+                # NO se vuelve a llamar SIDEA aquí.
+                raise
+
+
+            # ====================================================
+            # CUENTA / SESION / LIMITE / PDF
+            # ====================================================
+
+            except (
+                SideaNeedLogin,
+                SideaNoReadyAccount,
+                SideaDailyLimit,
+                SideaPdfError,
+            ) as exc:
+
+                err = str(exc)
+
+                error_type = (
+                    type(exc).__name__
+                )
+
+                _notify_support_error(
+                    req,
+                    (
+                        "PROVIDER16_"
+                        f"{error_type}"
+                    ),
+                    err,
+                )
+
+                if _provider16_requeue_fallback(
+                    error_type.upper(),
+                    err,
+                ):
+                    return
+
+                raise
+
+
+            # ====================================================
+            # OTRO ERROR CONTROLADO SIDEA
+            # ====================================================
+
+            except SideaError as exc:
+
+                err = str(exc)
+
+                _notify_support_error(
+                    req,
+                    "PROVIDER16_SIDEA_ERROR",
+                    err,
+                )
+
+                if _provider16_requeue_fallback(
+                    "SIDEA_ERROR",
+                    err,
+                ):
+                    return
+
+                raise
+
+
+            # ====================================================
+            # SUCCESS
+            # ====================================================
+
+            pdf_bytes = _require_pdf_bytes(
+                provider16_result,
+                "PROVIDER16",
+                req,
+            )
+
+            safe_media_b64 = (
+                base64.b64encode(
+                    pdf_bytes
+                ).decode()
+            )
+
+            total_seconds = (
+                _request_total_seconds(
+                    req,
+                    process_started_ts,
+                )
+            )
+
+            caption_text = ""
+
+            if (
+                req.source_group_id
+                not in NO_TIME_CAPTION_GROUPS
+            ):
+                caption_text = (
+                    f"⏱️ Tiempo total: "
+                    f"{_fmt_seconds(total_seconds)}"
+                )
+
+            # P16 inicialmente SOLO nacimiento normal.
+            filename = (
+                f"{req.curp}.pdf"
+            )
+
+            print(
+                "PROVIDER16_RESULT_OK =",
+                {
+                    "request_id": req.id,
+                    "account_key": (
+                        provider16_result.get(
+                            "account_key"
+                        )
+                    ),
+                    "usage_reserved": (
+                        provider16_result.get(
+                            "usage_reserved"
+                        )
+                    ),
+                    "registration_entity": (
+                        provider16_result.get(
+                            "registration_entity"
+                        )
+                    ),
+                    "front_pages": (
+                        provider16_result.get(
+                            "front_pages"
+                        )
+                    ),
+                    "final_pages": (
+                        provider16_result.get(
+                            "final_pages"
+                        )
+                    ),
+                    "pdf_bytes": len(
+                        pdf_bytes
+                    ),
+                },
+                flush=True,
+            )
+
+            # Limpiar contador BUSY si existía.
+            try:
+                redis_conn.delete(
+                    f"provider16_busy_retry:"
+                    f"{req.id}"
+                )
+            except Exception:
+                pass
+
+
+            # ====================================================
+            # R2
+            # ====================================================
+
+            try:
+                save_request_pdf_to_r2(
+                    req,
+                    db,
+                    pdf_bytes,
+                    filename=filename,
+                    origin="worker:PROVIDER16",
+                )
+
+            except Exception as r2_exc:
+
+                try:
+                    db.rollback()
+                except Exception as rollback_exc:
+                    print(
+                        "R2_SAVE_PROVIDER16_ROLLBACK_ERROR =",
+                        {
+                            "req_id": req.id,
+                            "error": str(
+                                rollback_exc
+                            ),
+                        },
+                        flush=True,
+                    )
+
+                print(
+                    "R2_SAVE_PROVIDER16_PDF_ERROR =",
+                    {
+                        "req_id": req.id,
+                        "filename": filename,
+                        "error": str(r2_exc),
+                    },
+                    flush=True,
+                )
+
+                raise
+
+
+            # ====================================================
+            # API
+            # ====================================================
+
+            if _store_api_pdf_result(
+                req,
+                db,
+                safe_media_b64,
+                filename,
+                "BASE64_PROVIDER16_API",
+            ):
+                return
+
+
+            # ====================================================
+            # WHATSAPP
+            # ====================================================
+
+            delivery_key = (
+                f"provider16_delivery:"
+                f"{req.id}:"
+                f"{req.curp}:"
+                f"{req.source_group_id or req.requester_wa_id}"
+            )
+
+            if redis_conn.exists(
+                delivery_key
+            ):
+                print(
+                    "PROVIDER16_DUPLICATE_DELIVERY_IGNORED =",
+                    delivery_key,
+                    flush=True,
+                )
+
+                return
+
+            _enqueue_pdf_delivery_now(
+                req,
+                db,
+                caption_text,
+                "BASE64_PROVIDER16",
+            )
+
+            return
+
 
         if provider_name == "PROVIDER15":
 

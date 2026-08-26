@@ -280,7 +280,12 @@ def provider_label_for_type(act_type: str) -> str:
         "DIVORCIO FOLIO": "divorcio folio",
         "FOLIO": "folio",
     }
-    return mapping.get(act_type, "nacimiento")
+    if act_type not in mapping:
+        raise RuntimeError(
+            f"UNSUPPORTED_PROVIDER_ACT_TYPE:{act_type}"
+        )
+
+    return mapping[act_type]
 
 
 def _remove_type_words(line: str) -> str:

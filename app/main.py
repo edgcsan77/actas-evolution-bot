@@ -174,10 +174,11 @@ BOT_PROVIDER_OPTIONS = {
     "GLOBAL_POOL": "Automático",
 
     "GLOBAL:PROVIDER1": "ADMIN",
-    "GLOBAL:PROVIDER5": "HERNANDEZ",
+    "GLOBAL:PROVIDER5": "ACTAS CARAS",
     
     "GLOBAL:PROVIDER14": "E-BOT",
     "GLOBAL:PROVIDER15": "E-WEB",
+    "GLOBAL:PROVIDER16": "SIDEA",
     
     "GLOBAL:PROVIDER4": "LAZARO WEB 1",
     "GLOBAL:PROVIDER10": "LAZARO WEB 2",
@@ -258,6 +259,7 @@ def _provider_from_mode(mode: str | None) -> str | None:
         "PROVIDER13",
         "PROVIDER14",
         "PROVIDER15",
+        "PROVIDER16",
         "MAYAPROVIDER",
     }:
         return provider_name
@@ -1166,7 +1168,7 @@ PROVIDER_LABELS = {
     "PROVIDER2": "ACTAS DEL SURESTE",
     "PROVIDER3": "AUSTRAM WEB",
     "PROVIDER4": "LAZARO WEB 1",
-    "PROVIDER5": "LUIS SID",
+    "PROVIDER5": "ACTAS CARAS",
     "PROVIDER6": "ACTAS ESCALANTE",
     "PROVIDER7": "MESINO SID",
     "PROVIDER8": "ANGEL",
@@ -1177,6 +1179,7 @@ PROVIDER_LABELS = {
     "PROVIDER13": "RL",
     "PROVIDER14": "E-BOT",
     "PROVIDER15": "E-WEB",
+    "PROVIDER16": "SIDEA",
     "MAYAPROVIDER": "PROVEEDOR DE MAYA",
 }
 
@@ -9815,6 +9818,7 @@ def panel_provider_weight(payload: dict, db: Session = Depends(get_db)):
         "PROVIDER13",
         "PROVIDER14",
         "PROVIDER15",
+        "PROVIDER16",
     }:
         return {"ok": False, "error": "Proveedor inválido"}
 
@@ -11984,7 +11988,7 @@ def panel_actas(
                     <div class="provider-row-break"></div>
 
                     <div class="provider-card">
-                      <div class="provider-name">HERNANDEZ</div>
+                      <div class="provider-name">ACTAS CARAS</div>
                       <div style="margin:6px 0;">
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
@@ -12102,6 +12106,58 @@ def panel_actas(
                         <button
                           class="btn btn-danger"
                           onclick="toggleProvider('PROVIDER15','off')"
+                        >
+                          Desactivar
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- PROVIDER16_PANEL_INTEGRATION_V2 -->
+                    <div class="provider-card">
+                      <div class="provider-name">SIDEA</div>
+
+                      <div style="margin:6px 0;">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
+                          Prioridad de uso
+                        </div>
+
+                        <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
+                          <div style="display:flex;align-items:center;gap:6px;">
+                            <input
+                              id="weight_PROVIDER16"
+                              type="number"
+                              min="0"
+                              step="0.1"
+                              value="{provider_weight_map.get('PROVIDER16', 0)}"
+                              style="width:65px;padding:4px 6px;border-radius:6px;border:1px solid #ccc;text-align:center;"
+                            >
+                            <span style="font-size:12px;opacity:.7;">nivel</span>
+                          </div>
+
+                          <button
+                            class="btn btn-primary"
+                            onclick="saveProviderWeight('PROVIDER16')"
+                          >
+                            Aplicar
+                          </button>
+                        </div>
+
+                        <div style="font-size:11px;opacity:.6;margin-top:4px;">
+                          Solo CURP + NACIMIENTO · Papel Bond + reverso
+                        </div>
+                      </div>
+
+                      <div class="provider-actions">
+                        <button
+                          class="btn btn-success"
+                          onclick="toggleProvider('PROVIDER16','on')"
+                        >
+                          Activar
+                        </button>
+
+                        <button
+                          class="btn btn-danger"
+                          onclick="toggleProvider('PROVIDER16','off')"
                         >
                           Desactivar
                         </button>
@@ -15781,6 +15837,7 @@ def startup():
         _get_or_create_provider(db, "PROVIDER13", False)
         _get_or_create_provider(db, "PROVIDER14", False)
         _get_or_create_provider(db, "PROVIDER15", False)
+        _get_or_create_provider(db, "PROVIDER16", False)
         _get_or_create_provider(db, "MAYAPROVIDER", False)
     
         current = _get_app_setting(db, "PROVIDER3_PHPSESSID", "")
@@ -16253,10 +16310,10 @@ API_ALLOWED_ACT_TYPES = {
     "DEFUNCION",
     "DIVORCIO",
     "CADENA",
-    "FOLIADA NACIMIENTO",
-    "FOLIADA MATRIMONIO",
-    "FOLIADA DEFUNCION",
-    "FOLIADA DIVORCIO",
+    "NACIMIENTO FOLIO",
+    "MATRIMONIO FOLIO",
+    "DEFUNCION FOLIO",
+    "DIVORCIO FOLIO",
 }
 
 API_ERROR_MESSAGES = {
@@ -16554,6 +16611,32 @@ def api_v1_create_acta(
     external_id = (payload.get("external_id") or "").strip()
 
     act_type = re.sub(r"\s+", " ", act_type).strip()
+
+    # La API historicamente acepta "FOLIADA TIPO",
+    # pero internamente todo ACTAS trabaja con "TIPO FOLIO".
+    api_act_type_aliases = {
+        "FOLIADA NACIMIENTO": "NACIMIENTO FOLIO",
+        "FOLIADO NACIMIENTO": "NACIMIENTO FOLIO",
+        "NACIMIENTO FOLIADA": "NACIMIENTO FOLIO",
+        "NACIMIENTO FOLIADO": "NACIMIENTO FOLIO",
+
+        "FOLIADA MATRIMONIO": "MATRIMONIO FOLIO",
+        "FOLIADO MATRIMONIO": "MATRIMONIO FOLIO",
+        "MATRIMONIO FOLIADA": "MATRIMONIO FOLIO",
+        "MATRIMONIO FOLIADO": "MATRIMONIO FOLIO",
+
+        "FOLIADA DEFUNCION": "DEFUNCION FOLIO",
+        "FOLIADO DEFUNCION": "DEFUNCION FOLIO",
+        "DEFUNCION FOLIADA": "DEFUNCION FOLIO",
+        "DEFUNCION FOLIADO": "DEFUNCION FOLIO",
+
+        "FOLIADA DIVORCIO": "DIVORCIO FOLIO",
+        "FOLIADO DIVORCIO": "DIVORCIO FOLIO",
+        "DIVORCIO FOLIADA": "DIVORCIO FOLIO",
+        "DIVORCIO FOLIADO": "DIVORCIO FOLIO",
+    }
+
+    act_type = api_act_type_aliases.get(act_type, act_type)
 
     if act_type not in API_ALLOWED_ACT_TYPES:
         return _api_error_response(
@@ -17516,6 +17599,7 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
         "120363408668441985@g.us",
         "120363421166637606@g.us",
         "120363427267191472@g.us",
+        "120363429406837130@g.us",
     }
 
     if req.created_at:
@@ -19190,6 +19274,7 @@ def _providers_status_text(db: Session) -> str:
     p13 = _get_or_create_provider(db, "PROVIDER13", False)
     p14 = _get_or_create_provider(db, "PROVIDER14", False)
     p15 = _get_or_create_provider(db, "PROVIDER15", False)
+    p16 = _get_or_create_provider(db, "PROVIDER16", False)
 
     s1 = "ON" if p1.is_enabled else "OFF"
     s2 = "ON" if p2.is_enabled else "OFF"
@@ -19206,6 +19291,7 @@ def _providers_status_text(db: Session) -> str:
     s13 = "ON" if p13.is_enabled else "OFF"
     s14 = "ON" if p14.is_enabled else "OFF"
     s15 = "ON" if p15.is_enabled else "OFF"
+    s16 = "ON" if p16.is_enabled else "OFF"
 
     provider1_extra = ""
     provider2_extra = ""
@@ -19458,9 +19544,10 @@ def _providers_status_text(db: Session) -> str:
 
     text = (
         f"ADMIN:          {s1}\n"
-        f"HERNANDEZ:      {s5}\n"
+        f"ACTAS CARAS:    {s5}\n"
         f"E-BOT:          {s14}\n"
         f"E-WEB:          {s15}\n"
+        f"SIDEA:          {s16}\n"
         f"LAZARO 1:       {s4}\n"
         f"LAZARO 2:       {s10}\n"
         f"LAZARO 3:       {s11}"
@@ -20417,18 +20504,58 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
         instance_name = (instance_name or "").strip()
 
-        if is_instance_blocked(instance_name):
-            print("IGNORED_REASON = instance_blocked_early", flush=True)
-            print("BLOCKED_INSTANCE =", instance_name, flush=True)
-            return {
-                "ok": True,
-                "ignored": "instance_blocked",
-                "instance_name": instance_name
-            }
-                
         key = data.get("key", {})
         message = data.get("message", {})
         push_name = data.get("pushName", "")
+
+        remote_jid_early = (key.get("remoteJid") or "").strip()
+
+        # Una instancia bloqueada no acepta solicitudes nuevas,
+        # pero sí debe recibir respuestas desde cualquier grupo proveedor
+        # que ya exista en request_logs.
+        provider_group_exists = False
+
+        if remote_jid_early:
+            provider_group_exists = (
+                db.query(RequestLog.id)
+                .filter(RequestLog.provider_group_id == remote_jid_early)
+                .first()
+                is not None
+            )
+
+        instance_blocked = is_instance_blocked(instance_name)
+
+        if (
+            instance_blocked
+            and not provider_group_exists
+        ):
+            print(
+                "IGNORED_REASON = instance_blocked_early",
+                flush=True,
+            )
+            print(
+                "BLOCKED_INSTANCE =",
+                instance_name,
+                flush=True,
+            )
+            return {
+                "ok": True,
+                "ignored": "instance_blocked",
+                "instance_name": instance_name,
+            }
+
+        if (
+            instance_blocked
+            and provider_group_exists
+        ):
+            print(
+                "BLOCKED_INSTANCE_PROVIDER_BYPASS =",
+                {
+                    "instance_name": instance_name,
+                    "remote_jid": remote_jid_early,
+                },
+                flush=True,
+            )
 
         original_message = message
 
@@ -20692,7 +20819,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             except Exception as e:
                 print("ENSURE_GROUP_OWNER_ERROR =", str(e), flush=True)
 
-        if is_instance_blocked(instance_name) and not is_admin_command:
+        if (
+            is_instance_blocked(instance_name)
+            and not is_admin_command
+            and not is_provider_message
+        ):
             msg = (
                 "⚠️ Este bot alcanzó su límite de solicitudes.\n\n"
                 "Por el momento está bloqueado para nuevas entradas."

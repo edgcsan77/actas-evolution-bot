@@ -115,7 +115,7 @@ for inst in get_instances():
 
         rdb.setex(
             cache_key,
-            600,
+            120,
             json.dumps(result, ensure_ascii=False),
         )
 
@@ -132,7 +132,7 @@ for inst in get_instances():
 
         rdb.setex(
             cache_key,
-            180,
+            60,
             json.dumps(result, ensure_ascii=False),
         )
 
