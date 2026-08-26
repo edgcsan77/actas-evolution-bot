@@ -7299,6 +7299,35 @@ def process_request(request_id: int):
 
         terminal_error = (getattr(req, "error_message", "") or "").upper()
 
+        # PROVIDER16_TERMINAL_ERROR_SKIP_V1
+        #
+        # ERROR en P16 significa request cerrado.
+        # Los reintentos legitimos de capacidad/fallback usan QUEUED.
+        #
+        # Evita que un job RQ viejo reviva mañana un request que
+        # ya termino y vuelva a consumir SIDEA.
+        if (
+            current_status == "ERROR"
+            and (
+                req.provider_name
+                or ""
+            ).strip().upper()
+            == "PROVIDER16"
+        ):
+            print(
+                "PROCESS_REQUEST_PROVIDER16_"
+                "TERMINAL_ERROR_SKIP =",
+                {
+                    "request_id": req.id,
+                    "status": req.status,
+                    "error_message": (
+                        req.error_message
+                    ),
+                },
+                flush=True,
+            )
+            return
+
         # Un request cerrado definitivamente por app.cleanup no debe
         # revivir si quedó un job viejo pendiente en Redis/RQ.
         if (
