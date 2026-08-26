@@ -14128,6 +14128,8 @@ def panel_actas(
                       </div>
                     </div>
 
+                    <div class="provider-row-break"></div>
+
                     <!-- PROVIDER16_PANEL_INTEGRATION_V2 -->
                     <div class="provider-card">
                       <div class="provider-name">SIDEA</div>
@@ -14163,8 +14165,6 @@ def panel_actas(
                         </div>
 
                         {_sidea_main_panel_html(db, current_token)}
-
-
 
                         <div style="margin-top:9px;">
                           <a
