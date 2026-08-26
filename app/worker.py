@@ -3396,7 +3396,11 @@ def _is_provider16_allowed_request(
       DEFUNCION
       MATRIMONIO
       DIVORCIO
-      por CURP o CADENA.
+      por CURP.
+
+    CADENA:
+      la propia cadena permite que SIDEA descubra
+      el acto registral real.
 
     FOLIADAS todavía bloqueadas.
     """
@@ -3428,22 +3432,31 @@ def _is_provider16_allowed_request(
     ):
         return False
 
-    if act_type_up not in {
+    # CADENA puede venir como act_type=CADENA.
+    # Si además viene tipada como MAT/DIV/DEF/NAC,
+    # después validaremos que el acto real coincida.
+    if is_chain(
+        term_clean
+    ):
+        return act_type_up in {
+            "CADENA",
+            "NACIMIENTO",
+            "DEFUNCION",
+            "MATRIMONIO",
+            "DIVORCIO",
+        }
+
+    if not _is_curp_term(
+        term_clean
+    ):
+        return False
+
+    return act_type_up in {
         "NACIMIENTO",
         "DEFUNCION",
         "MATRIMONIO",
         "DIVORCIO",
-    }:
-        return False
-
-    if is_chain(
-        term_clean
-    ):
-        return True
-
-    return _is_curp_term(
-        term_clean
-    )
+    }
 
 
 def _is_folio_act(act_type: str | None) -> bool:
@@ -5950,7 +5963,9 @@ def _process_provider16(req, db):
       CURP -> cadena real -> impresión.
 
     CADENA:
-      valida acto real antes de imprimir.
+      SIDEA descubre el acto real.
+      Si el request ya venía tipado como
+      NAC/MAT/DEF/DIV, también se valida.
     """
 
     from app.utils.curp import is_chain
@@ -5997,65 +6012,87 @@ def _process_provider16(req, db):
         "DIVORCIO": "4",
     }
 
-    acto = acto_map.get(
-        act_type_up
-    )
-
-    if not acto:
-        raise RuntimeError(
-            "PROVIDER16_ACT_TYPE_NOT_SUPPORTED:"
-            f"{act_type_up}"
-        )
-
     pool = SideaPool(
         redis_conn
     )
+
+    # ========================================================
+    # CADENA
+    # ========================================================
 
     if is_chain(
         term
     ):
 
+        # act_type=CADENA:
+        # SIDEA determina libremente el acto.
+        #
+        # Si la cadena fue enviada explícitamente como
+        # MATRIMONIO/DEFUNCION/etc., protegemos contra
+        # una cadena de acto distinto.
+        expected_acto = (
+            acto_map.get(
+                act_type_up
+            )
+        )
+
         result = (
             sidea_generate_pdf_from_chain(
                 pool=pool,
                 cadena=term,
-                expected_acto=acto,
+                expected_acto=expected_acto,
             )
         )
 
-    elif acto == "1":
-
-        result = sidea_generate_pdf(
-            pool=pool,
-            curp=term,
-            entidad=None,
-            acto="1",
-            tipo="1",
-        )
+    # ========================================================
+    # CURP
+    # ========================================================
 
     else:
 
-        resolved = (
-            sidea_resolve_special_curp_to_chain(
+        acto = acto_map.get(
+            act_type_up
+        )
+
+        if not acto:
+            raise RuntimeError(
+                "PROVIDER16_ACT_TYPE_NOT_SUPPORTED:"
+                f"{act_type_up}"
+            )
+
+        if acto == "1":
+
+            result = sidea_generate_pdf(
                 pool=pool,
                 curp=term,
-                acto=acto,
+                entidad=None,
+                acto="1",
+                tipo="1",
             )
-        )
 
-        result = (
-            sidea_generate_pdf_from_chain(
-                pool=pool,
-                cadena=resolved["cadena"],
-                expected_acto=acto,
+        else:
+
+            resolved = (
+                sidea_resolve_special_curp_to_chain(
+                    pool=pool,
+                    curp=term,
+                    acto=acto,
+                )
             )
-        )
 
-        result = dict(result)
+            result = (
+                sidea_generate_pdf_from_chain(
+                    pool=pool,
+                    cadena=resolved["cadena"],
+                    expected_acto=acto,
+                )
+            )
 
-        result[
-            "resolved_from_special_curp"
-        ] = True
+            result = dict(result)
+
+            result[
+                "resolved_from_special_curp"
+            ] = True
 
     pdf_bytes = (
         result.get("pdf_bytes")
