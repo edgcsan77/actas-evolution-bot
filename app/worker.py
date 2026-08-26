@@ -3391,13 +3391,17 @@ def _is_provider16_allowed_request(
     act_type: str | None,
 ) -> bool:
     """
-    PROVIDER16 / SIDEA inicialmente SOLO:
-    - CURP válida
-    - NACIMIENTO normal
-    - no cadena
-    - no foliada
-    - no especiales
+    SIDEA:
+      NACIMIENTO
+      DEFUNCION
+      MATRIMONIO
+      DIVORCIO
+      por CURP o CADENA.
+
+    FOLIADAS todavía bloqueadas.
     """
+
+    from app.utils.curp import is_chain
 
     term_clean = (
         term
@@ -3409,10 +3413,37 @@ def _is_provider16_allowed_request(
         or ""
     ).strip().upper()
 
-    if not _is_curp_term(term_clean):
+    act_type_up = (
+        act_type_up
+        .replace("Á", "A")
+        .replace("É", "E")
+        .replace("Í", "I")
+        .replace("Ó", "O")
+        .replace("Ú", "U")
+        .replace("Ü", "U")
+    )
+
+    if _is_folio_act(
+        act_type_up
+    ):
         return False
 
-    return act_type_up == "NACIMIENTO"
+    if act_type_up not in {
+        "NACIMIENTO",
+        "DEFUNCION",
+        "MATRIMONIO",
+        "DIVORCIO",
+    }:
+        return False
+
+    if is_chain(
+        term_clean
+    ):
+        return True
+
+    return _is_curp_term(
+        term_clean
+    )
 
 
 def _is_folio_act(act_type: str | None) -> bool:
@@ -5910,22 +5941,25 @@ def _process_provider15(req, db):
 
 def _process_provider16(req, db):
     """
-    PROVIDER16 / SIDEA.
+    PROVIDER16 SIDEA multiacto.
 
-    SIDEA resuelve automáticamente la entidad inicial
-    desde la CURP y genera:
+    NACIMIENTO CURP:
+      flujo original probado.
 
-        página frontal SIDEA
-        + reverso estatal
-        = PDF final de 2 páginas
+    DEF / MAT / DIV CURP:
+      CURP -> cadena real -> impresión.
 
-    La reserva de cuota y la protección contra
-    duplicados viven dentro de sidea_generate_pdf().
+    CADENA:
+      valida acto real antes de imprimir.
     """
+
+    from app.utils.curp import is_chain
 
     from app.services.provider16_sidea import (
         SideaPool,
         sidea_generate_pdf,
+        sidea_generate_pdf_from_chain,
+        sidea_resolve_special_curp_to_chain,
     )
 
     term = (
@@ -5941,17 +5975,87 @@ def _process_provider16(req, db):
             "PROVIDER16_NOT_ALLOWED_REQUEST"
         )
 
+    act_type_up = (
+        req.act_type
+        or ""
+    ).strip().upper()
+
+    act_type_up = (
+        act_type_up
+        .replace("Á", "A")
+        .replace("É", "E")
+        .replace("Í", "I")
+        .replace("Ó", "O")
+        .replace("Ú", "U")
+        .replace("Ü", "U")
+    )
+
+    acto_map = {
+        "NACIMIENTO": "1",
+        "DEFUNCION": "2",
+        "MATRIMONIO": "3",
+        "DIVORCIO": "4",
+    }
+
+    acto = acto_map.get(
+        act_type_up
+    )
+
+    if not acto:
+        raise RuntimeError(
+            "PROVIDER16_ACT_TYPE_NOT_SUPPORTED:"
+            f"{act_type_up}"
+        )
+
     pool = SideaPool(
         redis_conn
     )
 
-    result = sidea_generate_pdf(
-        pool=pool,
-        curp=term,
-        entidad=None,
-        acto="1",
-        tipo="1",
-    )
+    if is_chain(
+        term
+    ):
+
+        result = (
+            sidea_generate_pdf_from_chain(
+                pool=pool,
+                cadena=term,
+                expected_acto=acto,
+            )
+        )
+
+    elif acto == "1":
+
+        result = sidea_generate_pdf(
+            pool=pool,
+            curp=term,
+            entidad=None,
+            acto="1",
+            tipo="1",
+        )
+
+    else:
+
+        resolved = (
+            sidea_resolve_special_curp_to_chain(
+                pool=pool,
+                curp=term,
+                acto=acto,
+            )
+        )
+
+        result = (
+            sidea_generate_pdf_from_chain(
+                pool=pool,
+                cadena=resolved["cadena"],
+                expected_acto=acto,
+            )
+        )
+
+        result = dict(result)
+
+        result[
+            "resolved_from_special_curp"
+        ] = True
 
     pdf_bytes = (
         result.get("pdf_bytes")
@@ -5988,6 +6092,17 @@ def _process_provider16(req, db):
         ),
         "final_pages": result.get(
             "final_pages"
+        ),
+        "resolved_from_chain": result.get(
+            "resolved_from_chain",
+            False,
+        ),
+        "resolved_from_special_curp": result.get(
+            "resolved_from_special_curp",
+            False,
+        ),
+        "resolved_acto": result.get(
+            "resolved_acto"
         ),
     }
 

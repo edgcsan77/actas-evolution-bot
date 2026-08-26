@@ -4457,3 +4457,668 @@ def sidea_generate_pdf(
     raise SideaBusy(
         "SIDEA_ALL_READY_ACCOUNTS_BUSY"
     )
+
+
+# ============================================================
+# SIDEA_MULTIACT_CHAIN_SPECIAL_V2
+# ============================================================
+
+def sidea_resolve_chain(
+    pool: SideaPool,
+    cadena: str,
+    accounts: list[SideaAccount] | None = None,
+) -> dict:
+    """
+    Resuelve CADENA DIGITAL en SIDEA.
+
+    SOLO BUSCA:
+    - no imprime
+    - no reserva cuota
+    - obtiene acto, entidad y CURP canónica
+    """
+
+    cadena = (
+        cadena
+        or ""
+    ).strip()
+
+    if not cadena:
+        raise SideaError(
+            "SIDEA_EMPTY_CHAIN"
+        )
+
+    if accounts is None:
+        accounts = load_sidea_accounts()
+
+    if not accounts:
+        raise SideaNoReadyAccount(
+            "SIDEA_ACCOUNTS_NOT_CONFIGURED"
+        )
+
+    candidates = (
+        _sidea_prod_candidate_accounts(
+            pool,
+            accounts,
+        )
+    )
+
+    if not candidates:
+        raise SideaNoReadyAccount(
+            "SIDEA_NO_READY_ACCOUNT"
+        )
+
+    last_need_login = None
+    last_no_record = None
+    obtained_lock = False
+
+    for account in candidates:
+
+        lock_token = (
+            _sidea_prod_acquire_lock(
+                pool,
+                account.key,
+            )
+        )
+
+        if not lock_token:
+            continue
+
+        obtained_lock = True
+
+        try:
+
+            try:
+                session, state = (
+                    pool.build_http_session(
+                        account.key
+                    )
+                )
+
+            except SideaNeedLogin as exc:
+                last_need_login = exc
+                continue
+
+            try:
+                response = session.post(
+                    (
+                        f"{SIDEA_BASE_URL}"
+                        "/solicitudXCadena.do"
+                    ),
+                    data={
+                        "cadena": cadena,
+                    },
+                    headers={
+                        "Referer": (
+                            f"{SIDEA_BASE_URL}"
+                            "/solicitudes.do"
+                        ),
+                    },
+                    timeout=(
+                        SIDEA_HTTP_CONNECT_TIMEOUT,
+                        SIDEA_HTTP_READ_TIMEOUT,
+                    ),
+                    allow_redirects=True,
+                )
+
+            except requests.RequestException as exc:
+                raise SideaError(
+                    "SIDEA_SEARCH_CHAIN_HTTP_ERROR:"
+                    f"{type(exc).__name__}"
+                ) from exc
+
+            html = response.text or ""
+
+            if not _sidea_html_is_authenticated(
+                html
+            ):
+                pool.clear_session(
+                    account.key,
+                    reason="NEED_LOGIN",
+                )
+
+                last_need_login = (
+                    SideaNeedLogin(
+                        "SIDEA_NEED_LOGIN:"
+                        f"{account.key}"
+                    )
+                )
+
+                continue
+
+            try:
+                row_html = (
+                    _sidea_find_matching_row_html(
+                        html,
+                        cadena,
+                    )
+                )
+
+            except SideaNoRecord as exc:
+                last_no_record = exc
+                continue
+
+            hidden = (
+                _sidea_hidden_values_from_row(
+                    row_html
+                )
+            )
+
+            real_chain = (
+                hidden.get("cadena")
+                or ""
+            ).strip()
+
+            if (
+                real_chain
+                and real_chain != cadena
+            ):
+                raise SideaError(
+                    "SIDEA_CHAIN_MISMATCH"
+                )
+
+            acto = (
+                hidden.get("acto")
+                or ""
+            ).strip()
+
+            if acto not in {
+                "1",
+                "2",
+                "3",
+                "4",
+            }:
+                raise SideaError(
+                    "SIDEA_CHAIN_ACT_NOT_SUPPORTED:"
+                    f"{acto}"
+                )
+
+            entidad = (
+                hidden.get("entidad")
+                or ""
+            ).strip()
+
+            if not entidad:
+                raise SideaError(
+                    "SIDEA_CHAIN_MISSING_ENTITY"
+                )
+
+            canonical_curp = (
+                hidden.get("curp")
+                or hidden.get("curp_1")
+                or hidden.get("curp_2")
+                or ""
+            ).strip().upper()
+
+            if not canonical_curp:
+                raise SideaError(
+                    "SIDEA_CHAIN_MISSING_CURP"
+                )
+
+            pool.save_session(
+                account_key=account.key,
+                cookies=(
+                    _sidea_safe_cookie_dict(
+                        session
+                    )
+                ),
+                session_id=(
+                    state.get("session_id")
+                    or ""
+                ),
+                usuario=(
+                    state.get("usuario")
+                    or ""
+                ),
+                usuario_rol=(
+                    state.get("usuario_rol")
+                    or ""
+                ),
+                usuario_entidad=(
+                    state.get("usuario_entidad")
+                    or ""
+                ),
+            )
+
+            print(
+                "PROVIDER16_SIDEA_CHAIN_RESOLVED =",
+                {
+                    "account": account.key,
+                    "acto": acto,
+                    "entity": entidad,
+                },
+                flush=True,
+            )
+
+            return {
+                "account_key": account.key,
+                "cadena": (
+                    real_chain
+                    or cadena
+                ),
+                "curp": canonical_curp,
+                "entidad": entidad,
+                "acto": acto,
+                "municipio": (
+                    hidden.get("municipio")
+                    or ""
+                ).strip(),
+                "oficialia": (
+                    hidden.get("oficialia")
+                    or ""
+                ).strip(),
+            }
+
+        finally:
+            _sidea_prod_release_lock(
+                pool,
+                account.key,
+                lock_token,
+            )
+
+    if last_need_login is not None:
+        raise SideaNeedLogin(
+            "SIDEA_ALL_READY_ACCOUNTS_NEED_LOGIN"
+        ) from last_need_login
+
+    if last_no_record is not None:
+        raise SideaNoRecord(
+            "SIDEA_NO_RECORD:"
+            "CHAIN_NOT_FOUND"
+        ) from last_no_record
+
+    if not obtained_lock:
+        raise SideaBusy(
+            "SIDEA_ALL_READY_ACCOUNTS_BUSY"
+        )
+
+    raise SideaNoRecord(
+        "SIDEA_NO_RECORD:"
+        "CHAIN_NOT_FOUND"
+    )
+
+
+def sidea_resolve_special_curp_to_chain(
+    pool: SideaPool,
+    curp: str,
+    acto: str | int,
+    accounts: list[SideaAccount] | None = None,
+) -> dict:
+    """
+    DEFUNCION / MATRIMONIO / DIVORCIO por CURP.
+
+    Busca únicamente en la entidad contenida en la CURP.
+
+    Acepta que SIDEA coloque la CURP solicitada en:
+      curp
+      curp_1
+      curp_2
+
+    NO imprime.
+    NO reserva cuota.
+    """
+
+    curp = (
+        curp
+        or ""
+    ).strip().upper()
+
+    acto = str(
+        acto
+        or ""
+    ).strip()
+
+    if not curp:
+        raise SideaError(
+            "SIDEA_EMPTY_CURP"
+        )
+
+    if acto not in {
+        "2",
+        "3",
+        "4",
+    }:
+        raise SideaError(
+            "SIDEA_SPECIAL_ACT_INVALID:"
+            f"{acto}"
+        )
+
+    entidad = (
+        sidea_curp_birth_entity(
+            curp
+        )
+    )
+
+    if not entidad:
+        raise SideaNoRecord(
+            "SIDEA_NO_RECORD:"
+            "SPECIAL_ENTITY_UNKNOWN"
+        )
+
+    if accounts is None:
+        accounts = load_sidea_accounts()
+
+    if not accounts:
+        raise SideaNoReadyAccount(
+            "SIDEA_ACCOUNTS_NOT_CONFIGURED"
+        )
+
+    candidates = (
+        _sidea_prod_candidate_accounts(
+            pool,
+            accounts,
+        )
+    )
+
+    if not candidates:
+        raise SideaNoReadyAccount(
+            "SIDEA_NO_READY_ACCOUNT"
+        )
+
+    last_need_login = None
+    last_no_record = None
+    obtained_lock = False
+
+    for account in candidates:
+
+        lock_token = (
+            _sidea_prod_acquire_lock(
+                pool,
+                account.key,
+            )
+        )
+
+        if not lock_token:
+            continue
+
+        obtained_lock = True
+
+        try:
+
+            try:
+                session, state = (
+                    pool.build_http_session(
+                        account.key
+                    )
+                )
+
+            except SideaNeedLogin as exc:
+                last_need_login = exc
+                continue
+
+            try:
+                response = session.post(
+                    (
+                        f"{SIDEA_BASE_URL}"
+                        "/solicitudXCURP.do"
+                    ),
+                    data={
+                        "tipo": "1",
+                        "acto": acto,
+                        "entidad": entidad,
+                        "curp": curp,
+                    },
+                    headers={
+                        "Referer": (
+                            f"{SIDEA_BASE_URL}"
+                            "/solicitudes.do"
+                        ),
+                    },
+                    timeout=(
+                        SIDEA_HTTP_CONNECT_TIMEOUT,
+                        SIDEA_HTTP_READ_TIMEOUT,
+                    ),
+                    allow_redirects=True,
+                )
+
+            except requests.RequestException as exc:
+                raise SideaError(
+                    "SIDEA_SPECIAL_SEARCH_HTTP_ERROR:"
+                    f"{type(exc).__name__}"
+                ) from exc
+
+            html = response.text or ""
+
+            if not _sidea_html_is_authenticated(
+                html
+            ):
+                pool.clear_session(
+                    account.key,
+                    reason="NEED_LOGIN",
+                )
+
+                last_need_login = (
+                    SideaNeedLogin(
+                        "SIDEA_NEED_LOGIN:"
+                        f"{account.key}"
+                    )
+                )
+
+                continue
+
+            try:
+                row_html = (
+                    _sidea_find_matching_row_html(
+                        html,
+                        curp,
+                    )
+                )
+
+            except SideaNoRecord as exc:
+                last_no_record = exc
+                continue
+
+            hidden = (
+                _sidea_hidden_values_from_row(
+                    row_html
+                )
+            )
+
+            main_curp = (
+                hidden.get("curp")
+                or ""
+            ).strip().upper()
+
+            curp_1 = (
+                hidden.get("curp_1")
+                or ""
+            ).strip().upper()
+
+            curp_2 = (
+                hidden.get("curp_2")
+                or ""
+            ).strip().upper()
+
+            if curp not in {
+                main_curp,
+                curp_1,
+                curp_2,
+            }:
+                raise SideaError(
+                    "SIDEA_SPECIAL_CURP_MISMATCH"
+                )
+
+            real_acto = (
+                hidden.get("acto")
+                or ""
+            ).strip()
+
+            if (
+                real_acto
+                and real_acto != acto
+            ):
+                raise SideaError(
+                    "SIDEA_SPECIAL_ACT_MISMATCH:"
+                    f"EXPECTED_{acto}:"
+                    f"REAL_{real_acto}"
+                )
+
+            cadena = (
+                hidden.get("cadena")
+                or ""
+            ).strip()
+
+            if not cadena:
+                raise SideaNoRecord(
+                    "SIDEA_NO_RECORD:"
+                    "SPECIAL_EMPTY_CHAIN"
+                )
+
+            real_entity = (
+                hidden.get("entidad")
+                or entidad
+            ).strip()
+
+            canonical_curp = (
+                main_curp
+                or curp_1
+                or curp_2
+            )
+
+            if not canonical_curp:
+                raise SideaError(
+                    "SIDEA_SPECIAL_MISSING_CANONICAL_CURP"
+                )
+
+            pool.save_session(
+                account_key=account.key,
+                cookies=(
+                    _sidea_safe_cookie_dict(
+                        session
+                    )
+                ),
+                session_id=(
+                    state.get("session_id")
+                    or ""
+                ),
+                usuario=(
+                    state.get("usuario")
+                    or ""
+                ),
+                usuario_rol=(
+                    state.get("usuario_rol")
+                    or ""
+                ),
+                usuario_entidad=(
+                    state.get("usuario_entidad")
+                    or ""
+                ),
+            )
+
+            print(
+                "PROVIDER16_SPECIAL_CURP_RESOLVED =",
+                {
+                    "account": account.key,
+                    "acto": acto,
+                    "entity": real_entity,
+                    "matched_main":
+                        main_curp == curp,
+                    "matched_person1":
+                        curp_1 == curp,
+                    "matched_person2":
+                        curp_2 == curp,
+                },
+                flush=True,
+            )
+
+            return {
+                "account_key": account.key,
+                "requested_curp": curp,
+                "canonical_curp":
+                    canonical_curp,
+                "cadena": cadena,
+                "entidad": real_entity,
+                "acto": acto,
+            }
+
+        finally:
+            _sidea_prod_release_lock(
+                pool,
+                account.key,
+                lock_token,
+            )
+
+    if last_need_login is not None:
+        raise SideaNeedLogin(
+            "SIDEA_ALL_READY_ACCOUNTS_NEED_LOGIN"
+        ) from last_need_login
+
+    if last_no_record is not None:
+        raise SideaNoRecord(
+            "SIDEA_NO_RECORD:"
+            "SPECIAL_CURP_NOT_FOUND"
+        ) from last_no_record
+
+    if not obtained_lock:
+        raise SideaBusy(
+            "SIDEA_ALL_READY_ACCOUNTS_BUSY"
+        )
+
+    raise SideaNoRecord(
+        "SIDEA_NO_RECORD:"
+        "SPECIAL_CURP_NOT_FOUND"
+    )
+
+
+def sidea_generate_pdf_from_chain(
+    pool: SideaPool,
+    cadena: str,
+    accounts: list[SideaAccount] | None = None,
+    expected_acto: str | int | None = None,
+) -> dict:
+    """
+    Cadena Digital -> registro real -> flujo normal SIDEA.
+
+    expected_acto evita imprimir una cadena perteneciente
+    a un acto diferente al solicitado.
+    """
+
+    resolved = sidea_resolve_chain(
+        pool=pool,
+        cadena=cadena,
+        accounts=accounts,
+    )
+
+    expected = str(
+        expected_acto
+        or ""
+    ).strip()
+
+    real_acto = str(
+        resolved.get("acto")
+        or ""
+    ).strip()
+
+    if (
+        expected
+        and real_acto != expected
+    ):
+        raise SideaError(
+            "SIDEA_CHAIN_ACT_MISMATCH:"
+            f"EXPECTED_{expected}:"
+            f"REAL_{real_acto}"
+        )
+
+    result = sidea_generate_pdf(
+        pool=pool,
+        curp=resolved["curp"],
+        entidad=resolved["entidad"],
+        acto=real_acto,
+        tipo="1",
+        accounts=accounts,
+    )
+
+    result = dict(result)
+
+    result[
+        "resolved_from_chain"
+    ] = True
+
+    result[
+        "input_chain"
+    ] = cadena
+
+    result[
+        "resolved_acto"
+    ] = real_acto
+
+    return result
