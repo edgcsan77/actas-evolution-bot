@@ -14160,9 +14160,6 @@ def panel_actas(
                           </button>
                         </div>
 
-                        <div style="font-size:11px;opacity:.6;margin-top:4px;">
-                          Solo CURP + NACIMIENTO · Papel Bond + reverso
-                        </div>
 
                         {_sidea_main_panel_html(db, current_token)}
 
