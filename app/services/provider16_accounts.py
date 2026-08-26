@@ -462,3 +462,34 @@ def load_sidea_account_dicts(
 
     finally:
         db.close()
+
+
+# ============================================================
+# SIDEA_ACCOUNT_CREDENTIALS_V1
+# Descifrado exclusivamente en memoria para login SIDEA.
+# ============================================================
+
+def get_sidea_account_credentials(
+    slot: str,
+) -> dict | None:
+
+    slot = (
+        slot
+        or ""
+    ).strip().lower()
+
+    if slot not in SIDEA_ACCOUNT_SLOTS:
+        return None
+
+    accounts = (
+        load_sidea_account_dicts()
+    )
+
+    for account in accounts:
+        if (
+            account.get("key")
+            == slot
+        ):
+            return account
+
+    return None

@@ -9942,6 +9942,122 @@ def panel_sidea_accounts(
             else "Contraseña pendiente"
         )
 
+        # SIDEA_CAPTCHA_PANEL_UI_V1
+        if not configured:
+
+            login_html = """
+            <div class="sidea-login-box muted">
+              Configura primero el usuario SIDEA.
+            </div>
+            """
+
+        elif not password_configured:
+
+            login_html = """
+            <div class="sidea-login-box warning-box">
+              Guarda la contraseña para habilitar
+              el inicio de sesión desde el panel.
+            </div>
+            """
+
+        elif not enabled:
+
+            login_html = """
+            <div class="sidea-login-box muted">
+              Activa esta cuenta para iniciar sesión.
+            </div>
+            """
+
+        else:
+
+            if status == "READY":
+                login_title = "Sesión activa"
+                login_class = "ready-box"
+                login_button = "Renovar sesión"
+            else:
+                login_title = "Inicio de sesión requerido"
+                login_class = "danger-box"
+                login_button = "Cargar CAPTCHA"
+
+            login_html = f"""
+            <div
+              id="{slot}_login_box"
+              class="sidea-login-box {login_class}"
+            >
+
+              <div class="login-box-head">
+                <div>
+                  <strong>
+                    {login_title}
+                  </strong>
+
+                  <div class="login-help">
+                    El CAPTCHA siempre lo escribes tú.
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  class="captcha-load-btn"
+                  onclick="loadSideaCaptcha('{slot}')"
+                >
+                  {login_button}
+                </button>
+              </div>
+
+              <div
+                id="{slot}_captcha_area"
+                class="captcha-area"
+                style="display:none;"
+              >
+
+                <div class="captcha-image-wrap">
+                  <img
+                    id="{slot}_captcha_image"
+                    alt="CAPTCHA SIDEA"
+                  >
+                </div>
+
+                <div class="captcha-controls">
+
+                  <input
+                    id="{slot}_captcha_code"
+                    type="text"
+                    minlength="4"
+                    maxlength="6"
+                    autocomplete="off"
+                    placeholder="Código CAPTCHA"
+                  >
+
+                  <button
+                    type="button"
+                    class="captcha-refresh-btn"
+                    onclick="loadSideaCaptcha('{slot}')"
+                    title="Cargar otro CAPTCHA"
+                  >
+                    ↻
+                  </button>
+
+                  <button
+                    type="button"
+                    class="captcha-login-btn"
+                    onclick="loginSidea('{slot}')"
+                  >
+                    Iniciar sesión
+                  </button>
+
+                </div>
+
+                <div
+                  id="{slot}_captcha_message"
+                  class="captcha-message"
+                ></div>
+
+              </div>
+
+            </div>
+            """
+
         open_attr = (
             " open"
             if slot == focus_slot
@@ -10073,6 +10189,9 @@ def panel_sidea_accounts(
 
                 </div>
               </div>
+
+              {login_html}
+
             </details>
             """
         )
@@ -10087,6 +10206,11 @@ def panel_sidea_accounts(
 
     token_json = json.dumps(
         current_token
+    )
+
+
+    focus_json = json.dumps(
+        focus_slot
     )
 
     html = r"""
@@ -10476,6 +10600,125 @@ def panel_sidea_accounts(
     background: #1d4ed8;
   }
 
+
+  .sidea-login-box {
+    margin: 0 19px 19px;
+    border-radius: 11px;
+    padding: 13px;
+    font-size: 12px;
+    border: 1px solid #334155;
+  }
+
+  .sidea-login-box.ready-box {
+    border-color: rgba(34,197,94,.28);
+    background: rgba(20,83,45,.10);
+  }
+
+  .sidea-login-box.danger-box {
+    border-color: rgba(239,68,68,.32);
+    background: rgba(127,29,29,.10);
+  }
+
+  .sidea-login-box.warning-box {
+    border-color: rgba(245,158,11,.28);
+    background: rgba(120,53,15,.10);
+    color: #fbbf24;
+  }
+
+  .sidea-login-box.muted {
+    color: #94a3b8;
+    background: rgba(15,23,42,.45);
+  }
+
+  .login-box-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .login-help {
+    margin-top: 3px;
+    color: #94a3b8;
+    font-size: 10px;
+  }
+
+  .captcha-load-btn,
+  .captcha-login-btn,
+  .captcha-refresh-btn {
+    border: 0;
+    color: white;
+    cursor: pointer;
+    font-weight: 800;
+    border-radius: 8px;
+  }
+
+  .captcha-load-btn {
+    background: #334155;
+    padding: 8px 12px;
+  }
+
+  .captcha-login-btn {
+    background: #2563eb;
+    padding: 10px 14px;
+  }
+
+  .captcha-refresh-btn {
+    background: #475569;
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+  }
+
+  .captcha-area {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(148,163,184,.16);
+  }
+
+  .captcha-image-wrap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 210px;
+    min-height: 65px;
+    padding: 8px;
+    border-radius: 9px;
+    background: white;
+    margin-bottom: 10px;
+  }
+
+  .captcha-image-wrap img {
+    display: block;
+    max-width: 100%;
+    min-height: 45px;
+  }
+
+  .captcha-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .captcha-controls input {
+    min-width: 170px;
+    flex: 1;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 10px;
+    background: #0f172a;
+    color: white;
+    text-transform: uppercase;
+  }
+
+  .captcha-message {
+    min-height: 16px;
+    margin-top: 8px;
+    color: #94a3b8;
+    font-size: 10px;
+  }
+
   .notice {
     margin-top: 18px;
     border: 1px solid #233047;
@@ -10627,6 +10870,192 @@ def panel_sidea_accounts(
 <script>
 const panelToken = __TOKEN_JSON__;
 
+
+async function loadSideaCaptcha(slot) {
+
+  const area =
+    document.getElementById(
+      slot + "_captcha_area"
+    );
+
+  const image =
+    document.getElementById(
+      slot + "_captcha_image"
+    );
+
+  const message =
+    document.getElementById(
+      slot + "_captcha_message"
+    );
+
+  const code =
+    document.getElementById(
+      slot + "_captcha_code"
+    );
+
+  if (!area || !image) {
+    return;
+  }
+
+  area.style.display = "block";
+
+  message.textContent =
+    "Cargando CAPTCHA...";
+
+  code.value = "";
+
+  try {
+
+    const response = await fetch(
+      "/panel/sidea/"
+      + encodeURIComponent(slot)
+      + "/captcha?token="
+      + encodeURIComponent(panelToken),
+      {
+        method: "POST"
+      }
+    );
+
+    const data =
+      await response.json();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(
+        data.error
+        || "No se pudo cargar CAPTCHA"
+      );
+    }
+
+    image.src =
+      data.image_data_url;
+
+    area.dataset.challengeId =
+      data.challenge_id;
+
+    message.textContent =
+      "CAPTCHA válido por 5 minutos.";
+
+    code.focus();
+
+  } catch (error) {
+
+    area.dataset.challengeId = "";
+
+    message.textContent =
+      error.message
+      || "Error al cargar CAPTCHA";
+  }
+}
+
+
+async function loginSidea(slot) {
+
+  const area =
+    document.getElementById(
+      slot + "_captcha_area"
+    );
+
+  const codeInput =
+    document.getElementById(
+      slot + "_captcha_code"
+    );
+
+  const message =
+    document.getElementById(
+      slot + "_captcha_message"
+    );
+
+  const challengeId =
+    area.dataset.challengeId
+    || "";
+
+  const captcha =
+    codeInput.value
+      .trim()
+      .toUpperCase();
+
+  if (!challengeId) {
+    message.textContent =
+      "Primero carga un CAPTCHA.";
+    return;
+  }
+
+  if (
+    captcha.length < 4
+    || captcha.length > 6
+  ) {
+    message.textContent =
+      "Escribe el código CAPTCHA.";
+    codeInput.focus();
+    return;
+  }
+
+  message.textContent =
+    "Iniciando sesión...";
+
+  try {
+
+    const response = await fetch(
+      "/panel/sidea/"
+      + encodeURIComponent(slot)
+      + "/login?token="
+      + encodeURIComponent(panelToken),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
+        body: JSON.stringify({
+          challenge_id:
+            challengeId,
+          captcha:
+            captcha
+        })
+      }
+    );
+
+    const data =
+      await response.json();
+
+    if (!response.ok || !data.ok) {
+
+      message.textContent =
+        data.error
+        || "SIDEA rechazó el login.";
+
+      // Un CAPTCHA fallido ya no debe reutilizarse.
+      area.dataset.challengeId = "";
+
+      if (
+        data.needs_new_captcha
+      ) {
+        setTimeout(
+          () => loadSideaCaptcha(slot),
+          700
+        );
+      }
+
+      return;
+    }
+
+    message.textContent =
+      "✓ Sesión iniciada correctamente.";
+
+    setTimeout(
+      () => window.location.reload(),
+      650
+    );
+
+  } catch (error) {
+
+    message.textContent =
+      error.message
+      || "Error al iniciar sesión";
+  }
+}
+
+
 async function saveSideaAccount(slot) {
 
   const button =
@@ -10709,6 +11138,29 @@ async function saveSideaAccount(slot) {
     );
   }
 }
+
+const focusedSideaSlot = __FOCUS_JSON__;
+
+if (focusedSideaSlot) {
+  window.addEventListener(
+    "DOMContentLoaded",
+    () => {
+      const area =
+        document.getElementById(
+          focusedSideaSlot
+          + "_captcha_area"
+        );
+
+      if (area) {
+        loadSideaCaptcha(
+          focusedSideaSlot
+        );
+      }
+    }
+  );
+}
+
+
 </script>
 
 </body>
@@ -10728,6 +11180,12 @@ async function saveSideaAccount(slot) {
     html = html.replace(
         "__TOKEN_JSON__",
         token_json,
+    )
+
+
+    html = html.replace(
+        "__FOCUS_JSON__",
+        focus_json,
     )
 
     html = html.replace(
@@ -10757,6 +11215,122 @@ async function saveSideaAccount(slot) {
                 "no-store, max-age=0",
         },
     )
+
+
+
+# ============================================================
+# PROVIDER16_CAPTCHA_LOGIN_ROUTES_V1
+# CAPTCHA siempre introducido manualmente por administrador.
+# ============================================================
+
+@app.post(
+    "/panel/sidea/{slot}/captcha"
+)
+def panel_sidea_captcha(
+    slot: str,
+    request: Request,
+):
+    if not _is_valid_admin_panel_token(
+        request
+    ):
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "UNAUTHORIZED",
+            },
+            status_code=403,
+        )
+
+    try:
+        from app.services.provider16_login import (
+            sidea_start_login_captcha,
+        )
+
+        return sidea_start_login_captcha(
+            redis_conn,
+            slot,
+        )
+
+    except Exception as exc:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": str(exc),
+            },
+            status_code=400,
+        )
+
+
+@app.post(
+    "/panel/sidea/{slot}/login"
+)
+def panel_sidea_login(
+    slot: str,
+    request: Request,
+    payload: dict,
+):
+    if not _is_valid_admin_panel_token(
+        request
+    ):
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "UNAUTHORIZED",
+            },
+            status_code=403,
+        )
+
+    captcha_code = str(
+        payload.get("captcha")
+        or ""
+    ).strip()
+
+    challenge_id = str(
+        payload.get("challenge_id")
+        or ""
+    ).strip()
+
+    try:
+        from app.services.provider16_login import (
+            sidea_finish_login,
+        )
+
+        result = sidea_finish_login(
+            redis_conn,
+            slot,
+            challenge_id,
+            captcha_code,
+        )
+
+        if not result.get("ok"):
+            from fastapi.responses import JSONResponse
+
+            return JSONResponse(
+                result,
+                status_code=400,
+            )
+
+        _clear_panel_cache()
+
+        return result
+
+    except Exception as exc:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": str(exc),
+                "needs_new_captcha": True,
+            },
+            status_code=400,
+        )
 
 
 @app.post(
