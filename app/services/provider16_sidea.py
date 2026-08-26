@@ -131,18 +131,45 @@ def load_sidea_accounts() -> list[SideaAccount]:
     - nunca subir SIDEA_ACCOUNTS_JSON a Git
     """
 
-    raw = os.getenv("SIDEA_ACCOUNTS_JSON", "[]").strip()
-
+    # SIDEA_DB_ACCOUNTS_V1
+    #
+    # Configuración central del panel:
+    # SIDEA1..SIDEA6 en PostgreSQL.
+    #
+    # Si todavía no existe configuración DB,
+    # conserva compatibilidad con
+    # SIDEA_ACCOUNTS_JSON del .sidea.env.
     try:
-        data = json.loads(raw)
+        from app.services.provider16_accounts import (
+            load_sidea_account_dicts,
+        )
+
+        data = (
+            load_sidea_account_dicts()
+        )
+
     except Exception as exc:
         raise SideaError(
-            f"SIDEA_ACCOUNTS_JSON_INVALID:{exc}"
+            "SIDEA_ACCOUNTS_DB_LOAD_ERROR:"
+            f"{type(exc).__name__}:{exc}"
         ) from exc
+
+    if not data:
+        raw = os.getenv(
+            "SIDEA_ACCOUNTS_JSON",
+            "[]",
+        ).strip()
+
+        try:
+            data = json.loads(raw)
+        except Exception as exc:
+            raise SideaError(
+                f"SIDEA_ACCOUNTS_JSON_INVALID:{exc}"
+            ) from exc
 
     if not isinstance(data, list):
         raise SideaError(
-            "SIDEA_ACCOUNTS_JSON_MUST_BE_LIST"
+            "SIDEA_ACCOUNTS_MUST_BE_LIST"
         )
 
     result: list[SideaAccount] = []

@@ -175,11 +175,11 @@ BOT_PROVIDER_OPTIONS = {
 
     "GLOBAL:PROVIDER1": "ADMIN",
     "GLOBAL:PROVIDER5": "ACTAS CARAS",
-    
+
     "GLOBAL:PROVIDER14": "E-BOT",
     "GLOBAL:PROVIDER15": "E-WEB",
     "GLOBAL:PROVIDER16": "SIDEA",
-    
+
     "GLOBAL:PROVIDER4": "LAZARO WEB 1",
     "GLOBAL:PROVIDER10": "LAZARO WEB 2",
     "GLOBAL:PROVIDER11": "LAZARO WEB 3",
@@ -331,7 +331,7 @@ def should_notify_done(group_id: str | None) -> bool:
     if not group_id:
         return True
     return group_id not in NO_DONE_NOTIFY_GROUPS
-    
+
 
 def should_send_extra_text(group_id: str | None) -> bool:
     if not group_id:
@@ -798,15 +798,15 @@ def _bot_status_rows_uncached(db: Session) -> list[dict]:
                     ),
                 )
             )
-        
+
         personal_provider = _personal_provider_filter_for_instance(db, inst)
         if personal_provider:
             q_total = _exclude_private_provider_query(q_total, db, inst)
-        
+
         total = q_total.count()
 
         used = get_bot_used(db, inst)
-        
+
         limit_value = get_bot_limit(db, inst)
         blocked = is_instance_blocked(inst)
         # DESACTIVADO: no consultar Evolution por cada bot al cargar panel; saturaba Evolution y hacía lento webhook/sendText
@@ -856,7 +856,7 @@ def _bot_status_rows(db: Session) -> list[dict]:
 
     return rows
 
-    
+
 @app.get("/panel/instance/{instance_name}/qr")
 def panel_instance_qr(
     instance_name: str,
@@ -977,9 +977,9 @@ def panel_create_bot(
             .all()
         )
     }
-    
+
     visible_static_count = len(static_bots - hidden_static)
-    
+
     active_dynamic = (
         db.query(BotControl)
         .filter(
@@ -988,7 +988,7 @@ def panel_create_bot(
         )
         .count()
     )
-    
+
     total = visible_static_count + active_dynamic
 
     if total >=99:
@@ -1245,7 +1245,7 @@ def _is_bot_hidden_no_accounting_group(
         return False
 
     return gid in _bot_hidden_no_accounting_group_ids(instance_name)
-    
+
 
 MIN_BOT_PROMO_ACTAS = 10
 
@@ -1270,7 +1270,7 @@ def hide_group_from_bot_panel(db: Session, group_jid: str, instance_name: str):
     if row and (row.owner_instance or "").strip() == (instance_name or "").strip():
         row.owner_instance = None
     db.commit()
-    
+
 
 def _is_child_bot(instance_name: str) -> bool:
     inst = (instance_name or "").strip().lower()
@@ -2007,10 +2007,10 @@ def _panel_error_bucket(error_message: str | None, status: str | None = None) ->
 
     if "CUENTA_INEXISTENTE" in up:
         return "Cuenta del proveedor inexistente/inválida"
-    
+
     if "FRAME_FAILED" in up:
         return "Falla en marco/consulta secundaria del proveedor"
-    
+
     if "FOLIO_DOWNLOAD_FAILED" in up:
         return "Falló descarga de folio del proveedor"
 
@@ -2086,7 +2086,7 @@ def _provider_accounting_data(
             err_txt.ilike("%NO HAY REGISTRO%"),
             err_txt.ilike("%NO HAY REGISTROS%"),
             err_txt.ilike("%ACTA NO LOCALIZADA%"),
-    
+
             # Respuestas mal escritas de proveedores WhatsApp:
             err_txt.op("~")(
                 "[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[A-Z0-9][0-9].*[[:space:]]SIN([[:space:][:punct:]]|$)"
@@ -2967,7 +2967,7 @@ def botpanel_audit_all_groups(
 
         <div class="box">
           <h3>Resumen por grupo</h3>
-          
+
           <table>
             <thead>
               <tr>
@@ -3033,14 +3033,14 @@ def botpanel_audit_all_groups(
         for r in rows:
             local_created = _to_panel_tz(r.created_at)
             hora_envio = local_created.strftime("%Y-%m-%d %H:%M:%S") if local_created else ""
-            
+
             hora_recibido = ""
             tiempo_total = ""
-            
+
             if r.status == "DONE" and r.created_at and r.updated_at:
                 local_updated = _to_panel_tz(r.updated_at)
                 hora_recibido = local_updated.strftime("%Y-%m-%d %H:%M:%S") if local_updated else ""
-            
+
                 try:
                     tiempo_total = _fmt_duration_seconds((r.updated_at - r.created_at).total_seconds())
                 except Exception:
@@ -3097,7 +3097,7 @@ def botpanel_audit_all_groups(
           </table>
         </div>
       </div>
-      
+
     <script>
       async function downloadPdf(token, requestId) {
         try {
@@ -3192,7 +3192,7 @@ def panel_instances(db: Session = Depends(get_db)):
         used = credit["used"]
         limit_value = credit["limit"]
         blocked = is_instance_blocked(name)
-        
+
         items.append({
             "instance_name": name,
             "total_requests": int(total or 0),
@@ -3663,7 +3663,7 @@ async def panel_recharge_instance(instance_name: str, request: Request, db: Sess
         "blocked": is_instance_blocked(instance_name),
     }
 
-    
+
 @app.post("/panel/groups/manual-add")
 async def panel_manual_add_group(request: Request, db: Session = Depends(get_db)):
     try:
@@ -3730,7 +3730,7 @@ async def panel_manual_add_group(request: Request, db: Session = Depends(get_db)
         "custom_name": alias_row.custom_name,
         "category": category,
     }
-    
+
 
 @app.post("/cron/provider3/keepalive")
 def cron_provider3_keepalive(request: Request):
@@ -4020,7 +4020,7 @@ def _query_requests_for_panel(
         q = q.filter(RequestLog.act_type.ilike(f"%{act_type.strip()}%"))
 
     return q
-    
+
 
 def _panel_summary_from_rows(rows: list[RequestLog]) -> dict:
     out = {
@@ -4077,7 +4077,7 @@ def _panel_group_rows(
     def _is_hidden_group(gid: str, name: str) -> bool:
         if gid in HIDDEN_PANEL_GROUPS:
             return True
-    
+
         name_up = (name or "").strip().upper()
         excluded_words = (
             "PROV",
@@ -4092,19 +4092,19 @@ def _panel_group_rows(
         for gid in (set(GROUP_NAME_MAP.keys()) | set(group_cache.keys())):
             gid = gid or "PRIVADO"
             group_name = _group_name_cached(gid, group_cache)
-    
+
             if gid in HIDDEN_PANEL_GROUPS:
                 continue
-    
+
             row = db.query(AuthorizedGroup).filter_by(group_jid=gid).first()
             owner = (row.owner_instance or "").strip() if row else ""
 
             if gid != "PRIVADO" and owner and owner != "docifybot8":
                 continue
-            
+
             if gid != "PRIVADO" and not owner and _is_hidden_panel_group(gid, group_name):
                 continue
-    
+
             data[gid] = {
                 "group_jid": gid,
                 "group_name": group_name,
@@ -4319,10 +4319,10 @@ def _panel_detail_for_group(
     view = (view or "day").strip().lower()
 
     time_min, time_max, view = _panel_period_bounds(view, date_from, date_to)
-    
+
     local_start = _to_panel_tz(time_min)
     local_end = _to_panel_tz(time_max)
-    
+
     if not local_start or not local_end:
         now_local = _panel_now()
         local_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -4582,7 +4582,7 @@ def panel_audit_group(
         if is_last_day or next_day_diff_week:
             week_rows = weekly[(w_start, w_end)]
             count_week = len(week_rows)
-            
+
             html += f"""
             <tr class="weekly-row">
               <td>CORTE SEMANAL</td>
@@ -4805,7 +4805,7 @@ async def panel_recent_requests_stream():
             "X-Accel-Buffering": "no",
         },
     )
-    
+
 
 @app.get("/panel/live-status")
 def panel_live_status(
@@ -5235,7 +5235,7 @@ def panel_apply_shared_promotion(
     try:
         promo_label = promo_name or "paquete promocional"
         tipo_label = "crédito" if is_credit else "pagada"
-        
+
         used_total = max((int(r.used_actas or 0) for r in rows), default=0)
         available = max(0, int(total_actas or 0) - used_total)
 
@@ -5563,7 +5563,7 @@ def panel_add_group_to_shared_promotion(
         "used_actas": leader.used_actas,
         "available": max(0, int(leader.total_actas or 0) - int(leader.used_actas or 0)),
     }
-    
+
 
 def _is_credit_promotion(row: GroupPromotion) -> bool:
     return bool(row.is_credit)
@@ -6306,7 +6306,7 @@ def panel_group_detail(
 
     local_start = _to_panel_tz(time_min)
     local_end = _to_panel_tz(time_max)
-    
+
     if not local_start or not local_end:
         now_local = _panel_now()
         local_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -6545,16 +6545,16 @@ def panel_group_detail(
             </div>
 
             <div style="display:flex;align-items:end;gap:10px;">
-              <button 
-                type="button" 
+              <button
+                type="button"
                 class="btn btn-primary"
                 style="flex:1;white-space:nowrap;"
                 onclick="saveGroupName('{group_jid}')">
                 Guardar nombre
               </button>
-            
-              <button 
-                type="button" 
+
+              <button
+                type="button"
                 class="btn btn-warning"
                 style="flex:1;white-space:nowrap;"
                 onclick="pingGroup('{group_jid}')">
@@ -6568,7 +6568,7 @@ def panel_group_detail(
     html += f"""
         <div class="box">
           <div class="head"><strong>Categoría del grupo</strong></div>
-        
+
           <div class="filters" style="grid-template-columns: minmax(0, 1fr) 220px 220px;">
             <div>
               <div class="small">Categoría actual</div>
@@ -6578,13 +6578,13 @@ def panel_group_detail(
                 <option value="otro" {"selected" if group_category == "otro" else ""}>Otro</option>
               </select>
             </div>
-        
+
             <div style="display:flex;align-items:end;">
               <button type="button" class="btn btn-primary" style="width:100%;" onclick="saveGroupCategory('{group_jid}')">
                 Guardar categoría
               </button>
             </div>
-        
+
             <div style="display:flex;align-items:end;">
               <button type="button" class="btn btn-danger" style="width:100%;" onclick="removeGroupCategory('{group_jid}')">
                 Quitar categoría
@@ -6601,11 +6601,11 @@ def panel_group_detail(
         if is_in_shared_promo
         else ""
     )
-    
+
     html += f"""
         <div class="box">
           <div class="head"><strong>Promoción del grupo</strong></div>
-    
+
           <div class="filters" style="grid-template-columns: repeat(5, minmax(0, 1fr));">
             <div>
               <div class="small">Estado</div>
@@ -6628,13 +6628,13 @@ def panel_group_detail(
               <div style="margin-top:8px;font-weight:800;">{promo_price or 'N/D'}</div>
             </div>
           </div>
-    
+
           <div class="filters" style="grid-template-columns: repeat(6, minmax(0, 1fr));">
             <div>
               <div class="small">Nombre de promoción</div>
               <input id="promo_name" placeholder="" value="{promo_name}">
             </div>
-        
+
             <div>
               <div class="small">Tipo</div>
               <select id="promo_type">
@@ -6642,24 +6642,24 @@ def panel_group_detail(
                 <option value="credit" {"selected" if promo_is_credit else ""}>Crédito</option>
               </select>
             </div>
-        
+
             <div>
               <div class="small">Total de actas</div>
               <input id="promo_total" placeholder="" type="number" min="1" value="{promo_total if promo_total else ''}">
             </div>
-          
+
             <div>
               <div class="small">Precio por pieza</div>
               <input id="promo_price" placeholder="" value="{promo_price}">
             </div>
-        
+
             <div>
               <div class="small">Abono</div>
               <input id="promo_credit_abono" type="number" min="0"
               value="{promo_credit_abono if promo_is_credit else ''}"
               placeholder="N/A">
             </div>
-        
+
             <div>
               <div class="small">Debe</div>
               <input id="promo_credit_debe" type="number" min="0"
@@ -6667,12 +6667,12 @@ def panel_group_detail(
               placeholder="N/A">
             </div>
           </div>
-    
+
           <div class="filters">
             <button type="button" class="btn btn-success" onclick="savePromotion('{group_jid}')">Activar promoción</button>
             {shared_remove_btn}
           </div>
-    
+
           <div class="filters" style="grid-template-columns: minmax(0, 1fr) 220px;">
             <div>
               <div class="small">Límite individual dentro de bolsa compartida</div>
@@ -6680,14 +6680,14 @@ def panel_group_detail(
                      placeholder="Sin límite"
                      value="{promo_shared_group_limit if promo_shared_group_limit else ''}">
             </div>
-    
+
             <div style="display:flex;align-items:end;">
               <button type="button" class="btn btn-primary" style="width:100%;" onclick="setSharedGroupLimit('{group_jid}')">
                 Guardar límite
               </button>
             </div>
           </div>
-    
+
           <div class="filters" style="grid-template-columns: 1fr 220px 220px;">
             <input id="promo_recharge" placeholder="Recargar actas" type="number" min="1">
             <button type="button" class="btn btn-success" onclick="rechargePromotion('{group_jid}')">Recargar promoción</button>
@@ -6699,24 +6699,24 @@ def panel_group_detail(
     html += f"""
         <div class="box">
           <div class="head"><strong>Precio de acta</strong></div>
-          
+
           <div class="filters" style="grid-template-columns: 220px 180px;">
             <div>
               <div class="small">Precio por acta</div>
-              <input 
-                id="acta_price" 
-                type="number" 
-                step="0.01" 
-                min="0" 
+              <input
+                id="acta_price"
+                type="number"
+                step="0.01"
+                min="0"
                 value="{acta_price_num}"
               >
             </div>
-    
+
             <div style="display:flex;align-items:end;">
-              <button 
-                type="button" 
-                class="btn btn-primary" 
-                style="width:100%;" 
+              <button
+                type="button"
+                class="btn btn-primary"
+                style="width:100%;"
                 onclick="saveActaPrice('{group_jid}')">
                 Guardar precio
               </button>
@@ -6750,18 +6750,18 @@ def panel_group_detail(
     weekly_queued = 0
     weekly_processing = 0
     weekly_start = None
-    
+
     for r in detail["rows"]:
         if weekly_start is None:
             weekly_start = r["date"]
-    
+
         weekly_total += r["total"]
         weekly_done += r["done"]
         weekly_error += r["error"]
         weekly_queued += r["queued"]
         weekly_processing += r["processing"]
         done_amount = r["done"] * acta_price_num
-    
+
         html += f"""
               <tr>
                 <td>{_esc(r["day_name"])}</td>
@@ -6775,10 +6775,10 @@ def panel_group_detail(
                 <td class="right">${done_amount:,.2f}</td>
               </tr>
         """
-    
+
         is_sunday = r["day_name"].upper() == "DOMINGO"
         is_last_day = r == detail["rows"][-1]
-    
+
         if is_sunday or is_last_day:
             weekly_amount = weekly_done * acta_price_num
             html += f"""
@@ -6794,7 +6794,7 @@ def panel_group_detail(
                 <td class="right">${weekly_amount:,.2f}</td>
               </tr>
             """
-    
+
             weekly_total = 0
             weekly_done = 0
             weekly_error = 0
@@ -6852,7 +6852,7 @@ def panel_group_detail(
               alert("No se pudo conectar con el servidor");
             }}
           }}
-          
+
           async function savePromotion(groupJid) {{
             const promoName = document.getElementById("promo_name")?.value?.trim() || "";
             const totalActas = document.getElementById("promo_total")?.value?.trim() || "";
@@ -6860,10 +6860,10 @@ def panel_group_detail(
 
             const promoType = document.getElementById("promo_type")?.value || "paid";
             const isCredit = promoType === "credit";
-            
+
             let creditAbono = document.getElementById("promo_credit_abono")?.value?.trim() || "";
             let creditDebe = document.getElementById("promo_credit_debe")?.value?.trim() || "";
-            
+
             if (!isCredit) {{
               creditAbono = "0";
               creditDebe = "0";
@@ -6909,14 +6909,14 @@ def panel_group_detail(
           async function removeFromSharedPromotion(groupJid) {{
             const ok = confirm("¿Seguro que deseas sacar este grupo de la bolsa compartida?");
             if (!ok) return;
-        
+
             try {{
               const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/shared-promotion/remove`, {{
                 method: "POST"
               }});
-        
+
               const data = await res.json();
-        
+
               if (data.ok) {{
                 alert(data.message || "Grupo eliminado de la bolsa compartida");
                 location.reload();
@@ -6930,7 +6930,7 @@ def panel_group_detail(
 
           async function saveGroupCategory(groupJid) {{
             const category = document.getElementById("group_category")?.value || "otro";
-        
+
             try {{
               const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/category`, {{
                 method: "POST",
@@ -6939,9 +6939,9 @@ def panel_group_detail(
                 }},
                 body: JSON.stringify({{ category }})
               }});
-        
+
               const data = await res.json();
-        
+
               if (data.ok) {{
                 alert("Categoría guardada correctamente");
                 location.reload();
@@ -6952,17 +6952,17 @@ def panel_group_detail(
               alert("No se pudo conectar con el servidor");
             }}
           }}
-        
+
           async function removeGroupCategory(groupJid) {{
             if (!confirm("¿Quitar categoría de este grupo?")) return;
-        
+
             try {{
               const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/category/remove`, {{
                 method: "POST"
               }});
-        
+
               const data = await res.json();
-        
+
               if (data.ok) {{
                 alert("Categoría eliminada");
                 location.reload();
@@ -7018,7 +7018,7 @@ def panel_group_detail(
                 abono.value = "";
               }}
             }}
-        
+
             if (debe) {{
               if (isCredit) {{
                 debe.disabled = false;
@@ -7094,7 +7094,7 @@ def panel_group_detail(
 
           async function pingGroup(groupJid) {{
             if (!confirm("¿Enviar ping a este grupo?")) return;
-        
+
             const res = await fetch("/panel/ping-group", {{
               method: "POST",
               headers: {{
@@ -7104,9 +7104,9 @@ def panel_group_detail(
                 group_jid: groupJid
               }})
             }});
-        
+
             const data = await res.json();
-          
+
             if (data.ok) {{
               alert("Ping enviado");
             }} else {{
@@ -7116,12 +7116,12 @@ def panel_group_detail(
 
           async function saveGroupName(groupJid) {{
             const customName = document.getElementById("group_custom_name")?.value?.trim() || "";
-        
+
             if (!customName) {{
               alert("Ingresa el nombre del grupo");
               return;
             }}
-        
+
             try {{
               const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/name`, {{
                 method: "POST",
@@ -7132,9 +7132,9 @@ def panel_group_detail(
                   custom_name: customName
                 }})
               }});
-         
+
               const data = await res.json();
-        
+
               if (data.ok) {{
                 alert("Nombre guardado correctamente");
                 location.reload();
@@ -7298,7 +7298,7 @@ GROUP_NAME_MAP = {
     "120363408346528746@g.us": "Gpo. No. 12 Cristina",
     "120363406341954870@g.us": "Gpo. No. 13 Cristina",
     "120363424448068009@g.us": "Gpo. No. 14 Cristina",
-    "120363405818188792@g.us": "Gpo. No. 15 Cristina", 
+    "120363405818188792@g.us": "Gpo. No. 15 Cristina",
 }
 
 
@@ -7315,7 +7315,7 @@ def _group_name(jid: str, db: Session | None = None):
         return GROUP_NAME_MAP[jid]
 
     return "Grupo sin nombre"
-    
+
 
 @app.get("/panel/api")
 def panel_api_actas(
@@ -7862,7 +7862,7 @@ async def panel_broadcast_free(
         audio_base64 = _clean_audio_base64(payload.get("audio_base64") or "")
         target_category = (payload.get("category") or "all").strip().lower()
         selected_groups = payload.get("selected_groups") or []
-        
+
         if not message_text and not audio_base64:
             return {"ok": False, "error": "Mensaje/audio vacío"}
 
@@ -8060,7 +8060,7 @@ async def panel_broadcast_private_bots(
         message = (payload.get("message") or "").strip()
         audio_base64 = _clean_audio_base64(payload.get("audio_base64") or "")
         selected_instances = payload.get("selected_instances") or []
-        
+
         if not message and not audio_base64:
             return {"ok": False, "error": "Mensaje/audio vacío"}
 
@@ -8156,7 +8156,7 @@ def panel_private_bots_broadcast_progress(
         raw = raw.decode("utf-8", errors="ignore")
 
     return json.loads(raw)
-        
+
 
 def _promotion_summary_map(db: Session) -> dict[str, dict]:
     cache_key = "panel:promotion_summary_map:v1"
@@ -8199,20 +8199,20 @@ def _promotion_summary_map(db: Session) -> dict[str, dict]:
 
         total_actas = int(r.total_actas or 0)
         shared_key = (r.shared_key or "").strip()
-        
+
         if shared_key:
             shared_rows = [
                 x for x in rows
                 if (x.shared_key or "").strip() == shared_key
             ]
-        
+
             used_actas = max((int(x.used_actas or 0) for x in shared_rows), default=0)
-        
+
             if used_actas <= 0:
                 used_actas = sum(int(x.shared_group_used_actas or 0) for x in shared_rows)
         else:
             used_actas = int(r.used_actas or 0)
-        
+
         available = max(0, total_actas - used_actas)
         promo_name = (r.promo_name or "").strip()
 
@@ -8248,7 +8248,7 @@ def _promotion_summary_map(db: Session) -> dict[str, dict]:
     _cache_set_json(cache_key, out, ttl=15)
     return out
 
-                                                                                                        
+
 def _panel_cache_key(
     view: str,
     group_jid: str,
@@ -8269,12 +8269,12 @@ def _panel_cache_key(
         (act_type or "").strip(),
         (group_mode or "").strip(),
     ])
-                                                                                                        
+
 
 def _panel_delivery_metrics(db, time_min, time_max):
     try:
         maya_personal_provider = _personal_provider_filter_for_instance(db, "docifybot8maya")
-    
+
         q = db.query(
             RequestLog.provider_processing_time,
             RequestLog.provider_to_webhook_lag_s,
@@ -8370,7 +8370,7 @@ def _bot_credit_stats(db: Session, instance_name: str):
             "available": 0,
             "recharges": 0,
         }
-        
+
 
 @app.post("/botpanel/{token}/group/{group_jid}/block")
 def panel_bot_block_group(token: str, group_jid: str, db: Session = Depends(get_db)):
@@ -8504,10 +8504,10 @@ async def panel_bot_set_promo(token: str, request: Request, db: Session = Depend
         group = db.query(AuthorizedGroup).filter(
             AuthorizedGroup.group_jid == group_jid
         ).first()
-        
+
         if not group:
             return {"ok": False, "error": "Grupo no encontrado"}
-        
+
         if group.owner_instance != instance_name:
             group.owner_instance = instance_name
 
@@ -8645,7 +8645,7 @@ def botpanel_remove_promotion(
 
         db.delete(promo)
         db.commit()
-        
+
         try:
             send_group_text(
                 group_jid,
@@ -8658,7 +8658,7 @@ def botpanel_remove_promotion(
             )
         except Exception as notify_exc:
             print("BOT_PROMOTION_REMOVE_NOTIFY_ERROR =", str(notify_exc), flush=True)
-        
+
         _clear_panel_cache()
 
         return {
@@ -8954,7 +8954,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
 
     bot_blocked = is_instance_blocked(instance_name)
     bot_admin_blocked = is_instance_admin_blocked(instance_name)
-    
+
     if bot_admin_blocked:
         bot_status_label = "BLOQUEADO POR PANEL PRINCIPAL"
     else:
@@ -9146,17 +9146,17 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
             <div class="label">Actas cargadas</div>
             <div class="value">{credits['limit']}</div>
           </div>
-        
+
           <div class="card">
             <div class="label">Actas usadas</div>
             <div class="value">{credits['used']}</div>
           </div>
-        
+
           <div class="card">
             <div class="label">Actas disponibles</div>
             <div class="value">{credits['available']}</div>
           </div>
-        
+
           <div class="card">
             <div class="label">Recargas realizadas</div>
             <div class="value">{credits['recharges']}</div>
@@ -9225,7 +9225,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
               <button class="btn btn-success" onclick="sendBotFreeBroadcast()">Enviar mensaje libre</button>
               <button class="btn" onclick="document.getElementById('botBroadcastMessage').value=''">Limpiar</button>
             </div>
-            
+
             <div
               id="botBroadcastProgress"
               style="display:none;margin-top:12px;padding:12px;border-radius:12px;background:#f8fafc;border:1px solid #e5e7eb;font-size:13px;"
@@ -9243,10 +9243,10 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
             </div>
             <span class="badge badge-success">Mini panel</span>
           </div>
-        
+
           <div style="padding:16px;">
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">
-        
+
               <a target="_blank"
                  href="/botpanel/{_esc(token)}/audit?period=day&status=DONE"
                  style="text-decoration:none;color:inherit;">
@@ -9256,7 +9256,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                   <div class="small" style="margin-top:6px;">Ventas realizadas hoy</div>
                 </div>
               </a>
-        
+
               <a target="_blank"
                  href="/botpanel/{_esc(token)}/audit?period=30d&status=DONE"
                  style="text-decoration:none;color:inherit;">
@@ -9266,7 +9266,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                   <div class="small" style="margin-top:6px;">Ventas de todos los grupos</div>
                 </div>
               </a>
-        
+
               <a target="_blank"
                  href="/botpanel/{_esc(token)}/audit?period=month&status=DONE"
                  style="text-decoration:none;color:inherit;">
@@ -9276,7 +9276,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                   <div class="small" style="margin-top:6px;">Movimientos del mes</div>
                 </div>
               </a>
-        
+
               <a target="_blank"
                  href="/botpanel/{_esc(token)}/audit?period=prev_month&status=DONE"
                  style="text-decoration:none;color:inherit;">
@@ -9286,7 +9286,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                   <div class="small" style="margin-top:6px;">Consulta el corte pasado</div>
                 </div>
               </a>
-        
+
             </div>
           </div>
         </div>
@@ -9362,7 +9362,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                        Hoy
                     </a>
                     <br><br>
-                    
+
                     <a target="_blank"
                        href="/botpanel/{_esc(token)}/audit?period=30d&status=DONE&group_jid={_esc(g['group_jid'])}"
                        class="btn btn-success"
@@ -9370,7 +9370,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                        30 días
                     </a>
                     <br><br>
-                    
+
                     <a target="_blank"
                        href="/botpanel/{_esc(token)}/audit?period=month&status=DONE&group_jid={_esc(g['group_jid'])}"
                        class="btn btn-primary"
@@ -9378,7 +9378,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                        Mes actual
                     </a>
                     <br><br>
-                    
+
                     <a target="_blank"
                        href="/botpanel/{_esc(token)}/audit?period=prev_month&status=DONE&group_jid={_esc(g['group_jid'])}"
                        class="btn btn-success"
@@ -9386,7 +9386,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                        Mes anterior
                     </a>
                   </td>
-  
+
                   <td>
                     <div style="display:flex;gap:8px;min-width:220px;">
                       <input id="rename_{_esc(g["group_jid"])}" placeholder="Nuevo nombre">
@@ -9398,12 +9398,12 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                     <div style="display:grid;gap:8px;min-width:260px;">
                       <input id="promo_name_{_esc(g["group_jid"])}" placeholder="Nombre promo">
                       <input id="promo_total_{_esc(g["group_jid"])}" type="number" min="10" step="1" placeholder="Total actas">
-                
+
                       <button class="btn btn-success"
                         onclick="assignBotPromo('{_esc(g["group_jid"])}')">
                         Aplicar promo
                       </button>
-                
+
                       {
                         f"""
                         <button class="btn btn-danger"
@@ -9580,11 +9580,11 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
         async function hideBotGroup(groupJid) {
           const ok = confirm("¿Quitar este grupo del mini panel?");
           if (!ok) return;
-        
+
           const res = await fetch(`${BOT_PANEL_BASE}/group/${encodeURIComponent(groupJid)}/hide`, {
             method: "POST"
           });
-        
+
           const data = await res.json();
           if (data.ok) {
             location.reload();
@@ -9597,15 +9597,15 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
 
         async function sendBotFreeBroadcast() {
           const message = document.getElementById("botBroadcastMessage").value.trim();
-        
+
           if (!message) {
             alert("Escribe un mensaje.");
             return;
           }
-        
+
           const ok = confirm("¿Enviar este mensaje a todos los grupos activos de este bot?");
           if (!ok) return;
-        
+
           const res = await fetch(`${BOT_PANEL_BASE}/broadcast/free`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -9613,9 +9613,9 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
               message: message
             })
           });
-        
+
           const data = await res.json();
-        
+
           if (data.ok) {
             document.getElementById("botBroadcastMessage").value = "";
             alert(`Mensaje masivo en cola para ${data.instance}. Total: ${data.total}`);
@@ -9624,29 +9624,29 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
             alert(data.error || "No se pudo enviar el mensaje.");
           }
         }
-        
+
         function startBotBroadcastProgress(jobId) {
           const box = document.getElementById("botBroadcastProgress");
-        
+
           if (box) {
             box.style.display = "block";
             box.innerHTML = "Enviando mensajes...";
           }
-        
+
           if (botBroadcastProgressTimer) {
             clearInterval(botBroadcastProgressTimer);
           }
-        
+
           botBroadcastProgressTimer = setInterval(async () => {
             const res = await fetch(`${BOT_PANEL_BASE}/broadcast/progress/${jobId}`);
             const data = await res.json();
-        
+
             if (!data.ok) {
               if (box) box.innerHTML = data.error || "Error consultando progreso.";
               clearInterval(botBroadcastProgressTimer);
               return;
             }
-        
+
             if (box) {
               box.innerHTML = `
                 <strong>Estado:</strong> ${data.status || "pending"}<br>
@@ -9657,11 +9657,11 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
                 <strong>Actual:</strong> ${data.current || ""}
               `;
             }
-        
+
             if (data.status === "done") {
               box.innerHTML += "<br><strong style='color:green;'>✔ Envío terminado</strong>";
             }
-            
+
             if (data.status === "done" || data.status === "error") {
               clearInterval(botBroadcastProgressTimer);
             }
@@ -9671,12 +9671,12 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
         async function addManualBotGroup() {
           const groupJid = document.getElementById("manual_group_jid").value.trim();
           const groupName = document.getElementById("manual_group_name").value.trim();
-        
+
           if (!groupJid) {
             alert("Escribe el Group JID.");
             return;
           }
-        
+
           const res = await fetch(`${BOT_PANEL_BASE}/group/add`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -9685,7 +9685,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
               group_name: groupName
             })
           });
-        
+
           const data = await res.json();
           if (data.ok) {
             location.reload();
@@ -9746,7 +9746,7 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
         async function removeBotPromo(groupJid) {
           const ok = confirm("¿Seguro que deseas quitar la promoción de este grupo?");
           if (!ok) return;
-        
+
           const res = await fetch(`${BOT_PANEL_BASE}/promotion/remove`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -9754,9 +9754,9 @@ def panel_bot(token: str, db: Session = Depends(get_db)):
               group_jid: groupJid
             })
           });
-        
+
           const data = await res.json();
-        
+
           if (data.ok) {
             alert(data.message || "Promoción quitada correctamente.");
             location.reload();
@@ -9797,6 +9797,1064 @@ def _is_hidden_panel_group(gid: str | None, name: str | None) -> bool:
     return any(re.search(pattern, name_up) for pattern in excluded_patterns)
 
 
+
+# ============================================================
+# PROVIDER16_ACCOUNTS_PANEL_V2
+# SIDEA1..SIDEA6 · panel seguro y compacto
+# ============================================================
+
+@app.get(
+    "/panel/sidea",
+    response_class=HTMLResponse,
+)
+def panel_sidea_accounts(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not _is_valid_admin_panel_token(request):
+        return HTMLResponse(
+            "No autorizado",
+            status_code=403,
+        )
+
+    current_token = (
+        request.query_params.get("token")
+        or ""
+    ).strip()
+
+    from urllib.parse import quote
+
+    from app.services.provider16_accounts import (
+        get_sidea_accounts_for_panel,
+    )
+    from app.services.provider16_sidea import (
+        SideaPool,
+    )
+
+    rows = get_sidea_accounts_for_panel(db)
+    pool = SideaPool(redis_conn)
+
+    configured_count = 0
+    ready_count = 0
+    total_usage = 0
+    total_capacity = 0
+
+    cards = []
+
+    for row in rows:
+        slot = row["slot"]
+        label = row["label"]
+
+        username = (
+            row["username"]
+            or ""
+        ).strip()
+
+        enabled = bool(row["enabled"])
+        configured = bool(row["configured"])
+
+        password_configured = bool(
+            row["password_configured"]
+        )
+
+        daily_limit = int(
+            row["daily_limit"]
+        )
+
+        usage = pool.usage(slot)
+
+        remaining = max(
+            0,
+            daily_limit - usage,
+        )
+
+        if configured:
+            configured_count += 1
+            total_capacity += daily_limit
+            total_usage += usage
+
+        if not configured:
+            status = "SIN CONFIGURAR"
+
+        elif not enabled:
+            status = "DESACTIVADA"
+
+        else:
+            status = pool.get_status(slot)
+
+        if (
+            configured
+            and enabled
+            and status == "READY"
+        ):
+            ready_count += 1
+
+        if status == "READY":
+            badge_class = "ready"
+
+        elif status in {
+            "NEED_LOGIN",
+            "SESSION_EXPIRED",
+        }:
+            badge_class = "danger"
+
+        elif status == "DESACTIVADA":
+            badge_class = "disabled"
+
+        elif status == "SIN CONFIGURAR":
+            badge_class = "empty"
+
+        else:
+            badge_class = "warning"
+
+        checked = (
+            "checked"
+            if enabled
+            else ""
+        )
+
+        user_label = (
+            _esc(username)
+            if username
+            else "Sin usuario configurado"
+        )
+
+        password_label = (
+            "Contraseña guardada"
+            if password_configured
+            else "Contraseña pendiente"
+        )
+
+        cards.append(
+            f"""
+            <details class="sidea-account-card">
+              <summary>
+                <div class="sidea-summary-main">
+                  <div class="sidea-name-line">
+                    <span class="sidea-account-name">
+                      {label}
+                    </span>
+
+                    <span class="status-badge {badge_class}">
+                      {_esc(status)}
+                    </span>
+                  </div>
+
+                  <div class="sidea-user-preview">
+                    {user_label}
+                  </div>
+                </div>
+
+                <div class="sidea-summary-usage">
+                  <strong>{usage}</strong>
+                  <span>/ {daily_limit}</span>
+
+                  <small>
+                    {remaining} disponibles
+                  </small>
+                </div>
+
+                <div class="sidea-chevron">
+                  ›
+                </div>
+              </summary>
+
+              <div class="sidea-editor">
+                <div class="sidea-fields">
+
+                  <div class="sidea-field full">
+                    <label>
+                      Usuario / correo SIDEA
+                    </label>
+
+                    <input
+                      id="{slot}_username"
+                      value="{_esc(username)}"
+                      autocomplete="off"
+                      placeholder="Usuario SIDEA"
+                    >
+                  </div>
+
+                  <div class="sidea-field full">
+                    <label>
+                      Contraseña
+                    </label>
+
+                    <input
+                      id="{slot}_password"
+                      type="password"
+                      autocomplete="new-password"
+                      placeholder="Vacío = conservar la actual"
+                    >
+
+                    <div class="field-help">
+                      {password_label}
+                    </div>
+                  </div>
+
+                  <div class="sidea-field">
+                    <label>
+                      Límite diario
+                    </label>
+
+                    <input
+                      id="{slot}_limit"
+                      type="number"
+                      min="1"
+                      max="1000"
+                      value="{daily_limit}"
+                    >
+                  </div>
+
+                  <div class="sidea-field sidea-active-field">
+                    <label class="switch-label">
+                      <input
+                        id="{slot}_enabled"
+                        type="checkbox"
+                        {checked}
+                      >
+
+                      <span>
+                        Cuenta activa
+                      </span>
+                    </label>
+                  </div>
+
+                </div>
+
+                <div class="sidea-account-footer">
+
+                  <div class="sidea-mini-stats">
+                    <div>
+                      <span>Usadas hoy</span>
+                      <strong>{usage}</strong>
+                    </div>
+
+                    <div>
+                      <span>Restantes</span>
+                      <strong>{remaining}</strong>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    class="sidea-save-btn"
+                    onclick="saveSideaAccount('{slot}')"
+                  >
+                    Guardar cambios
+                  </button>
+
+                </div>
+              </div>
+            </details>
+            """
+        )
+
+    back_url = (
+        "/panel?token="
+        + quote(
+            current_token,
+            safe="",
+        )
+    )
+
+    token_json = json.dumps(
+        current_token
+    )
+
+    html = r"""
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+
+<meta
+  name="viewport"
+  content="width=device-width,initial-scale=1"
+>
+
+<title>Provider16 · SIDEA</title>
+
+<style>
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(
+        circle at top,
+        #111b31 0,
+        #070d19 34%,
+        #030712 72%
+      );
+    color: #f8fafc;
+    font-family:
+      Inter,
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      sans-serif;
+    min-height: 100vh;
+  }
+
+  .page {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 34px 0 60px;
+  }
+
+  .topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 18px;
+    margin-bottom: 25px;
+  }
+
+  .eyebrow {
+    color: #60a5fa;
+    font-weight: 800;
+    font-size: 12px;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    margin-bottom: 5px;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 30px;
+    letter-spacing: -.03em;
+  }
+
+  .subtitle {
+    margin-top: 5px;
+    color: #94a3b8;
+    font-size: 14px;
+  }
+
+  .back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid #334155;
+    background: #111827;
+    color: #e5e7eb;
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 13px;
+  }
+
+  .back-btn:hover {
+    background: #1f2937;
+  }
+
+  .stats {
+    display: grid;
+    grid-template-columns:
+      repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 22px;
+  }
+
+  .stat {
+    border: 1px solid #233047;
+    border-radius: 14px;
+    padding: 15px 17px;
+    background:
+      rgba(15, 23, 42, .76);
+    box-shadow:
+      0 14px 30px rgba(0,0,0,.18);
+  }
+
+  .stat span {
+    display: block;
+    color: #94a3b8;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    margin-bottom: 7px;
+  }
+
+  .stat strong {
+    display: block;
+    font-size: 23px;
+    line-height: 1;
+  }
+
+  .section-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: end;
+    gap: 15px;
+    margin: 27px 0 12px;
+  }
+
+  .section-head h2 {
+    margin: 0;
+    font-size: 17px;
+  }
+
+  .section-head p {
+    margin: 3px 0 0;
+    color: #64748b;
+    font-size: 12px;
+  }
+
+  .account-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .sidea-account-card {
+    overflow: hidden;
+    border: 1px solid #25334c;
+    border-radius: 14px;
+    background:
+      rgba(15,23,42,.82);
+    transition: .15s ease;
+  }
+
+  .sidea-account-card:hover {
+    border-color: #3b4d6b;
+  }
+
+  .sidea-account-card[open] {
+    border-color: #3b82f6;
+    box-shadow:
+      0 10px 32px rgba(0,0,0,.2);
+  }
+
+  summary {
+    list-style: none;
+    cursor: pointer;
+    display: grid;
+    grid-template-columns:
+      minmax(0,1fr)
+      auto
+      24px;
+    align-items: center;
+    gap: 18px;
+    padding: 17px 19px;
+    user-select: none;
+  }
+
+  summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .sidea-name-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .sidea-account-name {
+    font-size: 16px;
+    font-weight: 850;
+  }
+
+  .sidea-user-preview {
+    margin-top: 4px;
+    color: #94a3b8;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 850;
+    letter-spacing: .03em;
+  }
+
+  .status-badge.ready {
+    color: #4ade80;
+    background: rgba(34,197,94,.12);
+    border: 1px solid rgba(34,197,94,.23);
+  }
+
+  .status-badge.danger {
+    color: #fb7185;
+    background: rgba(244,63,94,.11);
+    border: 1px solid rgba(244,63,94,.22);
+  }
+
+  .status-badge.warning {
+    color: #fbbf24;
+    background: rgba(245,158,11,.11);
+    border: 1px solid rgba(245,158,11,.22);
+  }
+
+  .status-badge.disabled,
+  .status-badge.empty {
+    color: #94a3b8;
+    background: rgba(148,163,184,.08);
+    border: 1px solid rgba(148,163,184,.16);
+  }
+
+  .sidea-summary-usage {
+    min-width: 115px;
+    text-align: right;
+    font-size: 12px;
+    color: #94a3b8;
+  }
+
+  .sidea-summary-usage strong {
+    color: #f8fafc;
+    font-size: 16px;
+  }
+
+  .sidea-summary-usage small {
+    display: block;
+    color: #64748b;
+    margin-top: 3px;
+    font-size: 10px;
+  }
+
+  .sidea-chevron {
+    color: #64748b;
+    font-size: 25px;
+    transition: transform .15s ease;
+  }
+
+  details[open] .sidea-chevron {
+    transform: rotate(90deg);
+  }
+
+  .sidea-editor {
+    border-top: 1px solid #25334c;
+    padding: 18px 19px 19px;
+    background: rgba(2,6,23,.35);
+  }
+
+  .sidea-fields {
+    display: grid;
+    grid-template-columns:
+      repeat(2, minmax(0,1fr));
+    gap: 14px;
+  }
+
+  .sidea-field.full {
+    grid-column: 1 / -1;
+  }
+
+  .sidea-field label {
+    display: block;
+    font-size: 11px;
+    font-weight: 750;
+    color: #cbd5e1;
+    margin-bottom: 6px;
+  }
+
+  .sidea-field input[type="text"],
+  .sidea-field input[type="password"],
+  .sidea-field input[type="number"],
+  .sidea-field input:not([type]) {
+    width: 100%;
+    border: 1px solid #334155;
+    border-radius: 9px;
+    background: #0f172a;
+    color: #f8fafc;
+    padding: 10px 11px;
+    outline: none;
+  }
+
+  .sidea-field input:focus {
+    border-color: #3b82f6;
+    box-shadow:
+      0 0 0 3px rgba(59,130,246,.12);
+  }
+
+  .field-help {
+    color: #64748b;
+    font-size: 10px;
+    margin-top: 5px;
+  }
+
+  .sidea-active-field {
+    display: flex;
+    align-items: end;
+  }
+
+  .switch-label {
+    display: flex !important;
+    align-items: center;
+    gap: 9px;
+    height: 39px;
+    margin: 0 !important;
+    cursor: pointer;
+  }
+
+  .switch-label input {
+    width: 17px;
+    height: 17px;
+  }
+
+  .sidea-account-footer {
+    margin-top: 17px;
+    padding-top: 15px;
+    border-top: 1px solid #1e293b;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+  }
+
+  .sidea-mini-stats {
+    display: flex;
+    gap: 22px;
+  }
+
+  .sidea-mini-stats div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .sidea-mini-stats span {
+    color: #64748b;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+
+  .sidea-mini-stats strong {
+    font-size: 14px;
+  }
+
+  .sidea-save-btn {
+    border: 0;
+    border-radius: 9px;
+    background: #2563eb;
+    color: white;
+    padding: 10px 17px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
+  .sidea-save-btn:hover {
+    background: #1d4ed8;
+  }
+
+  .notice {
+    margin-top: 18px;
+    border: 1px solid #233047;
+    border-radius: 12px;
+    background: rgba(15,23,42,.55);
+    padding: 12px 15px;
+    color: #94a3b8;
+    font-size: 11px;
+    line-height: 1.6;
+  }
+
+  @media (max-width: 720px) {
+    .page {
+      width: min(100% - 20px, 1180px);
+      padding-top: 20px;
+    }
+
+    .topbar {
+      align-items: flex-start;
+    }
+
+    h1 {
+      font-size: 23px;
+    }
+
+    .stats {
+      grid-template-columns:
+        repeat(2, minmax(0,1fr));
+    }
+
+    summary {
+      grid-template-columns:
+        minmax(0,1fr)
+        auto;
+    }
+
+    .sidea-chevron {
+      display: none;
+    }
+
+    .sidea-summary-usage {
+      min-width: 90px;
+    }
+
+    .sidea-fields {
+      grid-template-columns: 1fr;
+    }
+
+    .sidea-field.full {
+      grid-column: auto;
+    }
+
+    .sidea-account-footer {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .sidea-save-btn {
+      width: 100%;
+    }
+  }
+</style>
+</head>
+
+<body>
+
+<div class="page">
+
+  <div class="topbar">
+
+    <div>
+      <div class="eyebrow">
+        Provider16
+      </div>
+
+      <h1>
+        Cuentas SIDEA
+      </h1>
+
+      <div class="subtitle">
+        Administración de SIDEA1 a SIDEA6
+      </div>
+    </div>
+
+    <a
+      class="back-btn"
+      href="__BACK_URL__"
+    >
+      ← Volver al panel
+    </a>
+
+  </div>
+
+  <div class="stats">
+
+    <div class="stat">
+      <span>Configuradas</span>
+      <strong>__CONFIGURED__/6</strong>
+    </div>
+
+    <div class="stat">
+      <span>Sesiones READY</span>
+      <strong>__READY__</strong>
+    </div>
+
+    <div class="stat">
+      <span>Usadas hoy</span>
+      <strong>__USAGE__</strong>
+    </div>
+
+    <div class="stat">
+      <span>Capacidad activa</span>
+      <strong>__CAPACITY__</strong>
+    </div>
+
+  </div>
+
+  <div class="section-head">
+
+    <div>
+      <h2>
+        Cuentas
+      </h2>
+
+      <p>
+        Haz clic sobre una cuenta para editarla.
+      </p>
+    </div>
+
+  </div>
+
+  <div class="account-list">
+    __SIDEA_CARDS__
+  </div>
+
+  <div class="notice">
+    Las contraseñas se almacenan cifradas y no se
+    vuelven a mostrar. Dejar el campo contraseña vacío
+    conserva la contraseña guardada.
+
+    <br>
+
+    El inicio de sesión y CAPTCHA se integrará después
+    dentro de cada cuenta.
+  </div>
+
+</div>
+
+<script>
+const panelToken = __TOKEN_JSON__;
+
+async function saveSideaAccount(slot) {
+
+  const button =
+    event.currentTarget;
+
+  const oldText =
+    button.textContent;
+
+  button.disabled = true;
+  button.textContent = "Guardando...";
+
+  try {
+
+    const username =
+      document.getElementById(
+        slot + "_username"
+      ).value.trim();
+
+    const password =
+      document.getElementById(
+        slot + "_password"
+      ).value;
+
+    const dailyLimit =
+      Number(
+        document.getElementById(
+          slot + "_limit"
+        ).value || 1000
+      );
+
+    const enabled =
+      document.getElementById(
+        slot + "_enabled"
+      ).checked;
+
+    const response = await fetch(
+      "/panel/sidea/account?token="
+      + encodeURIComponent(panelToken),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
+        body: JSON.stringify({
+          slot: slot,
+          username: username,
+          password: password,
+          daily_limit: dailyLimit,
+          enabled: enabled
+        })
+      }
+    );
+
+    const data =
+      await response.json();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(
+        data.error
+        || "No se pudo guardar"
+      );
+    }
+
+    button.textContent = "✓ Guardado";
+
+    setTimeout(
+      () => window.location.reload(),
+      450
+    );
+
+  } catch (error) {
+
+    button.disabled = false;
+    button.textContent = oldText;
+
+    alert(
+      error.message
+      || "No se pudo guardar"
+    );
+  }
+}
+</script>
+
+</body>
+</html>
+"""
+
+    html = html.replace(
+        "__SIDEA_CARDS__",
+        "".join(cards),
+    )
+
+    html = html.replace(
+        "__BACK_URL__",
+        _esc(back_url),
+    )
+
+    html = html.replace(
+        "__TOKEN_JSON__",
+        token_json,
+    )
+
+    html = html.replace(
+        "__CONFIGURED__",
+        str(configured_count),
+    )
+
+    html = html.replace(
+        "__READY__",
+        str(ready_count),
+    )
+
+    html = html.replace(
+        "__USAGE__",
+        str(total_usage),
+    )
+
+    html = html.replace(
+        "__CAPACITY__",
+        str(total_capacity),
+    )
+
+    return HTMLResponse(
+        content=html,
+        headers={
+            "Cache-Control":
+                "no-store, max-age=0",
+        },
+    )
+
+
+@app.post(
+    "/panel/sidea/account"
+)
+def panel_sidea_account_save(
+    request: Request,
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    if not _is_valid_admin_panel_token(request):
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "UNAUTHORIZED",
+            },
+            status_code=403,
+        )
+
+    from app.services.provider16_accounts import (
+        save_sidea_account_slot,
+    )
+    from app.services.provider16_sidea import (
+        SideaPool,
+        SideaNeedLogin,
+    )
+
+    slot = str(
+        payload.get("slot")
+        or ""
+    ).strip().lower()
+
+    username = str(
+        payload.get("username")
+        or ""
+    ).strip()
+
+    password = str(
+        payload.get("password")
+        or ""
+    )
+
+    try:
+        daily_limit = int(
+            payload.get(
+                "daily_limit",
+                1000,
+            )
+        )
+    except Exception:
+        daily_limit = 1000
+
+    enabled = bool(
+        payload.get("enabled")
+    )
+
+    try:
+        result = save_sidea_account_slot(
+            db,
+            slot=slot,
+            username=username,
+            password=password,
+            daily_limit=daily_limit,
+            enabled=enabled,
+        )
+
+    except Exception as exc:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": str(exc),
+            },
+            status_code=400,
+        )
+
+    pool = SideaPool(redis_conn)
+
+    if result.get(
+        "username_changed"
+    ):
+        pool.clear_session(
+            slot,
+            reason="NEED_LOGIN",
+        )
+
+    elif not result.get(
+        "enabled"
+    ):
+        pool.set_status(
+            slot,
+            "DISABLED",
+            ttl_sec=86400 * 30,
+        )
+
+    elif (
+        pool.get_status(slot)
+        == "DISABLED"
+    ):
+        try:
+            pool.get_session(slot)
+
+            pool.set_status(
+                slot,
+                "READY",
+            )
+
+        except SideaNeedLogin:
+            pool.set_status(
+                slot,
+                "NEED_LOGIN",
+                ttl_sec=86400,
+            )
+
+    _clear_panel_cache()
+
+    return {
+        "ok": True,
+        **result,
+    }
+
+
 @app.post("/panel/provider-weight")
 def panel_provider_weight(payload: dict, db: Session = Depends(get_db)):
     provider_name = str(payload.get("provider_name") or "").strip().upper()
@@ -9835,7 +10893,7 @@ def panel_provider_weight(payload: dict, db: Session = Depends(get_db)):
         "weight": row.weight,
     }
 
-                    
+
 @app.get("/panel", response_class=HTMLResponse)
 def panel_actas(
     request: Request,
@@ -9883,7 +10941,7 @@ def panel_actas(
 
         local_start_label = _to_panel_tz(time_min)
         local_end_label = _to_panel_tz(time_max)
-        
+
         if view == "custom" and local_start_label and local_end_label:
             period_label = (
                 f"Rango personalizado: "
@@ -9909,7 +10967,7 @@ def panel_actas(
         )
 
         group_base_q = base_q.filter(RequestLog.instance_name == MAIN_PANEL_INSTANCE)
-        
+
         group_cache = _build_group_name_cache(db)
         delivery_metrics = _panel_delivery_metrics(db, time_min, time_max)
         bot_status_rows = _bot_status_rows(db)
@@ -9926,7 +10984,7 @@ def panel_actas(
                 .all()
             )
         }
-        
+
         status_rows = (
             base_q.with_entities(
                 RequestLog.status,
@@ -9935,7 +10993,7 @@ def panel_actas(
             .group_by(RequestLog.status)
             .all()
         )
-        
+
         summary = {
             "total": 0,
             "queued": 0,
@@ -9954,7 +11012,7 @@ def panel_actas(
                 summary["done"] = cnt
             elif st == "ERROR":
                 summary["error"] = cnt
-        
+
         include_all_groups = (group_mode == "all")
         has_active_filters = any([
             (group_jid or "").strip(),
@@ -9962,7 +11020,7 @@ def panel_actas(
             (status or "").strip(),
             (act_type or "").strip(),
         ])
-        
+
         group_rows_raw = (
             group_base_q.with_entities(
                 RequestLog.source_group_id,
@@ -9973,23 +11031,23 @@ def panel_actas(
             .group_by(RequestLog.source_group_id, RequestLog.status)
             .all()
         )
-        
+
         group_map = {}
 
         if include_all_groups and not has_active_filters:
             for gid in (set(GROUP_NAME_MAP.keys()) | set(group_cache.keys())):
                 gid = gid or "PRIVADO"
                 group_name = _group_name_cached(gid, group_cache)
-        
+
                 if gid in hidden_main_group_ids:
                     continue
-                    
+
                 row = db.query(AuthorizedGroup).filter_by(group_jid=gid).first()
                 owner = (row.owner_instance or "").strip() if row else ""
-                
+
                 if gid != "PRIVADO" and owner != MAIN_PANEL_INSTANCE:
                     continue
-        
+
                 group_map[gid] = {
                     "group_jid": gid,
                     "group_name": group_name,
@@ -10000,20 +11058,20 @@ def panel_actas(
                     "error": 0,
                     "last_update": None,
                 }
-        
+
         for gid, st, cnt, last_upd in group_rows_raw:
             gid = gid or "PRIVADO"
             group_name = _group_name_cached(gid, group_cache)
-        
+
             if gid in hidden_main_group_ids:
                 continue
-        
+
             row = db.query(AuthorizedGroup).filter_by(group_jid=gid).first()
             owner = (row.owner_instance or "").strip() if row else ""
-            
+
             if gid != "PRIVADO" and owner not in ("", MAIN_PANEL_INSTANCE):
                 continue
-        
+
             item = group_map.setdefault(gid, {
                 "group_jid": gid,
                 "group_name": group_name,
@@ -10024,10 +11082,10 @@ def panel_actas(
                 "error": 0,
                 "last_update": None,
             })
-        
+
             cnt = int(cnt or 0)
             item["total"] += cnt
-        
+
             if st == "QUEUED":
                 item["queued"] += cnt
             elif st == "PROCESSING":
@@ -10036,16 +11094,16 @@ def panel_actas(
                 item["done"] += cnt
             elif st == "ERROR":
                 item["error"] += cnt
-        
+
             if last_upd and (not item["last_update"] or last_upd > item["last_update"]):
                 item["last_update"] = last_upd
-        
+
         by_group = list(group_map.values())
         if has_active_filters or not include_all_groups:
             by_group = [x for x in by_group if x["total"] > 0]
         by_group = [x for x in by_group if x["group_jid"] != "PRIVADO" or x["total"] > 0]
         by_group.sort(key=lambda x: ((x["total"] == 0), -x["total"], x["group_name"]))
-        
+
         by_provider_raw = (
             base_q.with_entities(
                 RequestLog.provider_name,
@@ -10055,7 +11113,7 @@ def panel_actas(
             .group_by(RequestLog.provider_name, RequestLog.status)
             .all()
         )
-        
+
         provider_map = {}
 
         provider_weight_map = {
@@ -10094,7 +11152,7 @@ def panel_actas(
                     "enabled",
                 }
             )
-        
+
         for name, st, cnt in by_provider_raw:
             name = name or "NO IDENTIFICADO"
             item = provider_map.setdefault(
@@ -10108,10 +11166,10 @@ def panel_actas(
                     "error": 0,
                 }
             )
-        
+
             cnt = int(cnt or 0)
             item["total"] += cnt
-        
+
             if st == "QUEUED":
                 item["queued"] += cnt
             elif st == "PROCESSING":
@@ -10120,7 +11178,7 @@ def panel_actas(
                 item["done"] += cnt
             elif st == "ERROR":
                 item["error"] += cnt
-        
+
         by_provider = list(provider_map.values())
         by_provider.sort(key=lambda x: (-x["total"], x["provider_name"]))
 
@@ -10135,7 +11193,7 @@ def panel_actas(
 
         provider_control_rows = provider_accounting["provider_control_rows"]
         provider_control_totals = provider_accounting["provider_control_totals"]
-        
+
         by_type_raw = (
             base_q.with_entities(
                 RequestLog.act_type,
@@ -10145,9 +11203,9 @@ def panel_actas(
             .group_by(RequestLog.act_type, RequestLog.status)
             .all()
         )
-        
+
         type_map = {}
-        
+
         for name, st, cnt in by_type_raw:
             name = name or "SIN_TIPO"
             item = type_map.setdefault(
@@ -10161,10 +11219,10 @@ def panel_actas(
                     "error": 0,
                 }
             )
-        
+
             cnt = int(cnt or 0)
             item["total"] += cnt
-        
+
             if st == "QUEUED":
                 item["queued"] += cnt
             elif st == "PROCESSING":
@@ -10173,7 +11231,7 @@ def panel_actas(
                 item["done"] += cnt
             elif st == "ERROR":
                 item["error"] += cnt
-        
+
         by_type = list(type_map.values())
         by_type.sort(key=lambda x: (-x["total"], x["act_type"]))
 
@@ -10186,9 +11244,9 @@ def panel_actas(
             .group_by(RequestLog.instance_name, RequestLog.status)
             .all()
         )
-    
+
         instance_map = {}
-    
+
         for name, st, cnt in by_instance_raw:
             name = name or "docifybot8"
             item = instance_map.setdefault(
@@ -10202,10 +11260,10 @@ def panel_actas(
                     "error": 0,
                 }
             )
-    
+
             cnt = int(cnt or 0)
             item["total"] += cnt
-    
+
             if st == "QUEUED":
                 item["queued"] += cnt
             elif st == "PROCESSING":
@@ -10214,12 +11272,12 @@ def panel_actas(
                 item["done"] += cnt
             elif st == "ERROR":
                 item["error"] += cnt
-    
+
         by_instance = list(instance_map.values())
         by_instance.sort(key=lambda x: (-x["total"], x["instance_name"]))
-        
+
         promo_map = _promotion_summary_map(db)
-        
+
         latest = (
             base_q.with_entities(
                 RequestLog.id,
@@ -10238,14 +11296,14 @@ def panel_actas(
             .limit(10)
             .all()
         )
-        
+
         subtitle = f"{period_label} ({PANEL_TZ})"
-        
+
         provider_states = _esc(_providers_status_text(db)).replace("\n", "<br>")
 
         cleanup_enabled = _cleanup_enabled(db)
         cleanup_max_age_minutes = _cleanup_max_age_minutes(db)
-        
+
         cleanup_panel_html = f"""
         <div class="box">
           <div class="head">
@@ -10256,20 +11314,20 @@ def panel_actas(
               </span>
             </div>
           </div>
-        
+
           <div class="cards" style="padding:16px;grid-template-columns:repeat(2,minmax(0,1fr));">
             <div class="card">
               <div class="label">Auto cleanup</div>
               <div class="value" style="font-size:1.6rem;">
                 {"ACTIVO" if cleanup_enabled else "DESACTIVADO"}
               </div>
-        
+
               <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
                 <label style="display:flex;align-items:center;gap:8px;font-weight:800;">
                   <input id="cleanupEnabled" type="checkbox" {"checked" if cleanup_enabled else ""}>
                   Activar app.cleanup
                 </label>
-        
+
                 <input
                   id="cleanupMaxAgeMinutes"
                   type="number"
@@ -10279,19 +11337,19 @@ def panel_actas(
                   value="{cleanup_max_age_minutes}"
                   style="width:120px;padding:10px;border:1px solid #d1d5db;border-radius:10px;"
                 >
-        
+
                 <span class="small">minutos máximos antes de cerrar atoradas</span>
-        
+
                 <button type="button" class="btn btn-primary" onclick="saveCleanupSettings()">
                   Guardar configuración
                 </button>
               </div>
             </div>
-        
+
             <div class="card">
               <div class="label">Borrado manual Redis/RQ + DB</div>
               <div class="value" style="font-size:1.6rem;">EN COLA / PROCESANDO</div>
-        
+
               <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
                 <input
                   id="cleanupPurgeMinutes"
@@ -10302,18 +11360,18 @@ def panel_actas(
                   value="{cleanup_max_age_minutes}"
                   style="width:120px;padding:10px;border:1px solid #d1d5db;border-radius:10px;"
                 >
-        
+
                 <span class="small">borrar con más de X minutos</span>
-        
+
                 <button type="button" class="btn btn-warning" onclick="previewCleanupPurge()">
                   Revisar cuántas
                 </button>
-        
+
                 <button type="button" class="btn btn-danger" onclick="purgeCleanupStuck()">
                   Borrar atoradas
                 </button>
               </div>
-        
+
               <div id="cleanupStatusBox" class="small" style="margin-top:12px;"></div>
             </div>
           </div>
@@ -10328,39 +11386,39 @@ def panel_actas(
                 <strong>⚡ Métricas de entrega</strong>
                 <span class="small">Tiempos promedio del periodo seleccionado.</span>
               </div>
-        
+
               <div class="cards" style="padding:16px; grid-template-columns: repeat(3, minmax(0, 1fr));">
-        
+
                 <div class="card">
                   <div class="label">Tiempo proveedor</div>
                   <div class="value">{delivery_metrics["avg_provider"]} s</div>
                 </div>
-        
+
                 <div class="card">
                   <div class="label">WhatsApp / Evolution</div>
                   <div class="value">{delivery_metrics["avg_whatsapp"]} s</div>
                 </div>
-        
+
                 <div class="card">
                   <div class="label">Procesamiento bot</div>
                   <div class="value">{delivery_metrics["avg_bot"]} s</div>
                 </div>
-        
+
                 <div class="card">
                   <div class="label">Entrega total promedio</div>
                   <div class="value">{delivery_metrics["avg_total"]} s</div>
                 </div>
-        
+
                 <div class="card">
                   <div class="label">Entrega más rápida</div>
                   <div class="value">{delivery_metrics["fastest"]} s</div>
                 </div>
-        
+
                 <div class="card">
                   <div class="label">Entrega más lenta</div>
                   <div class="value">{delivery_metrics["slowest"]} s</div>
                 </div>
-        
+
               </div>
             </div>
             """
@@ -10371,7 +11429,7 @@ def panel_actas(
             <strong>Estado de bots WhatsApp</strong>
             <span class="small">Monitorea el estado, uso y actividad de cada bot en tiempo real.</span>
           </div>
-        
+
           <div class="table-wrap">
             <table>
               <thead>
@@ -10389,13 +11447,13 @@ def panel_actas(
               </thead>
               <tbody>
         """
-        
+
         for b in bot_status_rows:
             state = b["state"]
             color = "green" if state == "open" else "red" if state == "close" else "#92400e"
 
             status_label = "🟢 Conectado" if state == "open" else "🔴 Desconectado" if state == "close" else "🟡 Desconocido"
-        
+
             used_txt = f'{b["used"]}/{b["limit"]}' if b["limit"] else str(b["used"])
 
             if state != "open":
@@ -10407,7 +11465,7 @@ def panel_actas(
             <button class="btn btn-warning" onclick="disconnectBot('{_esc(b["instance_name"])}')">Desconectar</button>
             <button class="btn btn-danger" onclick="hideBot('{_esc(b["instance_name"])}')">Ocultar</button>
             """
-        
+
             bot_status_html += f"""
                 <tr>
                   <td>{_esc(b["label"])}</td>
@@ -10421,30 +11479,30 @@ def panel_actas(
                   <td>{actions_html}</td>
                 </tr>
             """
-        
+
         bot_status_html += """
               </tbody>
             </table>
           </div>
-        
+
           <div class="box" style="margin-top:14px;">
             <div class="head"><strong>Nuevo Bot</strong></div>
-        
+
             <div class="filters" style="grid-template-columns: 1fr 1fr 180px;">
               <div>
                 <input id="newBotLabel" placeholder="Nombre">
               </div>
-        
+
               <div>
                 <input id="newBotInstance" placeholder="Instancia">
               </div>
-        
+
               <div>
                 <button class="btn btn-primary" onclick="createBot()">Crear</button>
               </div>
             </div>
           </div>
-        
+
           <div id="botQrBox" style="margin-top:14px;"></div>
         </div>
         """
@@ -10459,15 +11517,15 @@ def panel_actas(
                 como grupo virtual: API - Nombre del cliente.
               </div>
             </div>
-        
+
             <button type="button" class="btn btn-primary" onclick="loadApiClients()">
               Actualizar API
             </button>
           </div>
-        
+
           <div style="padding:16px;border-bottom:1px solid #e5e7eb;">
             <strong>Crear cliente API</strong>
-        
+
             <div
               style="
                 display:grid;
@@ -10481,7 +11539,7 @@ def panel_actas(
                 class="input"
                 placeholder="Nombre del cliente / programador"
               >
-        
+
               <input
                 id="apiNewCredit"
                 class="input"
@@ -10491,7 +11549,7 @@ def panel_actas(
                 value=""
                 placeholder="Saldo inicial"
               >
-        
+
               <input
                 id="apiNewPrice"
                 class="input"
@@ -10501,7 +11559,7 @@ def panel_actas(
                 value=""
                 placeholder="Precio por acta"
               >
-        
+
               <button
                 type="button"
                 class="btn btn-success"
@@ -10510,7 +11568,7 @@ def panel_actas(
                 Crear API key
               </button>
             </div>
-        
+
             <div
               id="apiKeyCreatedBox"
               style="
@@ -10523,7 +11581,7 @@ def panel_actas(
               "
             ></div>
           </div>
-        
+
           <div id="apiClientsWrap" style="padding:16px;">
             <div class="small">Cargando clientes API...</div>
           </div>
@@ -10532,16 +11590,16 @@ def panel_actas(
 
         api_clients_panel_js = r"""
         const apiPanelToken = new URLSearchParams(window.location.search).get("token") || "";
-        
+
         function apiMoney(value) {
           const n = Number(value || 0);
-        
+
           return n.toLocaleString("es-MX", {
             style: "currency",
             currency: "MXN"
           });
         }
-        
+
         function escapeApiHtml(value) {
           return String(value ?? "")
             .replaceAll("&", "&amp;")
@@ -10550,7 +11608,7 @@ def panel_actas(
             .replaceAll('"', "&quot;")
             .replaceAll("'", "&#039;");
         }
-        
+
         function escapeApiJs(value) {
           return String(value ?? "")
             .replaceAll("\\", "\\\\")
@@ -10558,19 +11616,19 @@ def panel_actas(
             .replaceAll("\n", "\\n")
             .replaceAll("\r", "");
         }
-        
+
         async function apiPanelFetch(path, options = {}) {
           const joiner = path.includes("?") ? "&" : "?";
           const url = `${path}${joiner}token=${encodeURIComponent(apiPanelToken)}`;
-        
+
           const response = await fetch(url, options);
-        
+
           let data = {};
-        
+
           try {
             data = await response.json();
           } catch (_) {}
-        
+
           if (!response.ok || !data.ok) {
             throw new Error(
               data.error ||
@@ -10578,21 +11636,21 @@ def panel_actas(
               "No se pudo completar la acción."
             );
           }
-        
+
           return data;
         }
-        
+
         async function loadApiClients() {
           const wrap = document.getElementById("apiClientsWrap");
-        
+
           if (!wrap) return;
-        
+
           wrap.innerHTML = '<div class="small">Actualizando clientes API...</div>';
-        
+
           try {
             const data = await apiPanelFetch("/panel/api/clients");
             const rows = data.items || [];
-        
+
             if (!rows.length) {
               wrap.innerHTML = `
                 <div class="small">
@@ -10601,7 +11659,7 @@ def panel_actas(
               `;
               return;
             }
-        
+
             let output = `
               <div class="table-wrap">
                 <table>
@@ -10622,28 +11680,28 @@ def panel_actas(
                   </thead>
                   <tbody>
             `;
-        
+
             for (const item of rows) {
               const clientId = Number(item.id);
-        
+
               const status = item.is_active
                 ? '<span class="badge badge-success">ACTIVO</span>'
                 : '<span class="badge badge-danger">INACTIVO</span>';
-        
+
               output += `
                 <tr>
                   <td>
                     <strong>${escapeApiHtml(item.name)}</strong><br>
                     <span class="small">ID ${clientId}</span>
                   </td>
-        
+
                   <td>${status}</td>
-        
+
                   <td>
                     <strong>${escapeApiHtml(item.panel_instance_name || "docifybot8")}</strong><br>
                     <span class="small">${escapeApiHtml(item.panel_group_jid || "")}</span>
                   </td>
-        
+
                   <td>${apiMoney(item.balance)}</td>
                   <td>${apiMoney(item.reserved)}</td>
                   <td><strong>${apiMoney(item.available)}</strong></td>
@@ -10651,7 +11709,7 @@ def panel_actas(
                   <td>${Number(item.done_count || 0)}</td>
                   <td>${Number(item.pending_count || 0)}</td>
                   <td>${Number(item.error_count || 0)}</td>
-        
+
                   <td>
                     <div style="display:flex;flex-wrap:wrap;gap:6px;min-width:250px;">
                       <button
@@ -10662,7 +11720,7 @@ def panel_actas(
                       >
                         Recargar
                       </button>
-        
+
                       <button
                         type="button"
                         class="btn btn-primary"
@@ -10676,7 +11734,7 @@ def panel_actas(
                       >
                         Configurar
                       </button>
-        
+
                       <button
                         type="button"
                         class="btn btn-warning"
@@ -10693,15 +11751,15 @@ def panel_actas(
                 </tr>
               `;
             }
-        
+
             output += `
                   </tbody>
                 </table>
               </div>
             `;
-        
+
             wrap.innerHTML = output;
-        
+
           } catch (error) {
             wrap.innerHTML = `
               <div style="color:#b91c1c;font-weight:700;">
@@ -10710,22 +11768,22 @@ def panel_actas(
             `;
           }
         }
-        
+
         async function createApiClient() {
           const name = document.getElementById("apiNewName")?.value.trim() || "";
           const creditBalance = document.getElementById("apiNewCredit")?.value.trim() || "0";
           const pricePerDone = document.getElementById("apiNewPrice")?.value.trim() || "5";
           const keyBox = document.getElementById("apiKeyCreatedBox");
-        
+
           if (!name) {
             alert("Escribe el nombre del cliente API.");
             return;
           }
-        
+
           if (!confirm(`¿Crear API key para ${name}? Quedará asociado a DOCIFYBOT8.`)) {
             return;
           }
-        
+
           try {
             const data = await apiPanelFetch("/panel/api/clients", {
               method: "POST",
@@ -10738,7 +11796,7 @@ def panel_actas(
                 price_per_done: pricePerDone
               })
             });
-        
+
             if (keyBox) {
               keyBox.style.display = "block";
               keyBox.innerHTML = `
@@ -10759,30 +11817,30 @@ def panel_actas(
                 >${escapeApiHtml(data.api_key)}</code>
               `;
             }
-        
+
             document.getElementById("apiNewName").value = "";
             document.getElementById("apiNewCredit").value = "0";
             document.getElementById("apiNewPrice").value = "5";
-        
+
             await loadApiClients();
-        
+
           } catch (error) {
             alert(error.message || String(error));
           }
         }
-        
+
         async function rechargeApiClient(clientId) {
           const amount = prompt("Monto de recarga en MXN:");
-        
+
           if (amount === null) return;
-        
+
           const note = prompt(
             "Nota de la recarga:",
             "Recarga desde panel principal"
           );
-        
+
           if (note === null) return;
-        
+
           try {
             const data = await apiPanelFetch(
               `/panel/api/clients/${clientId}/recharge`,
@@ -10797,15 +11855,15 @@ def panel_actas(
                 })
               }
             );
-        
+
             alert(`Recarga aplicada. Saldo actual: ${apiMoney(data.balance)}`);
             await loadApiClients();
-        
+
           } catch (error) {
             alert(error.message || String(error));
           }
         }
-        
+
         async function editApiClient(
           clientId,
           currentName,
@@ -10813,20 +11871,20 @@ def panel_actas(
           currentActive
         ) {
           const name = prompt("Nombre del cliente:", currentName);
-        
+
           if (name === null) return;
-        
+
           const price = prompt("Precio por acta DONE:", currentPrice);
-        
+
           if (price === null) return;
-        
+
           const activeText = prompt(
             "¿Cliente activo? Escribe SI o NO:",
             currentActive ? "SI" : "NO"
           );
-        
+
           if (activeText === null) return;
-        
+
           const isActive = [
             "SI",
             "S",
@@ -10835,7 +11893,7 @@ def panel_actas(
             "1",
             "TRUE"
           ].includes(activeText.trim().toUpperCase());
-        
+
           try {
             const data = await apiPanelFetch(
               `/panel/api/clients/${clientId}/settings`,
@@ -10851,20 +11909,20 @@ def panel_actas(
                 })
               }
             );
-        
+
             alert(
               `Cliente actualizado.\n` +
               `Bot: ${data.panel_instance_name}\n` +
               `Grupo: ${data.panel_group_jid}`
             );
-        
+
             await loadApiClients();
-        
+
           } catch (error) {
             alert(error.message || String(error));
           }
         }
-        
+
         async function rotateApiKey(clientId, clientName) {
           if (!confirm(
             `¿Regenerar API key de ${clientName}?\n\n` +
@@ -10872,7 +11930,7 @@ def panel_actas(
           )) {
             return;
           }
-        
+
           try {
             const data = await apiPanelFetch(
               `/panel/api/clients/${clientId}/rotate-key`,
@@ -10880,9 +11938,9 @@ def panel_actas(
                 method: "POST"
               }
             );
-        
+
             const box = document.getElementById("apiKeyCreatedBox");
-        
+
             if (box) {
               box.style.display = "block";
               box.innerHTML = `
@@ -10900,17 +11958,17 @@ def panel_actas(
                 >${escapeApiHtml(data.api_key)}</code>
               `;
             }
-        
+
           } catch (error) {
             alert(error.message || String(error));
           }
         }
-        
+
         document.addEventListener("DOMContentLoaded", () => {
           loadApiClients();
         });
         """
-    
+
         html = f"""
         <!doctype html>
         <html lang="es">
@@ -10925,40 +11983,40 @@ def panel_actas(
                 --text: #1f2937;
                 --muted: #6b7280;
                 --line: #e5e7eb;
-            
+
                 --primary: #334155;
                 --primary-dark: #1e293b;
-            
+
                 --success: #166534;
                 --success-dark: #14532d;
-            
+
                 --warning: #a16207;
                 --warning-dark: #854d0e;
-            
+
                 --danger: #991b1b;
                 --danger-dark: #7f1d1d;
-            
+
                 --shadow: 0 8px 24px rgba(15, 23, 42, 0.07);
                 --radius: 18px;
               }}
-            
+
               * {{
                 box-sizing: border-box;
               }}
-            
+
               body {{
                 margin: 0;
                 font-family: Arial, sans-serif;
                 background: var(--bg);
                 color: var(--text);
               }}
-            
+
               .wrap {{
                 max-width: 1500px;
                 margin: 0 auto;
                 padding: 16px;
               }}
-            
+
               .hero {{
                 background: linear-gradient(135deg, #1f2937 0%, #334155 55%, #475569 100%);
                 color: white;
@@ -10967,7 +12025,7 @@ def panel_actas(
                 margin-bottom: 18px;
                 box-shadow: var(--shadow);
               }}
-            
+
               .hero-top {{
                 display: flex;
                 justify-content: space-between;
@@ -10975,24 +12033,24 @@ def panel_actas(
                 gap: 16px;
                 flex-wrap: wrap;
               }}
-            
+
               .hero h1 {{
                 margin: 0 0 8px;
                 font-size: 1.9rem;
               }}
-            
+
               .hero-sub {{
                 color: rgba(255,255,255,.88);
                 font-size: .98rem;
               }}
-            
+
               .toolbar {{
                 margin-top: 16px;
                 display: flex;
                 gap: 10px;
                 flex-wrap: wrap;
               }}
-            
+
               .tool-link {{
                 text-decoration: none;
                 padding: 10px 16px;
@@ -11003,24 +12061,24 @@ def panel_actas(
                 border: 1px solid rgba(255,255,255,.14);
                 transition: .2s ease;
               }}
-            
+
               .tool-link:hover {{
                 background: rgba(255,255,255,.16);
               }}
-            
+
               .tool-link-active {{
                 background: #ffffff;
                 color: var(--primary-dark);
                 border-color: #ffffff;
               }}
-            
+
               .grid-hero {{
                 display: grid;
                 grid-template-columns: 1.2fr 1fr;
                 gap: 16px;
                 margin-top: 18px;
               }}
-            
+
               .glass {{
                 background: rgba(255,255,255,.08);
                 border: 1px solid rgba(255,255,255,.10);
@@ -11028,39 +12086,39 @@ def panel_actas(
                 padding: 18px;
                 backdrop-filter: blur(8px);
               }}
-            
+
               .section-title {{
                 margin: 0 0 14px;
                 font-size: 1rem;
                 font-weight: 800;
                 letter-spacing: .2px;
               }}
-            
+
               .provider-grid {{
                 display: grid;
                 grid-template-columns: repeat(3, minmax(0, 1fr));
                 gap: 12px;
               }}
-            
+
               .provider-card {{
                 background: rgba(255,255,255,.08);
                 border: 1px solid rgba(255,255,255,.12);
                 border-radius: 16px;
                 padding: 14px;
               }}
-            
+
               .provider-name {{
                 font-weight: 800;
                 margin-bottom: 10px;
                 font-size: .98rem;
               }}
-            
+
               .provider-actions {{
                 display: flex;
                 flex-wrap: wrap;
                 gap: 8px;
               }}
-            
+
               .status-panel {{
                 margin-top: 14px;
                 padding: 12px 14px;
@@ -11071,23 +12129,23 @@ def panel_actas(
                 font-size: .92rem;
                 line-height: 1.5;
               }}
-            
+
               .broadcast-grid {{
                 display: grid;
                 gap: 12px;
               }}
-            
+
               .broadcast-buttons {{
                 display: grid;
                 grid-template-columns: repeat(3, minmax(0, 1fr));
                 gap: 10px;
               }}
-            
+
               .broadcast-free {{
                 display: grid;
                 gap: 10px;
               }}
-            
+
               .broadcast-free textarea {{
                 width: 100%;
                 min-height: 140px;
@@ -11099,7 +12157,7 @@ def panel_actas(
                 color: var(--text);
                 background: white;
               }}
-            
+
               .box {{
                 background: var(--card);
                 border-radius: var(--radius);
@@ -11108,7 +12166,7 @@ def panel_actas(
                 margin-bottom: 16px;
                 border: 1px solid #eef2f7;
               }}
-            
+
               .head {{
                 padding: 16px 18px;
                 border-bottom: 1px solid var(--line);
@@ -11119,18 +12177,18 @@ def panel_actas(
                 flex-wrap: wrap;
                 background: #fafbfc;
               }}
-            
+
               .head strong {{
                 font-size: 1rem;
               }}
-            
+
               .filters {{
                 display: grid;
                 grid-template-columns: repeat(5, minmax(0, 1fr));
                 gap: 10px;
                 padding: 16px;
               }}
-            
+
               .filters input,
               .filters select,
               .input,
@@ -11144,7 +12202,7 @@ def panel_actas(
                 color: var(--text);
                 outline: none;
               }}
-            
+
               .filters input:focus,
               .filters select:focus,
               .input:focus,
@@ -11152,14 +12210,14 @@ def panel_actas(
                 border-color: var(--primary);
                 box-shadow: 0 0 0 3px rgba(51, 65, 85, .10);
               }}
-            
+
               .cards {{
                 display: grid;
                 grid-template-columns: repeat(5, minmax(0, 1fr));
                 gap: 12px;
                 margin-bottom: 16px;
               }}
-            
+
               .card {{
                 background: var(--card);
                 border-radius: 18px;
@@ -11168,7 +12226,7 @@ def panel_actas(
                 border: 1px solid var(--line);
                 position: relative;
               }}
-            
+
               .card::before {{
                 content: "";
                 position: absolute;
@@ -11179,7 +12237,7 @@ def panel_actas(
                 border-radius: 18px 18px 0 0;
                 background: #cbd5e1;
               }}
-            
+
               .label {{
                 color: var(--muted);
                 font-size: .88rem;
@@ -11188,24 +12246,24 @@ def panel_actas(
                 text-transform: uppercase;
                 letter-spacing: .3px;
               }}
-            
+
               .value {{
                 font-size: 1.9rem;
                 font-weight: 800;
                 line-height: 1;
               }}
-            
+
               .table-wrap {{
                 overflow-x: auto;
                 -webkit-overflow-scrolling: touch;
               }}
-            
+
               .table-wrap table {{
                 width: 100%;
                 border-collapse: collapse;
                 min-width: 1100px;
               }}
-            
+
               th, td {{
                 padding: 12px;
                 border-bottom: 1px solid var(--line);
@@ -11213,7 +12271,7 @@ def panel_actas(
                 vertical-align: top;
                 font-size: .95rem;
               }}
-            
+
               th {{
                 background: #1f2937;
                 color: white;
@@ -11221,46 +12279,46 @@ def panel_actas(
                 top: 0;
                 z-index: 1;
               }}
-            
+
               tr:hover td {{
                 background: #f9fafb;
               }}
-            
+
               .right {{
                 text-align: right;
               }}
-            
+
               .mono {{
                 font-family: Consolas, Monaco, monospace;
                 font-size: .9rem;
               }}
-            
+
               .small {{
                 color: var(--muted);
                 font-size: .84rem;
                 line-height: 1.45;
               }}
-            
+
               .status-q {{
                 color: #a16207;
                 font-weight: 800;
               }}
-            
+
               .status-p {{
                 color: #334155;
                 font-weight: 800;
               }}
-            
+
               .status-d {{
                 color: #166534;
                 font-weight: 800;
               }}
-            
+
               .status-e {{
                 color: #991b1b;
                 font-weight: 800;
               }}
-            
+
               .btn {{
                 border: none;
                 border-radius: 12px;
@@ -11271,52 +12329,52 @@ def panel_actas(
                 transition: .2s ease;
                 font-family: inherit;
               }}
-            
+
               .btn:hover {{
                 transform: translateY(-1px);
               }}
-            
+
               .btn-primary {{
                 background: var(--primary);
                 color: white;
               }}
-            
+
               .btn-primary:hover {{
                 background: var(--primary-dark);
               }}
-            
+
               .btn-success {{
                 background: var(--success);
                 color: white;
               }}
-            
+
               .btn-success:hover {{
                 background: var(--success-dark);
               }}
-            
+
               .btn-danger {{
                 background: var(--danger);
                 color: white;
               }}
-            
+
               .btn-danger:hover {{
                 background: var(--danger-dark);
               }}
-            
+
               .btn-warning {{
                 background: var(--warning);
                 color: white;
               }}
-            
+
               .btn-warning:hover {{
                 background: var(--warning-dark);
               }}
-            
+
               .btn-light {{
                 background: #e5e7eb;
                 color: #111827;
               }}
-            
+
               .btn-light:hover {{
                 background: #d1d5db;
               }}
@@ -11325,38 +12383,38 @@ def panel_actas(
                 background: #374151;
                 color: white;
               }}
-            
+
               .btn-closed:hover {{
                 background: #1f2937;
               }}
-            
+
               .actions-row {{
                 display: flex;
                 flex-wrap: wrap;
                 gap: 10px;
               }}
-            
+
               .helper {{
                 color: rgba(255,255,255,.82);
                 font-size: .86rem;
                 line-height: 1.45;
               }}
-    
+
               a.btn {{
                 text-decoration: none !important;
               }}
-            
+
               a.btn:hover {{
                 text-decoration: none !important;
               }}
-    
+
               .group-mode-bar {{
                 display: flex;
                 gap: 10px;
                 flex-wrap: wrap;
                 padding: 16px;
               }}
-            
+
               .group-mode-link {{
                 display: inline-flex;
                 align-items: center;
@@ -11370,25 +12428,25 @@ def panel_actas(
                 text-decoration: none !important;
                 transition: .2s ease;
               }}
-            
+
               .group-mode-link:hover {{
                 background: #eff6ff;
                 border-color: #bfdbfe;
                 text-decoration: none !important;
               }}
-            
+
               .group-mode-link-active {{
                 background: #dbeafe;
                 border-color: #93c5fd;
                 color: #1e3a8a;
               }}
-    
+
               .table-wrap td a {{
                 color: #1d4ed8;
                 text-decoration: none !important;
                 font-weight: 700;
               }}
-            
+
               .table-wrap td a:hover {{
                 color: #1e3a8a;
               }}
@@ -11403,7 +12461,7 @@ def panel_actas(
                 font-weight: 700;
                 white-space: nowrap;
               }}
-            
+
               .badge-light {{
                 background: #eef2ff;
                 color: #3730a3;
@@ -11413,12 +12471,12 @@ def panel_actas(
                 background:#dcfce7;
                 color:#166534;
               }}
-            
+
               .badge-warning {{
                 background: #fff7ed;
                 color: #c2410c;
               }}
-            
+
               .badge-danger {{
                 background: #fef2f2;
                 color: #b91c1c;
@@ -11432,7 +12490,7 @@ def panel_actas(
                 margin-top:18px;
                 padding:12px 0 4px 0;
               }}
-            
+
               .shared-promo-actions .btn{{
                 min-width:220px;
               }}
@@ -11444,21 +12502,21 @@ def panel_actas(
                 cursor:pointer;
                 user-select:none;
               }}
-            
+
               .collapse-icon{{
                 font-size:14px;
                 font-weight:700;
                 transition:transform .18s ease;
               }}
-            
+
               .collapsible-head.closed .collapse-icon{{
                 transform:rotate(-90deg);
               }}
-            
+
               .collapsible-body.open{{
                 display:block;
               }}
-            
+
               .collapsible-body.closed{{
                 display:none;
               }}
@@ -11471,13 +12529,13 @@ def panel_actas(
                 margin-bottom: 18px;
                 flex-wrap: wrap;
               }}
-            
+
               .broadcast-target {{
                 min-width: 240px;
                 max-width: 320px;
                 width: 100%;
               }}
-            
+
               .broadcast-label {{
                 display: block;
                 font-size: .9rem;
@@ -11485,7 +12543,7 @@ def panel_actas(
                 margin-bottom: 6px;
                 color: #e5e7eb;
               }}
-            
+
               .broadcast-select {{
                 width: 100%;
                 border: 1px solid rgba(255,255,255,.14);
@@ -11496,37 +12554,37 @@ def panel_actas(
                 font: inherit;
                 outline: none;
               }}
-            
+
               .broadcast-select option {{
                 color: #111827;
                 background: white;
               }}
-            
+
               .broadcast-section {{
                 display: grid;
                 gap: 18px;
               }}
-            
+
               .broadcast-block {{
                 background: rgba(255,255,255,.06);
                 border: 1px solid rgba(255,255,255,.08);
                 border-radius: 18px;
                 padding: 16px;
               }}
-            
+
               .broadcast-block-title {{
                 font-size: 1rem;
                 font-weight: 800;
                 margin-bottom: 6px;
                 color: white;
               }}
-            
+
               .broadcast-buttons-grid {{
                 display: grid;
                 grid-template-columns: repeat(2, minmax(0, 1fr));
                 gap: 12px;
               }}
-            
+
               .broadcast-buttons-grid .btn {{
                 width: 100%;
                 min-height: 52px;
@@ -11534,7 +12592,7 @@ def panel_actas(
                 line-height: 1.2;
                 text-align: center;
               }}
-            
+
               .broadcast-textarea {{
                 width: 100%;
                 min-height: 120px;
@@ -11548,12 +12606,12 @@ def panel_actas(
                 box-sizing: border-box;
                 outline: none;
               }}
-            
+
               .broadcast-textarea:focus {{
                 border-color: rgba(255,255,255,.35);
                 box-shadow: 0 0 0 3px rgba(255,255,255,.10);
               }}
-            
+
               .broadcast-actions {{
                 display: flex;
                 gap: 10px;
@@ -11572,7 +12630,7 @@ def panel_actas(
                 outline: none;
                 box-sizing: border-box;
               }}
-            
+
               .table-wrap input[type="number"]:focus{{
                 border-color: #334155;
                 box-shadow: 0 0 0 3px rgba(51, 65, 85, .10);
@@ -11588,18 +12646,18 @@ def panel_actas(
                 gap: 12px;
                 padding: 16px;
               }}
-            
+
               .bot-control-card {{
                 border: 1px solid #e5e7eb;
                 border-radius: 16px;
                 background: #ffffff;
                 overflow: hidden;
               }}
-            
+
               .bot-control-card[open] {{
                 box-shadow: 0 8px 24px rgba(15, 23, 42, .08);
               }}
-            
+
               .bot-control-summary {{
                 display: flex;
                 align-items: center;
@@ -11610,11 +12668,11 @@ def panel_actas(
                 list-style: none;
                 background: #ffffff;
               }}
-            
+
               .bot-control-summary::-webkit-details-marker {{
                 display: none;
               }}
-            
+
               .bot-control-summary::after {{
                 content: "Ver detalles";
                 font-size: 12px;
@@ -11622,28 +12680,28 @@ def panel_actas(
                 color: #334155;
                 white-space: nowrap;
               }}
-            
+
               .bot-control-card[open] .bot-control-summary::after {{
                 content: "Ocultar";
               }}
-            
+
               .bot-control-summary-main {{
                 display: flex;
                 flex-direction: column;
                 gap: 3px;
                 min-width: 190px;
               }}
-            
+
               .bot-control-name {{
                 font-size: 15px;
                 color: #0f172a;
               }}
-            
+
               .bot-control-instance {{
                 font-size: 11px;
                 color: #64748b;
               }}
-            
+
               .bot-control-summary-meta {{
                 display: flex;
                 align-items: center;
@@ -11653,175 +12711,175 @@ def panel_actas(
                 font-size: 12px;
                 color: #64748b;
               }}
-            
+
               .bot-control-summary-meta strong {{
                 color: #0f172a;
               }}
-            
+
               .bot-control-body {{
                 border-top: 1px solid #e5e7eb;
                 background: #f8fafc;
-            
+
                 display: grid;
                 grid-template-columns:
                   repeat(4, minmax(0, 1fr));
-            
+
                 gap: 14px;
                 padding: 18px;
               }}
-            
+
               .bot-control-field {{
                 display: flex;
                 flex-direction: column;
                 gap: 7px;
                 min-width: 0;
               }}
-            
+
               .bot-control-field label {{
                 font-size: 12px;
                 font-weight: 800;
                 color: #475569;
               }}
-            
+
               .bot-control-field input,
               .bot-control-field select {{
                 width: 100%;
                 min-width: 0;
                 box-sizing: border-box;
-            
+
                 padding: 10px 12px;
                 border: 1px solid #cbd5e1;
                 border-radius: 10px;
-            
+
                 background: white;
                 color: #0f172a;
                 font: inherit;
               }}
-            
+
               .bot-control-provider {{
                 grid-column: span 2;
               }}
-            
+
               .bot-control-stat {{
                 border: 1px solid #e2e8f0;
                 border-radius: 12px;
                 background: white;
                 padding: 12px;
-            
+
                 display: flex;
                 flex-direction: column;
                 gap: 4px;
               }}
-            
+
               .bot-control-stat span {{
                 font-size: 11px;
                 font-weight: 700;
                 color: #64748b;
                 text-transform: uppercase;
               }}
-            
+
               .bot-control-stat strong {{
                 font-size: 18px;
                 color: #0f172a;
               }}
-            
+
               .bot-control-actions {{
                 grid-column: 1 / -1;
-            
+
                 display: flex;
                 justify-content: flex-end;
                 flex-wrap: wrap;
                 gap: 10px;
-            
+
                 padding-top: 4px;
               }}
-            
+
               @media (max-width: 1100px) {{
                 .bot-control-body {{
                   grid-template-columns:
                     repeat(2, minmax(0, 1fr));
                 }}
-            
+
                 .bot-control-provider {{
                   grid-column: span 2;
                 }}
               }}
-            
+
               @media (max-width: 700px) {{
                 .bot-control-summary {{
                   align-items: flex-start;
                   flex-direction: column;
                 }}
-            
+
                 .bot-control-summary-meta {{
                   justify-content: flex-start;
                 }}
-             
+
                 .bot-control-body {{
                   grid-template-columns: 1fr;
                 }}
-            
+
                 .bot-control-provider {{
                   grid-column: auto;
                 }}
-            
+
                 .bot-control-actions {{
                   flex-direction: column;
                 }}
-            
+
                 .bot-control-actions .btn {{
                   width: 100%;
                 }}
               }}
-            
+
               @media (max-width: 1200px) {{
                 .grid-hero {{
                   grid-template-columns: 1fr;
                 }}
-            
+
                 .provider-grid {{
                   grid-template-columns: 1fr;
                 }}
-            
+
                 .broadcast-buttons {{
                   grid-template-columns: 1fr;
                 }}
-            
+
                 .cards {{
                   grid-template-columns: repeat(3, minmax(0, 1fr));
                 }}
               }}
-            
+
               @media (max-width: 900px) {{
                 .wrap {{
                   padding: 12px;
                 }}
-            
+
                 .hero {{
                   padding: 18px;
                   border-radius: 20px;
                 }}
-            
+
                 .hero h1 {{
                   font-size: 1.45rem;
                 }}
-            
+
                 .cards {{
                   grid-template-columns: repeat(2, minmax(0, 1fr));
                 }}
-            
+
                 .filters {{
                   grid-template-columns: 1fr;
                 }}
-            
+
                 .head {{
                   padding: 14px 16px;
                 }}
-            
+
                 .card {{
                   padding: 14px;
                 }}
-            
+
                 .value {{
                   font-size: 1.6rem;
                 }}
@@ -11829,27 +12887,27 @@ def panel_actas(
                 .broadcast-buttons-grid {{
                   grid-template-columns: 1fr;
                 }}
-            
+
                 .broadcast-actions {{
                   flex-direction: column;
                 }}
-            
+
                 .broadcast-actions .btn {{
                   width: 100%;
                 }}
               }}
-            
+
               @media (max-width: 560px) {{
                 .cards {{
                   grid-template-columns: 1fr;
                 }}
-            
+
                 .tool-link,
                 .btn {{
                   width: 100%;
                   justify-content: center;
                 }}
-            
+
                 .provider-actions,
                 .actions-row {{
                   flex-direction: column;
@@ -11857,10 +12915,10 @@ def panel_actas(
               }}
             </style>
         </head>
-        
+
         <body>
           <div class="wrap">
-        
+
             <div class="hero">
               <div class="hero-top">
                 <div>
@@ -11868,7 +12926,7 @@ def panel_actas(
                   <div class="hero-sub">{_esc(subtitle)}</div>
                 </div>
               </div>
-        
+
               <div class="toolbar">
                 <a href="/panel?token=docifymx2026&view=day&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'day' else ''}">Hoy</a>
                 <a href="/panel?token=docifymx2026&view=month&group_mode={_esc(group_mode)}" class="tool-link {'tool-link-active' if view == 'month' else ''}">Mes actual</a>
@@ -11907,11 +12965,11 @@ def panel_actas(
                   Aplicar rango
                 </button>
               </form>
-        
+
               <div class="grid-hero">
                 <div class="glass">
                   <h3 class="section-title">Proveedores</h3>
-            
+
                   <div class="provider-grid">
 
                     <div class="provider-card">
@@ -12010,12 +13068,12 @@ def panel_actas(
 
                     <div class="provider-card">
                       <div class="provider-name">E-BOT</div>
-                    
+
                       <div style="margin:6px 0;">
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
                           Prioridad de uso
                         </div>
-                    
+
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
                           <div style="display:flex;align-items:center;gap:6px;">
                             <input
@@ -12028,7 +13086,7 @@ def panel_actas(
                             >
                             <span style="font-size:12px;opacity:.7;">nivel</span>
                           </div>
-                    
+
                           <button
                             class="btn btn-primary"
                             onclick="saveProviderWeight('PROVIDER14')"
@@ -12036,12 +13094,12 @@ def panel_actas(
                             Aplicar
                           </button>
                         </div>
-                    
+
                         <div style="font-size:11px;opacity:.6;margin-top:4px;">
                           Más alto = este proveedor se usa más seguido
                         </div>
                       </div>
-                    
+
                       <div class="provider-actions">
                         <button
                           class="btn btn-success"
@@ -12049,7 +13107,7 @@ def panel_actas(
                         >
                           Activar
                         </button>
-                    
+
                         <button
                           class="btn btn-danger"
                           onclick="toggleProvider('PROVIDER14','off')"
@@ -12061,12 +13119,12 @@ def panel_actas(
 
                     <div class="provider-card">
                       <div class="provider-name">E-WEB</div>
-                    
+
                       <div style="margin:6px 0;">
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">
                           Prioridad de uso
                         </div>
-                    
+
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
                           <div style="display:flex;align-items:center;gap:6px;">
                             <input
@@ -12081,7 +13139,7 @@ def panel_actas(
                               nivel
                             </span>
                           </div>
-                    
+
                           <button
                             class="btn btn-primary"
                             onclick="saveProviderWeight('PROVIDER15')"
@@ -12089,12 +13147,12 @@ def panel_actas(
                             Aplicar
                           </button>
                         </div>
-                    
+
                         <div style="font-size:11px;opacity:.6;margin-top:4px;">
                           Más alto = este proveedor se usa más seguido
                         </div>
                       </div>
-                    
+
                       <div class="provider-actions">
                         <button
                           class="btn btn-success"
@@ -12102,7 +13160,7 @@ def panel_actas(
                         >
                           Activar
                         </button>
-                    
+
                         <button
                           class="btn btn-danger"
                           onclick="toggleProvider('PROVIDER15','off')"
@@ -12145,6 +13203,28 @@ def panel_actas(
                         <div style="font-size:11px;opacity:.6;margin-top:4px;">
                           Solo CURP + NACIMIENTO · Papel Bond + reverso
                         </div>
+
+
+                        <div style="margin-top:9px;">
+                          <a
+                            class="btn btn-primary"
+                            href="/panel/sidea?token={_esc(current_token)}"
+                            style="
+                              display:inline-flex;
+                              align-items:center;
+                              justify-content:center;
+                              width:100%;
+                              box-sizing:border-box;
+                              text-decoration:none;
+                              white-space:nowrap;
+                              font-size:11px;
+                              padding:7px 8px;
+                            "
+                          >
+                            ⚙ Cuentas SIDEA
+                          </a>
+                        </div>
+
                       </div>
 
                       <div class="provider-actions">
@@ -12226,19 +13306,19 @@ def panel_actas(
                       </div>
                     </div>
                   </div>
-                  
+
                   <div class="status-panel">
                     <strong>Estado actual</strong><br><br>
                     {provider_states}
                   </div>
                 </div>
-        
+
                 <div class="glass">
                   <div class="broadcast-header">
                     <div>
                       <h3 class="section-title" style="margin-bottom:6px;">Mensajes masivos</h3>
                     </div>
-                
+
                     <div class="broadcast-target">
                       <label for="broadcastCategory" class="broadcast-label">Enviar a</label>
                       <select id="broadcastCategory" class="broadcast-select">
@@ -12249,11 +13329,11 @@ def panel_actas(
                       </select>
                     </div>
                   </div>
-                
+
                   <div class="broadcast-section">
                     <div class="broadcast-block">
                       <div class="broadcast-block-title">Mensajes predefinidos</div>
-                
+
                       <div class="broadcast-buttons-grid">
                         <button class="btn btn-success" onclick="sendBroadcast('activas')">Servicio activo</button>
                         <button class="btn btn-warning" onclick="sendBroadcast('restablecido')">Servicio restablecido</button>
@@ -12261,10 +13341,10 @@ def panel_actas(
                         <button class="btn btn-closed" onclick="sendBroadcast('cerrado')">Servicio cerrado</button>
                       </div>
                     </div>
-                
+
                     <div class="broadcast-block">
                       <div class="broadcast-block-title">Mensaje libre</div>
-                
+
                       <textarea
                         id="broadcastMessage"
                         class="broadcast-textarea"
@@ -12275,28 +13355,28 @@ def panel_actas(
                         <div style="font-size:12px;font-weight:700;margin-bottom:8px;">
                           Audio opcional
                         </div>
-                    
+
                         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
                           <button type="button" class="btn btn-warning" onclick="startPanelAudioRecording('free')">
                             Grabar audio
                           </button>
-                    
+
                           <button type="button" class="btn btn-danger" onclick="stopPanelAudioRecording()" disabled id="freeAudioStopBtn">
                             Detener
                           </button>
-                    
+
                           <button type="button" class="btn btn-light" onclick="clearPanelAudio('free')">
                             Quitar audio
                           </button>
-                    
+
                           <span id="freeAudioStatus" style="font-size:12px;color:#d1d5db;font-weight:700;">
                             Sin audio
                           </span>
                         </div>
-                    
+
                         <audio id="freeAudioPreview" controls style="display:none;width:100%;margin-top:8px;"></audio>
                       </div>
-                
+
                       <div class="broadcast-actions">
                         <button class="btn btn-success" onclick="sendFreeBroadcast()">Enviar mensaje libre</button>
                         <button class="btn btn-light" onclick="clearBroadcast()">Limpiar</button>
@@ -12305,7 +13385,7 @@ def panel_actas(
 
                     <div class="broadcast-block">
                       <div class="broadcast-block-title">Mensaje privado a bots internos</div>
-                    
+
                       <div style="font-size:12px;color:#d1d5db;margin-bottom:8px;font-weight:600;">
                         Selecciona qué bots internos recibirán el aviso por privado.
                       </div>
@@ -12319,7 +13399,7 @@ def panel_actas(
                         >
                           Seleccionar todos configurados
                         </button>
-                    
+
                         <button
                           type="button"
                           class="btn btn-light"
@@ -12328,7 +13408,7 @@ def panel_actas(
                         >
                           Quitar selección
                         </button>
-                    
+
                         <span
                           id="privateBotSelectedCount"
                           style="font-size:11px;color:#d1d5db;font-weight:700;"
@@ -12336,14 +13416,14 @@ def panel_actas(
                           0 seleccionados
                         </span>
                       </div>
-                    
+
                       <div
                         id="privateBotTargets"
                         style="max-height:220px;overflow:auto;border:1px solid #e5e7eb;border-radius:12px;padding:10px;background:#f8fafc;color:#111827;"
                       >
                         Cargando bots...
                       </div>
-                    
+
                       <textarea
                         id="privateBotsBroadcastMessage"
                         class="broadcast-textarea"
@@ -12355,33 +13435,33 @@ def panel_actas(
                         <div style="font-size:12px;font-weight:800;margin-bottom:8px;">
                           Audio opcional
                         </div>
-                    
+
                         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
                           <button type="button" class="btn btn-warning" onclick="startPanelAudioRecording('private')">
                             Grabar audio
                           </button>
-                    
+
                           <button type="button" class="btn btn-danger" onclick="stopPanelAudioRecording()" disabled id="privateAudioStopBtn">
                             Detener
                           </button>
-                    
+
                           <button type="button" class="btn btn-light" onclick="clearPanelAudio('private')">
                             Quitar audio
                           </button>
-                    
+
                           <span id="privateAudioStatus" style="font-size:12px;color:#64748b;font-weight:800;">
                             Sin audio
                           </span>
                         </div>
-                    
+
                         <audio id="privateAudioPreview" controls style="display:none;width:100%;margin-top:8px;"></audio>
                       </div>
-                    
+
                       <div
                         id="privateBotsBroadcastProgress"
                         style="display:none;margin-top:10px;padding:10px;border-radius:10px;background:#f8fafc;border:1px solid #e5e7eb;font-size:12px;color:#111827;font-weight:600;"
                       ></div>
-                    
+
                       <div class="broadcast-actions">
                         <button class="btn btn-success" onclick="sendPrivateBotsBroadcast()">Enviar privado a seleccionados</button>
                         <button class="btn btn-light" onclick="document.getElementById('privateBotsBroadcastMessage').value=''">Limpiar</button>
@@ -12389,34 +13469,34 @@ def panel_actas(
                     </div>
                   </div>
                 </div>
-                
+
               </div>
             </div>
-        
+
             <form class="box" method="get" action="/panel">
               <input type="hidden" name="token" value="docifymx2026">
-              
+
               <div class="head">
                 <strong>Filtros</strong>
                 <span class="small">Aplica filtros para localizar información específica rápidamente.</span>
               </div>
-              
+
               <div class="filters">
                 <input type="hidden" name="view" value="{_esc(view)}">
                 <input type="hidden" name="group_mode" value="{_esc(group_mode)}">
                 <input type="hidden" name="date_from" value="{_esc(date_from)}">
                 <input type="hidden" name="date_to" value="{_esc(date_to)}">
-                
+
                 <input name="group_jid" placeholder="Grupo cliente" value="{_esc(group_jid)}">
                 <input name="provider_name" placeholder="Proveedor" value="{_esc(provider_name)}">
                 <input name="status" placeholder="Estado" value="{_esc(status)}">
                 <input name="act_type" placeholder="Tipo de acta" value="{_esc(act_type)}">
-                
+
                 <button type="submit" class="btn btn-primary">Filtrar</button>
               </div>
             </form>
         """
-        
+
         html += """
         <div class="box">
           <div class="head collapsible-head open" onclick="toggleSection('promoCompartidaBody', this)">
@@ -12436,10 +13516,10 @@ def panel_actas(
               <input id="sharedPromoTotalActas" type="number" placeholder="Total de actas del paquete">
               <input id="sharedPromoPricePerPiece" placeholder="Precio por acta">
             </div>
-        
+
             <div class="box" style="padding:14px;margin-top:8px;background:#f8fafc;border:1px solid #e5e7eb;">
               <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;align-items:end;">
-                
+
                 <div>
                   <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:#374151;">
                     Tipo de promoción
@@ -12449,33 +13529,33 @@ def panel_actas(
                     <option value="credit">Crédito</option>
                   </select>
                 </div>
-            
+
                 <div>
                   <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:#374151;">
                     Abono
                   </label>
                   <input id="sharedPromoCreditAbono" type="number" min="0" placeholder="N/A" value="" disabled>
                 </div>
-            
+
                 <div>
                   <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:#374151;">
                     Debe
                   </label>
                   <input id="sharedPromoCreditDebe" type="number" min="0" placeholder="N/A" value="" disabled>
                 </div>
-            
+
               </div>
-            
+
               <div class="helper" style="margin-top:12px;">
                 Selecciona los grupos que usarán la misma bolsa compartida. Si un grupo consume actas, se descuentan del mismo saldo para todos.
               </div>
-            
+
               <div style="margin-top:10px;font-size:13px;color:#6b7280;">
                 Ejemplo: si 4 grupos comparten una bolsa de 1000 actas y uno consume 50,
                 el saldo disponible será 950 para todos los grupos asociados.
               </div>
             </div>
-        
+
             <div class="box" style="padding:14px; margin-top:8px; background:#f8fafc; border:1px solid #e5e7eb;">
               <div style="display:grid; grid-template-columns: 1.2fr auto auto auto; gap:10px; align-items:center;">
                 <input
@@ -12483,28 +13563,28 @@ def panel_actas(
                   placeholder="Buscar grupo por nombre..."
                   oninput="filterSharedPromoGroups()"
                 >
-        
+
                 <label style="display:flex;align-items:center;gap:6px;font-size:14px;">
                   <input type="checkbox" id="filterNormalGroups" checked onchange="filterSharedPromoGroups()">
                   Normales
                 </label>
-        
+
                 <label style="display:flex;align-items:center;gap:6px;font-size:14px;">
                   <input type="checkbox" id="filterTestGroups" onchange="filterSharedPromoGroups()">
                   Pruebas
                 </label>
-        
+
                 <label style="display:flex;align-items:center;gap:6px;font-size:14px;">
                   <input type="checkbox" id="filterProviderGroups" onchange="filterSharedPromoGroups()">
                   Proveedores
                 </label>
               </div>
-        
+
               <div class="helper" style="margin-top:10px;">
                 Selecciona los grupos que compartirán el mismo saldo. Por defecto se muestran solo grupos normales.
               </div>
             </div>
-        
+
             <div
               id="sharedPromoGroups"
               style="max-height:360px;overflow:auto;border:1px solid #e5e7eb;padding:12px;border-radius:14px;background:#fff;margin-top:12px;"
@@ -12516,23 +13596,23 @@ def panel_actas(
         for gid in sorted(group_ids, key=lambda x: _group_name_cached(x, group_cache).lower()):
             group_name = _group_name_cached(gid, group_cache)
             upper_name = group_name.upper()
-        
+
             is_test = (
                 "PRUEBA" in upper_name
                 or "PRUEBAS" in upper_name
                 or "TEST" in upper_name
             )
-        
+
             is_provider = (
                 upper_name.startswith("PROV ")
                 or "PROV " in upper_name
                 or "PROVEEDOR" in upper_name
             )
-        
+
             group_kind = "normal"
             badge_text = "Normal"
             badge_class = "badge-light"
-        
+
             if is_test:
                 group_kind = "test"
                 badge_text = "Prueba"
@@ -12541,7 +13621,7 @@ def panel_actas(
                 group_kind = "provider"
                 badge_text = "Proveedor"
                 badge_class = "badge-danger"
-        
+
             html += f'''
             <label
               class="shared-promo-item"
@@ -12561,7 +13641,7 @@ def panel_actas(
             '''
         html += """
             </div>
-        
+
             <div class="shared-promo-actions">
               <button class="btn btn-success" onclick="applySharedPromotion()">
                 Aplicar promoción compartida
@@ -12570,7 +13650,7 @@ def panel_actas(
               <button class="btn btn-primary" type="button" onclick="addGroupToSharedPromotion()">
                 Agregar grupo a bolsa existente
               </button>
-        
+
               <button class="btn btn-light" type="button" onclick="clearSharedPromotionSelection()">
                 Limpiar selección
               </button>
@@ -12589,28 +13669,28 @@ def panel_actas(
             <strong>📊 Estado de solicitudes</strong>
             <span class="small">Resumen del periodo seleccionado</span>
           </div>
-        
+
           <div class="cards" style="padding:16px; grid-template-columns: repeat(5, minmax(0, 1fr));">
             <div class="card">
               <div class="label">Total</div>
               <div class="value" id="liveStatTotal">{summary["total"]}</div>
             </div>
-        
+
             <div class="card">
               <div class="label">En cola</div>
               <div class="value" id="liveStatQueued">{summary["queued"]}</div>
             </div>
-        
+
             <div class="card">
               <div class="label">Procesando</div>
               <div class="value" id="liveStatProcessing">{summary["processing"]}</div>
             </div>
-        
+
             <div class="card">
               <div class="label">Hecho</div>
               <div class="value" id="liveStatDone">{summary["done"]}</div>
             </div>
-        
+
             <div class="card">
               <div class="label">Error</div>
               <div class="value" id="liveStatError">{summary["error"]}</div>
@@ -12975,7 +14055,7 @@ def panel_actas(
               </thead>
               <tbody>
         """
-    
+
         if by_instance:
             for r in by_instance:
                 html += f"""
@@ -12988,7 +14068,7 @@ def panel_actas(
                 """
         else:
             html += '<tr><td colspan="4">Sin datos.</td></tr>'
-    
+
         html += """
               </tbody>
             </table>
@@ -13094,7 +14174,7 @@ def panel_actas(
               </thead>
               <tbody>
         """
-    
+
         if by_type:
             for r in by_type:
                 html += f"""
@@ -13107,7 +14187,7 @@ def panel_actas(
                 """
         else:
             html += '<tr><td colspan="4">Sin datos.</td></tr>'
-    
+
         html += """
               </tbody>
             </table>
@@ -13141,7 +14221,7 @@ def panel_actas(
             if all_blocked
             else '<button class="btn btn-danger" onclick="toggleAllGroups()">Bloquear todos los grupos</button>'
         )
-        
+
         html += f"""
         <div class="box">
           <div class="head">
@@ -13160,18 +14240,18 @@ def panel_actas(
             <strong>Agregar grupo manualmente</strong>
             <span class="small">Registra un grupo nuevo indicando su ID, nombre y categoría.</span>
           </div>
-        
+
           <div class="filters" style="grid-template-columns: 1.2fr 1fr 220px 220px;">
             <div>
               <div class="small">Group JID</div>
               <input id="manualGroupJid" placeholder="1203634XXXXXXXXXX@g.us">
             </div>
-        
+
             <div>
               <div class="small">Nombre del grupo</div>
               <input id="manualGroupName" placeholder="Nombre del grupo">
             </div>
-        
+
             <div>
               <div class="small">Categoría</div>
               <select id="manualGroupCategory">
@@ -13180,7 +14260,7 @@ def panel_actas(
                 <option value="otro" selected>Otro</option>
               </select>
             </div>
-        
+
             <div style="display:flex;align-items:end;">
               <button type="button" class="btn btn-primary" style="width:100%;" onclick="addManualGroup()">
                 Agregar grupo
@@ -13219,35 +14299,35 @@ def panel_actas(
               </thead>
               <tbody>
         """
-    
+
         if by_group:
             for r in by_group:
                 blocked = is_group_blocked(r["group_jid"])
                 blocked_text = "BLOQUEADO" if blocked else "ACTIVO"
-                
+
                 block_btn = (
                     f'<button class="btn btn-success" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'unblock\')">Desbloquear</button>'
-                    if blocked else 
+                    if blocked else
                     f'<button class="btn btn-danger" onclick="toggleGroupBlock(\'{r["group_jid"]}\', \'block\')">Bloquear</button>'
                     f'<button class="btn btn-light" onclick="hideGroupFromPanel(\'{r["group_jid"]}\')">Ocultar</button>'
                 )
-                
+
                 action_btn = f'''
                 <div style="display:flex;align-items:center;gap:8px;">
                   {block_btn}
                 </div>
                 '''
-        
+
                 group_key = (r["group_jid"] or "").replace("@g.us", "").strip()
                 promo_info = (
                     promo_map.get(r["group_jid"])
                     or promo_map.get(group_key)
                 )
-        
+
                 if promo_info:
                     status = "Activa" if promo_info["available"] > 0 else "Agotada"
                     promo_badge_class = "badge-success" if promo_info["available"] > 0 else "badge-danger"
-                
+
                     is_shared = bool((promo_info.get("shared_key") or "").strip()) and (promo_info.get("shared_count", 0) > 1)
                     shared_text = "Compartida" if is_shared else "Individual"
                     shared_badge_class = "badge-warning" if is_shared else "badge-light"
@@ -13257,7 +14337,7 @@ def panel_actas(
                         f'<div class="small" style="margin-top:4px;color:#6b7280;">{_esc(client_key)}</div>'
                         if is_shared and client_key else ""
                     )
-                
+
                     promo_cell = f"""
                     <span class="badge {promo_badge_class}">{status}</span>
                     <span class="badge {shared_badge_class}" style="margin-left:6px;">{shared_text}</span><br>
@@ -13272,7 +14352,7 @@ def panel_actas(
                        +Promoción
                     </a>
                     """
-        
+
                 html += f"""
                 <tr>
                   <td>
@@ -13299,7 +14379,7 @@ def panel_actas(
                 """
         else:
             html += '<tr><td colspan="8">Sin datos.</td></tr>'
-    
+
         html += """
               </tbody>
             </table>
@@ -13308,8 +14388,8 @@ def panel_actas(
         </div>
         """
 
-        
-    
+
+
         html += """
         <div class="box">
           <div class="head collapsible-head open" onclick="toggleSection('recentRequestsWrap', this)">
@@ -13340,7 +14420,7 @@ def panel_actas(
               </thead>
               <tbody>
         """
-    
+
         if latest:
             for r in latest:
                 status_class = {
@@ -13349,7 +14429,7 @@ def panel_actas(
                     "DONE": "status-d",
                     "ERROR": "status-e",
                 }.get(r.status, "")
-    
+
                 html += f"""
                 <tr>
                   <td>{r.id}</td>
@@ -13366,7 +14446,7 @@ def panel_actas(
                 """
         else:
             html += '<tr><td colspan="10">Sin solicitudes en este periodo.</td></tr>'
-    
+
         html += f"""
               </tbody>
             </table>
@@ -13374,7 +14454,7 @@ def panel_actas(
         </div>
       </div>
     </div>
-    
+
       <script>
         const PANEL_STREAM_ENABLED = {json.dumps(PANEL_STREAM_ENABLED)};
         let broadcastRunning = false;
@@ -13382,17 +14462,17 @@ def panel_actas(
         function getPanelToken() {{
           return new URLSearchParams(window.location.search).get("token") || "";
         }}
-        
+
         async function saveCleanupSettings() {{
           const enabled = !!document.getElementById("cleanupEnabled")?.checked;
           const maxAge = Number(document.getElementById("cleanupMaxAgeMinutes")?.value || 0);
           const panelToken = getPanelToken();
-        
+
           if (!maxAge || maxAge < 1 || maxAge > 1440) {{
             alert("Ingresa minutos válidos entre 1 y 1440.");
             return;
           }}
-        
+
           try {{
             const res = await fetch(`/panel/cleanup/settings?token=${{encodeURIComponent(panelToken)}}`, {{
               method: "POST",
@@ -13404,48 +14484,48 @@ def panel_actas(
                 max_age_minutes: maxAge
               }})
             }});
-        
+
             const data = await res.json();
-        
+
             if (!data.ok) {{
               alert(data.error || "No se pudo guardar configuración.");
               return;
             }}
-        
+
             alert(`Cleanup actualizado: ${{data.enabled ? "ACTIVO" : "DESACTIVADO"}} · ${{data.max_age_minutes}} min`);
             location.reload();
-        
+
           }} catch (e) {{
             alert("Error conectando con el servidor.");
           }}
         }}
-        
+
         async function previewCleanupPurge() {{
           const minutes = Number(document.getElementById("cleanupPurgeMinutes")?.value || 0);
           const box = document.getElementById("cleanupStatusBox");
           const panelToken = getPanelToken();
-        
+
           if (!minutes || minutes < 1 || minutes > 1440) {{
             alert("Ingresa minutos válidos entre 1 y 1440.");
             return;
           }}
-        
+
           if (box) {{
             box.innerHTML = "Revisando atoradas...";
           }}
-        
+
           try {{
             const res = await fetch(
               `/panel/cleanup/status?token=${{encodeURIComponent(panelToken)}}&older_than_minutes=${{encodeURIComponent(minutes)}}`
             );
-        
+
             const data = await res.json();
-        
+
             if (!data.ok) {{
               alert(data.error || "No se pudo revisar.");
               return;
             }}
-        
+
             if (box) {{
               box.innerHTML = `
                 Encontradas: <strong>${{data.stuck_count}}</strong>
@@ -13453,29 +14533,29 @@ def panel_actas(
                 <strong>${{data.check_minutes}}</strong> minutos.
               `;
             }}
-        
+
           }} catch (e) {{
             alert("Error conectando con el servidor.");
           }}
         }}
-        
+
         async function purgeCleanupStuck() {{
           const minutes = Number(document.getElementById("cleanupPurgeMinutes")?.value || 0);
           const panelToken = getPanelToken();
-        
+
           if (!minutes || minutes < 1 || minutes > 1440) {{
             alert("Ingresa minutos válidos entre 1 y 1440.");
             return;
           }}
-        
+
           const ok = confirm(
             `¿Seguro que deseas BORRAR de Redis/RQ y base de datos las solicitudes ` +
             `EN COLA/PROCESANDO con más de ${{minutes}} minutos?\n\n` +
             `Esta acción no se puede deshacer.`
           );
-        
+
           if (!ok) return;
-        
+
           try {{
             const res = await fetch(`/panel/cleanup/purge-stuck?token=${{encodeURIComponent(panelToken)}}`, {{
               method: "POST",
@@ -13486,23 +14566,23 @@ def panel_actas(
                 older_than_minutes: minutes
               }})
             }});
-        
+
             const data = await res.json();
-        
+
             if (!data.ok) {{
               alert(data.error || "No se pudo borrar.");
               return;
             }}
-        
+
             alert(
               `Limpieza lista.\n\n` +
               `Encontradas: ${{data.found}}\n` +
               `Borradas DB: ${{data.deleted_db}}\n` +
               `Jobs RQ borrados: ${{data.rq?.deleted || 0}}`
             );
-        
+
             location.reload();
-        
+
           }} catch (e) {{
             alert("Error conectando con el servidor.");
           }}
@@ -13511,39 +14591,39 @@ def panel_actas(
         let panelAudioRecorder = null;
         let panelAudioChunks = [];
         let panelAudioTarget = null;
-        
+
         let panelAudioBase64 = {{
           free: "",
           private: ""
         }};
-        
+
         function setPanelAudioStatus(target, text) {{
           const id = target === "private" ? "privateAudioStatus" : "freeAudioStatus";
           const el = document.getElementById(id);
           if (el) el.textContent = text;
         }}
-        
+
         function setPanelAudioStopEnabled(target, enabled) {{
           const id = target === "private" ? "privateAudioStopBtn" : "freeAudioStopBtn";
           const btn = document.getElementById(id);
           if (btn) btn.disabled = !enabled;
         }}
-        
+
         function setPanelAudioPreview(target, blob) {{
           const id = target === "private" ? "privateAudioPreview" : "freeAudioPreview";
           const audio = document.getElementById(id);
           if (!audio) return;
-        
+
           if (!blob) {{
             audio.style.display = "none";
             audio.removeAttribute("src");
             return;
           }}
-        
+
           audio.src = URL.createObjectURL(blob);
           audio.style.display = "block";
         }}
-        
+
         function blobToDataUrl(blob) {{
           return new Promise((resolve, reject) => {{
             const reader = new FileReader();
@@ -13552,97 +14632,97 @@ def panel_actas(
             reader.readAsDataURL(blob);
           }});
         }}
-        
+
         async function startPanelAudioRecording(target) {{
           if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {{
             alert("Tu navegador no permite grabar audio aquí.");
             return;
           }}
-        
+
           if (panelAudioRecorder && panelAudioRecorder.state === "recording") {{
             alert("Ya hay una grabación activa.");
             return;
           }}
-        
+
           panelAudioTarget = target;
           panelAudioChunks = [];
-        
+
           try {{
             const stream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
-        
+
             let options = {{}};
-        
+
             if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {{
               options = {{ mimeType: "audio/webm;codecs=opus" }};
             }} else if (MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")) {{
               options = {{ mimeType: "audio/ogg;codecs=opus" }};
             }}
-        
+
             panelAudioRecorder = new MediaRecorder(stream, options);
-        
+
             panelAudioRecorder.ondataavailable = (event) => {{
               if (event.data && event.data.size > 0) {{
                 panelAudioChunks.push(event.data);
               }}
             }};
-        
+
             panelAudioRecorder.onstop = async () => {{
               try {{
                 const blob = new Blob(panelAudioChunks, {{
                   type: panelAudioRecorder.mimeType || "audio/webm"
                 }});
-        
+
                 const dataUrl = await blobToDataUrl(blob);
-        
+
                 panelAudioBase64[panelAudioTarget] = dataUrl;
-        
+
                 setPanelAudioPreview(panelAudioTarget, blob);
                 setPanelAudioStatus(panelAudioTarget, "Audio listo para enviar");
               }} catch (e) {{
                 console.error(e);
                 setPanelAudioStatus(panelAudioTarget, "Error preparando audio");
               }}
-        
+
               try {{
                 stream.getTracks().forEach(track => track.stop());
               }} catch (e) {{}}
-        
+
               setPanelAudioStopEnabled(panelAudioTarget, false);
               panelAudioRecorder = null;
             }};
-        
+
             panelAudioRecorder.start();
             panelAudioBase64[target] = "";
             setPanelAudioPreview(target, null);
             setPanelAudioStatus(target, "Grabando...");
             setPanelAudioStopEnabled(target, true);
-        
+
           }} catch (e) {{
             console.error(e);
             alert("No se pudo acceder al micrófono.");
             setPanelAudioStopEnabled(target, false);
           }}
         }}
-        
+
         function stopPanelAudioRecording() {{
           if (panelAudioRecorder && panelAudioRecorder.state === "recording") {{
             panelAudioRecorder.stop();
           }}
         }}
-        
+
         function clearPanelAudio(target) {{
           panelAudioBase64[target] = "";
           setPanelAudioPreview(target, null);
           setPanelAudioStatus(target, "Sin audio");
         }}
-    
+
         async function toggleProvider(provider, action) {{
           const url = `/panel/provider/${{provider}}/${{action}}`;
-    
+
           try {{
             const res = await fetch(url, {{ method: "POST" }});
             const data = await res.json();
-    
+
             if (data.ok) {{
               location.reload();
             }} else {{
@@ -13652,7 +14732,7 @@ def panel_actas(
             alert("No se pudo conectar con el servidor");
           }}
         }}
-    
+
         async function toggleProvider1Group(slot, enable) {{
           const action = enable ? "on" : "off";
           const token = new URLSearchParams(window.location.search).get("token") || "";
@@ -13678,7 +14758,7 @@ def panel_actas(
         async function refreshSID() {{
           const sid = prompt("Pega el nuevo PHPSESSID");
           if (!sid) return;
-    
+
           try {{
             const res = await fetch("/panel/provider3/session", {{
               method: "POST",
@@ -13689,9 +14769,9 @@ def panel_actas(
                 phpsessid: sid
               }})
             }});
-    
+
             const data = await res.json();
-    
+
             if (data.ok) {{
               alert("SID actualizada");
               location.reload();
@@ -13706,7 +14786,7 @@ def panel_actas(
         async function refreshHID() {{
           const hid = prompt("Pega el nuevo HID de LAZARO WEB 1");
           if (!hid) return;
-        
+
           try {{
             const res = await fetch("/panel/provider4/hid", {{
               method: "POST",
@@ -13717,9 +14797,9 @@ def panel_actas(
                 hid: hid
               }})
             }});
-        
+
             const data = await res.json();
-        
+
             if (data.ok) {{
               alert("HID de LAZARO WEB 1 actualizado");
               location.reload();
@@ -13734,7 +14814,7 @@ def panel_actas(
         async function refreshHID10() {{
           const hid = prompt("Pega el nuevo HID de LAZARO WEB 2", "D0cuExprRServ2");
           if (!hid) return;
-        
+
           try {{
             const res = await fetch("/panel/provider10/hid", {{
               method: "POST",
@@ -13745,9 +14825,9 @@ def panel_actas(
                 hid: hid
               }})
             }});
-        
+
             const data = await res.json();
-        
+
             if (data.ok) {{
               alert("HID de LAZARO WEB 2 actualizado");
               location.reload();
@@ -13762,7 +14842,7 @@ def panel_actas(
         async function refreshHID11() {{
           const hid = prompt("Pega el nuevo HID de LAZARO WEB 3", "D0cuExprRServ3");
           if (!hid) return;
-        
+
           try {{
             const res = await fetch("/panel/provider11/hid", {{
               method: "POST",
@@ -13773,9 +14853,9 @@ def panel_actas(
                 hid: hid
               }})
             }});
-        
+
             const data = await res.json();
-        
+
             if (data.ok) {{
               alert("HID de LAZARO WEB 3 actualizado");
               location.reload();
@@ -13790,7 +14870,7 @@ def panel_actas(
         async function saveProviderWeight(providerName) {{
           const input = document.getElementById("weight_" + providerName);
           const weight = input ? input.value : 0;
-        
+
           const res = await fetch("/panel/provider-weight", {{
             method: "POST",
             headers: {{"Content-Type": "application/json"}},
@@ -13799,14 +14879,14 @@ def panel_actas(
               weight: weight
             }})
           }});
-        
+
           const data = await res.json();
-        
+
           if (!data.ok) {{
             alert("Error: " + (data.error || "No se pudo guardar"));
             return;
           }}
-        
+
           alert("Peso actualizado: " + providerName + " = " + data.weight);
         }}
 
@@ -13814,26 +14894,26 @@ def panel_actas(
           const select = document.getElementById(
             "bot_provider_mode_" + instanceName
           );
-        
+
           if (!select) {{
             alert("No se encontró el selector de proveedor.");
             return;
           }}
-        
+
           const originalText = button
             ? button.textContent
             : "Guardar";
-        
+
           if (button) {{
             button.disabled = true;
             button.textContent = "Guardando...";
           }}
-        
+
           try {{
             const token = new URLSearchParams(
               window.location.search
             ).get("token") || "";
-        
+
             const response = await fetch(
               `/panel/instance/${{encodeURIComponent(instanceName)}}/provider-mode?token=${{encodeURIComponent(token)}}`,
               {{
@@ -13846,30 +14926,30 @@ def panel_actas(
                 }})
               }}
             );
-        
+
             const data = await response.json();
-        
+
             if (!response.ok || !data.ok) {{
               throw new Error(
                 data.error || "No se pudo guardar el proveedor."
               );
             }}
-        
+
             if (button) {{
               button.textContent = "Guardado ✓";
-        
+
               setTimeout(() => {{
                 button.disabled = false;
                 button.textContent = originalText;
               }}, 1200);
             }}
-        
+
           }} catch (error) {{
             if (button) {{
               button.disabled = false;
               button.textContent = originalText;
             }}
-        
+
             alert(
               "Error guardando proveedor: "
               + (error.message || error)
@@ -13936,12 +15016,12 @@ def panel_actas(
         async function saveBotLimit(instanceName) {{
           const input = document.getElementById(`bot_limit_${{instanceName}}`);
           const value = Number((input?.value || "0").trim());
-        
+
           if (Number.isNaN(value) || value < 0) {{
             alert("Ingresa un límite válido.");
             return;
           }}
-        
+
           try {{
             const res = await fetch(`/panel/instance/${{encodeURIComponent(instanceName)}}/limit`, {{
               method: "POST",
@@ -13952,9 +15032,9 @@ def panel_actas(
                 limit: value
               }})
             }});
-        
+
             const data = await res.json();
-        
+
             if (data.ok) {{
               alert(`Límite actualizado para ${{instanceName}}: ${{data.limit}}`);
               location.reload();
@@ -13969,11 +15049,11 @@ def panel_actas(
         async function hideGroupFromPanel(groupJid) {{
           const ok = confirm("¿Quitar este grupo visualmente del panel?");
           if (!ok) return;
-        
+
           const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/hide`, {{
             method: "POST"
           }});
-        
+
           const data = await res.json();
           if (data.ok) {{
             location.reload();
@@ -13984,41 +15064,41 @@ def panel_actas(
 
         function normalizeQrImage(qr) {{
           const value = String(qr || "").trim();
-        
+
           if (!value) return "";
-        
+
           if (value.startsWith("data:image")) {{
             return value;
           }}
-        
+
           // Base64 normal de PNG/JPG/WebP.
           // Antes solo aceptabas /9j, pero muchos QR PNG empiezan con iVBORw0KGgo.
           const looksBase64 =
             value.length > 100 &&
             /^[A-Za-z0-9+/=]+$/.test(value);
-        
+
           if (looksBase64) {{
             return `data:image/png;base64,${{value}}`;
           }}
-        
+
           return "";
         }}
-        
+
         async function getBotQr(instanceName) {{
           const box = document.getElementById("botQrBox");
           if (!box) return;
-        
+
           box.innerHTML = "<strong>Generando QR...</strong>";
-        
+
           try {{
             const panelToken = new URLSearchParams(window.location.search).get("token") || "";
 
             const res = await fetch(
               `/panel/instance/${{encodeURIComponent(instanceName)}}/qr?token=${{encodeURIComponent(panelToken)}}`
             );
-            
+
             const data = await res.json();
-        
+
             if (!data.ok) {{
               box.innerHTML = `
                 <div style="color:red;font-weight:800;margin-bottom:10px;">
@@ -14028,9 +15108,9 @@ def panel_actas(
               `;
               return;
             }}
-        
+
             const payload = data.data || {{}};
-        
+
             const qr =
               data.qr_image ||
               data.qr ||
@@ -14046,9 +15126,9 @@ def panel_actas(
               payload.instance?.qr ||
               payload.instance?.base64 ||
               "";
-        
+
             const imgSrc = normalizeQrImage(qr);
-        
+
             if (imgSrc) {{
               box.innerHTML = `
                 <div style="padding:14px;border:1px solid #e5e7eb;border-radius:14px;background:white;">
@@ -14061,7 +15141,7 @@ def panel_actas(
               `;
               return;
             }}
-        
+
             if (qr) {{
               box.innerHTML = `
                 <div style="padding:14px;border:1px solid #e5e7eb;border-radius:14px;background:white;">
@@ -14071,14 +15151,14 @@ def panel_actas(
               `;
               return;
             }}
-        
+
             box.innerHTML = `
               <div style="color:#b45309;font-weight:800;margin-bottom:10px;">
                 Evolution respondió OK, pero no mandó QR.
               </div>
               <pre style="white-space:pre-wrap;background:#111827;color:white;padding:14px;border-radius:12px;">${{JSON.stringify(data, null, 2)}}</pre>
             `;
-        
+
           }} catch (e) {{
             box.innerHTML = `<div style="color:red;font-weight:800;">Error de conexión</div>`;
           }}
@@ -14089,30 +15169,30 @@ def panel_actas(
           await fetch(`/panel/bots/${{i}}/disconnect?token=docifymx2026`,{{method:"POST"}});
           location.reload();
         }}
-        
+
         async function hideBot(i){{
           if(!confirm("Ocultar?")) return;
           await fetch(`/panel/bots/${{i}}/hide?token=docifymx2026`,{{method:"POST"}});
           location.reload();
         }}
-        
+
         async function createBot(){{
           const label=document.getElementById("newBotLabel").value;
           const instance=document.getElementById("newBotInstance").value;
-        
+
           const r=await fetch(`/panel/bots/create?token=docifymx2026`,{{
             method:"POST",
             headers:{{"Content-Type":"application/json"}},
             body:JSON.stringify({{label,instance_name:instance}})
           }});
-        
+
           const d=await r.json();
-        
+
           if(!d.ok){{
             alert(d.error||"error");
             return;
           }}
-        
+
           alert("Token: "+d.token);
           location.reload();
         }}
@@ -14120,16 +15200,16 @@ def panel_actas(
         async function updateProvider7Credentials() {{
           const access_token = prompt("PROVIDER7_ACCESS_TOKEN:");
           if (access_token === null) return;
-        
+
           const jsessionid = prompt("PROVIDER7_JSESSIONID:");
           if (jsessionid === null) return;
-        
+
           const oficialia = prompt("PROVIDER7_OFICIALIA:");
           if (oficialia === null) return;
-        
+
           const rfc_usuario = prompt("PROVIDER7_RFC_USUARIO:");
           if (rfc_usuario === null) return;
-        
+
           try {{
             const res = await fetch("/panel/provider7/update-credentials", {{
               method: "POST",
@@ -14143,9 +15223,9 @@ def panel_actas(
                 rfc_usuario
               }})
             }});
-        
+
             const data = await res.json();
-        
+
             if (data.ok) {{
               alert("Credenciales de Provider7 actualizadas");
               location.reload();
@@ -14156,16 +15236,16 @@ def panel_actas(
             alert("Error de conexión al actualizar Provider7");
           }}
         }}
-        
+
         async function rechargeBotLimit(instanceName) {{
           const input = document.getElementById(`bot_recharge_${{instanceName}}`);
           const value = Number((input?.value || "").trim());
-        
+
           if (Number.isNaN(value) || value <= 0) {{
             alert("Ingresa una recarga válida mayor a 0.");
             return;
           }}
-        
+
           try {{
             const res = await fetch(`/panel/instance/${{encodeURIComponent(instanceName)}}/recharge`, {{
               method: "POST",
@@ -14176,9 +15256,9 @@ def panel_actas(
                 amount: value
               }})
             }});
-        
+
             const data = await res.json();
-        
+
             if (data.ok) {{
               alert(`Recarga aplicada a ${{instanceName}}. Nuevo límite: ${{data.limit}}`);
               location.reload();
@@ -14189,18 +15269,18 @@ def panel_actas(
             alert("Error de conexión al recargar el bot.");
           }}
         }}
-        
+
         async function resetBotUsage(instanceName) {{
           const ok = confirm(`¿Seguro que deseas resetear las usadas de ${{instanceName}}?`);
           if (!ok) return;
-        
+
           try {{
             const res = await fetch(`/panel/instance/${{encodeURIComponent(instanceName)}}/reset-usage`, {{
               method: "POST"
             }});
-        
+
             const data = await res.json();
-        
+
             if (data.ok) {{
               alert(`Usadas reseteadas para ${{instanceName}}.`);
               location.reload();
@@ -14211,7 +15291,7 @@ def panel_actas(
             alert("Error de conexión al resetear el consumo.");
           }}
         }}
-        
+
         async function blockAllBots() {{
           const ok = confirm(
             "¿Seguro que deseas BLOQUEAR TODOS los bots para nuevas solicitudes?"
@@ -14289,14 +15369,14 @@ def panel_actas(
         async function blockBot(instanceName) {{
           const ok = confirm(`¿Bloquear ${{instanceName}} para nuevas solicitudes?`);
           if (!ok) return;
-        
+
           try {{
             const res = await fetch(`/panel/instance/${{encodeURIComponent(instanceName)}}/block`, {{
               method: "POST"
             }});
-        
+
             const data = await res.json();
-        
+
             if (data.ok) {{
               alert(`${{instanceName}} bloqueado.`);
               location.reload();
@@ -14307,15 +15387,15 @@ def panel_actas(
             alert("Error de conexión al bloquear el bot.");
           }}
         }}
-        
+
         async function unblockBot(instanceName) {{
           try {{
             const res = await fetch(`/panel/instance/${{encodeURIComponent(instanceName)}}/unblock`, {{
               method: "POST"
             }});
-        
+
             const data = await res.json();
-        
+
             if (data.ok) {{
               alert(`${{instanceName}} desbloqueado.`);
               location.reload();
@@ -14326,19 +15406,19 @@ def panel_actas(
             alert("Error de conexión al desbloquear el bot.");
           }}
         }}
-        
+
         async function addGroupToSharedPromotion() {{
           const selected = Array.from(document.querySelectorAll(".shared-promo-group:checked"))
             .map(el => el.value);
-        
+
           if (selected.length !== 1) {{
             alert("Selecciona solo un grupo para agregarlo a una bolsa existente");
             return;
           }}
-        
+
           const shared_key = prompt("Ingresa la clave de la bolsa compartida existente:");
           if (!shared_key) return;
-        
+
           try {{
             const res = await fetch("/panel/promotions/add-group", {{
               method: "POST",
@@ -14350,9 +15430,9 @@ def panel_actas(
                 shared_key: shared_key
               }})
             }});
-        
+
             const data = await res.json();
-        
+
             if (data.ok) {{
               alert(data.message || "Grupo agregado correctamente");
               location.reload();
@@ -14368,17 +15448,17 @@ def panel_actas(
           const group_jid = (document.getElementById("manualGroupJid")?.value || "").trim();
           const custom_name = (document.getElementById("manualGroupName")?.value || "").trim();
           const category = (document.getElementById("manualGroupCategory")?.value || "otro").trim();
-        
+
           if (!group_jid) {{
             alert("Ingresa el Group JID");
             return;
           }}
-        
+
           if (!group_jid.endsWith("@g.us")) {{
             alert("El Group JID debe terminar en @g.us");
             return;
           }}
-        
+
           try {{
             const res = await fetch("/panel/groups/manual-add", {{
               method: "POST",
@@ -14391,9 +15471,9 @@ def panel_actas(
                 category
               }})
             }});
-        
+
             const data = await res.json();
-        
+
             if (data.ok) {{
               alert(data.message || "Grupo agregado");
               location.reload();
@@ -14408,7 +15488,7 @@ def panel_actas(
         async function setSharedGroupLimit(groupJid) {{
           const value = prompt("Ingresa el límite individual de actas para este grupo dentro de la bolsa compartida:");
           if (value === null) return;
-        
+
           try {{
             const res = await fetch("/panel/promotions/set-group-limit", {{
               method: "POST",
@@ -14420,9 +15500,9 @@ def panel_actas(
                 limit_actas: Number(value || 0)
               }})
             }});
-        
+
             const data = await res.json();
-        
+
             if (data.ok) {{
               alert(data.message || "Límite actualizado");
               location.reload();
@@ -14437,12 +15517,12 @@ def panel_actas(
         async function sendBroadcast(type) {{
           const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
           if (!ok) return;
-        
+
           if (broadcastRunning) return;
           broadcastRunning = true;
-        
+
           const category = document.getElementById("broadcastCategory")?.value || "all";
-        
+
           try {{
             const res = await fetch(`/panel/broadcast/${{type}}`, {{
               method: "POST",
@@ -14453,9 +15533,9 @@ def panel_actas(
                 category: category
               }})
             }});
-        
+
             const data = await res.json();
-        
+
             if (data.ok) {{
               alert(data.message || "Envío iniciado");
             }} else {{
@@ -14464,27 +15544,27 @@ def panel_actas(
           }} catch (e) {{
             alert("No se pudo conectar con el servidor");
           }}
-        
+
           broadcastRunning = false;
         }}
-    
+
         async function sendFreeBroadcast() {{
           const textarea = document.getElementById("broadcastMessage");
           const message = textarea.value.trim();
           const audioBase64 = panelAudioBase64.free || "";
           const category = document.getElementById("broadcastCategory")?.value || "all";
-        
+
           if (!message && !audioBase64) {{
             alert("Escribe un mensaje o graba un audio");
             return;
           }}
-        
+
           const ok = confirm("¿Seguro que deseas enviar este mensaje masivamente?");
           if (!ok) return;
-        
+
           if (broadcastRunning) return;
           broadcastRunning = true;
-        
+
           try {{
             const res = await fetch("/panel/broadcast/free", {{
               method: "POST",
@@ -14497,9 +15577,9 @@ def panel_actas(
                 category: category
               }})
             }});
-        
+
             const data = await res.json();
-        
+
             if (data.ok) {{
               alert(data.message || "Envío iniciado");
               textarea.value = "";
@@ -14510,7 +15590,7 @@ def panel_actas(
           }} catch (e) {{
             alert("No se pudo conectar con el servidor");
           }}
-        
+
           broadcastRunning = false;
         }}
 
@@ -14519,57 +15599,57 @@ def panel_actas(
         function getPrivateBotChecks() {{
           return Array.from(document.querySelectorAll(".privateBotCheck"));
         }}
-        
+
         function syncPrivateBotSelectCounter() {{
           const counter = document.getElementById("privateBotSelectedCount");
           if (!counter) return;
-        
+
           const checks = getPrivateBotChecks();
           const enabled = checks.filter(x => !x.disabled);
           const selected = enabled.filter(x => x.checked);
-        
+
           counter.textContent = `${{selected.length}} de ${{enabled.length}} configurados seleccionados`;
         }}
-        
+
         function selectAllPrivateBots(checked) {{
           const checks = getPrivateBotChecks();
-        
+
           checks.forEach(chk => {{
             if (!chk.disabled) {{
               chk.checked = checked;
             }}
           }});
-        
+
           syncPrivateBotSelectCounter();
         }}
 
         async function loadPrivateBotTargets() {{
           const box = document.getElementById("privateBotTargets");
           if (!box) return;
-        
+
           try {{
             const res = await fetch("/panel/broadcast/private-bots/targets?token=docifymx2026");
             const data = await res.json();
-        
+
             if (!data.ok) {{
               box.innerHTML = `<div style="color:#b91c1c;">${{data.error || "No se pudieron cargar los bots"}}</div>`;
               return;
             }}
-        
+
             const bots = data.bots || [];
-        
+
             if (!bots.length) {{
               box.innerHTML = `<div style="color:#64748b;">No hay bots internos extra registrados.</div>`;
               return;
             }}
-        
+
             box.innerHTML = bots.map(bot => {{
               const disabled = bot.configured ? "" : "disabled";
               const checked = bot.configured ? "" : "";
               const status = bot.configured
                 ? `<span style="color:#15803d;font-weight:700;">Configurado</span>`
                 : `<span style="color:#b91c1c;font-weight:700;">Sin número privado</span>`;
-        
+
               return `
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px;border-bottom:1px solid #e5e7eb;">
                   <label style="display:flex;align-items:center;gap:8px;flex:1;cursor:pointer;">
@@ -14587,7 +15667,7 @@ def panel_actas(
                       <span style="font-size:11px;color:#64748b;">${{bot.jid || "Sin JID"}}</span>
                     </span>
                   </label>
-        
+
                   <div style="text-align:right;">
                     <div style="font-size:11px;">${{status}}</div>
                     <button
@@ -14603,26 +15683,26 @@ def panel_actas(
             }}).join("");
 
             syncPrivateBotSelectCounter();
-        
+
           }} catch (e) {{
             box.innerHTML = `<div style="color:#b91c1c;">Error cargando bots internos</div>`;
           }}
         }}
-        
+
         async function setPrivateBotTarget(instanceName) {{
           const value = prompt(
             "Ingresa el número privado/JID que recibirá avisos para " + instanceName + "\\n\\nEjemplo: 8991234567, 528991234567 o 528991234567@s.whatsapp.net"
           );
-        
+
           if (value === null) return;
-        
+
           const clean = value.trim();
-        
+
           if (!clean) {{
             alert("Número vacío");
             return;
           }}
-        
+
           try {{
             const res = await fetch(`/panel/bots/${{encodeURIComponent(instanceName)}}/private-target?token=docifymx2026`, {{
               method: "POST",
@@ -14633,44 +15713,44 @@ def panel_actas(
                 jid: clean
               }})
             }});
-        
+
             const data = await res.json();
-        
+
             if (!data.ok) {{
               alert(data.error || "No se pudo guardar el número privado");
               return;
             }}
-        
+
             alert("Número privado guardado: " + data.jid);
             loadPrivateBotTargets();
-        
+
           }} catch (e) {{
             alert("Error de conexión al guardar número privado");
           }}
         }}
-        
+
         async function sendPrivateBotsBroadcast() {{
           const textarea = document.getElementById("privateBotsBroadcastMessage");
           const message = textarea.value.trim();
           const audioBase64 = panelAudioBase64.private || "";
-        
+
           if (!message && !audioBase64) {{
             alert("Escribe un mensaje privado o graba un audio.");
             return;
           }}
-        
+
           const selected = Array.from(document.querySelectorAll(".privateBotCheck:checked"))
             .map(x => x.value)
             .filter(Boolean);
-        
+
           if (!selected.length) {{
             alert("Selecciona al menos un bot interno.");
             return;
           }}
-        
+
           const ok = confirm(`¿Enviar este mensaje privado a ${{selected.length}} bot(s) interno(s)?`);
           if (!ok) return;
-        
+
           try {{
             const res = await fetch("/panel/broadcast/private-bots?token=docifymx2026", {{
               method: "POST",
@@ -14683,43 +15763,43 @@ def panel_actas(
                 selected_instances: selected
               }})
             }});
-        
+
             const data = await res.json();
-        
+
             if (!data.ok) {{
               alert(data.error || "No se pudo enviar el mensaje privado");
               return;
             }}
-        
+
             alert(data.message || "Mensaje privado en cola");
             textarea.value = "";
             clearPanelAudio("private");
             startPrivateBotsBroadcastProgress(data.job_id);
-        
+
           }} catch (e) {{
             alert("No se pudo conectar con el servidor");
           }}
         }}
-        
+
         function startPrivateBotsBroadcastProgress(jobId) {{
           const box = document.getElementById("privateBotsBroadcastProgress");
-        
+
           if (box) {{
             box.style.display = "block";
             box.innerHTML = "Enviando privados...";
           }}
-        
+
           if (privateBotsProgressTimer) {{
             clearInterval(privateBotsProgressTimer);
           }}
-        
+
           privateBotsProgressTimer = setInterval(async () => {{
             try {{
               const res = await fetch(`/panel/broadcast/private-bots/progress/${{jobId}}?token=docifymx2026`);
               const data = await res.json();
-        
+
               if (!box) return;
-        
+
               box.innerHTML = `
                 Estado: <strong>${{data.status || "pending"}}</strong><br>
                 Enviados: <strong>${{data.sent || 0}}</strong> /
@@ -14728,12 +15808,12 @@ def panel_actas(
                 Saltados: <strong>${{data.skipped || 0}}</strong><br>
                 Actual: ${{data.current || ""}}
               `;
-        
+
               if (data.status === "done" || data.status === "error") {{
                 clearInterval(privateBotsProgressTimer);
                 privateBotsProgressTimer = null;
               }}
-        
+
             }} catch (e) {{
               if (box) {{
                 box.innerHTML = "No se pudo consultar el progreso.";
@@ -14743,11 +15823,11 @@ def panel_actas(
             }}
           }}, 2000);
         }}
-        
+
         document.addEventListener("DOMContentLoaded", () => {{
           loadPrivateBotTargets();
         }});
-    
+
         function clearBroadcast() {{
           document.getElementById("broadcastMessage").value = "";
         }}
@@ -14756,17 +15836,17 @@ def panel_actas(
           const msg = action === "block"
             ? "¿Bloquear este grupo? El bot dejará de responder silenciosamente."
             : "¿Desbloquear este grupo?";
-        
+
           const ok = confirm(msg);
           if (!ok) return;
-        
+
           try {{
             const res = await fetch(`/panel/group/${{encodeURIComponent(groupJid)}}/${{action}}`, {{
               method: "POST"
             }});
-        
+
             const data = await res.json();
-        
+
             if (data.ok) {{
               location.reload();
             }} else {{
@@ -14780,14 +15860,14 @@ def panel_actas(
         async function toggleAllGroups() {{
           const ok = confirm("¿Seguro que deseas cambiar el estado de todos los grupos cliente?");
           if (!ok) return;
-        
+
           try {{
             const res = await fetch("/panel/groups/toggle-all", {{
               method: "POST"
             }});
-        
+
             const data = await res.json();
-        
+
             if (data.ok) {{
               alert(data.message || "Estado actualizado");
               location.reload();
@@ -14802,19 +15882,19 @@ def panel_actas(
         async function applySharedPromotion() {{
           const selected = Array.from(document.querySelectorAll(".shared-promo-group:checked"))
             .map(el => el.value);
-        
+
           const promo_name = document.getElementById("sharedPromoName").value || "";
           const client_key = document.getElementById("sharedPromoClientKey").value || "";
           const shared_key = client_key.trim().toUpperCase();
           const total_actas = Number(document.getElementById("sharedPromoTotalActas").value || 0);
           const price_per_piece = document.getElementById("sharedPromoPricePerPiece").value || "";
-        
+
           const promo_type = document.getElementById("sharedPromoType").value || "paid";
           const is_credit = promo_type === "credit";
-        
+
           let credit_abono_raw = document.getElementById("sharedPromoCreditAbono").value || "";
           let credit_debe_raw = document.getElementById("sharedPromoCreditDebe").value || "";
-        
+
           if (!is_credit) {{
             credit_abono_raw = "0";
             credit_debe_raw = "0";
@@ -14822,25 +15902,25 @@ def panel_actas(
             if (credit_abono_raw === "") credit_abono_raw = "0";
             if (credit_debe_raw === "") credit_debe_raw = "0";
           }}
-        
+
           const credit_abono = Number(credit_abono_raw);
           const credit_debe = Number(credit_debe_raw);
-        
+
           if (!selected.length) {{
             alert("Selecciona al menos un grupo");
             return;
           }}
-        
+
           if (!total_actas || total_actas <= 0) {{
             alert("Ingresa un total de actas válido");
             return;
           }}
-        
+
           if (!shared_key) {{
             alert("Ingresa una bolsa compartida");
             return;
           }}
-        
+
           try {{
             const res = await fetch("/panel/promotions/apply", {{
               method: "POST",
@@ -14859,9 +15939,9 @@ def panel_actas(
                 credit_debe
               }})
             }});
-        
+
             const data = await res.json();
-        
+
             if (data.ok) {{
               alert("Promoción compartida aplicada correctamente");
               location.reload();
@@ -14876,10 +15956,10 @@ def panel_actas(
         function toggleSharedPromoCreditFields() {{
           const promoType = document.getElementById("sharedPromoType");
           const isCredit = promoType && promoType.value === "credit";
-        
+
           const abono = document.getElementById("sharedPromoCreditAbono");
           const debe = document.getElementById("sharedPromoCreditDebe");
-        
+
           if (abono) {{
             if (isCredit) {{
               abono.disabled = false;
@@ -14889,7 +15969,7 @@ def panel_actas(
               abono.value = "";
             }}
           }}
-        
+
           if (debe) {{
             if (isCredit) {{
               debe.disabled = false;
@@ -14900,14 +15980,14 @@ def panel_actas(
             }}
           }}
         }}
-        
+
         document.addEventListener("DOMContentLoaded", () => {{
           const promoType = document.getElementById("sharedPromoType");
           if (promoType) {{
             promoType.addEventListener("change", toggleSharedPromoCreditFields);
             toggleSharedPromoCreditFields();
           }}
-        
+
           filterSharedPromoGroups();
 
           startPanelLive();
@@ -14915,21 +15995,21 @@ def panel_actas(
           if (PANEL_STREAM_ENABLED && !document.hidden) {{
             startRecentRequestsStream();
           }}
-        
+
           const sections = [
             "grupoClienteBody",
             "promoCompartidaBody",
             "recentRequestsWrap"
           ];
-        
+
           sections.forEach(id => {{
             const body = document.getElementById(id);
             const head = body?.previousElementSibling;
-        
+
             if (!body || !head) return;
-        
+
             const state = localStorage.getItem(id);
-        
+
             if (state === "closed") {{
               body.classList.remove("open");
               body.classList.add("closed");
@@ -14943,53 +16023,53 @@ def panel_actas(
           const showNormal = document.getElementById("filterNormalGroups")?.checked;
           const showTest = document.getElementById("filterTestGroups")?.checked;
           const showProvider = document.getElementById("filterProviderGroups")?.checked;
-        
+
           const items = document.querySelectorAll(".shared-promo-item");
-        
+
           items.forEach(item => {{
             const name = item.dataset.name || "";
             const kind = item.dataset.kind || "normal";
-        
+
             const matchesSearch = !search || name.includes(search);
-        
+
             let matchesKind = false;
             if (kind === "normal" && showNormal) matchesKind = true;
             if (kind === "test" && showTest) matchesKind = true;
             if (kind === "provider" && showProvider) matchesKind = true;
-        
+
             item.style.display = (matchesSearch && matchesKind) ? "flex" : "none";
           }});
         }}
-        
+
         function clearSharedPromotionSelection() {{
           document.querySelectorAll(".shared-promo-group").forEach(el => {{
             el.checked = false;
           }});
-        
+
           const searchInput = document.getElementById("sharedPromoSearch");
           if (searchInput) searchInput.value = "";
-        
+
           const normal = document.getElementById("filterNormalGroups");
           const test = document.getElementById("filterTestGroups");
           const provider = document.getElementById("filterProviderGroups");
-        
+
           if (normal) normal.checked = true;
           if (test) test.checked = false;
           if (provider) provider.checked = false;
-        
+
           filterSharedPromoGroups();
         }}
 
         function toggleSection(bodyId, headEl) {{
           const body = document.getElementById(bodyId);
           if (!body) return;
-        
+
           const isClosed = body.classList.contains("closed");
-        
+
           if (isClosed) {{
             body.classList.remove("closed");
             body.classList.add("open");
-            headEl.classList.remove("closed");    
+            headEl.classList.remove("closed");
             localStorage.setItem(bodyId, "open");
           }} else {{
             body.classList.remove("open");
@@ -15101,7 +16181,7 @@ def panel_actas(
         async function refreshRecentRequests() {{
           const wrap = document.getElementById("recentRequestsWrap");
           if (!wrap) return;
-        
+
           const params = new URLSearchParams({{
             view: document.querySelector('input[name="view"]')?.value || "day",
             group_jid: document.querySelector('input[name="group_jid"]')?.value || "",
@@ -15111,7 +16191,7 @@ def panel_actas(
             date_from: document.querySelector('input[name="date_from"]')?.value || "",
             date_to: document.querySelector('input[name="date_to"]')?.value || "",
           }});
-        
+
           params.set("fresh", "1");
 
           try {{
@@ -15120,14 +16200,14 @@ def panel_actas(
               {{ cache: "no-store" }}
             );
             if (!res.ok) throw new Error("No se pudo actualizar solicitudes recientes");
-        
+
             const html = await res.text();
             wrap.innerHTML = html;
           }} catch (e) {{
             console.error("RECENT_REQUESTS_REFRESH_ERROR =", e);
           }}
         }}
-        
+
         let recentRequestsTimer = null;
 
         function startRecentRequestsStream() {{
@@ -15165,7 +16245,7 @@ def panel_actas(
             redis_conn.setex(cache_key, PANEL_HTML_TTL, html)
         except Exception:
             pass
-            
+
         return HTMLResponse(
             content=html,
             headers={
@@ -15174,7 +16254,7 @@ def panel_actas(
                 "Expires": "0",
             },
         )
-        
+
     except Exception as e:
         print("panel_actas error:", repr(e), flush=True)
         return HTMLResponse(
@@ -15521,7 +16601,7 @@ def panel_auditoria_proveedores(
                 """
         else:
             html += '<tr><td colspan="5">Sin errores registrados para este periodo.</td></tr>'
-            
+
         html += """
                   </tbody>
                 </table>
@@ -15839,7 +16919,7 @@ def startup():
         _get_or_create_provider(db, "PROVIDER15", False)
         _get_or_create_provider(db, "PROVIDER16", False)
         _get_or_create_provider(db, "MAYAPROVIDER", False)
-    
+
         current = _get_app_setting(db, "PROVIDER3_PHPSESSID", "")
         if not current and settings.PROVIDER3_PHPSESSID:
             _set_app_setting(db, "PROVIDER3_PHPSESSID", settings.PROVIDER3_PHPSESSID)
@@ -16034,7 +17114,7 @@ def test_provider3_session(
             "ok": False,
             "error": str(e),
         }
-        
+
 
 
 
@@ -16489,14 +17569,14 @@ def _api_public_error_code(raw_error: str | None) -> str:
         "SHARED_GROUP_LIMIT_REACHED",
     }:
         return "GROUP_LIMIT_REACHED"
-    
+
     if code in {
         "DELIVERY_FAILED",
         "PDF_SEND_FAILED",
         "PROVIDER3_PDF_SEND_FAILED",
     }:
         return "DELIVERY_FAILED"
-    
+
     if code in {
         "PROVIDER6_ACT_TYPE_NOT_ALLOWED",
     }:
@@ -16850,12 +17930,12 @@ def api_v1_create_acta(
 
     try:
         _enqueue_process_request(row, "api_v1_create_acta")
-    
+
     except Exception as enqueue_exc:
         # La solicitud ya existe en PostgreSQL, pero no quedó en Redis/RQ.
         # La marcamos ERROR para que NO reserve saldo eternamente.
         db.rollback()
-    
+
         try:
             failed_row = (
                 db.query(RequestLog)
@@ -16866,7 +17946,7 @@ def api_v1_create_acta(
                 .with_for_update()
                 .first()
             )
-    
+
             if failed_row and (failed_row.status or "").upper() == "QUEUED":
                 failed_row.status = "ERROR"
                 failed_row.error_message = (
@@ -16874,30 +17954,30 @@ def api_v1_create_acta(
                 )
                 failed_row.updated_at = _utc_now_naive()
                 db.commit()
-    
+
             else:
                 db.rollback()
-    
+
         except Exception as mark_error_exc:
             db.rollback()
-    
+
             print("API_QUEUE_FAILURE_MARK_ERROR_FAILED =", {
                 "request_id": getattr(row, "id", None),
                 "enqueue_error": str(enqueue_exc),
                 "mark_error": str(mark_error_exc),
             }, flush=True)
-    
+
         print("API_QUEUE_ENQUEUE_FAILED =", {
             "request_id": getattr(row, "id", None),
             "api_client_id": getattr(auth_client, "id", None),
             "error": str(enqueue_exc),
         }, flush=True)
-    
+
         return _api_error_response(
             "CREATE_REQUEST_FAILED",
             error_raw=f"QUEUE_ENQUEUE_FAILED:{str(enqueue_exc)[:200]}",
         )
-    
+
     return {
         "ok": True,
         "request_id": row.id,
@@ -16992,10 +18072,10 @@ def api_v1_get_acta_pdf(
             "error_message": API_ERROR_MESSAGES["REQUEST_NOT_DONE"],
             "status": row.status,
         }
-    
+
         if row.status == "ERROR":
             detail.update(_api_request_error_fields(row))
-    
+
         raise HTTPException(status_code=400, detail=detail)
 
     if not row.api_result_base64:
@@ -17060,7 +18140,7 @@ def api_v1_list_actas(
     items = []
 
     base_url = str(request.base_url).rstrip("/")
-    
+
     for r in rows:
         item = {
             "request_id": r.id,
@@ -17073,15 +18153,15 @@ def api_v1_list_actas(
             "created_at": r.created_at.isoformat() if r.created_at else None,
             "updated_at": r.updated_at.isoformat() if r.updated_at else None,
         }
-    
+
         if r.status == "DONE" and r.api_result_base64:
             item["pdf_url"] = f"{base_url}/api/v1/actas/{r.id}/pdf"
-    
+
         if r.status == "ERROR":
             item.update(_api_request_error_fields(r))
-    
+
         items.append(item)
-    
+
     return {
         "ok": True,
         "items": items,
@@ -17112,7 +18192,7 @@ def api_admin_create_client(
             "error": "INVALID_CREDIT_BALANCE",
             "message": "El saldo inicial no puede ser negativo.",
         }
-    
+
     if price <= 0:
         return {
             "ok": False,
@@ -17767,7 +18847,7 @@ def _extract_provider_no_record_identifiers(text_body: str | None) -> list[str]:
                 # No eliminar repetidos:
                 # cada aparición puede corresponder a una solicitud distinta.
                 found.append(ident)
-        
+
         for m in pattern_after.finditer(norm):
             ident = re.sub(r"[^A-Z0-9]", "", m.group("id").upper())
             if ident:
@@ -17927,11 +19007,11 @@ def _close_provider_negative_response(
 
     text_norm = info["norm"]
     negative_act_group = _text_mentions_act_type_group(text_norm)
-    
+
     matched_requests = []
     matched_ids = set()
     match_modes = {}
-    
+
     def _pick_by_type(
         rows,
         *,
@@ -17939,7 +19019,7 @@ def _close_provider_negative_response(
     ):
         if not rows:
             return None
-    
+
         # Excluir solicitudes que ya fueron relacionadas con otro renglón
         # del mismo mensaje del proveedor.
         available_rows = [
@@ -17947,10 +19027,10 @@ def _close_provider_negative_response(
             for row in rows
             if row.id not in matched_ids
         ]
-    
+
         if not available_rows:
             return None
-    
+
         # Cuando el proveedor menciona explícitamente el tipo de acta,
         # limitar las candidatas a ese tipo.
         if negative_act_group:
@@ -17959,7 +19039,7 @@ def _close_provider_negative_response(
                 for row in available_rows
                 if _expected_act_type_group(row.act_type) == negative_act_group
             ]
-    
+
             print(
                 "NEGATIVE_PICK_BY_TYPE =",
                 {
@@ -17976,10 +19056,10 @@ def _close_provider_negative_response(
                 },
                 flush=True,
             )
-    
+
             if not typed:
                 return None
-    
+
             # Si hay varias del mismo tipo, tomar primero la más antigua.
             return sorted(
                 typed,
@@ -17988,17 +19068,17 @@ def _close_provider_negative_response(
                     row.id,
                 ),
             )[0]
-    
+
         # Caso normal: solo hay una candidata.
         if len(available_rows) == 1:
             return available_rows[0]
-    
+
         if explicit_identifier:
             type_groups = {
                 _expected_act_type_group(row.act_type)
                 for row in available_rows
             }
-    
+
             # Es seguro tomar una por una cuando:
             # 1. El proveedor escribió explícitamente la CURP.
             # 2. Todas las solicitudes abiertas son del mismo tipo.
@@ -18016,7 +19096,7 @@ def _close_provider_negative_response(
                         row.id,
                     ),
                 )[0]
-    
+
                 print(
                     "NEGATIVE_REPEATED_IDENTIFIER_SELECTED =",
                     {
@@ -18029,9 +19109,9 @@ def _close_provider_negative_response(
                     },
                     flush=True,
                 )
-    
+
                 return selected
-    
+
         print(
             "NEGATIVE_AMBIGUOUS_WITHOUT_TYPE =",
             {
@@ -18046,7 +19126,7 @@ def _close_provider_negative_response(
             },
             flush=True,
         )
-    
+
         return None
 
     def _add_match(req, mode: str):
@@ -18098,7 +19178,7 @@ def _close_provider_negative_response(
             )
             .all()
         )
-    
+
         req = _pick_by_type(
             rows,
             explicit_identifier=True,
@@ -18127,7 +19207,7 @@ def _close_provider_negative_response(
             .limit(20)
             .all()
         )
-        
+
         _add_match(
             _pick_by_type(
                 rows,
@@ -18390,7 +19470,7 @@ def _pick_matching_processing_req_for_pdf(
 
     if not candidates and lookup_id:
         today_limit = _utc_now_naive() - timedelta(hours=18)
-    
+
         candidates = (
             db.query(RequestLog)
             .filter(
@@ -18405,7 +19485,7 @@ def _pick_matching_processing_req_for_pdf(
             .limit(20)
             .all()
         )
-    
+
         print("PROVIDER_PDF_MATCH_STAGE_ANY_GROUP =", [
             {
                 "id": r.id,
@@ -18446,7 +19526,7 @@ def _pick_matching_processing_req_for_pdf(
         "candidate_ids": [r.id for r in candidates],
         "candidate_types": [r.act_type for r in candidates],
     }, flush=True)
-    
+
     # Si el PDF trae tipo claro y hay candidatos con la misma CURP,
     # escoger SOLO el request cuyo tipo coincida.
     if detected_pdf_type:
@@ -18454,7 +19534,7 @@ def _pick_matching_processing_req_for_pdf(
             r for r in candidates
             if is_chain(r.curp) or _expected_act_type_group(r.act_type) == detected_pdf_type
         ]
-    
+
         if len(typed_candidates) == 1:
             r = typed_candidates[0]
             print("PROVIDER_PDF_SMART_DETECTED_TYPE_MATCH =", {
@@ -18465,7 +19545,7 @@ def _pick_matching_processing_req_for_pdf(
                 "matched_instance_name": r.instance_name,
             }, flush=True)
             return r
-    
+
         if len(typed_candidates) > 1:
             provider14_only = all(
                 (r.provider_name or "").strip().upper()
@@ -18597,12 +19677,12 @@ def _pick_matching_processing_req_for_pdf(
                 "typed_candidate_instances": [r.instance_name for r in typed_candidates],
             }, flush=True)
             return None
-    
+
     # Si no detectó tipo claro, usa validación vieja SOLO si hay un candidato.
     # Si hay varios con misma CURP, no escoger por antigüedad porque puede cruzar nacimiento/matrimonio.
     if len(candidates) == 1:
         r = candidates[0]
-    
+
         if _pdf_matches_req_type(pdf_bytes, r):
             print("PROVIDER_PDF_SINGLE_CANDIDATE_TYPE_OK =", {
                 "matched_req_id": r.id,
@@ -18611,7 +19691,7 @@ def _pick_matching_processing_req_for_pdf(
                 "matched_instance_name": r.instance_name,
             }, flush=True)
             return r
-    
+
         print("PROVIDER_PDF_SINGLE_CANDIDATE_TYPE_UNCONFIRMED_SOFT_MATCH =", {
             "matched_req_id": r.id,
             "matched_act_type": r.act_type,
@@ -18619,7 +19699,7 @@ def _pick_matching_processing_req_for_pdf(
             "matched_instance_name": r.instance_name,
         }, flush=True)
         return r
-    
+
     if len(candidates) > 1:
         same_request_keys = {
             (
@@ -18680,7 +19760,7 @@ def _pick_matching_processing_req_for_pdf(
     if lookup_id:
         try:
             today_limit = _utc_now_naive() - timedelta(hours=18)
-    
+
             debug_rows = (
                 db.query(RequestLog)
                 .filter(
@@ -18693,7 +19773,7 @@ def _pick_matching_processing_req_for_pdf(
             )
         except Exception as dbg_exc:
             print("PROVIDER_PDF_UNMATCHED_DB_DEBUG_ERROR =", str(dbg_exc), flush=True)
-    
+
     print("PROVIDER_PDF_NO_SAFE_TYPE_MATCH =", {
         "lookup_id": lookup_id,
         "source_chat_id": source_chat_id,
@@ -18701,7 +19781,7 @@ def _pick_matching_processing_req_for_pdf(
         "webhook_instance_name": instance_name,
         "candidates": len(candidates),
     }, flush=True)
-    
+
     print("PROVIDER_PDF_UNMATCHED_DB_DEBUG =", [
         {
             "id": r.id,
@@ -18718,7 +19798,7 @@ def _pick_matching_processing_req_for_pdf(
         }
         for r in debug_rows
     ], flush=True)
-    
+
     return None
 
 
@@ -18783,7 +19863,7 @@ def _is_admin(requester_wa_id: str, from_me: bool = False) -> bool:
     requester = requester.replace("+", "").replace(" ", "").strip()
 
     return from_me or requester in admins
-    
+
 
 def _reply_to_origin(source_group_id: str | None, requester_wa_id: str, text: str, instance_name: str = None):
     if source_group_id:
@@ -19361,7 +20441,7 @@ def _providers_status_text(db: Session) -> str:
                 f" | CURP restantes: {curp_left if curp_left is not None else 'N/D'}"
                 f" | CADENA restantes: {cadena_left if cadena_left is not None else 'N/D'}"
             )
-    
+
     if p4.is_enabled:
         if p4_cached.get("error"):
             provider4_extra = f" | ERROR: {p4_cached.get('error')}"
@@ -19895,7 +20975,7 @@ def list_blocked_groups() -> list[str]:
             out.append(str(v))
     out.sort()
     return out
-    
+
 
 @app.post("/panel/group/{group_jid}/name")
 def panel_set_group_name(
@@ -20333,7 +21413,7 @@ def _unwrap_message(msg: dict) -> dict:
         break
 
     return current
-    
+
 
 def _get_latest_request(
     db: Session,
@@ -20489,11 +21569,11 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         #print("WEBHOOK PAYLOAD =", payload, flush=True)
         event = payload.get("event", "")
         data = payload.get("data", {})
-        
+
         instance_name = payload.get("instance", "default")
         print("WEBHOOK_INSTANCE =", instance_name, flush=True)
         print("WEBHOOK_IS_INSTANCE_BLOCKED =", is_instance_blocked(instance_name), flush=True)
-        
+
         event_norm = str(event or "").strip().lower()
 
         if event_norm not in {"messages.upsert", "messages_upsert"}:
@@ -20585,7 +21665,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                 message = nested_message
                 break
-        
+
         # =====================================================
         # DESCARTE TEMPRANO DE EVENTOS VACIOS DE EVOLUTION
         # =====================================================
@@ -20603,7 +21683,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         from_me = key.get("fromMe", False)
         participant = key.get("participant", "")
         msg_id = key.get("id", "")
-        
+
         is_group = remote_jid.endswith("@g.us")
         source_chat_id = remote_jid
         source_group_id = remote_jid if is_group else None
@@ -20615,9 +21695,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         print("ADMIN_DEBUG_SENDER =", data.get("sender", ""), flush=True)
         print("ADMIN_DEBUG_REQUESTER_WA_ID =", requester_wa_id, flush=True)
         print("ADMIN_DEBUG_ADMIN_PHONES =", settings.ADMIN_PHONE, flush=True)
-        
+
         text_body = ""
-        
+
         if "conversation" in message:
             text_body = message.get("conversation", "")
 
@@ -20627,7 +21707,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 .get("extendedTextMessage", {})
                 .get("text", "")
             )
-        
+
         text_upper = normalize_text(text_body)
 
         message_keys = (
@@ -20687,14 +21767,14 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 "ok": True,
                 "ignored": "bot_to_bot",
             }
-            
+
         # =========================
         # BLOQUEO DE BUCLE ENTRE BOTS
         # =========================
         if from_me and not text_upper.startswith("/"):
             print("IGNORED_REASON = from_me_early", flush=True)
             return {"ok": True, "ignored": "from_me_early"}
-        
+
         BOT_WARNING_PHRASES = [
             "LA CADENA, IDENTIFICADOR ELECTRONICO O CODIGO DE VERIFICACION",
             "DEBE TENER EXACTAMENTE 20 DIGITOS",
@@ -20705,7 +21785,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             "CURP INCORRECTA O INCOMPLETA",
             "CADENA INCORRECTA O INCOMPLETA",
         ]
-        
+
         if any(p in text_upper for p in BOT_WARNING_PHRASES):
             print("IGNORED_REASON = bot_warning_text", flush=True)
             print("BOT_WARNING_TEXT =", repr(text_body[:120]), flush=True)
@@ -20714,7 +21794,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         if is_bot_generated_text(text_body):
             print("WEBHOOK_IGNORED_BOT_GENERATED_TEXT =", repr(text_body[:100]), flush=True)
             return {"ok": True, "ignored": "bot_generated_text"}
-        
+
         admin_commands = (
             "/GROUPID",
             "/ADDGROUP",
@@ -20741,7 +21821,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         print("EARLY_FROM_ME =", from_me, flush=True)
         print("EARLY_REMOTE_JID =", remote_jid, flush=True)
         print("EARLY_MESSAGE_KEYS =", list(message.keys()) if isinstance(message, dict) else [], flush=True)
-        
+
         if from_me and not any(text_upper.startswith(cmd) for cmd in admin_commands):
             print("IGNORED_REASON = from_me", flush=True)
             print("IGNORED_FROM_ME_REMOTE_JID =", remote_jid, flush=True)
@@ -20751,14 +21831,14 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         provider_groups = _all_provider_groups()
         is_provider_message = source_chat_id in provider_groups
         is_admin_command = text_upper.startswith("/")
-        
+
         if is_group and not is_provider_message and not is_admin_command:
             ignore_group, ignore_reason = _should_ignore_group_for_instance(
                 db,
                 source_group_id,
                 instance_name,
             )
-        
+
             if ignore_group:
                 print("IGNORED_GROUP_AUTH_EARLY =", {
                     "reason": ignore_reason,
@@ -20766,7 +21846,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     "instance_name": instance_name,
                     "text": text_body[:120],
                 }, flush=True)
-        
+
                 return {
                     "ok": True,
                     "ignored": ignore_reason,
@@ -20812,7 +21892,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             },
             flush=True,
         )
-        
+
         if is_group and not is_provider_message:
             try:
                 _ensure_group_owner(db, source_group_id, instance_name)
@@ -20828,13 +21908,13 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 "⚠️ Este bot alcanzó su límite de solicitudes.\n\n"
                 "Por el momento está bloqueado para nuevas entradas."
             )
-        
+
             if source_group_id:
                 if should_send_extra_text(source_group_id):
                     send_group_text(source_group_id, msg, instance_name)
             else:
                 send_text(requester_wa_id, msg, instance_name)
-        
+
             return {"ok": True, "ignored": "instance_blocked"}
 
         print("WEBHOOK_SOURCE_GROUP_ID =", source_group_id, flush=True)
@@ -20844,14 +21924,14 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             print("IGNORED_REASON = group_blocked", flush=True)
             print("IGNORED_GROUP =", source_group_id, flush=True)
             print("IGNORED_INSTANCE =", instance_name, flush=True)
-        
+
             if (instance_name or "").strip() == MAIN_PANEL_INSTANCE:
                 msg = (
                     "🔒 Servicio pausado\n"
                     "Este grupo tiene un pago pendiente.\n\n"
                     "Contacta al administrador para reactivarlo."
                 )
-                
+
                 try:
                     if should_send_extra_text(source_group_id):
                         send_group_text(
@@ -20861,9 +21941,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         )
                 except Exception as e:
                     print("BLOCKED_GROUP_PAYMENT_NOTICE_ERROR =", str(e), flush=True)
-        
+
             return {"ok": True, "ignored": "group_blocked_payment_pending"}
-    
+
         terms = extract_request_terms(text_body)
         problem = detect_identifier_problem(text_body)
 
@@ -20900,7 +21980,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             quoted_msg_id = _extract_quoted_message_id(message, data)
             text_norm = (text_body or "").strip().upper()
-            
+
             print("PROVIDER_QUOTED_MSG_ID =", quoted_msg_id, flush=True)
             print("PROVIDER_TEXT_NORM =", text_norm, flush=True)
 
@@ -21234,32 +22314,32 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             doc = None
             doc_mode = "none"
             media_message_id = msg_id
-            
+
             msg_unwrapped = _unwrap_message(message) or message
-            
+
             if "documentMessage" in msg_unwrapped:
                 doc_mode = "direct_document"
                 doc = msg_unwrapped.get("documentMessage")
                 media_message_id = msg_id
-            
+
             elif "documentWithCaptionMessage" in msg_unwrapped:
                 doc_mode = "direct_document_with_caption"
                 doc_wrap = msg_unwrapped.get("documentWithCaptionMessage", {})
                 doc = doc_wrap.get("message", {}).get("documentMessage")
                 media_message_id = msg_id
-            
+
             elif "extendedTextMessage" in msg_unwrapped:
                 ext = msg_unwrapped.get("extendedTextMessage", {})
                 ctx = ext.get("contextInfo", {}) or {}
                 quoted = _unwrap_message(ctx.get("quotedMessage", {}) or {})
-            
+
                 quoted_doc_msg_id = ctx.get("stanzaId", "") or ctx.get("quotedStanzaID", "") or ""
-            
+
                 if "documentMessage" in quoted:
                     doc_mode = "quoted_document"
                     doc = quoted.get("documentMessage")
                     media_message_id = quoted_doc_msg_id or msg_id
-            
+
                 elif "documentWithCaptionMessage" in quoted:
                     doc_mode = "quoted_document_with_caption"
                     doc_wrap = quoted.get("documentWithCaptionMessage", {})
@@ -21373,24 +22453,24 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             if doc:
                 filename = doc.get("fileName") or ""
                 filename_id = _extract_identifier_from_filename_local(filename)
-                
+
                 doc_caption = (
                     doc.get("caption")
                     or doc.get("title")
                     or doc.get("fileName")
                     or ""
                 )
-                
+
                 caption_id = _extract_provider_identifier_loose(doc_caption or "")
-                
+
                 print("PROVIDER_DOC_FILENAME =", filename, flush=True)
                 print("PROVIDER_DOC_FILENAME_IDENTIFIER =", filename_id, flush=True)
                 print("PROVIDER_DOC_CAPTION =", doc_caption, flush=True)
                 print("PROVIDER_DOC_CAPTION_IDENTIFIER =", caption_id, flush=True)
-            
+
                 provider_msg_ts = data.get("messageTimestamp")
                 webhook_received_ts = time.time()
-            
+
                 print("PROVIDER_EVENT_MESSAGE_TIMESTAMP =", provider_msg_ts, flush=True)
                 print("WEBHOOK_RECEIVED_TS =", webhook_received_ts, flush=True)
 
@@ -21401,21 +22481,21 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         print("PROVIDER_TO_WEBHOOK_LAG_S =", round(lag_s, 3), flush=True)
                 except Exception as ts_exc:
                     print("PROVIDER_TO_WEBHOOK_LAG_ERROR =", str(ts_exc), flush=True)
-            
+
                 pdf_received_ts = time.time()
                 print("PROVIDER1_PDF_RECEIVED =", media_message_id, pdf_received_ts, flush=True)
-            
+
                 open_req = None
                 lookup_id = filename_id or provider_id or caption_id
-            
+
                 media_b64_start_ts = time.time()
                 print("PROVIDER1_MEDIA_B64_START =", media_message_id, media_b64_start_ts, flush=True)
                 print("PDF_RECEIVED_TO_MEDIA_B64_START_S =", round(media_b64_start_ts - pdf_received_ts, 3), flush=True)
-            
+
                 t_media_b64_start = time.perf_counter()
                 t0 = time.perf_counter()
                 print("T_DOC_DETECTED =", source_chat_id, media_message_id, flush=True)
-            
+
                 t1 = time.perf_counter()
 
                 try:
@@ -21425,14 +22505,14 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         "filename": filename,
                         "lookup_id": lookup_id,
                     }, flush=True)
-                
+
                     media_json = get_media_base64("document", media_message_id, instance_name)
-                
+
                     print("GET_MEDIA_BASE64_CALL_OK =", {
                         "media_message_id": media_message_id,
                         "elapsed_s": round(time.perf_counter() - t1, 3),
                     }, flush=True)
-                
+
                 except Exception as media_exc:
                     print(
                         "GET_MEDIA_BASE64_CALL_ERROR =",
@@ -21445,7 +22525,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         },
                         flush=True,
                     )
-                
+
                     # El msg_id se marcó como visto al entrar al webhook.
                     # Como la descarga falló por una causa transitoria,
                     # se libera para permitir que Evolution lo reenvíe.
@@ -21459,7 +22539,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         instance_name=instance_name,
                         reason="provider_pdf_media_download_failed_retryable",
                     )
-                
+
                     return {
                         "ok": True,
                         "ignored": (
@@ -21467,9 +22547,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         ),
                         "error": str(media_exc),
                     }
-                
+
                 print("T_GET_MEDIA_BASE64 =", round(time.perf_counter() - t1, 3), flush=True)
-            
+
                 print(
                     "PROVIDER1_MEDIA_B64_DONE =",
                     media_message_id,
@@ -21485,14 +22565,14 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     or media_json.get("media")
                     or ""
                 )
-                
+
                 if not media_b64:
                     print(
                         "PROVIDER_PDF_BASE64_EMPTY =",
                         media_json,
                         flush=True,
                     )
-                
+
                     release_webhook_msg_seen(
                         msg_id,
                         instance_name,
@@ -21503,18 +22583,18 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         instance_name=instance_name,
                         reason="provider_pdf_base64_empty_retryable",
                     )
-                
+
                     return {
                         "ok": True,
                         "ignored": "provider_pdf_base64_empty_retryable",
                     }
-                
+
                 if media_b64.startswith("data:"):
                     parts = media_b64.split(",", 1)
                     media_b64 = parts[1] if len(parts) > 1 else media_b64
-                
+
                 media_b64 = media_b64.replace("\n", "").replace("\r", "").strip()
-                
+
                 missing_padding = len(media_b64) % 4
                 if missing_padding:
                     media_b64 += "=" * (4 - missing_padding)
@@ -21526,7 +22606,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         media_b64,
                         validate=False,
                     )
-                
+
                 except Exception as decode_exc:
                     print(
                         "PROVIDER_PDF_BASE64_DECODE_ERROR =",
@@ -21540,7 +22620,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         },
                         flush=True,
                     )
-                
+
                     release_webhook_msg_seen(
                         msg_id,
                         instance_name,
@@ -21551,28 +22631,28 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         instance_name=instance_name,
                         reason="provider_pdf_base64_decode_failed_retryable",
                     )
-                
+
                     return {
                         "ok": True,
                         "ignored": "provider_pdf_base64_decode_failed_retryable",
                         "error": str(decode_exc),
                     }
-                
+
                 print(
                     "T_BASE64_DECODE =",
                     round(time.perf_counter() - t_decode, 3),
                     flush=True,
                 )
-                
+
                 print("PDF_HEADER =", pdf_bytes[:8], flush=True)
                 print("PDF_BYTES_LEN =", len(pdf_bytes), flush=True)
-                
+
                 if b"%PDF" not in pdf_bytes[:20]:
                     print(
                         "PROVIDER_PDF_INVALID_BINARY",
                         flush=True,
                     )
-                
+
                     release_webhook_msg_seen(
                         msg_id,
                         instance_name,
@@ -21583,7 +22663,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         instance_name=instance_name,
                         reason="provider_pdf_invalid_binary_retryable",
                     )
-                
+
                     return {
                         "ok": True,
                         "ignored": "provider_pdf_invalid_binary_retryable",
@@ -21597,7 +22677,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     pdf_bytes=pdf_bytes,
                     instance_name=instance_name,
                 )
-                
+
                 print("PROVIDER_PDF_FALLBACK_MATCH =", {
                     "lookup_id": lookup_id,
                     "quoted_msg_id": quoted_msg_id,
@@ -21607,7 +22687,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     "matched_instance_name": getattr(open_req, "instance_name", None),
                     "matched_act_type": getattr(open_req, "act_type", None),
                 }, flush=True)
-                
+
                 if not open_req:
                     print(
                         "PROVIDER_PDF_WITHOUT_SAFE_MATCH =",
@@ -21621,16 +22701,16 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         },
                         flush=True,
                     )
-                
+
                     fallback_req = None
                     fallback_filters = None
-                
+
                     if lookup_id:
                         fallback_filters = [
                             RequestLog.curp == lookup_id,
                             _provider_pdf_match_status_filter(),
                         ]
-                
+
                         fallback_req = (
                             db.query(RequestLog)
                             .filter(*fallback_filters)
@@ -21643,20 +22723,20 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             )
                             .first()
                         )
-                
+
                     if fallback_req and fallback_filters:
                         active_count = (
                             db.query(RequestLog)
                             .filter(*fallback_filters)
                             .count()
                         )
-                
+
                         print(
                             "PROVIDER_PDF_LAST_RESORT_ACTIVE_COUNT =",
                             active_count,
                             flush=True,
                         )
-                
+
                         if active_count == 1:
                             print(
                                 "PROVIDER_PDF_LAST_RESORT_MATCH =",
@@ -21664,7 +22744,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                                 flush=True,
                             )
                             open_req = fallback_req
-                
+
                         else:
                             print(
                                 "PROVIDER_PDF_LAST_RESORT_AMBIGUOUS =",
@@ -21713,7 +22793,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                                 ),
                                 "retry_scheduled": retry_scheduled,
                             }
-                
+
                     else:
                         # Puede ser una carrera:
                         # el proveedor respondió antes de que la solicitud quedara
@@ -21728,7 +22808,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             instance_name=instance_name,
                             reason="provider_pdf_without_safe_match_retryable",
                         )
-                
+
                         print(
                             "PROVIDER_PDF_MATCH_RETRY_RELEASED =",
                             {
@@ -21739,7 +22819,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             },
                             flush=True,
                         )
-                
+
                         return {
                             "ok": True,
                             "ignored": "provider_pdf_without_safe_match_retryable",
@@ -21761,14 +22841,14 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         "filename": filename,
                         "source_chat_id": source_chat_id,
                     }, flush=True)
-                
+
                     reroute_req = _find_same_curp_req_by_act_type(
                         db,
                         curp=open_req.curp,
                         provider_group_id=source_chat_id,
                         detected_type=detected_pdf_type,
                     )
-                
+
                     if reroute_req and reroute_req.id != open_req.id:
                         print("PROVIDER_PDF_REROUTED_TO_SAME_CURP_CORRECT_ACT_TYPE =", {
                             "old_req_id": open_req.id,
@@ -21778,16 +22858,16 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             "detected_pdf_type": detected_pdf_type,
                             "filename": filename,
                         }, flush=True)
-                
+
                         open_req = reroute_req
                         is_chain_req = is_chain(open_req.curp)
-                
+
                     else:
                         open_req.status = "PROCESSING"
                         open_req.error_message = "WRONG_ACT_TYPE_PDF_PENDING_RETRY"
                         open_req.updated_at = _utc_now_naive()
                         db.commit()
-                
+
                         try:
                             support_key = f"support_wrong_type_pending:{open_req.id}"
                             if redis_conn.set(support_key, "1", ex=120, nx=True):
@@ -21803,39 +22883,39 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                                 )
                         except Exception as support_exc:
                             print("NOTIFY_SUPPORT_ERROR_FAILED =", str(support_exc), flush=True)
-                
+
                         return {"ok": True, "ignored": "provider_pdf_wrong_act_type_pending_retry"}
-                
+
                 if is_chain_req:
                     print("PROVIDER_CHAIN_SKIP_ACT_TYPE_VALIDATION =", open_req.curp, flush=True)
-                
+
                 if not is_chain_req:
                     term_check = _validate_pdf_term_detailed(
                         pdf_bytes,
                         open_req.curp,
                         open_req.act_type,
                     )
-                
+
                     term_status = term_check.get("status")
                     term_reason = term_check.get("reason")
                     found_curps = term_check.get("found_curps") or []
-                
+
                     expected_term_norm = re.sub(r"[^A-Z0-9]", "", (open_req.curp or "").upper())
                     filename_id_norm = re.sub(r"[^A-Z0-9]", "", (filename_id or "").upper())
                     provider_id_norm = re.sub(r"[^A-Z0-9]", "", (provider_id or "").upper())
-                
+
                     filename_matches_expected = bool(
                         expected_term_norm
                         and filename_id_norm
                         and filename_id_norm == expected_term_norm
                     )
-                
+
                     provider_text_matches_expected = bool(
                         expected_term_norm
                         and provider_id_norm
                         and provider_id_norm == expected_term_norm
                     )
-                
+
                     if term_status == "MISMATCH":
                         print("PROVIDER_PDF_WRONG_INTERNAL_CURP =", {
                             "req_id": open_req.id,
@@ -21847,12 +22927,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             "provider_id": provider_id,
                             "source_chat_id": source_chat_id,
                         }, flush=True)
-                
+
                         open_req.status = "PROCESSING"
                         open_req.error_message = "WRONG_CURP_IN_PDF_PENDING_RETRY"
                         open_req.updated_at = _utc_now_naive()
                         db.commit()
-                
+
                         try:
                             support_key = f"support_wrong_curp_pending:{open_req.id}"
                             if redis_conn.set(support_key, "1", ex=120, nx=True):
@@ -21868,9 +22948,9 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                                 )
                         except Exception as support_exc:
                             print("NOTIFY_SUPPORT_WRONG_CURP_PENDING_FAILED =", str(support_exc), flush=True)
-                
+
                         return {"ok": True, "ignored": "provider_pdf_wrong_internal_curp_pending_retry"}
-                
+
                     if term_status == "UNCERTAIN":
                         # Aquí NO hay CURP interna diferente.
                         # Solo no se pudo leer bien el texto interno.
@@ -21896,12 +22976,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                                 "reason": term_reason,
                                 "source_chat_id": source_chat_id,
                             }, flush=True)
-                
+
                             open_req.status = "PROCESSING"
                             open_req.error_message = "WRONG_CURP_IN_PDF_PENDING_RETRY"
                             open_req.updated_at = _utc_now_naive()
                             db.commit()
-                
+
                             try:
                                 support_key = f"support_wrong_curp_uncertain:{open_req.id}"
                                 if redis_conn.set(support_key, "1", ex=120, nx=True):
@@ -21918,37 +22998,37 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                                     )
                             except Exception as support_exc:
                                 print("NOTIFY_SUPPORT_WRONG_CURP_UNCERTAIN_FAILED =", str(support_exc), flush=True)
-                
+
                             return {"ok": True, "ignored": "provider_pdf_curp_uncertain_pending_retry"}
 
                 if open_req.provider_name == "PROVIDER8":
                     try:
                         from app.services.provider7 import procesar_pdf_externo_provider8
-                
+
                         result = procesar_pdf_externo_provider8(
                             pdf_bytes=pdf_bytes,
                             term=open_req.curp,
                             act_type=open_req.act_type,
                             filename=filename or f"{open_req.curp}.pdf",
                         )
-                
+
                         pdf_bytes = result["pdf_bytes"]
-                
+
                         print("PROVIDER8_POSTPROCESS_OK =", {
                             "req_id": open_req.id,
                             "estado": result.get("estado"),
                             "folio": result.get("folio"),
                             "pdf_bytes_len": len(pdf_bytes),
                         }, flush=True)
-                
+
                     except Exception as e:
                         print("PROVIDER8_POSTPROCESS_ERROR =", str(e), flush=True)
-                
+
                         open_req.status = "ERROR"
                         open_req.error_message = f"PROVIDER8_POSTPROCESS_ERROR: {str(e)[:300]}"
                         open_req.updated_at = _utc_now_naive()
                         db.commit()
-                
+
                         try:
                             _notify_support_error(
                                 open_req,
@@ -21957,13 +23037,13 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             )
                         except Exception as support_exc:
                             print("PROVIDER8_POSTPROCESS_SUPPORT_NOTIFY_ERROR =", str(support_exc), flush=True)
-                
+
                         return {"ok": True, "ignored": "provider8_postprocess_failed"}
-                
+
                 t_encode = time.perf_counter()
                 safe_media_b64 = base64.b64encode(pdf_bytes).decode()
                 print("T_BASE64_REENCODE_FINAL =", round(time.perf_counter() - t_encode, 3), flush=True)
-                
+
                 # Dedupe fuerte:
                 # 1) provider_pdf_done = solo si ya se entregó correctamente.
                 # 2) provider_pdf_sending = candado temporal mientras se está entregando.
@@ -21971,17 +23051,17 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 if redis_conn.get(done_key):
                     print("PROVIDER_PDF_ALREADY_DONE_IGNORED =", done_key, flush=True)
                     return {"ok": True, "ignored": "provider_pdf_already_done"}
-                
+
                 sending_key = f"provider_pdf_sending:{open_req.id}"
                 already_processing = redis_conn.set(sending_key, "1", ex=300, nx=True)
-                
+
                 if not already_processing:
                     print("PROVIDER_PDF_DUPLICATE_SENDING_IGNORED =", sending_key, flush=True)
                     return {"ok": True, "ignored": "provider_pdf_duplicate_sending"}
-                
+
                 match_term = filename_id or provider_id or open_req.curp or "NO_TERM"
                 pdf_dedupe_key = f"provider_pdf:{open_req.id}:{source_chat_id}:{match_term}:{filename or 'nofile'}"
-                
+
                 already_sent = redis_conn.set(pdf_dedupe_key, "1", ex=3600, nx=True)
                 if not already_sent:
                     print("PROVIDER_PDF_DUPLICATE_IGNORED =", pdf_dedupe_key, flush=True)
@@ -21992,7 +23072,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         print("PDF_SENDING_DELETE_AFTER_DUPLICATE_ERROR =", str(redis_del_exc), flush=True)
 
                     return {"ok": True, "ignored": "provider_pdf_duplicate"}
-                
+
                 open_req.pdf_url = None
                 open_req.provider_media_url = "BASE64_FROM_MEDIA_MESSAGE"
                 open_req.status = "PROCESSING"
@@ -22051,7 +23131,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     "source_group_id": open_req.source_group_id,
                     "doc_mode": doc_mode,
                 }, flush=True)
-    
+
                 total_relay_s = None
                 t4 = time.perf_counter()
                 try:
@@ -22300,7 +23380,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 open_req.error_message = None
                 open_req.updated_at = _utc_now_naive()
                 db.commit()
-                
+
                 try:
                     redis_conn.set(done_key, "1", ex=3600)
                     redis_conn.delete(sending_key)
@@ -22360,10 +23440,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             print("BOT_BLOCKED_NOW =", blocked_now, flush=True)
                         else:
                             print("BOT_INSTANCE_MISSING_FOR_REQ =", open_req.id, flush=True)
-                
+
                     except Exception as bot_limit_exc:
                         print("BOT_LIMIT_UPDATE_ERROR =", str(bot_limit_exc), flush=True)
-                
+
                     t3 = time.perf_counter()
                     try:
                          from app.worker import _handle_group_promotion_after_done
@@ -22392,14 +23472,14 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     print("TOTAL_DELIVERY_TIME =", open_req.total_delivery_time, flush=True)
                 except Exception as e:
                     print("TOTAL_DELIVERY_TIME_ERROR =", str(e), flush=True)
-                
+
                 t_save = time.perf_counter()
                 db.commit()
                 print("T_DB_COMMIT_FINAL_METRICS =", round(time.perf_counter() - t_save, 3), flush=True)
-                
+
                 print("T_TOTAL_PROVIDER1_RELAY =", total_relay_s, flush=True)
                 print("PROVIDER1_PDF_RELAYED =", open_req.id, time.time(), flush=True)
-        
+
                 return {"ok": True, "provider_result": "pdf_delivered"}
 
             # 2) SI NO HAY PDF, INTENTAR TEXTO
@@ -22413,22 +23493,22 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             # Esos ya se manejan arriba por quoted_msg_id.
             if text_body and _is_no_record_message(text_upper):
                 no_record_ids = _extract_provider_no_record_identifiers(text_body)
-            
+
                 # Fallback viejo: por si viene un solo dato y extract_identifier_loose sí lo detectó.
                 if not no_record_ids and provider_id:
                     no_record_ids = [provider_id]
-            
+
                 if not no_record_ids:
                     print("PROVIDER_NO_RECORD_WITHOUT_IDENTIFIER =", {
                         "text_body": text_body,
                         "source_chat_id": source_chat_id,
                     }, flush=True)
-            
+
                     return {"ok": True, "ignored": "provider_no_record_without_identifier"}
-            
+
                 matched_req_ids = []
                 unmatched_ids = []
-            
+
                 for no_record_id in no_record_ids:
                     open_req = (
                         db.query(RequestLog)
@@ -22440,7 +23520,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         .order_by(RequestLog.created_at.asc())
                         .first()
                     )
-            
+
                     if not open_req:
                         open_req = (
                             db.query(RequestLog)
@@ -22451,7 +23531,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             .order_by(RequestLog.created_at.desc())
                             .first()
                         )
-            
+
                         print("PROVIDER_NO_RECORD_FALLBACK_MATCH =", {
                             "provider_id": no_record_id,
                             "matched_req_id": getattr(open_req, "id", None),
@@ -22459,31 +23539,31 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             "matched_source_group_id": getattr(open_req, "source_group_id", None),
                             "matched_instance_name": getattr(open_req, "instance_name", None),
                         }, flush=True)
-            
+
                     if not open_req:
                         unmatched_ids.append(no_record_id)
                         continue
-            
+
                     print("PROVIDER_NO_RECORD_MATCHED_REQ_ID =", open_req.id, flush=True)
                     print("PROVIDER_NO_RECORD_MATCHED_CURP =", open_req.curp, flush=True)
-            
+
                     open_req.status = "ERROR"
                     open_req.error_message = "SIN REGISTRO"
                     open_req.updated_at = _utc_now_naive()
                     db.commit()
-            
+
                     _notify_client_no_record(
                         open_req
                     )
-            
+
                     matched_req_ids.append(open_req.id)
-            
+
                 print("PROVIDER_NO_RECORD_TEXT_LIST_RESULT =", {
                     "ids_detected": no_record_ids,
                     "matched_req_ids": matched_req_ids,
                     "unmatched_ids": unmatched_ids,
                 }, flush=True)
-            
+
                 if matched_req_ids:
                     return {
                         "ok": True,
@@ -22491,7 +23571,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         "matched_req_ids": matched_req_ids,
                         "unmatched_ids": unmatched_ids,
                     }
-            
+
                 print("PROVIDER_NO_RECORD_WITHOUT_MATCH =", {
                     "text_body": text_body,
                     "ids_detected": no_record_ids,
@@ -22528,7 +23608,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     "ignored": "provider_no_record_without_match_retryable",
                     "retry_scheduled": retry_scheduled,
                 }
-            
+
             print("PROVIDER_RAW_MESSAGE_KEYS =", list(message.keys()), flush=True)
             print("PROVIDER_RAW_MESSAGE =", message, flush=True)
             print("PROVIDER_UNHANDLED_MESSAGE =", message, flush=True)
@@ -22665,7 +23745,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 send_text(requester_wa_id, "⚠️ Usa /GROUPID dentro de un grupo.", instance_name=instance_name)
 
             return {"ok": True}
-        
+
         if text_upper.startswith("/ADDGROUP"):
             if not _is_admin(requester_wa_id, from_me):
                 print("ADDGROUP_DENIED_USER =", requester_wa_id, flush=True)
@@ -22845,7 +23925,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
             _reply_to_origin(source_group_id, requester_wa_id, "✅ PROVIDER2 desactivado")
             return {"ok": True}
-        
+
         # =========================
         # FLUJO NORMAL DE USUARIO
         # =========================
@@ -22855,7 +23935,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 is_authorized_group(db, source_group_id)
                 or (ALLOW_LEGACY_KNOWN_GROUPS and is_legacy_known_group(db, source_group_id))
             )
-        
+
             if not group_allowed:
                 print("IGNORED_REASON = group_not_authorized", flush=True)
                 print("IGNORED_GROUP =", source_group_id, flush=True)
@@ -22866,30 +23946,30 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             print("IGNORED_REASON = user_not_authorized", flush=True)
             print("IGNORED_USER =", requester_wa_id, flush=True)
             return {"ok": True, "ignored": "user_not_authorized"}
-        
+
         if not text_body:
             print("IGNORED_REASON = no_text", flush=True)
             return {"ok": True, "ignored": "no_text"}
-        
+
         print("REQUEST_TEXT =", text_body, flush=True)
         print("REQUEST_TERMS =", terms, flush=True)
-        
+
         if not terms:
             print("IGNORED_REASON = no_identifier", flush=True)
-        
+
             problem_msg = detect_identifier_problem(text_body)
-        
+
             if problem_msg:
                 final_msg = problem_msg
-        
+
                 if source_group_id:
                     if should_send_extra_text(source_group_id):
                         send_group_text(source_group_id, final_msg, instance_name=instance_name)
                 else:
                     send_text(requester_wa_id, final_msg, instance_name=instance_name)
-        
+
             return {"ok": True, "ignored": "no_identifier"}
-        
+
         requester_display_name = (
             (push_name or "").strip()
             or requester_wa_id
@@ -22928,7 +24008,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 },
                 flush=True,
             )
-        
+
             #last_done = get_last_done_request(db, term, act_type)
             last_req = _get_latest_request(db, term, act_type, source_chat_id)
 
@@ -22957,13 +24037,13 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                             bot_name=client_bot_name,
                             dato=term,
                         )
-    
+
                         if source_group_id:
                             if should_send_extra_text(source_group_id):
                                 send_group_text(source_group_id, done_msg, instance_name=instance_name)
                         else:
                             send_text(requester_wa_id, done_msg, instance_name=instance_name)
-    
+
                         continue
 
                 # La misma CURP/cadena ya está viva. NO crear otro RequestLog.
@@ -23048,7 +24128,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         flush=True,
                     )
                     continue
-        
+
             # ========================================================
             # PROVIDER14 RESULT_TIMEOUT: VENTANA DE PDF TARDÍO
             # ========================================================
