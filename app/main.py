@@ -9800,7 +9800,7 @@ def _is_hidden_panel_group(gid: str | None, name: str | None) -> bool:
 
 # ============================================================
 # PROVIDER16_ACCOUNTS_PANEL_V2
-# SIDEA1..SIDEA6 · panel seguro y compacto
+# SIDEA1..SIDEA7 · panel seguro y compacto
 # ============================================================
 
 @app.get(
@@ -9836,6 +9836,7 @@ def panel_sidea_accounts(
         "sidea4",
         "sidea5",
         "sidea6",
+        "sidea7",
     }:
         focus_slot = ""
 
@@ -10799,7 +10800,7 @@ def panel_sidea_accounts(
       </h1>
 
       <div class="subtitle">
-        Administración de SIDEA1 a SIDEA6
+        Administración de SIDEA1 a SIDEA7
       </div>
     </div>
 
@@ -11498,7 +11499,7 @@ def panel_provider_weight(payload: dict, db: Session = Depends(get_db)):
 
 # ============================================================
 # PROVIDER16_MAIN_DASHBOARD_V1
-# Resumen SIDEA1..SIDEA6 para panel principal
+# Resumen SIDEA1..SIDEA7 para panel principal
 # ============================================================
 
 def _sidea_main_panel_html(

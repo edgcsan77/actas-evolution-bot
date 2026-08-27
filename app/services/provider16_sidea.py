@@ -33,6 +33,64 @@ SIDEA_TIMEZONE = os.getenv(
     "America/Mexico_City",
 ).strip() or "America/Mexico_City"
 
+
+# ============================================================
+# PROVIDER16_OPERATING_WINDOW_V1
+#
+# SIDEA solamente puede iniciar trabajo nuevo entre:
+#
+#   07:00 <= hora CDMX < 22:00
+#
+# A las 22:00 ya se considera cerrado.
+# ============================================================
+
+SIDEA_OPERATING_START_MINUTE = 7 * 60
+SIDEA_OPERATING_END_MINUTE = 22 * 60
+
+
+def sidea_operating_window(
+    now: datetime | None = None,
+) -> dict:
+
+    tz = ZoneInfo(
+        SIDEA_TIMEZONE
+    )
+
+    if now is None:
+        local_now = datetime.now(
+            tz
+        )
+
+    elif now.tzinfo is None:
+        local_now = now.replace(
+            tzinfo=tz
+        )
+
+    else:
+        local_now = now.astimezone(
+            tz
+        )
+
+    minute_of_day = (
+        local_now.hour * 60
+        + local_now.minute
+    )
+
+    is_open = (
+        SIDEA_OPERATING_START_MINUTE
+        <= minute_of_day
+        < SIDEA_OPERATING_END_MINUTE
+    )
+
+    return {
+        "is_open": is_open,
+        "timezone": SIDEA_TIMEZONE,
+        "local_iso": local_now.isoformat(),
+        "start": "07:00",
+        "end": "22:00",
+    }
+
+
 SIDEA_SESSION_TTL_SEC = int(
     os.getenv("SIDEA_SESSION_TTL_SEC", "64800")
 )
@@ -134,7 +192,7 @@ def load_sidea_accounts() -> list[SideaAccount]:
     # SIDEA_DB_ACCOUNTS_V1
     #
     # Configuración central del panel:
-    # SIDEA1..SIDEA6 en PostgreSQL.
+    # SIDEA1..SIDEA7 en PostgreSQL.
     #
     # Si todavía no existe configuración DB,
     # conserva compatibilidad con

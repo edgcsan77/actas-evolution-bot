@@ -6185,11 +6185,50 @@ def _process_provider16(req, db):
     from app.utils.curp import is_chain
 
     from app.services.provider16_sidea import (
+        SideaBusy,
         SideaPool,
         sidea_generate_pdf,
         sidea_generate_pdf_from_chain,
+        sidea_operating_window,
         sidea_resolve_special_curp_to_chain,
     )
+
+    # PROVIDER16_OPERATING_WINDOW_V1
+    #
+    # Este guard ocurre ANTES de cualquier llamada
+    # HTTP / búsqueda / resolución contra SIDEA.
+    operating_window = (
+        sidea_operating_window()
+    )
+
+    if not operating_window[
+        "is_open"
+    ]:
+        print(
+            "PROVIDER16_OUTSIDE_OPERATING_HOURS =",
+            {
+                "request_id": req.id,
+                "timezone": operating_window[
+                    "timezone"
+                ],
+                "local_iso": operating_window[
+                    "local_iso"
+                ],
+                "start": operating_window[
+                    "start"
+                ],
+                "end": operating_window[
+                    "end"
+                ],
+            },
+            flush=True,
+        )
+
+        raise SideaBusy(
+            "SIDEA_OUTSIDE_OPERATING_HOURS:"
+            "07:00-22:00:"
+            "America/Mexico_City"
+        )
 
     term = (
         req.curp
