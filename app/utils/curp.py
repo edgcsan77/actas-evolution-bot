@@ -465,9 +465,18 @@ def extract_typed_request_terms(text: str) -> list[tuple[str, str]]:
     # MATRIMONIO
     items: list[dict] = []
 
-    # Índices de los identificadores encontrados en la última línea
-    # que contenía identificadores.
-    previous_line_indices: list[int] = []
+    # Identificadores consecutivos que todavía tienen
+    # tipo implícito.
+    #
+    # Permite interpretar correctamente:
+    #
+    # CURP1
+    # CURP2
+    # CURP3
+    # DEFUNCION FOLIO
+    #
+    # aplicando DEFUNCION FOLIO a todo el bloque.
+    pending_implicit_indices: list[int] = []
 
     lines = [
         line.strip()
@@ -497,14 +506,20 @@ def extract_typed_request_terms(text: str) -> list[tuple[str, str]]:
         # CURP1 ya tenía NACIMIENTO explícito, por lo que DEFUNCION
         # será contexto para CURP2 y no modificará CURP1.
         # ---------------------------------------------------------
-        if explicit_type and not identifiers and previous_line_indices:
-            for idx in previous_line_indices:
+        if (
+            explicit_type
+            and not identifiers
+            and pending_implicit_indices
+        ):
+            for idx in pending_implicit_indices:
                 if not items[idx]["explicit"]:
                     items[idx]["act_type"] = resolve_type(
                         explicit_type,
                         items[idx]["term"],
                     )
                     items[idx]["explicit"] = True
+
+            pending_implicit_indices = []
 
         # Un tipo explícito también se convierte en contexto para
         # identificadores posteriores.
@@ -550,9 +565,17 @@ def extract_typed_request_terms(text: str) -> list[tuple[str, str]]:
             )
             current_line_indices.append(len(items) - 1)
 
-        # Importante: únicamente la línea inmediatamente anterior con
-        # identificadores puede recibir un tipo escrito después.
-        previous_line_indices = current_line_indices
+        # Una línea con tipo explícito + identificador marca
+        # una nueva frontera y no debe modificar bloques anteriores.
+        if explicit_type and identifiers:
+            pending_implicit_indices = []
+
+        # Acumular solamente identificadores cuyo tipo sigue
+        # siendo implícito. Así un tipo escrito al final puede
+        # aplicarse a todo el bloque consecutivo.
+        for idx in current_line_indices:
+            if not items[idx]["explicit"]:
+                pending_implicit_indices.append(idx)
 
     # Deduplicar por IDENTIFICADOR + TIPO.
     # La misma CURP puede solicitarse legítimamente con dos tipos distintos.

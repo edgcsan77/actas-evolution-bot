@@ -12,6 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import requests
+import fitz
 from pypdf import PdfReader, PdfWriter
 
 
@@ -1150,6 +1151,530 @@ def sidea_rear_path(
         )
 
     return path
+
+
+
+# ============================================================
+# PROVIDER16_INTERNAL_REFERENCE_V1
+#
+# Referencia DERIVADA / INTERNA.
+# NO representa un folio emitido por SIDEA / Registro Civil.
+# ============================================================
+
+_SIDEA_CODE128_PATTERNS = (
+    "212222","222122","222221","121223","121322",
+    "131222","122213","122312","132212","221213",
+    "221312","231212","112232","122132","122231",
+    "113222","123122","123221","223211","221132",
+    "221231","213212","223112","312131","311222",
+    "321122","321221","312212","322112","322211",
+    "212123","212321","232121","111323","131123",
+    "131321","112313","132113","132311","211313",
+    "231113","231311","112133","112331","132131",
+    "113123","113321","133121","313121","211331",
+    "231131","213113","213311","213131","311123",
+    "311321","331121","312113","312311","332111",
+    "314111","221411","431111","111224","111422",
+    "121124","121421","141122","141221","112214",
+    "112412","122114","122411","142112","142211",
+    "241211","221114","413111","241112","134111",
+    "111242","121142","121241","114212","124112",
+    "124211","411212","421112","421211","212141",
+    "214121","412121","111143","111341","131141",
+    "114113","114311","411113","411311","113141",
+    "114131","311141","411131","211412","211214",
+    "211232","2331112",
+)
+
+
+def _sidea_extract_electronic_identifier(
+    pdf_bytes: bytes,
+) -> str:
+    """
+    Extrae SOLO el Identificador Electrónico mostrado
+    en la parte superior de la primera página.
+
+    No usa CADENA ni Código de Verificación.
+    """
+
+    if not pdf_bytes:
+        raise SideaPdfError(
+            "SIDEA_INTERNAL_REF_EMPTY_PDF"
+        )
+
+    try:
+        doc = fitz.open(
+            stream=pdf_bytes,
+            filetype="pdf",
+        )
+    except Exception as exc:
+        raise SideaPdfError(
+            "SIDEA_INTERNAL_REF_PDF_OPEN_ERROR"
+        ) from exc
+
+    try:
+        if doc.page_count != 1:
+            raise SideaPdfError(
+                "SIDEA_INTERNAL_REF_EXPECTED_ONE_PAGE:"
+                f"{doc.page_count}"
+            )
+
+        text = (
+            doc[0].get_text("text")
+            or ""
+        )
+
+    finally:
+        doc.close()
+
+    label = re.search(
+        r"Identificador\s+"
+        r"Electr[oó]nico",
+        text,
+        flags=re.I,
+    )
+
+    if not label:
+        raise SideaPdfError(
+            "SIDEA_INTERNAL_REF_IDENTIFIER_LABEL_NOT_FOUND"
+        )
+
+    # El Identificador Electrónico puede venir:
+    #
+    #   12345678901234567890
+    #
+    # o fragmentado por el layout del PDF:
+    #
+    #   1234 5678 9012 3456 7890
+    #
+    # PyMuPDF puede insertar espacios/saltos aunque
+    # visualmente el número se vea continuo.
+    #
+    # Limitamos la búsqueda al bloque inmediatamente
+    # posterior a la etiqueta y cortamos antes del
+    # Código de Verificación para no confundir ambos.
+    nearby = text[
+        label.end():
+        label.end() + 320
+    ]
+
+    verification_label = re.search(
+        r"C[oó]digo\s+(?:de\s+)?"
+        r"Verificaci[oó]n",
+        nearby,
+        flags=re.I,
+    )
+
+    if verification_label:
+        nearby = nearby[
+            :verification_label.start()
+        ]
+
+    # Primero conservar exactamente el comportamiento
+    # que ya funciona con NACIMIENTO FOLIO.
+    values = re.findall(
+        r"(?<!\d)(\d{20})(?!\d)",
+        nearby,
+    )
+
+    # Fallback seguro:
+    # aceptar únicamente 20 dígitos separados por
+    # espacios, tabs o saltos de línea.
+    if not values:
+        loose_values = re.findall(
+            r"(?<!\d)"
+            r"((?:\d[\s]*){20})"
+            r"(?!\d)",
+            nearby,
+        )
+
+        for raw_value in loose_values:
+            normalized = re.sub(
+                r"\s+",
+                "",
+                raw_value,
+            )
+
+            if re.fullmatch(
+                r"\d{20}",
+                normalized,
+            ):
+                values.append(
+                    normalized
+                )
+
+    values = list(
+        dict.fromkeys(values)
+    )
+
+    if len(values) != 1:
+        raise SideaPdfError(
+            "SIDEA_INTERNAL_REF_IDENTIFIER_AMBIGUOUS:"
+            f"{values}"
+        )
+
+    return values[0]
+
+
+def _sidea_resolve_entity_code(
+    registration_entity: Any,
+) -> str:
+    """
+    Convierte la entidad registral final al código
+    de dos dígitos usado por el mapa SIDEA.
+    """
+
+    asset = sidea_entity_to_asset(
+        registration_entity
+    )
+
+    codes = [
+        str(code).zfill(2)
+        for code, value
+        in SIDEA_ENTITY_CODE_TO_ASSET.items()
+        if value == asset
+    ]
+
+    if len(codes) != 1:
+        raise SideaPdfError(
+            "SIDEA_INTERNAL_REF_ENTITY_CODE_AMBIGUOUS:"
+            f"{registration_entity}:{asset}:{codes}"
+        )
+
+    return codes[0]
+
+
+def _sidea_build_internal_reference(
+    registration_entity: Any,
+    identifier: str,
+) -> tuple[str, str]:
+    """
+    Retorna:
+      visible: A16 0010799-A
+      barcode: A160010799-A
+    """
+
+    identifier = str(
+        identifier or ""
+    ).strip()
+
+    if not re.fullmatch(
+        r"\d{20}",
+        identifier,
+    ):
+        raise SideaPdfError(
+            "SIDEA_INTERNAL_REF_BAD_IDENTIFIER:"
+            f"{identifier}"
+        )
+
+    entity_code = (
+        _sidea_resolve_entity_code(
+            registration_entity
+        )
+    )
+
+    last7 = identifier[-7:]
+
+    visible = (
+        f"A{entity_code} "
+        f"{last7}-A"
+    )
+
+    barcode_value = (
+        f"A{entity_code}"
+        f"{last7}-A"
+    )
+
+    return visible, barcode_value
+
+
+def _sidea_draw_code128b(
+    page,
+    value: str,
+    rect,
+) -> None:
+    """
+    Code128-B puro con vectores PyMuPDF.
+    Sin dependencias externas.
+    """
+
+    value = str(
+        value or ""
+    )
+
+    if not value:
+        raise SideaPdfError(
+            "SIDEA_INTERNAL_REF_BARCODE_EMPTY"
+        )
+
+    data_codes = []
+
+    for ch in value:
+        n = ord(ch)
+
+        if n < 32 or n > 126:
+            raise SideaPdfError(
+                "SIDEA_INTERNAL_REF_BARCODE_BAD_CHAR:"
+                f"{repr(ch)}"
+            )
+
+        data_codes.append(
+            n - 32
+        )
+
+    # Code128-B start = 104
+    checksum = (
+        104
+        + sum(
+            index * code
+            for index, code
+            in enumerate(
+                data_codes,
+                start=1,
+            )
+        )
+    ) % 103
+
+    symbols = [
+        104,
+        *data_codes,
+        checksum,
+        106,
+    ]
+
+    quiet_modules = 10
+
+    total_modules = (
+        quiet_modules * 2
+        + sum(
+            sum(
+                int(x)
+                for x in
+                _SIDEA_CODE128_PATTERNS[
+                    symbol
+                ]
+            )
+            for symbol in symbols
+        )
+    )
+
+    module_width = (
+        rect.width
+        / total_modules
+    )
+
+    x = (
+        rect.x0
+        + quiet_modules
+        * module_width
+    )
+
+    for symbol in symbols:
+
+        pattern = (
+            _SIDEA_CODE128_PATTERNS[
+                symbol
+            ]
+        )
+
+        black = True
+
+        for digit in pattern:
+
+            width = (
+                int(digit)
+                * module_width
+            )
+
+            if black:
+                page.draw_rect(
+                    fitz.Rect(
+                        x,
+                        rect.y0,
+                        x + width,
+                        rect.y1,
+                    ),
+                    color=None,
+                    fill=(0, 0, 0),
+                    width=0,
+                    overlay=True,
+                )
+
+            x += width
+            black = not black
+
+
+def add_sidea_internal_reference(
+    pdf_bytes: bytes,
+    registration_entity: Any,
+) -> bytes:
+    """
+    Agrega REFERENCIA INTERNA en la primera página.
+
+    Posición calibrada contra formato SIDEA carta 612x792:
+      centro X = 115.5
+      título   baseline y = 49
+      valor    baseline y = 61
+      barcode  x=54..177 / y=64..79
+    """
+
+    identifier = (
+        _sidea_extract_electronic_identifier(
+            pdf_bytes
+        )
+    )
+
+    visible, barcode_value = (
+        _sidea_build_internal_reference(
+            registration_entity,
+            identifier,
+        )
+    )
+
+    try:
+        doc = fitz.open(
+            stream=pdf_bytes,
+            filetype="pdf",
+        )
+    except Exception as exc:
+        raise SideaPdfError(
+            "SIDEA_INTERNAL_REF_PDF_OPEN_ERROR"
+        ) from exc
+
+    try:
+        if doc.page_count != 1:
+            raise SideaPdfError(
+                "SIDEA_INTERNAL_REF_EXPECTED_ONE_PAGE:"
+                f"{doc.page_count}"
+            )
+
+        page = doc[0]
+
+        if (
+            abs(page.rect.width - 612.0)
+            > 2.0
+            or
+            abs(page.rect.height - 792.0)
+            > 2.0
+        ):
+            raise SideaPdfError(
+                "SIDEA_INTERNAL_REF_UNEXPECTED_PAGE_SIZE:"
+                f"{page.rect.width}x"
+                f"{page.rect.height}"
+            )
+
+        center_x = 115.5
+
+        title = (
+            "FOLIO"
+        )
+
+        title_size = 8.5
+
+        title_width = (
+            fitz.get_text_length(
+                title,
+                fontname="helv",
+                fontsize=title_size,
+            )
+        )
+
+        page.insert_text(
+            (
+                center_x
+                - title_width / 2,
+                49.0,
+            ),
+            title,
+            fontname="helv",
+            fontsize=title_size,
+            color=(0, 0, 0),
+            overlay=True,
+        )
+
+        ref_size = 10.5
+
+        ref_width = (
+            fitz.get_text_length(
+                visible,
+                fontname="helv",
+                fontsize=ref_size,
+            )
+        )
+
+        page.insert_text(
+            (
+                center_x
+                - ref_width / 2,
+                61.0,
+            ),
+            visible,
+            fontname="helv",
+            fontsize=ref_size,
+            color=(0, 0, 0),
+            overlay=True,
+        )
+
+        _sidea_draw_code128b(
+            page,
+            barcode_value,
+            fitz.Rect(
+                54.0,
+                64.0,
+                177.0,
+                79.0,
+            ),
+        )
+
+        result = doc.tobytes(
+            garbage=4,
+            deflate=True,
+        )
+
+    finally:
+        doc.close()
+
+    try:
+        check = fitz.open(
+            stream=result,
+            filetype="pdf",
+        )
+
+        try:
+            if check.page_count != 1:
+                raise SideaPdfError(
+                    "SIDEA_INTERNAL_REF_OUTPUT_PAGE_COUNT:"
+                    f"{check.page_count}"
+                )
+        finally:
+            check.close()
+
+    except SideaPdfError:
+        raise
+
+    except Exception as exc:
+        raise SideaPdfError(
+            "SIDEA_INTERNAL_REF_OUTPUT_INVALID"
+        ) from exc
+
+    print(
+        "PROVIDER16_INTERNAL_REFERENCE_OK =",
+        {
+            "registration_entity": (
+                str(
+                    registration_entity
+                    or ""
+                )
+            ),
+            "identifier_last7": (
+                identifier[-7:]
+            ),
+            "reference": visible,
+        },
+        flush=True,
+    )
+
+    return result
 
 
 def append_sidea_rear(
@@ -4028,6 +4553,7 @@ def sidea_generate_pdf(
     oid_poll_delay_sec: float = 2.0,
     response_poll_attempts: int = 45,
     response_poll_delay_sec: float = 4.0,
+    add_internal_folio: bool = False,
 ) -> dict:
     """
     PROVIDER16 SIDEA - flujo completo de producción.
@@ -4853,6 +5379,17 @@ def sidea_generate_pdf(
                     or entidad
                 ).strip()
 
+            # =================================================
+            # P16 FOLIO
+            # Identificador electronico + entidad registral final
+            # =================================================
+
+            if add_internal_folio:
+                pdf_bytes = add_sidea_internal_reference(
+                    pdf_bytes,
+                    registration_entity,
+                )
+
             final_pdf = append_sidea_rear(
                 pdf_bytes,
                 registration_entity,
@@ -5600,6 +6137,7 @@ def sidea_generate_pdf_from_chain(
     accounts: list[SideaAccount] | None = None,
     expected_acto: str | int | None = None,
     request_id: int | None = None,
+    add_internal_folio: bool = False,
 ) -> dict:
     """
     Cadena Digital -> registro real -> flujo normal SIDEA.
@@ -5642,6 +6180,7 @@ def sidea_generate_pdf_from_chain(
         tipo="1",
         accounts=accounts,
         request_id=request_id,
+        add_internal_folio=add_internal_folio,
     )
 
     result = dict(result)

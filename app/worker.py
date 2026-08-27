@@ -1581,6 +1581,57 @@ def _notify_support_error(req, err: str, extra_msg: str = ""):
     if not support_group:
         return
 
+    support_dedupe_key = None
+
+    try:
+        req_id = int(
+            getattr(req, "id", 0)
+            or 0
+        )
+
+        if req_id:
+            support_dedupe_key = (
+                "support_error_once:v1:"
+                f"{req_id}"
+            )
+
+            claimed = redis_conn.set(
+                support_dedupe_key,
+                "1",
+                ex=30,
+                nx=True,
+            )
+
+            if not claimed:
+                print(
+                    "SUPPORT_ERROR_DUPLICATE_SKIPPED =",
+                    {
+                        "request_id": req_id,
+                        "err": str(err)[:300],
+                    },
+                    flush=True,
+                )
+
+                return
+
+    except Exception as dedupe_exc:
+
+        # Si Redis falla, NO perder una alerta real.
+        support_dedupe_key = None
+
+        print(
+            "SUPPORT_ERROR_DEDUPE_CHECK_FAILED =",
+            {
+                "request_id": getattr(
+                    req,
+                    "id",
+                    None,
+                ),
+                "error": str(dedupe_exc),
+            },
+            flush=True,
+        )
+
     try:
         provider_name = (getattr(req, "provider_name", "") or "").strip().upper()
 
@@ -3605,18 +3656,26 @@ def _is_provider16_allowed_request(
     act_type: str | None,
 ) -> bool:
     """
-    SIDEA:
+    PROVIDER16 / SIDEA acepta:
+
+    CURP:
       NACIMIENTO
       DEFUNCION
       MATRIMONIO
       DIVORCIO
-      por CURP.
+
+      NACIMIENTO FOLIO
+      DEFUNCION FOLIO
+      MATRIMONIO FOLIO
+      DIVORCIO FOLIO
 
     CADENA:
-      la propia cadena permite que SIDEA descubra
-      el acto registral real.
+      CADENA
+      FOLIO
+      y variantes tipadas normales/folio.
 
-    FOLIADAS todavía bloqueadas.
+    La variante FOLIO usa el mismo acto registral SIDEA;
+    la diferencia de formato se genera después en el PDF.
     """
 
     from app.utils.curp import is_chain
@@ -3641,36 +3700,42 @@ def _is_provider16_allowed_request(
         .replace("Ü", "U")
     )
 
-    if _is_folio_act(
-        act_type_up
-    ):
-        return False
+    normal_types = {
+        "NACIMIENTO",
+        "DEFUNCION",
+        "MATRIMONIO",
+        "DIVORCIO",
+    }
 
-    # CADENA puede venir como act_type=CADENA.
-    # Si además viene tipada como MAT/DIV/DEF/NAC,
-    # después validaremos que el acto real coincida.
+    folio_types = {
+        "NACIMIENTO FOLIO",
+        "DEFUNCION FOLIO",
+        "MATRIMONIO FOLIO",
+        "DIVORCIO FOLIO",
+    }
+
     if is_chain(
         term_clean
     ):
-        return act_type_up in {
-            "CADENA",
-            "NACIMIENTO",
-            "DEFUNCION",
-            "MATRIMONIO",
-            "DIVORCIO",
-        }
+        return act_type_up in (
+            normal_types
+            | folio_types
+            | {
+                "CADENA",
+                "FOLIO",
+            }
+        )
 
     if not _is_curp_term(
         term_clean
     ):
         return False
 
-    return act_type_up in {
-        "NACIMIENTO",
-        "DEFUNCION",
-        "MATRIMONIO",
-        "DIVORCIO",
-    }
+    return act_type_up in (
+        normal_types
+        | folio_types
+    )
+
 
 
 def _is_folio_act(act_type: str | None) -> bool:
@@ -6258,11 +6323,24 @@ def _process_provider16(req, db):
         .replace("Ü", "U")
     )
 
+    add_internal_folio = (
+        _is_folio_act(
+            act_type_up
+        )
+    )
+
     acto_map = {
         "NACIMIENTO": "1",
+        "NACIMIENTO FOLIO": "1",
+
         "DEFUNCION": "2",
+        "DEFUNCION FOLIO": "2",
+
         "MATRIMONIO": "3",
+        "MATRIMONIO FOLIO": "3",
+
         "DIVORCIO": "4",
+        "DIVORCIO FOLIO": "4",
     }
 
     pool = SideaPool(
@@ -6295,6 +6373,7 @@ def _process_provider16(req, db):
                 cadena=term,
                 expected_acto=expected_acto,
                 request_id=req.id,
+                add_internal_folio=add_internal_folio,
             )
         )
 
@@ -6323,6 +6402,7 @@ def _process_provider16(req, db):
                 acto="1",
                 tipo="1",
                 request_id=req.id,
+                add_internal_folio=add_internal_folio,
             )
 
         else:
@@ -6341,6 +6421,7 @@ def _process_provider16(req, db):
                     cadena=resolved["cadena"],
                     expected_acto=acto,
                     request_id=req.id,
+                    add_internal_folio=add_internal_folio,
                 )
             )
 
@@ -8978,9 +9059,163 @@ def process_request(request_id: int):
             # OTRO ERROR CONTROLADO SIDEA
             # ====================================================
 
-            except SideaError as exc:
+            except (
+                requests.RequestException,
+                SideaError,
+            ) as exc:
 
                 err = str(exc)
+                err_up = err.upper()
+
+                is_network_error = (
+                    isinstance(
+                        exc,
+                        requests.RequestException,
+                    )
+                    or "HTTP_ERROR" in err_up
+                    or "CONNECTIONERROR" in err_up
+                    or "REMOTEDISCONNECTED" in err_up
+                )
+
+                guard_key = (
+                    "provider16:sidea:"
+                    "request_guard:v2:"
+                    f"{req.id}"
+                )
+
+                audit_key = (
+                    "provider16:sidea:"
+                    "request_audit:v2:"
+                    f"{req.id}"
+                )
+
+                try:
+                    has_sidea_reservation = bool(
+                        redis_conn.get(guard_key)
+                        or redis_conn.get(audit_key)
+                    )
+                except Exception as guard_exc:
+
+                    # Si Redis no puede confirmar que NO hubo
+                    # reserva, jamás arriesgar reimpresión.
+                    has_sidea_reservation = True
+
+                    print(
+                        "PROVIDER16_NETWORK_GUARD_CHECK_ERROR =",
+                        {
+                            "request_id": req.id,
+                            "error": str(guard_exc),
+                        },
+                        flush=True,
+                    )
+
+                # ============================================
+                # RED + SIN GUARD/AUDIT:
+                # fallo previo a reserva -> retry seguro.
+                # ============================================
+
+                if (
+                    is_network_error
+                    and not has_sidea_reservation
+                ):
+
+                    retry_key = (
+                        "provider16:sidea:"
+                        "network_retry:v1:"
+                        f"{req.id}"
+                    )
+
+                    try:
+                        retry_num = int(
+                            redis_conn.incr(
+                                retry_key
+                            )
+                        )
+
+                        redis_conn.expire(
+                            retry_key,
+                            1800,
+                        )
+
+                    except Exception as retry_exc:
+
+                        retry_num = 999
+
+                        print(
+                            "PROVIDER16_NETWORK_RETRY_REDIS_ERROR =",
+                            {
+                                "request_id": req.id,
+                                "error": str(retry_exc),
+                            },
+                            flush=True,
+                        )
+
+                    if retry_num <= 3:
+
+                        req.provider_name = "PROVIDER16"
+                        req.provider_group_id = None
+                        req.provider_message = None
+                        req.status = "QUEUED"
+                        req.error_message = (
+                            "PROVIDER16_NETWORK_RETRY_"
+                            f"{retry_num}:"
+                            f"{err[:500]}"
+                        )
+                        req.updated_at = (
+                            _utc_now_naive()
+                        )
+
+                        db.commit()
+
+                        # Backoff pequeño:
+                        # 2s, 4s, 6s.
+                        time.sleep(
+                            min(
+                                retry_num * 2,
+                                6,
+                            )
+                        )
+
+                        job = (
+                            _provider16_fifo_add_request(
+                                req,
+                                ticket_at_front=True,
+                            )
+                        )
+
+                        print(
+                            "PROVIDER16_NETWORK_RETRY_QUEUED =",
+                            {
+                                "request_id": req.id,
+                                "retry": retry_num,
+                                "guard_or_audit": False,
+                                "job_id": job.id,
+                                "error": err[:300],
+                            },
+                            flush=True,
+                        )
+
+                        return
+
+                # Si YA hubo reserva, jamás reintentar P16.
+                # Si agotó los 3 intentos, tampoco.
+                if (
+                    is_network_error
+                    and has_sidea_reservation
+                ):
+                    fallback_reason = (
+                        "NETWORK_AFTER_RESERVATION"
+                    )
+
+                elif is_network_error:
+                    fallback_reason = (
+                        "NETWORK_RETRY_EXHAUSTED"
+                    )
+
+                else:
+                    fallback_reason = (
+                        "SIDEA_ERROR"
+                    )
 
                 _notify_support_error(
                     req,
@@ -8989,7 +9224,7 @@ def process_request(request_id: int):
                 )
 
                 if _provider16_requeue_fallback(
-                    "SIDEA_ERROR",
+                    fallback_reason,
                     err,
                 ):
                     return
