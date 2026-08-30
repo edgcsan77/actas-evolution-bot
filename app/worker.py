@@ -265,6 +265,95 @@ def process_provider16_fifo_ticket():
 
         return
 
+    # ========================================================
+    # PROVIDER16_FIFO_SELF_DRAIN_V1
+    #
+    # Un ticket RQ procesa exactamente un miembro del ZSET.
+    #
+    # Si por cualquier carrera, reinicio, ticket viejo/duplicado
+    # o desfase previo quedan mas miembros en la FIFO que tickets
+    # capaces de despertarlos, el ultimo request podria quedar
+    # esperando hasta que llegue una solicitud nueva.
+    #
+    # Despues de un procesamiento normal verificamos el ZSET.
+    # Si aun hay espera, generamos un ticket adicional de drenado.
+    #
+    # El orden cronologico NO cambia:
+    # process_provider16_fifo_ticket siempre usa ZPOPMIN.
+    #
+    # En REQUEST_LOCK_UNAVAILABLE no entramos aqui porque esa rama
+    # ya restaura el mismo member y programa su propio retry.
+    # ========================================================
+
+    fifo_remaining = int(
+        redis_conn.zcard(
+            PROVIDER16_FIFO_ZSET_KEY
+        )
+    )
+
+    if fifo_remaining > 0:
+
+        try:
+
+            # PROVIDER16_FIFO_SELF_DRAIN_QUEUE_GUARD_V1
+            #
+            # Si ya existe al menos un ticket esperando en RQ,
+            # ese ticket sera capaz de hacer el siguiente ZPOPMIN.
+            #
+            # Solo creamos un ticket de rescate cuando existe
+            # trabajo en el ZSET pero la cola RQ ya no tiene
+            # ningun ticket futuro esperando.
+            queued_tickets = int(
+                provider16_queue.count
+            )
+
+            if queued_tickets == 0:
+
+                drain_job = provider16_queue.enqueue(
+                    process_provider16_fifo_ticket,
+                    job_timeout=900,
+                )
+
+                print(
+                    "PROVIDER16_FIFO_SELF_DRAIN_ENQUEUED =",
+                    {
+                        "completed_request_id": request_id,
+                        "fifo_remaining": fifo_remaining,
+                        "queued_tickets_before": (
+                            queued_tickets
+                        ),
+                        "drain_job_id": drain_job.id,
+                    },
+                    flush=True,
+                )
+
+            else:
+
+                print(
+                    "PROVIDER16_FIFO_SELF_DRAIN_NOT_NEEDED =",
+                    {
+                        "completed_request_id": request_id,
+                        "fifo_remaining": fifo_remaining,
+                        "queued_tickets": queued_tickets,
+                    },
+                    flush=True,
+                )
+
+        except Exception as drain_exc:
+
+            # El request actual ya termino. Una falla al crear
+            # el ticket de continuidad no debe convertirlo
+            # artificialmente en job fallido.
+            print(
+                "PROVIDER16_FIFO_SELF_DRAIN_ENQUEUE_ERROR =",
+                {
+                    "completed_request_id": request_id,
+                    "fifo_remaining": fifo_remaining,
+                    "error": repr(drain_exc),
+                },
+                flush=True,
+            )
+
     return result
 
 SLOW_PROVIDERS = {"PROVIDER4", "PROVIDER10", "PROVIDER11"}
