@@ -831,6 +831,7 @@ def _provider_from_mode(mode: str | None) -> str | None:
         "PROVIDER14",
         "PROVIDER15",
         "MAYAPROVIDER",
+        "PROVIDER16",
     }:
         return provider_name
 
@@ -6252,11 +6253,167 @@ def _process_provider16(req, db):
     from app.services.provider16_sidea import (
         SideaBusy,
         SideaPool,
+        SideaSubmitUncertain,
         sidea_generate_pdf,
         sidea_generate_pdf_from_chain,
+        sidea_recover_request,
         sidea_operating_window,
         sidea_resolve_special_curp_to_chain,
     )
+
+    # ========================================================
+    # PROVIDER16_DIRECT_RECOVERY_ENTRY_V1
+    #
+    # Un guard demuestra que este request YA reservó cuota.
+    #
+    # Recovery tiene prioridad sobre:
+    #   - horario operativo
+    #   - validación normal
+    #   - resolución CADENA
+    #   - resolución CURP especial
+    #   - candidate_accounts / saldo
+    #
+    # Descargar una respuesta existente NO consume otra acta.
+    # ========================================================
+
+    recovery_guard_key = (
+        "provider16:sidea:"
+        "request_guard:v2:"
+        f"{req.id}"
+    )
+
+    try:
+        recovery_guard_exists = bool(
+            redis_conn.get(
+                recovery_guard_key
+            )
+        )
+
+    except Exception as guard_exc:
+
+        # Fail-safe:
+        # si Redis no puede demostrar que NO existe guard,
+        # jamás entrar al flujo normal y arriesgar otro POST.
+        raise SideaSubmitUncertain(
+            "SIDEA_DIRECT_RECOVERY_"
+            "GUARD_CHECK_UNCERTAIN:"
+            f"{req.id}:"
+            f"{type(guard_exc).__name__}"
+        ) from guard_exc
+
+    if recovery_guard_exists:
+
+        recovery_act_type = (
+            req.act_type
+            or ""
+        ).strip().upper()
+
+        recovery_act_type = (
+            recovery_act_type
+            .replace("Á", "A")
+            .replace("É", "E")
+            .replace("Í", "I")
+            .replace("Ó", "O")
+            .replace("Ú", "U")
+            .replace("Ü", "U")
+        )
+
+        recovery_folio = (
+            _is_folio_act(
+                recovery_act_type
+            )
+        )
+
+        recovery_pool = (
+            SideaPool(
+                redis_conn
+            )
+        )
+
+        print(
+            "PROVIDER16_WORKER_DIRECT_RECOVERY =",
+            {
+                "request_id": req.id,
+                "act_type": (
+                    recovery_act_type
+                ),
+                "folio": bool(
+                    recovery_folio
+                ),
+            },
+            flush=True,
+        )
+
+        result = (
+            sidea_recover_request(
+                pool=recovery_pool,
+                request_id=req.id,
+                add_internal_folio=(
+                    recovery_folio
+                ),
+            )
+        )
+
+        pdf_bytes = (
+            result.get(
+                "pdf_bytes"
+            )
+            or b""
+        )
+
+        if not pdf_bytes:
+            raise RuntimeError(
+                "PROVIDER16_RECOVERY_EMPTY_PDF"
+            )
+
+        return {
+            "pdf_bytes": (
+                pdf_bytes
+            ),
+            "account_key": result.get(
+                "account_key"
+            ),
+            "usage_reserved": result.get(
+                "usage_reserved"
+            ),
+            "peticion_oid": result.get(
+                "peticion_oid"
+            ),
+            "respuesta_oid": result.get(
+                "respuesta_oid"
+            ),
+            "registration_entity": (
+                result.get(
+                    "registration_entity"
+                )
+            ),
+            "cadena": result.get(
+                "cadena"
+            ),
+            "front_pages": result.get(
+                "front_pages"
+            ),
+            "final_pages": result.get(
+                "final_pages"
+            ),
+            "resolved_from_chain": (
+                result.get(
+                    "resolved_from_chain",
+                    False,
+                )
+            ),
+            "resolved_from_special_curp": (
+                result.get(
+                    "resolved_from_special_curp",
+                    False,
+                )
+            ),
+            "resolved_acto": result.get(
+                "resolved_acto"
+            ),
+            "recovered": True,
+        }
+
 
     # PROVIDER16_OPERATING_WINDOW_V1
     #
@@ -8880,10 +9037,643 @@ def process_request(request_id: int):
                 return True
 
 
+            # ====================================================
+            # PROVIDER16_RECOVERY_ROUTING_V1
+            #
+            # FUENTE AUTORITATIVA DE CONSUMO:
+            #   request_guard:v2
+            #
+            # IMPORTANTE:
+            # audit NO sirve para determinar consumo porque
+            # PREPARED se escribe antes de reserve_one().
+            # ====================================================
+
+            def _provider16_has_reservation_guard() -> bool:
+
+                guard_key = (
+                    "provider16:sidea:"
+                    "request_guard:v2:"
+                    f"{req.id}"
+                )
+
+                try:
+                    return bool(
+                        redis_conn.get(
+                            guard_key
+                        )
+                    )
+
+                except Exception as guard_exc:
+
+                    # Fail-safe:
+                    # si Redis no puede demostrar que NO hubo
+                    # reserva, no arriesgar segundo POST.
+                    print(
+                        "PROVIDER16_RECOVERY_"
+                        "GUARD_CHECK_ERROR =",
+                        {
+                            "request_id": req.id,
+                            "error": str(
+                                guard_exc
+                            )[:300],
+                        },
+                        flush=True,
+                    )
+
+                    return True
+
+
+            # ====================================================
+            # PROVIDER16_RECOVERY_HARDENING_V1
+            # ====================================================
+
+            PROVIDER16_RECOVERY_MAX_RETRIES = 6
+
+
+            def _provider16_read_recovery_audit():
+
+                audit_key = (
+                    "provider16:sidea:"
+                    "request_audit:v2:"
+                    f"{req.id}"
+                )
+
+                try:
+
+                    raw = redis_conn.get(
+                        audit_key
+                    )
+
+                except Exception as audit_exc:
+
+                    print(
+                        "PROVIDER16_RECOVERY_"
+                        "AUDIT_READ_ERROR =",
+                        {
+                            "request_id": req.id,
+                            "error": str(
+                                audit_exc
+                            )[:300],
+                        },
+                        flush=True,
+                    )
+
+                    return (
+                        None,
+                        "READ_ERROR",
+                    )
+
+                if not raw:
+                    return (
+                        None,
+                        "MISSING",
+                    )
+
+                if isinstance(
+                    raw,
+                    bytes,
+                ):
+                    raw = raw.decode(
+                        "utf-8",
+                        errors="replace",
+                    )
+
+                try:
+
+                    payload = json.loads(
+                        str(raw)
+                    )
+
+                except Exception as audit_exc:
+
+                    print(
+                        "PROVIDER16_RECOVERY_"
+                        "AUDIT_JSON_ERROR =",
+                        {
+                            "request_id": req.id,
+                            "error": str(
+                                audit_exc
+                            )[:300],
+                        },
+                        flush=True,
+                    )
+
+                    return (
+                        None,
+                        "INVALID",
+                    )
+
+                if not isinstance(
+                    payload,
+                    dict,
+                ):
+                    return (
+                        None,
+                        "INVALID",
+                    )
+
+                return (
+                    payload,
+                    "OK",
+                )
+
+
+            def _provider16_merge_request_audit(
+                state_name: str,
+                **extra,
+            ) -> bool:
+                """
+                Merge seguro del audit desde worker.
+
+                Se usa especialmente para R2_SAVED.
+                No toca guard ni contador SIDEA.
+                """
+
+                audit_key = (
+                    "provider16:sidea:"
+                    "request_audit:v2:"
+                    f"{req.id}"
+                )
+
+                try:
+
+                    raw = redis_conn.get(
+                        audit_key
+                    )
+
+                    payload = {}
+
+                    if raw:
+
+                        if isinstance(
+                            raw,
+                            bytes,
+                        ):
+                            raw = raw.decode(
+                                "utf-8",
+                                errors="replace",
+                            )
+
+                        previous = json.loads(
+                            str(raw)
+                        )
+
+                        if isinstance(
+                            previous,
+                            dict,
+                        ):
+                            payload.update(
+                                previous
+                            )
+
+                    payload[
+                        "request_id"
+                    ] = int(
+                        req.id
+                    )
+
+                    payload[
+                        "state"
+                    ] = str(
+                        state_name
+                    ).strip().upper()
+
+                    payload[
+                        "updated_at"
+                    ] = (
+                        datetime.now(
+                            ZoneInfo(
+                                "America/Mexico_City"
+                            )
+                        ).isoformat()
+                    )
+
+                    for key, value in (
+                        extra.items()
+                    ):
+
+                        if value is None:
+                            continue
+
+                        payload[
+                            str(key)
+                        ] = value
+
+                    redis_conn.setex(
+                        audit_key,
+                        2592000,
+                        json.dumps(
+                            payload,
+                            ensure_ascii=False,
+                        ),
+                    )
+
+                    return True
+
+                except Exception as audit_exc:
+
+                    print(
+                        "PROVIDER16_RECOVERY_"
+                        "AUDIT_MERGE_ERROR =",
+                        {
+                            "request_id": req.id,
+                            "state": state_name,
+                            "error": str(
+                                audit_exc
+                            )[:300],
+                        },
+                        flush=True,
+                    )
+
+                    return False
+
+
+            def _provider16_requeue_recovery(
+                reason: str,
+                err: str,
+            ) -> bool:
+                """
+                Reintenta únicamente la MISMA impresión P16.
+
+                JAMAS:
+                  - libera el guard
+                  - reserva otra cuota
+                  - hace fallback post-reserva
+
+                Recovery moderno requiere audit con contexto.
+                Guards legacy sin contexto quedan HOLD.
+                """
+
+                # PROVIDER16_RECOVERY_DB_RESET_V1
+                #
+                # Si PostgreSQL cerró una conexión por
+                # idle-in-transaction durante SIDEA, abandonar
+                # cualquier transacción anterior antes del UPDATE.
+                try:
+                    db.rollback()
+                except Exception as db_reset_exc:
+                    print(
+                        "PROVIDER16_RECOVERY_DB_"
+                        "ROLLBACK_ERROR =",
+                        {
+                            "request_id": req.id,
+                            "error": str(
+                                db_reset_exc
+                            )[:300],
+                        },
+                        flush=True,
+                    )
+
+                    # Un segundo rollback limpia el estado local
+                    # de Session cuando el primer intento detectó
+                    # la desconexión del servidor.
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+
+                if not (
+                    _provider16_has_reservation_guard()
+                ):
+                    return False
+
+
+                # ================================================
+                # 1. AUDIT LEGACY / INSUFICIENTE
+                # ================================================
+
+                (
+                    audit,
+                    audit_status,
+                ) = (
+                    _provider16_read_recovery_audit()
+                )
+
+                if audit_status in {
+                    "MISSING",
+                    "INVALID",
+                }:
+
+                    _provider16_hold_consumed_local_error(
+                        "LEGACY_AUDIT_"
+                        f"{audit_status}",
+                        (
+                            f"{err[:450]} | "
+                            f"audit_status="
+                            f"{audit_status}"
+                        ),
+                    )
+
+                    return True
+
+
+                if audit_status == "OK":
+
+                    audit_curp = str(
+                        audit.get(
+                            "curp"
+                        )
+                        or ""
+                    ).strip().upper()
+
+                    audit_acto = str(
+                        audit.get(
+                            "acto"
+                        )
+                        or ""
+                    ).strip()
+
+                    # Los audits creados ANTES del parche
+                    # normalmente sólo tenían:
+                    # request_id/account/usage/state/time.
+                    #
+                    # No hay información suficiente para
+                    # correlacionar una impresión de forma segura.
+                    if (
+                        not audit_curp
+                        or audit_acto
+                        not in {
+                            "1",
+                            "2",
+                            "3",
+                            "4",
+                        }
+                    ):
+
+                        _provider16_hold_consumed_local_error(
+                            "LEGACY_AUDIT_NO_CONTEXT",
+                            (
+                                f"{err[:450]} | "
+                                f"audit_state="
+                                f"{audit.get('state')} | "
+                                f"audit_curp="
+                                f"{audit_curp or 'EMPTY'} | "
+                                f"audit_acto="
+                                f"{audit_acto or 'EMPTY'}"
+                            ),
+                        )
+
+                        return True
+
+
+                # READ_ERROR es potencialmente transitorio.
+                # Permitimos retry, pero siempre acotado.
+
+
+                # ================================================
+                # 2. CONTADOR DE RECOVERY
+                # ================================================
+
+                retry_key = (
+                    "provider16:sidea:"
+                    "recovery_retry:v1:"
+                    f"{req.id}"
+                )
+
+                try:
+
+                    retry_num = int(
+                        redis_conn.incr(
+                            retry_key
+                        )
+                    )
+
+                    redis_conn.expire(
+                        retry_key,
+                        604800,
+                    )
+
+                except Exception as retry_exc:
+
+                    # Si no podemos llevar contador fiable,
+                    # no arriesgar loop infinito.
+                    _provider16_hold_consumed_local_error(
+                        "RECOVERY_COUNTER_UNAVAILABLE",
+                        (
+                            f"{err[:450]} | "
+                            f"counter_error="
+                            f"{str(retry_exc)[:200]}"
+                        ),
+                    )
+
+                    return True
+
+
+                # ================================================
+                # 3. LIMITE DURO
+                # ================================================
+
+                if (
+                    retry_num
+                    > PROVIDER16_RECOVERY_MAX_RETRIES
+                ):
+
+                    _provider16_hold_consumed_local_error(
+                        "RECOVERY_RETRY_EXHAUSTED",
+                        (
+                            f"{err[:450]} | "
+                            f"retry={retry_num} | "
+                            f"max="
+                            f"{PROVIDER16_RECOVERY_MAX_RETRIES}"
+                        ),
+                    )
+
+                    print(
+                        "PROVIDER16_RECOVERY_"
+                        "RETRY_EXHAUSTED =",
+                        {
+                            "request_id": req.id,
+                            "retry": retry_num,
+                            "max": (
+                                PROVIDER16_RECOVERY_MAX_RETRIES
+                            ),
+                            "reason": reason,
+                        },
+                        flush=True,
+                    )
+
+                    return True
+
+
+                # ================================================
+                # 4. REQUEUE P16
+                # ================================================
+
+                req.provider_name = "PROVIDER16"
+                req.provider_group_id = None
+                req.provider_message = None
+
+                req.status = "QUEUED"
+
+                req.error_message = (
+                    "PROVIDER16_RECOVERY_PENDING_"
+                    f"{retry_num}:"
+                    f"{reason}:"
+                    f"{err[:500]}"
+                )
+
+                req.updated_at = (
+                    _utc_now_naive()
+                )
+
+                db.commit()
+
+
+                # Backoff breve.
+                delay_sec = min(
+                    max(
+                        retry_num * 2,
+                        2,
+                    ),
+                    10,
+                )
+
+                time.sleep(
+                    delay_sec
+                )
+
+
+                job = (
+                    _provider16_fifo_add_request(
+                        req,
+                        ticket_at_front=True,
+                    )
+                )
+
+
+                print(
+                    "PROVIDER16_RECOVERY_REQUEUED =",
+                    {
+                        "request_id": req.id,
+                        "retry": retry_num,
+                        "max_retry": (
+                            PROVIDER16_RECOVERY_MAX_RETRIES
+                        ),
+                        "reason": reason,
+                        "delay_sec": (
+                            delay_sec
+                        ),
+                        "job_id": job.id,
+                        "fifo_waiting": int(
+                            redis_conn.zcard(
+                                PROVIDER16_FIFO_ZSET_KEY
+                            )
+                        ),
+                        "audit_status": (
+                            audit_status
+                        ),
+                        "error": err[:300],
+                    },
+                    flush=True,
+                )
+
+                return True
+
+
+            def _provider16_hold_consumed_local_error(
+                reason: str,
+                err: str,
+            ) -> None:
+                """
+                Error determinista LOCAL después de consumir.
+
+                NO fallback.
+                NO segundo POST.
+                NO loop infinito.
+
+                El guard/audit quedan intactos para que,
+                después de corregir el postproceso,
+                podamos reencolar y recuperar la MISMA acta.
+                """
+
+                # PROVIDER16_HOLD_DB_RESET_V1
+                try:
+                    db.rollback()
+                except Exception as db_reset_exc:
+                    print(
+                        "PROVIDER16_HOLD_DB_"
+                        "ROLLBACK_ERROR =",
+                        {
+                            "request_id": req.id,
+                            "error": str(
+                                db_reset_exc
+                            )[:300],
+                        },
+                        flush=True,
+                    )
+
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+
+                req.provider_name = "PROVIDER16"
+                req.provider_group_id = None
+                req.provider_message = None
+
+                req.status = "ERROR"
+
+                req.error_message = (
+                    "PROVIDER16_CONSUMED_RECOVERY_HOLD:"
+                    f"{reason}:"
+                    f"{err[:700]}"
+                )
+
+                req.updated_at = (
+                    _utc_now_naive()
+                )
+
+                db.commit()
+
+                print(
+                    "PROVIDER16_RECOVERY_HOLD =",
+                    {
+                        "request_id": req.id,
+                        "reason": reason,
+                        "error": err[:300],
+                    },
+                    flush=True,
+                )
+
+
             try:
+
+                # PROVIDER16_DB_TXN_CLOSED_BEFORE_SIDEA_V1
+                #
+                # No mantener una transacción PostgreSQL abierta
+                # mientras SIDEA puede tardar varios minutos.
+                #
+                # Capturamos primero los datos necesarios porque
+                # db.commit() puede expirar el ORM req.
+                from types import SimpleNamespace
+
+                provider16_req_snapshot = SimpleNamespace(
+                    id=req.id,
+                    curp=req.curp,
+                    act_type=req.act_type,
+                )
+
+                db.commit()
+
+                print(
+                    "PROVIDER16_DB_TXN_CLOSED_BEFORE_SIDEA =",
+                    {
+                        "request_id": (
+                            provider16_req_snapshot.id
+                        ),
+                        "curp": (
+                            provider16_req_snapshot.curp
+                        ),
+                        "act_type": (
+                            provider16_req_snapshot.act_type
+                        ),
+                    },
+                    flush=True,
+                )
+
                 provider16_result = (
                     _process_provider16(
-                        req,
+                        provider16_req_snapshot,
                         db,
                     )
                 )
@@ -9009,14 +9799,26 @@ def process_request(request_id: int):
                     err,
                 )
 
+                if (
+                    _provider16_has_reservation_guard()
+                ):
+
+                    if _provider16_requeue_recovery(
+                        "UNCERTAIN",
+                        err,
+                    ):
+                        return
+
+                    raise
+
+                # Sin guard:
+                # no hay evidencia de cuota reservada.
                 if _provider16_requeue_fallback(
                     "UNCERTAIN",
                     err,
                 ):
                     return
 
-                # Sin fallback: subir al manejador genérico.
-                # NO se vuelve a llamar SIDEA aquí.
                 raise
 
 
@@ -9046,6 +9848,43 @@ def process_request(request_id: int):
                     err,
                 )
 
+                if (
+                    _provider16_has_reservation_guard()
+                ):
+
+                    err_up = (
+                        err
+                        or ""
+                    ).upper()
+
+                    # Error local determinista del folio.
+                    # NO reintentar automáticamente hasta
+                    # corregir el extractor.
+                    if (
+                        isinstance(
+                            exc,
+                            SideaPdfError,
+                        )
+                        and err_up.startswith(
+                            "SIDEA_INTERNAL_REF_"
+                        )
+                    ):
+
+                        _provider16_hold_consumed_local_error(
+                            "LOCAL_FOLIO_ERROR",
+                            err,
+                        )
+
+                        return
+
+                    if _provider16_requeue_recovery(
+                        error_type.upper(),
+                        err,
+                    ):
+                        return
+
+                    raise
+
                 if _provider16_requeue_fallback(
                     error_type.upper(),
                     err,
@@ -9067,6 +9906,115 @@ def process_request(request_id: int):
                 err = str(exc)
                 err_up = err.upper()
 
+                # PROVIDER16_AMBIGUOUS_TERMINAL_WORKER_V1
+                #
+                # SIDEA devolvió 2+ registros para la misma CURP.
+                # Es un resultado determinista de búsqueda,
+                # no un problema de red ni de capacidad.
+                if err_up.startswith(
+                    "SIDEA_AMBIGUOUS_CURP_ROWS:"
+                ):
+
+                    # Asegurar una transacción DB limpia.
+                    try:
+                        db.rollback()
+                    except Exception as rollback_exc:
+                        print(
+                            "PROVIDER16_AMBIGUOUS_"
+                            "ROLLBACK_ERROR =",
+                            {
+                                "request_id": req.id,
+                                "error": str(
+                                    rollback_exc
+                                )[:300],
+                            },
+                            flush=True,
+                        )
+
+                    req.provider_name = "PROVIDER16"
+                    req.provider_group_id = None
+                    req.provider_message = None
+
+                    req.status = "ERROR"
+                    req.error_message = err[:1000]
+                    req.updated_at = _utc_now_naive()
+
+                    db.commit()
+
+                    # Soporte: una sola incidencia real.
+                    _notify_support_error(
+                        req,
+                        "PROVIDER16_SIDEA_ERROR",
+                        err,
+                    )
+
+                    # Aviso útil al cliente.
+                    try:
+                        ambiguous_msg = (
+                            "⚠️ No fue posible seleccionar "
+                            "el acta automáticamente\n"
+                            f"Dato: {req.curp}\n"
+                            f"Tipo: {req.act_type}\n\n"
+                            "Se encontraron varios registros "
+                            "para esta CURP.\n"
+                            "Si cuentas con la Cadena Digital "
+                            "o Identificador Electrónico, "
+                            "envíalo para precisar el acta."
+                        )
+
+                        instance = (
+                            req.instance_name
+                            or "docifybot8"
+                        )
+
+                        if req.source_group_id:
+
+                            if should_send_extra_text(
+                                req.source_group_id
+                            ):
+                                send_group_text(
+                                    req.source_group_id,
+                                    ambiguous_msg,
+                                    instance,
+                                )
+
+                        elif req.requester_wa_id:
+
+                            from app.services.evolution import (
+                                send_text,
+                            )
+
+                            send_text(
+                                req.requester_wa_id,
+                                ambiguous_msg,
+                                instance_name=instance,
+                            )
+
+                    except Exception as notify_exc:
+
+                        print(
+                            "PROVIDER16_AMBIGUOUS_"
+                            "CLIENT_NOTIFY_ERROR =",
+                            {
+                                "request_id": req.id,
+                                "error": str(
+                                    notify_exc
+                                )[:300],
+                            },
+                            flush=True,
+                        )
+
+                    print(
+                        "PROVIDER16_AMBIGUOUS_TERMINAL =",
+                        {
+                            "request_id": req.id,
+                            "error": err[:300],
+                        },
+                        flush=True,
+                    )
+
+                    return
+
                 is_network_error = (
                     isinstance(
                         exc,
@@ -9077,37 +10025,12 @@ def process_request(request_id: int):
                     or "REMOTEDISCONNECTED" in err_up
                 )
 
-                guard_key = (
-                    "provider16:sidea:"
-                    "request_guard:v2:"
-                    f"{req.id}"
+                # PREPARED existe ANTES de reservar.
+                # Por eso SOLO request_guard:v2 demuestra
+                # que realmente hubo consumo/reserva.
+                has_sidea_reservation = (
+                    _provider16_has_reservation_guard()
                 )
-
-                audit_key = (
-                    "provider16:sidea:"
-                    "request_audit:v2:"
-                    f"{req.id}"
-                )
-
-                try:
-                    has_sidea_reservation = bool(
-                        redis_conn.get(guard_key)
-                        or redis_conn.get(audit_key)
-                    )
-                except Exception as guard_exc:
-
-                    # Si Redis no puede confirmar que NO hubo
-                    # reserva, jamás arriesgar reimpresión.
-                    has_sidea_reservation = True
-
-                    print(
-                        "PROVIDER16_NETWORK_GUARD_CHECK_ERROR =",
-                        {
-                            "request_id": req.id,
-                            "error": str(guard_exc),
-                        },
-                        flush=True,
-                    )
 
                 # ============================================
                 # RED + SIN GUARD/AUDIT:
@@ -9197,17 +10120,40 @@ def process_request(request_id: int):
 
                         return
 
-                # Si YA hubo reserva, jamás reintentar P16.
-                # Si agotó los 3 intentos, tampoco.
-                if (
-                    is_network_error
-                    and has_sidea_reservation
-                ):
-                    fallback_reason = (
+                # ============================================
+                # DESPUES DE RESERVA:
+                # recovery de la MISMA impresión SIDEA.
+                # JAMAS fallback.
+                # ============================================
+
+                if has_sidea_reservation:
+
+                    recovery_reason = (
                         "NETWORK_AFTER_RESERVATION"
+                        if is_network_error
+                        else "SIDEA_ERROR_AFTER_RESERVATION"
                     )
 
-                elif is_network_error:
+                    _notify_support_error(
+                        req,
+                        "PROVIDER16_SIDEA_RECOVERY",
+                        err,
+                    )
+
+                    if _provider16_requeue_recovery(
+                        recovery_reason,
+                        err,
+                    ):
+                        return
+
+                    raise
+
+                # ============================================
+                # SIN RESERVA:
+                # comportamiento anterior.
+                # ============================================
+
+                if is_network_error:
                     fallback_reason = (
                         "NETWORK_RETRY_EXHAUSTED"
                     )
@@ -9313,6 +10259,12 @@ def process_request(request_id: int):
                     f"provider16_busy_retry:"
                     f"{req.id}"
                 )
+
+                redis_conn.delete(
+                    "provider16:sidea:"
+                    "recovery_retry:v1:"
+                    f"{req.id}"
+                )
             except Exception:
                 pass
 
@@ -9328,6 +10280,47 @@ def process_request(request_id: int):
                     pdf_bytes,
                     filename=filename,
                     origin="worker:PROVIDER16",
+                )
+
+                # ================================================
+                # PROVIDER16_R2_CHECKPOINT_V1
+                #
+                # A esta altura R2 ya confirmó y
+                # save_request_pdf_to_r2() ya hizo commit.
+                # ================================================
+
+                _provider16_merge_request_audit(
+                    "R2_SAVED",
+                    pdf_storage_key=(
+                        getattr(
+                            req,
+                            "pdf_storage_key",
+                            None,
+                        )
+                    ),
+                    pdf_filename=(
+                        getattr(
+                            req,
+                            "pdf_filename",
+                            None,
+                        )
+                    ),
+                    r2_saved=True,
+                )
+
+                print(
+                    "PROVIDER16_AUDIT_R2_SAVED =",
+                    {
+                        "request_id": req.id,
+                        "pdf_storage_key": (
+                            getattr(
+                                req,
+                                "pdf_storage_key",
+                                None,
+                            )
+                        ),
+                    },
+                    flush=True,
                 )
 
             except Exception as r2_exc:

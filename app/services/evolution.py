@@ -414,6 +414,40 @@ def send_document(number: str, pdf_url: str, filename: str = "acta.pdf", caption
     )
 
 
+# ============================================================
+# CLIENT_GROUP_WHITELABEL_V1
+# Grupos donde NO debe mostrarse la marca del bot.
+# ============================================================
+
+UNBRANDED_CLIENT_GROUPS = {
+    "120363411207299314@g.us",
+}
+
+
+def _strip_client_group_brand(group_jid: str, text: str) -> str:
+    raw = (text or "").strip()
+
+    if (group_jid or "").strip() not in UNBRANDED_CLIENT_GROUPS:
+        return raw
+
+    lines = raw.splitlines()
+
+    if not lines:
+        return raw
+
+    first = lines[0].strip().upper()
+
+    known_brand_lines = {
+        "🚀 DOCU EXPRES ⚡",
+        "🚀 DOCU EXPRES",
+    }
+
+    if first in known_brand_lines:
+        return "\n".join(lines[1:]).lstrip()
+
+    return raw
+
+
 def send_group_text(group_jid: str, text: str, instance_name: str = None):
     if _is_internal_api_group(group_jid):
         print("SEND_GROUP_TEXT_SKIPPED_INTERNAL_API_GROUP =", group_jid, flush=True)
@@ -424,7 +458,7 @@ def send_group_text(group_jid: str, text: str, instance_name: str = None):
 
     payload = {
         "number": _normalize_number(group_jid),
-        "text": (text or "").strip(),
+        "text": _strip_client_group_brand(group_jid, text),
     }
 
     print("SEND_GROUP_TEXT_URL =", url, flush=True)
@@ -466,7 +500,7 @@ def send_group_text_ack_fast(group_jid: str, text: str, instance_name: str = Non
 
     payload = {
         "number": _normalize_number(group_jid),
-        "text": (text or "").strip(),
+        "text": _strip_client_group_brand(group_jid, text),
     }
 
     return _post_send_text_with_retries(

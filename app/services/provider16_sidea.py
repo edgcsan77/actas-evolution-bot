@@ -193,7 +193,7 @@ def load_sidea_accounts() -> list[SideaAccount]:
     # SIDEA_DB_ACCOUNTS_V1
     #
     # Configuración central del panel:
-    # SIDEA1..SIDEA7 en PostgreSQL.
+    # SIDEA1..SIDEA10 en PostgreSQL.
     #
     # Si todavía no existe configuración DB,
     # conserva compatibilidad con
@@ -1191,10 +1191,22 @@ def _sidea_extract_electronic_identifier(
     pdf_bytes: bytes,
 ) -> str:
     """
-    Extrae SOLO el Identificador Electrónico mostrado
-    en la parte superior de la primera página.
+    Extrae SOLO el Identificador Electrónico de la
+    primera página.
 
-    No usa CADENA ni Código de Verificación.
+    PROVIDER16_IDENTIFIER_SPATIAL_V2
+
+    Algunos formatos SIDEA (confirmado DEFUNCION)
+    almacenan internamente el texto en este orden:
+
+        05030000220260101391
+        Identificador Electrónico
+
+    aunque visualmente el número se encuentre debajo
+    de la etiqueta.
+
+    Por eso la fuente primaria es la POSICION física
+    del texto, no únicamente el orden de extracción.
     """
 
     if not pdf_bytes:
@@ -1207,114 +1219,426 @@ def _sidea_extract_electronic_identifier(
             stream=pdf_bytes,
             filetype="pdf",
         )
+
     except Exception as exc:
         raise SideaPdfError(
             "SIDEA_INTERNAL_REF_PDF_OPEN_ERROR"
         ) from exc
 
     try:
+
         if doc.page_count != 1:
             raise SideaPdfError(
                 "SIDEA_INTERNAL_REF_EXPECTED_ONE_PAGE:"
                 f"{doc.page_count}"
             )
 
+        page = doc[0]
+
         text = (
-            doc[0].get_text("text")
+            page.get_text(
+                "text"
+            )
             or ""
         )
 
-    finally:
-        doc.close()
-
-    label = re.search(
-        r"Identificador\s+"
-        r"Electr[oó]nico",
-        text,
-        flags=re.I,
-    )
-
-    if not label:
-        raise SideaPdfError(
-            "SIDEA_INTERNAL_REF_IDENTIFIER_LABEL_NOT_FOUND"
+        words = (
+            page.get_text(
+                "words"
+            )
+            or []
         )
 
-    # El Identificador Electrónico puede venir:
-    #
-    #   12345678901234567890
-    #
-    # o fragmentado por el layout del PDF:
-    #
-    #   1234 5678 9012 3456 7890
-    #
-    # PyMuPDF puede insertar espacios/saltos aunque
-    # visualmente el número se vea continuo.
-    #
-    # Limitamos la búsqueda al bloque inmediatamente
-    # posterior a la etiqueta y cortamos antes del
-    # Código de Verificación para no confundir ambos.
-    nearby = text[
-        label.end():
-        label.end() + 320
-    ]
+        # ====================================================
+        # 1. ESTRATEGIA PRIMARIA:
+        #    POSICION REAL DEL LABEL + NUMERO
+        # ====================================================
 
-    verification_label = re.search(
-        r"C[oó]digo\s+(?:de\s+)?"
-        r"Verificaci[oó]n",
-        nearby,
-        flags=re.I,
-    )
+        identifier_words = []
 
-    if verification_label:
-        nearby = nearby[
-            :verification_label.start()
+        label_words = []
+
+        for word in words:
+
+            if (
+                not isinstance(
+                    word,
+                    (list, tuple),
+                )
+                or len(word) < 5
+            ):
+                continue
+
+            value = str(
+                word[4]
+                or ""
+            ).strip()
+
+            normalized = (
+                value
+                .lower()
+                .replace("ó", "o")
+            )
+
+            if (
+                "identificador"
+                in normalized
+                or "electronico"
+                in normalized
+            ):
+                label_words.append(
+                    word
+                )
+
+        # Normalmente son dos palabras:
+        # Identificador + Electrónico.
+        #
+        # Formamos el rectángulo completo de esas palabras.
+        if label_words:
+
+            label_x0 = min(
+                float(w[0])
+                for w in label_words
+            )
+
+            label_y0 = min(
+                float(w[1])
+                for w in label_words
+            )
+
+            label_x1 = max(
+                float(w[2])
+                for w in label_words
+            )
+
+            label_y1 = max(
+                float(w[3])
+                for w in label_words
+            )
+
+            label_center_x = (
+                label_x0
+                + label_x1
+            ) / 2.0
+
+            for word in words:
+
+                if (
+                    not isinstance(
+                        word,
+                        (list, tuple),
+                    )
+                    or len(word) < 5
+                ):
+                    continue
+
+                value = str(
+                    word[4]
+                    or ""
+                ).strip()
+
+                # El valor oficial que buscamos tiene
+                # exactamente 20 dígitos.
+                if not re.fullmatch(
+                    r"\d{20}",
+                    value,
+                ):
+                    continue
+
+                x0 = float(
+                    word[0]
+                )
+
+                y0 = float(
+                    word[1]
+                )
+
+                x1 = float(
+                    word[2]
+                )
+
+                y1 = float(
+                    word[3]
+                )
+
+                center_x = (
+                    x0 + x1
+                ) / 2.0
+
+                # --------------------------------------------
+                # Debe encontrarse físicamente muy cerca del
+                # label.
+                #
+                # Permitimos pequeño solapamiento vertical
+                # porque las cajas de fuente del PDF pueden
+                # tocarse.
+                # --------------------------------------------
+
+                vertical_ok = (
+                    y0
+                    >= (
+                        label_y0
+                        - 5.0
+                    )
+                    and y0
+                    <= (
+                        label_y1
+                        + 35.0
+                    )
+                )
+
+                horizontal_ok = (
+                    abs(
+                        center_x
+                        - label_center_x
+                    )
+                    <= 100.0
+                )
+
+                # También exigir que el número esté en la
+                # misma zona horizontal general del label.
+                overlap_ok = (
+                    x1
+                    >= (
+                        label_x0
+                        - 50.0
+                    )
+                    and x0
+                    <= (
+                        label_x1
+                        + 50.0
+                    )
+                )
+
+                if (
+                    vertical_ok
+                    and horizontal_ok
+                    and overlap_ok
+                ):
+                    identifier_words.append(
+                        {
+                            "value": value,
+                            "distance_y": abs(
+                                y0
+                                - label_y1
+                            ),
+                            "distance_x": abs(
+                                center_x
+                                - label_center_x
+                            ),
+                            "bbox": (
+                                x0,
+                                y0,
+                                x1,
+                                y1,
+                            ),
+                        }
+                    )
+
+        # Eliminar duplicados conservando el mejor candidato.
+        best_by_value = {}
+
+        for item in identifier_words:
+
+            value = item[
+                "value"
+            ]
+
+            score = (
+                item[
+                    "distance_y"
+                ],
+                item[
+                    "distance_x"
+                ],
+            )
+
+            current = (
+                best_by_value.get(
+                    value
+                )
+            )
+
+            if (
+                current is None
+                or score
+                < current[
+                    "score"
+                ]
+            ):
+                best_by_value[
+                    value
+                ] = {
+                    "score": score,
+                    "item": item,
+                }
+
+        spatial_values = list(
+            best_by_value.keys()
+        )
+
+        if len(
+            spatial_values
+        ) == 1:
+
+            identifier = (
+                spatial_values[0]
+            )
+
+            print(
+                "PROVIDER16_IDENTIFIER_"
+                "SPATIAL_OK =",
+                {
+                    "identifier_last7": (
+                        identifier[-7:]
+                    ),
+                    "bbox": (
+                        best_by_value[
+                            identifier
+                        ][
+                            "item"
+                        ][
+                            "bbox"
+                        ]
+                    ),
+                },
+                flush=True,
+            )
+
+            return identifier
+
+        if len(
+            spatial_values
+        ) > 1:
+
+            print(
+                "PROVIDER16_IDENTIFIER_"
+                "SPATIAL_AMBIGUOUS =",
+                spatial_values,
+                flush=True,
+            )
+
+        # ====================================================
+        # 2. FALLBACK TEXTO
+        #
+        # Mantener compatibilidad con formatos NACIMIENTO
+        # que ya funcionaban.
+        #
+        # A diferencia del código anterior buscamos tanto
+        # ANTES como DESPUES de la etiqueta.
+        # ====================================================
+
+        label = re.search(
+            r"Identificador\s+"
+            r"Electr[oó]nico",
+            text,
+            flags=re.I,
+        )
+
+        if not label:
+            raise SideaPdfError(
+                "SIDEA_INTERNAL_REF_IDENTIFIER_LABEL_NOT_FOUND"
+            )
+
+        window_start = max(
+            0,
+            label.start() - 180,
+        )
+
+        window_end = min(
+            len(text),
+            label.end() + 320,
+        )
+
+        nearby = text[
+            window_start:
+            window_end
         ]
 
-    # Primero conservar exactamente el comportamiento
-    # que ya funciona con NACIMIENTO FOLIO.
-    values = re.findall(
-        r"(?<!\d)(\d{20})(?!\d)",
-        nearby,
-    )
+        # Separar Código de Verificación si aparece
+        # DESPUÉS del label.
+        verification_label = re.search(
+            r"C[oó]digo\s+(?:de\s+)?"
+            r"Verificaci[oó]n",
+            nearby,
+            flags=re.I,
+        )
 
-    # Fallback seguro:
-    # aceptar únicamente 20 dígitos separados por
-    # espacios, tabs o saltos de línea.
-    if not values:
-        loose_values = re.findall(
+        if verification_label:
+
+            local_label_offset = (
+                label.start()
+                - window_start
+            )
+
+            if (
+                verification_label.start()
+                > local_label_offset
+            ):
+                nearby = nearby[
+                    :verification_label.start()
+                ]
+
+        values = re.findall(
             r"(?<!\d)"
-            r"((?:\d[\s]*){20})"
+            r"(\d{20})"
             r"(?!\d)",
             nearby,
         )
 
-        for raw_value in loose_values:
-            normalized = re.sub(
-                r"\s+",
-                "",
-                raw_value,
+        if not values:
+
+            loose_values = re.findall(
+                r"(?<!\d)"
+                r"((?:\d[\s]*){20})"
+                r"(?!\d)",
+                nearby,
             )
 
-            if re.fullmatch(
-                r"\d{20}",
-                normalized,
-            ):
-                values.append(
-                    normalized
+            for raw_value in loose_values:
+
+                normalized = re.sub(
+                    r"\s+",
+                    "",
+                    raw_value,
                 )
 
-    values = list(
-        dict.fromkeys(values)
-    )
+                if re.fullmatch(
+                    r"\d{20}",
+                    normalized,
+                ):
+                    values.append(
+                        normalized
+                    )
 
-    if len(values) != 1:
+        values = list(
+            dict.fromkeys(
+                values
+            )
+        )
+
+        if len(values) == 1:
+
+            print(
+                "PROVIDER16_IDENTIFIER_"
+                "TEXT_FALLBACK_OK =",
+                {
+                    "identifier_last7": (
+                        values[0][-7:]
+                    ),
+                },
+                flush=True,
+            )
+
+            return values[0]
+
         raise SideaPdfError(
             "SIDEA_INTERNAL_REF_IDENTIFIER_AMBIGUOUS:"
             f"{values}"
         )
 
-    return values[0]
-
+    finally:
+        doc.close()
 
 def _sidea_resolve_entity_code(
     registration_entity: Any,
@@ -4272,6 +4596,17 @@ def _sidea_prod_candidate_accounts(
 
     for account in accounts:
 
+        # PROVIDER16_SIDEA8_PRODUCTION_EXCLUDE_V1
+        # SIDEA8 no tiene credencial productiva válida todavía.
+        # Puede existir en panel, pero jamás participar en requests.
+        if (
+            (account.key or "")
+            .strip()
+            .lower()
+            == "sidea8"
+        ):
+            continue
+
         if not account.enabled:
             continue
 
@@ -4613,6 +4948,7 @@ def sidea_generate_pdf(
     request_id_int = None
     request_guard_key = None
     request_audit_key = None
+    request_has_guard = False
 
     if request_id is not None:
 
@@ -4632,53 +4968,132 @@ def sidea_generate_pdf(
             f"{request_id_int}"
         )
 
-        # Evita incluso volver a buscar/baseline
-        # si este mismo RequestLog ya consumio
-        # una reserva en un intento anterior.
-        if pool.redis.exists(
-            request_guard_key
-        ):
-            raise SideaSubmitUncertain(
-                "SIDEA_REQUEST_ALREADY_"
-                "RESERVED_OR_SUBMITTED:"
-                f"{request_id_int}"
+        # PROVIDER16_RECOVERY_EXISTING_V1
+        #
+        # Si ya existe guard NO volvemos a reservar ni hacemos
+        # otro POST. Más abajo entraremos al flujo de recuperación.
+        request_has_guard = bool(
+            pool.redis.exists(
+                request_guard_key
             )
+        )
 
     def _write_request_audit(
         state_name: str,
         account_key: str = "",
         usage_value: int | None = None,
+        **extra,
     ) -> None:
 
         if not request_audit_key:
             return
 
-        payload = {
-            "request_id": (
-                request_id_int
-            ),
-            "account": (
-                account_key
-                or ""
-            ),
-            "usage": (
-                usage_value
-            ),
-            "state": (
-                str(
-                    state_name
-                )
-                .strip()
-                .upper()
-            ),
-            "updated_at": (
-                datetime.now(
-                    ZoneInfo(
-                        SIDEA_TIMEZONE
+        payload = {}
+
+        # ----------------------------------------------------
+        # MERGE: conservar todo lo conocido anteriormente.
+        # ----------------------------------------------------
+        try:
+            previous_raw = pool.redis.get(
+                request_audit_key
+            )
+
+            if previous_raw:
+                if isinstance(
+                    previous_raw,
+                    bytes,
+                ):
+                    previous_raw = (
+                        previous_raw.decode(
+                            "utf-8",
+                            errors="replace",
+                        )
                     )
-                ).isoformat()
-            ),
-        }
+
+                previous = json.loads(
+                    str(previous_raw)
+                )
+
+                if isinstance(
+                    previous,
+                    dict,
+                ):
+                    payload.update(
+                        previous
+                    )
+
+        except Exception as audit_read_exc:
+            print(
+                "PROVIDER16_SIDEA_"
+                "AUDIT_READ_ERROR =",
+                {
+                    "request_id": (
+                        request_id_int
+                    ),
+                    "error": str(
+                        audit_read_exc
+                    )[:200],
+                },
+                flush=True,
+            )
+
+        payload[
+            "request_id"
+        ] = request_id_int
+
+        if account_key:
+            payload[
+                "account"
+            ] = str(
+                account_key
+            )
+
+        elif "account" not in payload:
+            payload[
+                "account"
+            ] = ""
+
+        if usage_value is not None:
+            payload[
+                "usage"
+            ] = int(
+                usage_value
+            )
+
+        elif "usage" not in payload:
+            payload[
+                "usage"
+            ] = None
+
+        payload[
+            "state"
+        ] = (
+            str(
+                state_name
+            )
+            .strip()
+            .upper()
+        )
+
+        payload[
+            "updated_at"
+        ] = (
+            datetime.now(
+                ZoneInfo(
+                    SIDEA_TIMEZONE
+                )
+            ).isoformat()
+        )
+
+        for key, value in (
+            extra.items()
+        ):
+            if value is None:
+                continue
+
+            payload[
+                str(key)
+            ] = value
 
         try:
             pool.redis.setex(
@@ -4708,6 +5123,1040 @@ def sidea_generate_pdf(
                 flush=True,
             )
 
+
+
+    # ============================================================
+    # PROVIDER16_RECOVERY_EXISTING_V1
+    #
+    # REGLA:
+    #   guard existente = JAMAS reserve_one()
+    #   guard existente = JAMAS solicitudImpresion.do
+    #
+    # Solamente:
+    #   misma cuenta -> monitor -> misma petición/respuesta
+    #   -> actaPDF.do -> folio/reverso -> return.
+    # ============================================================
+
+    def _read_request_audit() -> dict:
+
+        if not request_audit_key:
+            raise SideaSubmitUncertain(
+                "SIDEA_RECOVERY_AUDIT_KEY_MISSING:"
+                f"{request_id_int}"
+            )
+
+        raw = pool.redis.get(
+            request_audit_key
+        )
+
+        if not raw:
+            raise SideaSubmitUncertain(
+                "SIDEA_RECOVERY_AUDIT_MISSING:"
+                f"{request_id_int}"
+            )
+
+        if isinstance(
+            raw,
+            bytes,
+        ):
+            raw = raw.decode(
+                "utf-8",
+                errors="replace",
+            )
+
+        try:
+            payload = json.loads(
+                str(raw)
+            )
+
+        except Exception as exc:
+            raise SideaSubmitUncertain(
+                "SIDEA_RECOVERY_AUDIT_INVALID_JSON:"
+                f"{request_id_int}"
+            ) from exc
+
+        if not isinstance(
+            payload,
+            dict,
+        ):
+            raise SideaSubmitUncertain(
+                "SIDEA_RECOVERY_AUDIT_NOT_OBJECT:"
+                f"{request_id_int}"
+            )
+
+        audit_request_id = (
+            payload.get(
+                "request_id"
+            )
+        )
+
+        if (
+            audit_request_id is not None
+            and int(audit_request_id)
+            != int(request_id_int)
+        ):
+            raise SideaSubmitUncertain(
+                "SIDEA_RECOVERY_AUDIT_REQUEST_MISMATCH:"
+                f"{request_id_int}:"
+                f"{audit_request_id}"
+            )
+
+        return payload
+
+
+    def _read_guard_reservation() -> tuple[str, int]:
+
+        raw = pool.redis.get(
+            request_guard_key
+        )
+
+        if not raw:
+            raise SideaSubmitUncertain(
+                "SIDEA_RECOVERY_GUARD_DISAPPEARED:"
+                f"{request_id_int}"
+            )
+
+        if isinstance(
+            raw,
+            bytes,
+        ):
+            raw = raw.decode(
+                "utf-8",
+                errors="replace",
+            )
+
+        value = str(raw).strip()
+
+        try:
+            account_key, usage_text = (
+                value.rsplit(
+                    ":",
+                    1,
+                )
+            )
+
+            account_key = (
+                account_key.strip()
+            )
+
+            usage_value = int(
+                usage_text
+            )
+
+        except Exception as exc:
+            raise SideaSubmitUncertain(
+                "SIDEA_RECOVERY_BAD_GUARD:"
+                f"{request_id_int}:"
+                f"{value[:100]}"
+            ) from exc
+
+        if (
+            not account_key
+            or usage_value <= 0
+        ):
+            raise SideaSubmitUncertain(
+                "SIDEA_RECOVERY_BAD_GUARD_VALUES:"
+                f"{request_id_int}"
+            )
+
+        return (
+            account_key,
+            usage_value,
+        )
+
+
+    def _recover_existing_request(
+        recovery_accounts,
+    ) -> dict:
+
+        audit = (
+            _read_request_audit()
+        )
+
+        (
+            guard_account,
+            guard_usage,
+        ) = _read_guard_reservation()
+
+        audit_account = str(
+            audit.get(
+                "account"
+            )
+            or ""
+        ).strip()
+
+        if (
+            audit_account
+            and audit_account
+            != guard_account
+        ):
+            raise SideaSubmitUncertain(
+                "SIDEA_RECOVERY_ACCOUNT_MISMATCH:"
+                f"{request_id_int}:"
+                f"{audit_account}:"
+                f"{guard_account}"
+            )
+
+        account_key = (
+            audit_account
+            or guard_account
+        )
+
+        usage_value = (
+            audit.get(
+                "usage"
+            )
+        )
+
+        if usage_value is None:
+            usage_value = (
+                guard_usage
+            )
+
+        try:
+            usage_value = int(
+                usage_value
+            )
+        except Exception:
+            usage_value = (
+                guard_usage
+            )
+
+        account = next(
+            (
+                item
+                for item
+                in recovery_accounts
+                if str(
+                    item.key
+                ).strip()
+                == account_key
+            ),
+            None,
+        )
+
+        if account is None:
+            raise SideaSubmitUncertain(
+                "SIDEA_RECOVERY_ACCOUNT_NOT_CONFIGURED:"
+                f"{request_id_int}:"
+                f"{account_key}"
+            )
+
+        audit_curp = str(
+            audit.get(
+                "curp"
+            )
+            or ""
+        ).strip().upper()
+
+        if (
+            audit_curp
+            and audit_curp != curp
+        ):
+            raise SideaSubmitUncertain(
+                "SIDEA_RECOVERY_CURP_MISMATCH:"
+                f"{request_id_int}:"
+                f"{audit_curp}:"
+                f"{curp}"
+            )
+
+        if (
+            "add_internal_folio"
+            in audit
+            and bool(
+                audit.get(
+                    "add_internal_folio"
+                )
+            )
+            != bool(
+                add_internal_folio
+            )
+        ):
+            raise SideaSubmitUncertain(
+                "SIDEA_RECOVERY_FOLIO_MODE_MISMATCH:"
+                f"{request_id_int}"
+            )
+
+        lock_token = (
+            _sidea_prod_acquire_lock(
+                pool,
+                account_key,
+            )
+        )
+
+        if not lock_token:
+            raise SideaBusy(
+                "SIDEA_RECOVERY_ACCOUNT_BUSY:"
+                f"{account_key}"
+            )
+
+        print(
+            "PROVIDER16_SIDEA_RECOVERY_BEGIN =",
+            {
+                "request_id": (
+                    request_id_int
+                ),
+                "account": (
+                    account_key
+                ),
+                "usage": (
+                    usage_value
+                ),
+                "audit_state": (
+                    audit.get(
+                        "state"
+                    )
+                ),
+            },
+            flush=True,
+        )
+
+        try:
+
+            # ----------------------------------------------------
+            # MISMA CUENTA / MISMA SESIÓN
+            # ----------------------------------------------------
+
+            session, state = (
+                pool.build_http_session(
+                    account_key
+                )
+            )
+
+            pdf_params = (
+                audit.get(
+                    "pdf_params"
+                )
+            )
+
+            required_pdf_keys = (
+                "acto",
+                "cadena",
+                "origen",
+                "destino",
+                "peticionOID",
+                "respuestaFecha",
+                "respuestaOID",
+            )
+
+            has_complete_pdf_params = (
+                isinstance(
+                    pdf_params,
+                    dict,
+                )
+                and all(
+                    str(
+                        pdf_params.get(
+                            key
+                        )
+                        or ""
+                    ).strip()
+                    for key
+                    in required_pdf_keys
+                )
+            )
+
+            response_row = None
+
+            peticion_oid = str(
+                audit.get(
+                    "peticion_oid"
+                )
+                or ""
+            ).strip()
+
+            respuesta_oid = str(
+                audit.get(
+                    "respuesta_oid"
+                )
+                or ""
+            ).strip()
+
+            cadena_respuesta = str(
+                audit.get(
+                    "cadena"
+                )
+                or ""
+            ).strip()
+
+            # ----------------------------------------------------
+            # Si todavía no habíamos llegado a RESPONSE_RESOLVED,
+            # encontrar la petición YA EXISTENTE en monitoreo.
+            # ----------------------------------------------------
+
+            if not has_complete_pdf_params:
+
+                chain = cadena_respuesta
+
+                if not chain:
+                    chain = str(
+                        audit.get(
+                            "chain"
+                        )
+                        or ""
+                    ).strip()
+
+                if not chain:
+                    raise SideaSubmitUncertain(
+                        "SIDEA_RECOVERY_CHAIN_MISSING:"
+                        f"{request_id_int}"
+                    )
+
+                baseline_petitions = {
+                    str(value).strip()
+                    for value
+                    in (
+                        audit.get(
+                            "baseline_petitions"
+                        )
+                        or []
+                    )
+                    if str(
+                        value
+                    ).strip()
+                }
+
+                baseline_responses = {
+                    str(value).strip()
+                    for value
+                    in (
+                        audit.get(
+                            "baseline_responses"
+                        )
+                        or []
+                    )
+                    if str(
+                        value
+                    ).strip()
+                }
+
+                baseline_all = (
+                    baseline_petitions
+                    | baseline_responses
+                )
+
+                parsed = None
+
+                # ----------------------------------------------
+                # PETICIÓN
+                # ----------------------------------------------
+
+                if not peticion_oid:
+
+                    total_attempts = max(
+                        1,
+                        int(
+                            oid_poll_attempts
+                        ),
+                    )
+
+                    for attempt in range(
+                        total_attempts + 1
+                    ):
+
+                        if attempt > 0:
+                            time.sleep(
+                                float(
+                                    oid_poll_delay_sec
+                                )
+                            )
+
+                        monitor_html = (
+                            _sidea_prod_monitor_get(
+                                session
+                            )
+                        )
+
+                        parsed = (
+                            _sidea_prod_parse_monitor(
+                                monitor_html
+                            )
+                        )
+
+                        petition_ids = (
+                            _sidea_prod_petition_oids(
+                                parsed[
+                                    "petitions"
+                                ],
+                                curp,
+                                chain,
+                            )
+                            - baseline_all
+                        )
+
+                        response_ids = (
+                            _sidea_prod_response_oids(
+                                parsed[
+                                    "responses"
+                                ],
+                                curp,
+                                chain,
+                            )
+                            - baseline_all
+                        )
+
+                        candidates_oid = (
+                            petition_ids
+                            | response_ids
+                        )
+
+                        if len(
+                            candidates_oid
+                        ) == 1:
+
+                            peticion_oid = next(
+                                iter(
+                                    candidates_oid
+                                )
+                            )
+
+                            break
+
+                        if len(
+                            candidates_oid
+                        ) > 1:
+                            raise SideaSubmitUncertain(
+                                "SIDEA_RECOVERY_MULTIPLE_"
+                                "NEW_PETITIONS:"
+                                f"{request_id_int}:"
+                                f"{account_key}"
+                            )
+
+                    if not peticion_oid:
+                        raise SideaResponseTimeout(
+                            "SIDEA_RECOVERY_PETITION_"
+                            "NOT_VISIBLE:"
+                            f"{request_id_int}:"
+                            f"{account_key}"
+                        )
+
+                    _write_request_audit(
+                        "PETITION_RESOLVED",
+                        account_key,
+                        usage_value,
+                        peticion_oid=(
+                            peticion_oid
+                        ),
+                        recovered=True,
+                    )
+
+                # ----------------------------------------------
+                # RESPUESTA
+                # ----------------------------------------------
+
+                if parsed is None:
+
+                    monitor_html = (
+                        _sidea_prod_monitor_get(
+                            session
+                        )
+                    )
+
+                    parsed = (
+                        _sidea_prod_parse_monitor(
+                            monitor_html
+                        )
+                    )
+
+                response_row = (
+                    _sidea_prod_response_for_oid(
+                        parsed[
+                            "responses"
+                        ],
+                        peticion_oid,
+                    )
+                )
+
+                if response_row is None:
+
+                    for _ in range(
+                        max(
+                            1,
+                            int(
+                                response_poll_attempts
+                            ),
+                        )
+                    ):
+
+                        monitor_html = (
+                            _sidea_prod_monitor_get(
+                                session
+                            )
+                        )
+
+                        parsed = (
+                            _sidea_prod_parse_monitor(
+                                monitor_html
+                            )
+                        )
+
+                        response_row = (
+                            _sidea_prod_response_for_oid(
+                                parsed[
+                                    "responses"
+                                ],
+                                peticion_oid,
+                            )
+                        )
+
+                        if response_row:
+                            break
+
+                        time.sleep(
+                            float(
+                                response_poll_delay_sec
+                            )
+                        )
+
+                if response_row is None:
+                    raise SideaResponseTimeout(
+                        "SIDEA_RECOVERY_RESPONSE_TIMEOUT:"
+                        f"{request_id_int}:"
+                        f"{account_key}:"
+                        f"{peticion_oid}"
+                    )
+
+                if len(
+                    response_row
+                ) < 13:
+                    raise SideaError(
+                        "SIDEA_RECOVERY_RESPONSE_ROW_SHORT"
+                    )
+
+                cadena_respuesta = str(
+                    response_row[0]
+                    or ""
+                ).strip()
+
+                if (
+                    not cadena_respuesta
+                    or cadena_respuesta.lower()
+                    == "no existe acto."
+                ):
+                    raise SideaNoRecord(
+                        "SIDEA_NO_RECORD:"
+                        "REMOTE_NO_ACT"
+                    )
+
+                respuesta_oid = str(
+                    response_row[12]
+                    or ""
+                ).strip()
+
+                respuesta_fecha = str(
+                    response_row[11]
+                    or ""
+                ).strip()
+
+                if (
+                    not respuesta_oid
+                    or not respuesta_fecha
+                ):
+                    raise SideaError(
+                        "SIDEA_RECOVERY_RESPONSE_INCOMPLETE"
+                    )
+
+                pdf_params = {
+                    "acto": str(
+                        response_row[7]
+                        or ""
+                    ).strip(),
+
+                    "cadena": (
+                        cadena_respuesta
+                    ),
+
+                    "origen": str(
+                        response_row[8]
+                        or ""
+                    ).strip(),
+
+                    "destino": str(
+                        response_row[9]
+                        or ""
+                    ).strip(),
+
+                    "peticionOID": str(
+                        response_row[10]
+                        or ""
+                    ).strip(),
+
+                    "respuestaFecha": (
+                        respuesta_fecha
+                    ),
+
+                    "respuestaOID": (
+                        respuesta_oid
+                    ),
+                }
+
+                if not all(
+                    pdf_params.values()
+                ):
+                    raise SideaPdfError(
+                        "SIDEA_RECOVERY_PDF_PARAMS_INCOMPLETE"
+                    )
+
+                response_entity = ""
+
+                if len(
+                    response_row
+                ) > 16:
+                    response_entity = str(
+                        response_row[16]
+                        or ""
+                    ).strip()
+
+                _write_request_audit(
+                    "RESPONSE_RESOLVED",
+                    account_key,
+                    usage_value,
+                    peticion_oid=(
+                        peticion_oid
+                    ),
+                    respuesta_oid=(
+                        respuesta_oid
+                    ),
+                    respuesta_fecha=(
+                        respuesta_fecha
+                    ),
+                    cadena=(
+                        cadena_respuesta
+                    ),
+                    registration_entity_hint=(
+                        response_entity
+                    ),
+                    pdf_params=(
+                        pdf_params
+                    ),
+                    recovered=True,
+                )
+
+            else:
+
+                # Ya teníamos todos los datos exactos:
+                # no necesitamos correlacionar monitor.
+                pdf_params = {
+                    key: str(
+                        pdf_params.get(
+                            key
+                        )
+                        or ""
+                    ).strip()
+                    for key
+                    in required_pdf_keys
+                }
+
+                peticion_oid = (
+                    pdf_params[
+                        "peticionOID"
+                    ]
+                )
+
+                respuesta_oid = (
+                    pdf_params[
+                        "respuestaOID"
+                    ]
+                )
+
+                cadena_respuesta = (
+                    pdf_params[
+                        "cadena"
+                    ]
+                )
+
+            # ----------------------------------------------------
+            # DESCARGAR ESA MISMA ACTA.
+            #
+            # IMPORTANTE:
+            # aquí NO existe solicitudImpresion.do.
+            # ----------------------------------------------------
+
+            pdf_response = session.get(
+                (
+                    f"{SIDEA_BASE_URL}"
+                    "/actaPDF.do"
+                ),
+                params=pdf_params,
+                timeout=(
+                    SIDEA_HTTP_CONNECT_TIMEOUT,
+                    SIDEA_HTTP_READ_TIMEOUT,
+                ),
+                allow_redirects=True,
+            )
+
+            pdf_response.raise_for_status()
+
+            pdf_bytes = (
+                pdf_response.content
+                or b""
+            )
+
+            content_type = (
+                pdf_response.headers.get(
+                    "Content-Type"
+                )
+                or ""
+            ).lower()
+
+            if not pdf_bytes.startswith(
+                b"%PDF-"
+            ):
+                raise SideaPdfError(
+                    "SIDEA_RECOVERY_INVALID_PDF_SIGNATURE"
+                )
+
+            if "pdf" not in content_type:
+                raise SideaPdfError(
+                    "SIDEA_RECOVERY_INVALID_PDF_CONTENT_TYPE"
+                )
+
+            try:
+                front_pages = len(
+                    PdfReader(
+                        BytesIO(
+                            pdf_bytes
+                        )
+                    ).pages
+                )
+
+            except Exception as exc:
+                raise SideaPdfError(
+                    "SIDEA_RECOVERY_FRONT_PDF_PARSE_ERROR"
+                ) from exc
+
+            if front_pages != 1:
+                raise SideaPdfError(
+                    "SIDEA_RECOVERY_FRONT_PAGE_COUNT:"
+                    f"{front_pages}"
+                )
+
+            _write_request_audit(
+                "PDF_DOWNLOADED",
+                account_key,
+                usage_value,
+                peticion_oid=(
+                    peticion_oid
+                ),
+                respuesta_oid=(
+                    respuesta_oid
+                ),
+                front_pages=(
+                    front_pages
+                ),
+                remote_pdf_bytes=(
+                    len(pdf_bytes)
+                ),
+                recovered=True,
+            )
+
+            # ----------------------------------------------------
+            # ENTIDAD
+            # ----------------------------------------------------
+
+            registration_entity = str(
+                audit.get(
+                    "registration_entity"
+                )
+                or audit.get(
+                    "registration_entity_hint"
+                )
+                or audit.get(
+                    "preflight_entity"
+                )
+                or audit.get(
+                    "search_entity"
+                )
+                or audit.get(
+                    "preferred_entity"
+                )
+                or entidad
+                or ""
+            ).strip()
+
+            if (
+                response_row is not None
+                and len(
+                    response_row
+                ) > 16
+                and str(
+                    response_row[16]
+                    or ""
+                ).strip()
+            ):
+                registration_entity = str(
+                    response_row[16]
+                    or ""
+                ).strip()
+
+            if not registration_entity:
+                raise SideaPdfError(
+                    "SIDEA_RECOVERY_REGISTRATION_ENTITY_MISSING"
+                )
+
+            # ----------------------------------------------------
+            # MISMO POSTPROCESO LOCAL
+            # ----------------------------------------------------
+
+            if add_internal_folio:
+                pdf_bytes = (
+                    add_sidea_internal_reference(
+                        pdf_bytes,
+                        registration_entity,
+                    )
+                )
+
+            final_pdf = (
+                append_sidea_rear(
+                    pdf_bytes,
+                    registration_entity,
+                )
+            )
+
+            try:
+                final_pages = len(
+                    PdfReader(
+                        BytesIO(
+                            final_pdf
+                        )
+                    ).pages
+                )
+
+            except Exception as exc:
+                raise SideaPdfError(
+                    "SIDEA_RECOVERY_FINAL_PDF_PARSE_ERROR"
+                ) from exc
+
+            if final_pages != 2:
+                raise SideaPdfError(
+                    "SIDEA_RECOVERY_FINAL_PAGE_COUNT:"
+                    f"{final_pages}"
+                )
+
+            _write_request_audit(
+                "LOCAL_PDF_READY",
+                account_key,
+                usage_value,
+                peticion_oid=(
+                    peticion_oid
+                ),
+                respuesta_oid=(
+                    respuesta_oid
+                ),
+                registration_entity=(
+                    registration_entity
+                ),
+                front_pages=(
+                    front_pages
+                ),
+                final_pages=(
+                    final_pages
+                ),
+                final_pdf_bytes=(
+                    len(final_pdf)
+                ),
+                folio_applied=bool(
+                    add_internal_folio
+                ),
+                recovered=True,
+            )
+
+            pool.set_status(
+                account_key,
+                "READY",
+            )
+
+            _write_request_audit(
+                "SUCCESS",
+                account_key,
+                usage_value,
+                peticion_oid=(
+                    peticion_oid
+                ),
+                respuesta_oid=(
+                    respuesta_oid
+                ),
+                registration_entity=(
+                    registration_entity
+                ),
+                cadena=(
+                    cadena_respuesta
+                ),
+                front_pages=(
+                    front_pages
+                ),
+                final_pages=(
+                    final_pages
+                ),
+                recovered=True,
+            )
+
+            print(
+                "PROVIDER16_SIDEA_RECOVERY_SUCCESS =",
+                {
+                    "request_id": (
+                        request_id_int
+                    ),
+                    "account": (
+                        account_key
+                    ),
+                    "usage": (
+                        usage_value
+                    ),
+                    "peticion_oid": (
+                        peticion_oid
+                    ),
+                    "respuesta_oid": (
+                        respuesta_oid
+                    ),
+                    "front_pages": (
+                        front_pages
+                    ),
+                    "final_pages": (
+                        final_pages
+                    ),
+                },
+                flush=True,
+            )
+
+            return {
+                "pdf_bytes": (
+                    final_pdf
+                ),
+                "account_key": (
+                    account_key
+                ),
+                "usage_reserved": (
+                    usage_value
+                ),
+                "peticion_oid": (
+                    peticion_oid
+                ),
+                "respuesta_oid": (
+                    respuesta_oid
+                ),
+                "registration_entity": (
+                    registration_entity
+                ),
+                "cadena": (
+                    cadena_respuesta
+                ),
+                "front_pages": (
+                    front_pages
+                ),
+                "final_pages": (
+                    final_pages
+                ),
+                "recovered": True,
+            }
+
+        finally:
+            _sidea_prod_release_lock(
+                pool,
+                account_key,
+                lock_token,
+            )
+
     if accounts is None:
         accounts = (
             load_sidea_accounts()
@@ -4716,6 +6165,22 @@ def sidea_generate_pdf(
     if not accounts:
         raise SideaNoReadyAccount(
             "SIDEA_ACCOUNTS_NOT_CONFIGURED"
+        )
+
+    if request_has_guard:
+
+        print(
+            "PROVIDER16_SIDEA_RECOVERY_GUARD_FOUND =",
+            {
+                "request_id": (
+                    request_id_int
+                ),
+            },
+            flush=True,
+        )
+
+        return _recover_existing_request(
+            accounts
         )
 
     candidates = (
@@ -4923,6 +6388,51 @@ def sidea_generate_pdf(
             baseline_all = (
                 baseline_petitions
                 | baseline_responses
+            )
+
+            # =================================================
+            # RECOVERY CHECKPOINT: PREPARED
+            #
+            # Ocurre ANTES de reservar cuota.
+            # Deja persistido el baseline necesario para
+            # recuperar una impresion incierta sin repetir POST.
+            # =================================================
+
+            _write_request_audit(
+                "PREPARED",
+                account.key,
+                None,
+                curp=curp,
+                chain=chain,
+                acto=acto,
+                tipo=tipo,
+                add_internal_folio=bool(
+                    add_internal_folio
+                ),
+                preferred_entity=str(
+                    entidad
+                    or ""
+                ),
+                preflight_entity=str(
+                    preflight_entity
+                    or ""
+                ),
+                search_entity=str(
+                    search.get(
+                        "entidad"
+                    )
+                    or ""
+                ),
+                baseline_petitions=sorted(
+                    str(value)
+                    for value
+                    in baseline_petitions
+                ),
+                baseline_responses=sorted(
+                    str(value)
+                    for value
+                    in baseline_responses
+                ),
             )
 
             # =================================================
@@ -5142,6 +6652,16 @@ def sidea_generate_pdf(
                     f"{reserved}"
                 )
 
+            _write_request_audit(
+                "PETITION_RESOLVED",
+                account.key,
+                reserved,
+                peticion_oid=str(
+                    peticion_oid
+                    or ""
+                ),
+            )
+
             print(
                 "PROVIDER16_SIDEA_PETITION_RESOLVED =",
                 {
@@ -5246,6 +6766,81 @@ def sidea_generate_pdf(
                 raise SideaError(
                     "SIDEA_RESPONSE_INCOMPLETE"
                 )
+
+            # =================================================
+            # RECOVERY CHECKPOINT: RESPONSE_RESOLVED
+            #
+            # Desde aqui SIDEA ya tiene una respuesta concreta.
+            # Guardamos exactamente los parametros necesarios
+            # para volver a descargar ESA MISMA acta.
+            # =================================================
+
+            response_registration_entity = ""
+
+            if len(response_row) > 16:
+                response_registration_entity = str(
+                    response_row[16]
+                    or ""
+                ).strip()
+
+            recovery_pdf_params = {
+                "acto": str(
+                    response_row[7]
+                    or ""
+                ).strip(),
+
+                "cadena": (
+                    cadena_respuesta
+                ),
+
+                "origen": str(
+                    response_row[8]
+                    or ""
+                ).strip(),
+
+                "destino": str(
+                    response_row[9]
+                    or ""
+                ).strip(),
+
+                "peticionOID": str(
+                    response_row[10]
+                    or ""
+                ).strip(),
+
+                "respuestaFecha": (
+                    respuesta_fecha
+                ),
+
+                "respuestaOID": (
+                    respuesta_oid
+                ),
+            }
+
+            _write_request_audit(
+                "RESPONSE_RESOLVED",
+                account.key,
+                reserved,
+                peticion_oid=str(
+                    peticion_oid
+                    or ""
+                ),
+                respuesta_oid=(
+                    respuesta_oid
+                ),
+                respuesta_fecha=(
+                    respuesta_fecha
+                ),
+                cadena=(
+                    cadena_respuesta
+                ),
+                registration_entity_hint=(
+                    response_registration_entity
+                ),
+                pdf_params=(
+                    recovery_pdf_params
+                ),
+            )
 
             # =================================================
             # 8. URL PDF
@@ -5359,6 +6954,25 @@ def sidea_generate_pdf(
                     f"{front_pages}"
                 )
 
+            _write_request_audit(
+                "PDF_DOWNLOADED",
+                account.key,
+                reserved,
+                peticion_oid=str(
+                    peticion_oid
+                    or ""
+                ),
+                respuesta_oid=(
+                    respuesta_oid
+                ),
+                front_pages=(
+                    front_pages
+                ),
+                remote_pdf_bytes=(
+                    len(pdf_bytes)
+                ),
+            )
+
             # =================================================
             # 10. ENTIDAD REGISTRAL + REVERSO
             # =================================================
@@ -5413,6 +7027,34 @@ def sidea_generate_pdf(
                     "SIDEA_FINAL_PAGE_COUNT:"
                     f"{final_pages}"
                 )
+
+            _write_request_audit(
+                "LOCAL_PDF_READY",
+                account.key,
+                reserved,
+                peticion_oid=str(
+                    peticion_oid
+                    or ""
+                ),
+                respuesta_oid=(
+                    respuesta_oid
+                ),
+                registration_entity=(
+                    registration_entity
+                ),
+                front_pages=(
+                    front_pages
+                ),
+                final_pages=(
+                    final_pages
+                ),
+                final_pdf_bytes=(
+                    len(final_pdf)
+                ),
+                folio_applied=bool(
+                    add_internal_folio
+                ),
+            )
 
             # =================================================
             # 11. GUARDAR COOKIES ACTUALIZADAS
@@ -5534,6 +7176,232 @@ def sidea_generate_pdf(
 # ============================================================
 # SIDEA_MULTIACT_CHAIN_SPECIAL_V2
 # ============================================================
+
+
+# ============================================================
+# PROVIDER16_DIRECT_RECOVERY_ENTRY_V1
+# ============================================================
+
+def sidea_recover_request(
+    pool: SideaPool,
+    request_id: int,
+    accounts: list[SideaAccount] | None = None,
+    add_internal_folio: bool = False,
+) -> dict:
+    """
+    Recupera una impresion YA reservada/creada.
+
+    REGLAS:
+      - requiere request_guard:v2
+      - usa contexto persistido por PREPARED
+      - NO busca cadena nuevamente
+      - NO resuelve CURP especial nuevamente
+      - NO selecciona cuenta por saldo
+      - NO reserva cuota
+      - NO hace solicitudImpresion.do
+
+    sidea_generate_pdf() detectará el guard y entrará
+    inmediatamente al recovery interno.
+    """
+
+    request_id_int = int(
+        request_id
+    )
+
+    guard_key = (
+        "provider16:sidea:"
+        "request_guard:v2:"
+        f"{request_id_int}"
+    )
+
+    audit_key = (
+        "provider16:sidea:"
+        "request_audit:v2:"
+        f"{request_id_int}"
+    )
+
+    if not pool.redis.exists(
+        guard_key
+    ):
+        raise SideaSubmitUncertain(
+            "SIDEA_DIRECT_RECOVERY_GUARD_MISSING:"
+            f"{request_id_int}"
+        )
+
+    raw = pool.redis.get(
+        audit_key
+    )
+
+    if not raw:
+        raise SideaSubmitUncertain(
+            "SIDEA_DIRECT_RECOVERY_AUDIT_MISSING:"
+            f"{request_id_int}"
+        )
+
+    if isinstance(
+        raw,
+        bytes,
+    ):
+        raw = raw.decode(
+            "utf-8",
+            errors="replace",
+        )
+
+    try:
+        audit = json.loads(
+            str(raw)
+        )
+
+    except Exception as exc:
+        raise SideaSubmitUncertain(
+            "SIDEA_DIRECT_RECOVERY_AUDIT_INVALID:"
+            f"{request_id_int}"
+        ) from exc
+
+    if not isinstance(
+        audit,
+        dict,
+    ):
+        raise SideaSubmitUncertain(
+            "SIDEA_DIRECT_RECOVERY_AUDIT_NOT_OBJECT:"
+            f"{request_id_int}"
+        )
+
+    audit_request_id = (
+        audit.get(
+            "request_id"
+        )
+    )
+
+    if (
+        audit_request_id is not None
+        and int(
+            audit_request_id
+        ) != request_id_int
+    ):
+        raise SideaSubmitUncertain(
+            "SIDEA_DIRECT_RECOVERY_REQUEST_MISMATCH:"
+            f"{request_id_int}:"
+            f"{audit_request_id}"
+        )
+
+    curp = str(
+        audit.get(
+            "curp"
+        )
+        or ""
+    ).strip().upper()
+
+    acto = str(
+        audit.get(
+            "acto"
+        )
+        or ""
+    ).strip()
+
+    tipo = str(
+        audit.get(
+            "tipo"
+        )
+        or "1"
+    ).strip()
+
+    entidad = str(
+        audit.get(
+            "preflight_entity"
+        )
+        or audit.get(
+            "search_entity"
+        )
+        or audit.get(
+            "preferred_entity"
+        )
+        or ""
+    ).strip()
+
+    if not curp:
+        raise SideaSubmitUncertain(
+            "SIDEA_DIRECT_RECOVERY_CURP_MISSING:"
+            f"{request_id_int}"
+        )
+
+    if acto not in {
+        "1",
+        "2",
+        "3",
+        "4",
+    }:
+        raise SideaSubmitUncertain(
+            "SIDEA_DIRECT_RECOVERY_ACTO_INVALID:"
+            f"{request_id_int}:"
+            f"{acto}"
+        )
+
+    if tipo not in {
+        "1",
+        "2",
+    }:
+        raise SideaSubmitUncertain(
+            "SIDEA_DIRECT_RECOVERY_TIPO_INVALID:"
+            f"{request_id_int}:"
+            f"{tipo}"
+        )
+
+    if (
+        "add_internal_folio"
+        in audit
+        and bool(
+            audit.get(
+                "add_internal_folio"
+            )
+        )
+        != bool(
+            add_internal_folio
+        )
+    ):
+        raise SideaSubmitUncertain(
+            "SIDEA_DIRECT_RECOVERY_FOLIO_MISMATCH:"
+            f"{request_id_int}"
+        )
+
+    print(
+        "PROVIDER16_DIRECT_RECOVERY_ENTRY =",
+        {
+            "request_id": (
+                request_id_int
+            ),
+            "curp": curp,
+            "acto": acto,
+            "tipo": tipo,
+            "entity": entidad,
+            "audit_state": (
+                audit.get(
+                    "state"
+                )
+            ),
+        },
+        flush=True,
+    )
+
+    # IMPORTANTE:
+    # sidea_generate_pdf() verá request_guard:v2
+    # antes de candidate_accounts y hará RETURN recovery.
+    return sidea_generate_pdf(
+        pool=pool,
+        curp=curp,
+        entidad=(
+            entidad
+            or None
+        ),
+        acto=acto,
+        tipo=tipo,
+        accounts=accounts,
+        request_id=request_id_int,
+        add_internal_folio=(
+            add_internal_folio
+        ),
+    )
+
 
 def sidea_resolve_chain(
     pool: SideaPool,

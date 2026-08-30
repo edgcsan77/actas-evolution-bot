@@ -19,10 +19,10 @@ SIDEA_ACCOUNTS_SETTING_KEY = (
 
 SIDEA_ACCOUNT_SLOTS = tuple(
     f"sidea{i}"
-    for i in range(1, 8)
+    for i in range(1, 11)
 )
 
-SIDEA_MAX_DAILY_LIMIT = 1000
+SIDEA_MAX_DAILY_LIMIT = 2000
 SIDEA_DEFAULT_DAILY_LIMIT = 1000
 
 

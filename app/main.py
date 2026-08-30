@@ -9800,7 +9800,7 @@ def _is_hidden_panel_group(gid: str | None, name: str | None) -> bool:
 
 # ============================================================
 # PROVIDER16_ACCOUNTS_PANEL_V2
-# SIDEA1..SIDEA7 · panel seguro y compacto
+# SIDEA1..SIDEA10 · panel seguro y compacto
 # ============================================================
 
 @app.get(
@@ -9837,6 +9837,9 @@ def panel_sidea_accounts(
         "sidea5",
         "sidea6",
         "sidea7",
+        "sidea8",
+        "sidea9",
+        "sidea10",
     }:
         focus_slot = ""
 
@@ -10145,7 +10148,7 @@ def panel_sidea_accounts(
                       id="{slot}_limit"
                       type="number"
                       min="1"
-                      max="1000"
+                      max="2000"
                       value="{daily_limit}"
                     >
                   </div>
@@ -10800,7 +10803,7 @@ def panel_sidea_accounts(
       </h1>
 
       <div class="subtitle">
-        Administración de SIDEA1 a SIDEA7
+        Administración de SIDEA1 a SIDEA10
       </div>
     </div>
 
@@ -10817,7 +10820,7 @@ def panel_sidea_accounts(
 
     <div class="stat">
       <span>Configuradas</span>
-      <strong>__CONFIGURED__/6</strong>
+      <strong>__CONFIGURED__/10</strong>
     </div>
 
     <div class="stat">
@@ -11499,7 +11502,7 @@ def panel_provider_weight(payload: dict, db: Session = Depends(get_db)):
 
 # ============================================================
 # PROVIDER16_MAIN_DASHBOARD_V1
-# Resumen SIDEA1..SIDEA7 para panel principal
+# Resumen SIDEA1..SIDEA10 para panel principal
 # ============================================================
 
 def _sidea_main_panel_html(
@@ -11612,7 +11615,7 @@ def _sidea_main_panel_html(
 
         unconfigured = max(
             0,
-            6 - configured,
+            len(rows) - configured,
         )
 
         token_q = quote(
@@ -17043,14 +17046,20 @@ def panel_actas(
         let panelLiveMarker = null;
 
         function panelLiveParams() {{
+          // PANEL_PERIOD_LIVE_FIX_V1
+          // La URL es la fuente real del periodo visible.
+          // No usar querySelector(name=view), porque existen varios
+          // formularios con ese mismo nombre y el primero es "custom".
+          const pageParams = new URLSearchParams(window.location.search || "");
+
           return new URLSearchParams({{
-            view: document.querySelector('input[name="view"]')?.value || "day",
-            group_jid: document.querySelector('input[name="group_jid"]')?.value || "",
-            provider_name: document.querySelector('input[name="provider_name"]')?.value || "",
-            status: document.querySelector('input[name="status"]')?.value || "",
-            act_type: document.querySelector('input[name="act_type"]')?.value || "",
-            date_from: document.querySelector('input[name="date_from"]')?.value || "",
-            date_to: document.querySelector('input[name="date_to"]')?.value || "",
+            view: pageParams.get("view") || "day",
+            group_jid: pageParams.get("group_jid") || "",
+            provider_name: pageParams.get("provider_name") || "",
+            status: pageParams.get("status") || "",
+            act_type: pageParams.get("act_type") || "",
+            date_from: pageParams.get("date_from") || "",
+            date_to: pageParams.get("date_to") || "",
           }});
         }}
 
@@ -17141,15 +17150,8 @@ def panel_actas(
           const wrap = document.getElementById("recentRequestsWrap");
           if (!wrap) return;
 
-          const params = new URLSearchParams({{
-            view: document.querySelector('input[name="view"]')?.value || "day",
-            group_jid: document.querySelector('input[name="group_jid"]')?.value || "",
-            provider_name: document.querySelector('input[name="provider_name"]')?.value || "",
-            status: document.querySelector('input[name="status"]')?.value || "",
-            act_type: document.querySelector('input[name="act_type"]')?.value || "",
-            date_from: document.querySelector('input[name="date_from"]')?.value || "",
-            date_to: document.querySelector('input[name="date_to"]')?.value || "",
-          }});
+          // Reutilizar exactamente el periodo/filtros de la URL.
+          const params = panelLiveParams();
 
           params.set("fresh", "1");
 
@@ -18375,6 +18377,7 @@ API_ERROR_MESSAGES = {
     "REQUEST_NOT_FOUND": "La solicitud no existe o no pertenece al cliente autenticado.",
     "REQUEST_NOT_DONE": "La solicitud todavia no esta lista o termino en error.",
     "CREATE_REQUEST_FAILED": "No se pudo crear la solicitud.",
+    "NO_RECORD": "No se encontró un acta para el dato solicitado.",
     "UNKNOWN_ERROR": "La solicitud no pudo completarse.",
 }
 
@@ -18425,6 +18428,23 @@ def _api_public_error_code(raw_error: str | None) -> str:
     original_code, detail = _api_split_error(raw_error)
     code = _api_clean_internal_error_code(original_code)
     raw_up = (raw_error or "").strip().upper()
+
+    # ========================================================
+    # API_SIDEA_NO_RECORD_V1
+    #
+    # SIDEA ya clasifico el resultado como NO RECORD.
+    # Esto NO es timeout ni falla tecnica del proveedor.
+    # ========================================================
+    if (
+        code == "SIDEA_NO_RECORD"
+        or raw_up.startswith("SIDEA_NO_RECORD:")
+        or code in {
+            "SEARCH_ENTITY_NOT_FOUND",
+            "SPECIAL_CURP_NOT_FOUND",
+            "CHAIN_NOT_FOUND",
+        }
+    ):
+        return "NO_RECORD"
 
     # Deteccion por texto crudo de errores comunes que vienen del proveedor
     if (
@@ -25496,6 +25516,86 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
                     # No modificar el ERROR ni volver a consumir proveedor.
                     continue
+
+                # ========================================================
+                # PROVIDER16_AMBIGUOUS_TERMINAL_V1
+                #
+                # SIDEA ya confirmó que existen varios registros para
+                # la misma CURP/tipo. Reenviar inmediatamente la misma
+                # CURP no resuelve la ambigüedad y sólo vuelve a consumir
+                # proveedor / generar soporte.
+                #
+                # Durante 24h conservamos el ERROR como terminal.
+                # ========================================================
+
+                ambiguous_error = (
+                    error_existing.error_message
+                    or ""
+                ).strip().upper()
+
+                ambiguous_cutoff = (
+                    _utc_now_naive()
+                    - timedelta(hours=24)
+                )
+
+                existing_ambiguous_is_fresh = (
+                    ambiguous_error.startswith(
+                        "SIDEA_AMBIGUOUS_CURP_ROWS:"
+                    )
+                    and error_existing.updated_at
+                    and error_existing.updated_at
+                    >= ambiguous_cutoff
+                )
+
+                if existing_ambiguous_is_fresh:
+
+                    # Cerrar la transacción de lectura antes de
+                    # llamar Evolution.
+                    db.commit()
+
+                    ambiguous_msg = (
+                        f"⚠️ {act_type} · registro ambiguo\n"
+                        f"👤 {requester_display_name}\n\n"
+                        "Se localizaron varios registros para la "
+                        "CURP solicitada.\n"
+                        "No se volverá a procesar automáticamente "
+                        "con la misma CURP.\n"
+                        "Si cuentas con la Cadena Digital o "
+                        "Identificador Electrónico, envíalo para "
+                        "precisar el acta."
+                    )
+
+                    print(
+                        "EXISTING_PROVIDER16_AMBIGUOUS_"
+                        "RETURNED_WITHOUT_RETRY =",
+                        {
+                            "request_id": (
+                                error_existing.id
+                            ),
+                            "term": term,
+                            "act_type": act_type,
+                            "error_message": (
+                                error_existing.error_message
+                            ),
+                        },
+                        flush=True,
+                    )
+
+                    if source_group_id:
+                        send_group_text(
+                            source_group_id,
+                            ambiguous_msg,
+                            instance_name=instance_name,
+                        )
+                    else:
+                        send_text(
+                            requester_wa_id,
+                            ambiguous_msg,
+                            instance_name=instance_name,
+                        )
+
+                    continue
+
 
                 # --------------------------------------------------------
                 # REACTIVAR LA MISMA REQUEST
