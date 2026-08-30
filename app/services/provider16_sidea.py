@@ -4624,17 +4624,6 @@ def _sidea_prod_candidate_accounts(
 
     for account in accounts:
 
-        # PROVIDER16_SIDEA8_PRODUCTION_EXCLUDE_V1
-        # SIDEA8 no tiene credencial productiva válida todavía.
-        # Puede existir en panel, pero jamás participar en requests.
-        if (
-            (account.key or "")
-            .strip()
-            .lower()
-            == "sidea8"
-        ):
-            continue
-
         if not account.enabled:
             continue
 
