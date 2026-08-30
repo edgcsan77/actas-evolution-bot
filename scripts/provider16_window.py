@@ -116,7 +116,7 @@ def main() -> None:
     open_now = (
         7 * 60
         <= minutes
-        < 22 * 60
+        < 23 * 60
     )
 
     stamp = now.strftime(

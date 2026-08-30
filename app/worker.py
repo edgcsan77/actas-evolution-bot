@@ -6448,7 +6448,7 @@ def _process_provider16(req, db):
 
         raise SideaBusy(
             "SIDEA_OUTSIDE_OPERATING_HOURS:"
-            "07:00-22:00:"
+            "07:00-23:00:"
             "America/Mexico_City"
         )
 

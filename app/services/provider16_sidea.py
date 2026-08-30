@@ -5,7 +5,7 @@ import os
 import re
 import unicodedata
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -40,13 +40,13 @@ SIDEA_TIMEZONE = os.getenv(
 #
 # SIDEA solamente puede iniciar trabajo nuevo entre:
 #
-#   07:00 <= hora CDMX < 22:00
+#   07:00 <= hora CDMX < 23:00
 #
-# A las 22:00 ya se considera cerrado.
+# A las 23:00 ya se considera cerrado.
 # ============================================================
 
 SIDEA_OPERATING_START_MINUTE = 7 * 60
-SIDEA_OPERATING_END_MINUTE = 22 * 60
+SIDEA_OPERATING_END_MINUTE = 23 * 60
 
 
 def sidea_operating_window(
@@ -88,7 +88,7 @@ def sidea_operating_window(
         "timezone": SIDEA_TIMEZONE,
         "local_iso": local_now.isoformat(),
         "start": "07:00",
-        "end": "22:00",
+        "end": "23:00",
     }
 
 
@@ -353,12 +353,40 @@ class SideaPool:
 
         return str(raw)
 
+    @staticmethod
+    def _usage_bucket_date(
+        local_now: datetime,
+    ) -> str:
+        """
+        Define el bucket de consumo SIDEA.
+
+        Lunes-viernes usan su fecha normal.
+        Sabado usa su propia fecha.
+        Domingo reutiliza la fecha del sabado.
+
+        De esta forma sabado + domingo comparten
+        exactamente el mismo limite por cuenta.
+        """
+
+        # WEEKEND_USAGE_POOL_V1
+        if local_now.weekday() == 6:
+            local_now = (
+                local_now
+                - timedelta(days=1)
+            )
+
+        return local_now.strftime(
+            "%Y-%m-%d"
+        )
+
     def _today(self) -> str:
         now = datetime.now(
             ZoneInfo(SIDEA_TIMEZONE)
         )
 
-        return now.strftime("%Y-%m-%d")
+        return self._usage_bucket_date(
+            now
+        )
 
     def _session_key(self, account_key: str) -> str:
         return (

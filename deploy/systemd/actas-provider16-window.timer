@@ -1,0 +1,13 @@
+[Unit]
+Description=ACTAS PROVIDER16 schedule 07:00-23:00 America/Mexico_City
+
+[Timer]
+OnBootSec=30s
+OnCalendar=*-*-* 07:00:00 America/Mexico_City
+OnCalendar=*-*-* 23:00:00 America/Mexico_City
+Persistent=true
+AccuracySec=1s
+Unit=actas-provider16-window.service
+
+[Install]
+WantedBy=timers.target
