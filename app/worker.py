@@ -9176,7 +9176,14 @@ def process_request(request_id: int):
             # PROVIDER16_RECOVERY_HARDENING_V1
             # ====================================================
 
-            PROVIDER16_RECOVERY_MAX_RETRIES = 6
+            # PROVIDER16_RECOVERY_LONG_WINDOW_V1
+            #
+            # Recovery trabaja sobre la MISMA impresión
+            # protegida por request_guard:v2.
+            #
+            # NO reserva otra cuota.
+            # NO ejecuta otra solicitudImpresion.do.
+            PROVIDER16_RECOVERY_MAX_RETRIES = 60
 
 
             def _provider16_read_recovery_audit():

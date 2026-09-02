@@ -358,22 +358,11 @@ class SideaPool:
         local_now: datetime,
     ) -> str:
         """
-        Define el bucket de consumo SIDEA.
+        Define el bucket diario de consumo SIDEA.
 
-        Lunes-viernes usan su fecha normal.
-        Sabado usa su propia fecha.
-        Domingo reutiliza la fecha del sabado.
-
-        De esta forma sabado + domingo comparten
-        exactamente el mismo limite por cuenta.
+        Cada dia usa su propia fecha local.
+        Sabado y domingo tienen contadores independientes.
         """
-
-        # WEEKEND_USAGE_POOL_V1
-        if local_now.weekday() == 6:
-            local_now = (
-                local_now
-                - timedelta(days=1)
-            )
 
         return local_now.strftime(
             "%Y-%m-%d"
@@ -860,6 +849,24 @@ class SideaPool:
             f"{request_id}"
         )
 
+        # ====================================================
+        # PROVIDER16_CONSUMED_REQUESTS_INDEX_V1
+        #
+        # Índice diario de request_id que REALMENTE
+        # reservaron/consumieron una unidad SIDEA.
+        #
+        # Se escribe dentro del MISMO Lua atómico que:
+        #   - incrementa usage
+        #   - crea request_guard:v2
+        #
+        # No hace ninguna llamada HTTP adicional a SIDEA.
+        # ====================================================
+        consumed_requests_key = (
+            "provider16:sidea:"
+            "consumed_requests:"
+            f"{self._today()}"
+        )
+
         lua = """
         local previous = redis.call(
             'GET',
@@ -917,6 +924,22 @@ class SideaPool:
             2592000
         )
 
+        -- PROVIDER16_CONSUMED_REQUESTS_INDEX_V1
+        --
+        -- Solo se ejecuta cuando este request_id
+        -- obtuvo una NUEVA reserva.
+        redis.call(
+            'SADD',
+            KEYS[3],
+            ARGV[3]
+        )
+
+        redis.call(
+            'EXPIRE',
+            KEYS[3],
+            2592000
+        )
+
         return {
             1,
             new_value
@@ -925,13 +948,15 @@ class SideaPool:
 
         result = self.redis.eval(
             lua,
-            2,
+            3,
             usage_key,
             guard_key,
+            consumed_requests_key,
             int(
                 account.daily_limit
             ),
             account.key,
+            str(request_id),
         )
 
         code = int(
@@ -6457,23 +6482,26 @@ def sidea_generate_pdf(
             #    Desde aquí hay consumo local.
             # =================================================
 
+            # =================================================
+            # PROVIDER16_REQUIRE_REQUEST_ID_FOR_CONSUMPTION_V1
+            #
+            # REGLA DE PRODUCCION:
+            # Ninguna impresión SIDEA puede reservar cuota sin
+            # estar ligada a un RequestLog.id.
+            #
+            # Esto elimina consumos anónimos/no auditables.
+            # =================================================
             if request_id_int is None:
-
-                # Compatibilidad con herramientas
-                # manuales antiguas que no pasan
-                # RequestLog.id.
-                reserved = pool.reserve_one(
-                    account
+                raise SideaError(
+                    "SIDEA_REQUEST_ID_REQUIRED_FOR_RESERVATION"
                 )
 
-            else:
-
-                reserved = (
-                    pool.reserve_one_for_request(
-                        account,
-                        request_id_int,
-                    )
+            reserved = (
+                pool.reserve_one_for_request(
+                    account,
+                    request_id_int,
                 )
+            )
 
             if reserved is None:
                 continue
