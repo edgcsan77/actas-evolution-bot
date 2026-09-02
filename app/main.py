@@ -11512,6 +11512,12 @@ def _sidea_main_panel_html(
 
     from html import escape
     from urllib.parse import quote
+    from datetime import (
+        datetime,
+        timedelta,
+        timezone,
+    )
+    from zoneinfo import ZoneInfo
 
     try:
         from app.services.provider16_accounts import (
@@ -11630,6 +11636,57 @@ def _sidea_main_panel_html(
 
         sidea_day = pool._today()
 
+        # ====================================================
+        # PROVIDER16_SIDEA_CARRYOVER_PANEL_V1
+        #
+        # El consumo SIDEA pertenece al día en que se reservó
+        # cuota. El panel general, en cambio, agrupa por
+        # RequestLog.created_at.
+        #
+        # Separar:
+        #   - solicitudes creadas hoy + DONE
+        #   - arrastre anterior + DONE
+        # ====================================================
+
+        sidea_tz = ZoneInfo(
+            "America/Mexico_City"
+        )
+
+        sidea_local_start = (
+            datetime.strptime(
+                sidea_day,
+                "%Y-%m-%d",
+            )
+            .replace(
+                tzinfo=sidea_tz
+            )
+        )
+
+        sidea_local_end = (
+            sidea_local_start
+            + timedelta(days=1)
+        )
+
+        sidea_start_utc = (
+            sidea_local_start
+            .astimezone(
+                timezone.utc
+            )
+            .replace(
+                tzinfo=None
+            )
+        )
+
+        sidea_end_utc = (
+            sidea_local_end
+            .astimezone(
+                timezone.utc
+            )
+            .replace(
+                tzinfo=None
+            )
+        )
+
         consumed_index_key = (
             "provider16:sidea:"
             f"consumed_requests:{sidea_day}"
@@ -11668,6 +11725,12 @@ def _sidea_main_panel_html(
         )
 
         done_sidea = 0
+
+        # DONE consumidas hoy, separadas por
+        # fecha original del RequestLog.
+        done_today_sidea = 0
+        carryover_done_sidea = 0
+
         processing_sidea = 0
         queued_sidea = 0
         error_sidea = 0
@@ -11683,6 +11746,7 @@ def _sidea_main_panel_html(
                     RequestLog.status,
                     RequestLog.provider_name,
                     RequestLog.pdf_storage_key,
+                    RequestLog.created_at,
                 )
                 .filter(
                     RequestLog.id.in_(
@@ -11715,6 +11779,10 @@ def _sidea_main_panel_html(
                     or ""
                 ).strip()
 
+                request_created_at = (
+                    consumed_row[4]
+                )
+
                 found_ids.add(
                     request_id
                 )
@@ -11726,6 +11794,19 @@ def _sidea_main_panel_html(
                     and request_pdf
                 ):
                     done_sidea += 1
+
+                    if (
+                        request_created_at
+                        is not None
+                        and request_created_at
+                        >= sidea_start_utc
+                        and request_created_at
+                        < sidea_end_utc
+                    ):
+                        done_today_sidea += 1
+
+                    else:
+                        carryover_done_sidea += 1
 
                 elif request_status == "PROCESSING":
                     processing_sidea += 1
@@ -11862,9 +11943,14 @@ def _sidea_main_panel_html(
               <strong>{tracked_total}</strong>
 
               <span style="opacity:.72;">
-                ✅ DONE + PDF
+                ✅ Creadas hoy + DONE
               </span>
-              <strong>{done_sidea}</strong>
+              <strong>{done_today_sidea}</strong>
+
+              <span style="opacity:.72;">
+                ↩️ Arrastre anterior + DONE
+              </span>
+              <strong>{carryover_done_sidea}</strong>
 
               <span style="opacity:.72;">
                 ⏳ En curso
