@@ -9173,6 +9173,191 @@ def process_request(request_id: int):
 
 
             # ====================================================
+            # PROVIDER16_NO_NEW_CROSS_DAY_CONSUMPTION_V1
+            #
+            # Una solicitud creada en OTRO día local NO puede
+            # generar una NUEVA reserva SIDEA hoy.
+            #
+            # EXCEPCION:
+            # Si ya existe request_guard:v2, esa solicitud ya
+            # consumió SIDEA previamente y puede continuar hacia
+            # recovery de ESA MISMA impresión.
+            #
+            # SIN GUARD + OTRO DIA:
+            #   NO reserva SIDEA
+            #   NO solicitudImpresion.do
+            #   intenta fallback
+            # ====================================================
+
+            cross_day_created_at = getattr(
+                req,
+                "created_at",
+                None,
+            )
+
+            cross_day_created_local_date = None
+
+            if cross_day_created_at is not None:
+
+                if cross_day_created_at.tzinfo is None:
+                    cross_day_created_aware = (
+                        cross_day_created_at.replace(
+                            tzinfo=timezone.utc
+                        )
+                    )
+                else:
+                    cross_day_created_aware = (
+                        cross_day_created_at.astimezone(
+                            timezone.utc
+                        )
+                    )
+
+                cross_day_created_local_date = (
+                    cross_day_created_aware
+                    .astimezone(
+                        ZoneInfo(
+                            "America/Monterrey"
+                        )
+                    )
+                    .date()
+                )
+
+            cross_day_today_local = (
+                _mx_now().date()
+            )
+
+            cross_day_candidate = (
+                cross_day_created_local_date is None
+                or cross_day_created_local_date
+                != cross_day_today_local
+            )
+
+            if cross_day_candidate:
+
+                cross_day_has_guard = (
+                    _provider16_has_reservation_guard()
+                )
+
+                if cross_day_has_guard:
+
+                    print(
+                        "PROVIDER16_CROSS_DAY_RECOVERY_ALLOWED =",
+                        {
+                            "request_id": req.id,
+                            "created_local_date": (
+                                str(
+                                    cross_day_created_local_date
+                                )
+                                if cross_day_created_local_date
+                                is not None
+                                else "UNKNOWN"
+                            ),
+                            "today_local": str(
+                                cross_day_today_local
+                            ),
+                            "guard": True,
+                            "action": (
+                                "ALLOW_EXISTING_RECOVERY"
+                            ),
+                        },
+                        flush=True,
+                    )
+
+                else:
+
+                    cross_day_err = (
+                        "CROSS_DAY_NEW_SIDEA_"
+                        "CONSUMPTION_BLOCKED:"
+                        "created_local_date="
+                        + (
+                            str(
+                                cross_day_created_local_date
+                            )
+                            if cross_day_created_local_date
+                            is not None
+                            else "UNKNOWN"
+                        )
+                        + ":today_local="
+                        + str(
+                            cross_day_today_local
+                        )
+                    )
+
+                    print(
+                        "PROVIDER16_CROSS_DAY_BLOCKED =",
+                        {
+                            "request_id": req.id,
+                            "curp": req.curp,
+                            "act_type": req.act_type,
+                            "created_at": (
+                                req.created_at.isoformat()
+                                if req.created_at
+                                else None
+                            ),
+                            "created_local_date": (
+                                str(
+                                    cross_day_created_local_date
+                                )
+                                if cross_day_created_local_date
+                                is not None
+                                else "UNKNOWN"
+                            ),
+                            "today_local": str(
+                                cross_day_today_local
+                            ),
+                            "guard": False,
+                            "action": (
+                                "NO_SIDEA_RESERVATION"
+                            ),
+                        },
+                        flush=True,
+                    )
+
+                    if _provider16_requeue_fallback(
+                        "CROSS_DAY_BLOCKED",
+                        cross_day_err,
+                        delay_sec=1,
+                    ):
+                        return
+
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+
+                    req.provider_name = "PROVIDER16"
+                    req.provider_group_id = None
+                    req.provider_message = None
+
+                    req.status = "ERROR"
+
+                    req.error_message = (
+                        "PROVIDER16_CROSS_DAY_BLOCKED_"
+                        "NO_FALLBACK:"
+                        f"{cross_day_err}"
+                    )[:1000]
+
+                    req.updated_at = (
+                        _utc_now_naive()
+                    )
+
+                    db.commit()
+
+                    print(
+                        "PROVIDER16_CROSS_DAY_"
+                        "TERMINAL_NO_FALLBACK =",
+                        {
+                            "request_id": req.id,
+                            "error": req.error_message,
+                            "sidea_consumed": False,
+                        },
+                        flush=True,
+                    )
+
+                    return
+
+
+            # ====================================================
             # PROVIDER16_RECOVERY_HARDENING_V1
             # ====================================================
 
