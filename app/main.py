@@ -11618,6 +11618,274 @@ def _sidea_main_panel_html(
             len(rows) - configured,
         )
 
+        # ====================================================
+        # PROVIDER16_SIDEA_ACCOUNTING_PANEL_V1
+        #
+        # Fuente autoritativa:
+        #   usage SIDEA = unidades consumidas
+        #   consumed_requests:<fecha> = request_id de cada unidad
+        #
+        # No usa created_at para decidir qué consumió SIDEA hoy.
+        # ====================================================
+
+        sidea_day = pool._today()
+
+        consumed_index_key = (
+            "provider16:sidea:"
+            f"consumed_requests:{sidea_day}"
+        )
+
+        raw_consumed_ids = (
+            redis_conn.smembers(
+                consumed_index_key
+            )
+            or set()
+        )
+
+        consumed_ids = []
+
+        for raw_id in raw_consumed_ids:
+
+            if isinstance(raw_id, bytes):
+                raw_id = raw_id.decode(
+                    "utf-8",
+                    errors="replace",
+                )
+
+            try:
+                consumed_ids.append(
+                    int(raw_id)
+                )
+            except Exception:
+                continue
+
+        consumed_ids = sorted(
+            set(consumed_ids)
+        )
+
+        tracked_total = len(
+            consumed_ids
+        )
+
+        done_sidea = 0
+        processing_sidea = 0
+        queued_sidea = 0
+        error_sidea = 0
+        done_anomalo_sidea = 0
+        other_sidea = 0
+        missing_sidea = 0
+
+        if consumed_ids:
+
+            consumed_rows = (
+                db.query(
+                    RequestLog.id,
+                    RequestLog.status,
+                    RequestLog.provider_name,
+                    RequestLog.pdf_storage_key,
+                )
+                .filter(
+                    RequestLog.id.in_(
+                        consumed_ids
+                    )
+                )
+                .all()
+            )
+
+            found_ids = set()
+
+            for consumed_row in consumed_rows:
+
+                request_id = int(
+                    consumed_row[0]
+                )
+
+                request_status = str(
+                    consumed_row[1]
+                    or ""
+                ).strip().upper()
+
+                request_provider = str(
+                    consumed_row[2]
+                    or ""
+                ).strip().upper()
+
+                request_pdf = str(
+                    consumed_row[3]
+                    or ""
+                ).strip()
+
+                found_ids.add(
+                    request_id
+                )
+
+                if (
+                    request_status == "DONE"
+                    and request_provider
+                    == "PROVIDER16"
+                    and request_pdf
+                ):
+                    done_sidea += 1
+
+                elif request_status == "PROCESSING":
+                    processing_sidea += 1
+
+                elif request_status == "QUEUED":
+                    queued_sidea += 1
+
+                elif request_status == "ERROR":
+                    error_sidea += 1
+
+                elif request_status == "DONE":
+                    # SIDEA consumió, pero el resultado final
+                    # quedó en otro proveedor o sin PDF SIDEA.
+                    done_anomalo_sidea += 1
+
+                else:
+                    other_sidea += 1
+
+            missing_sidea = max(
+                0,
+                tracked_total
+                - len(found_ids),
+            )
+
+        in_progress_sidea = (
+            processing_sidea
+            + queued_sidea
+        )
+
+        post_consume_problem_sidea = (
+            error_sidea
+            + done_anomalo_sidea
+            + other_sidea
+            + missing_sidea
+        )
+
+        classified_total = (
+            done_sidea
+            + processing_sidea
+            + queued_sidea
+            + error_sidea
+            + done_anomalo_sidea
+            + other_sidea
+            + missing_sidea
+        )
+
+        usage_index_diff = (
+            int(used_total)
+            - int(tracked_total)
+        )
+
+        index_classified_diff = (
+            int(tracked_total)
+            - int(classified_total)
+        )
+
+        accounting_ok = (
+            usage_index_diff == 0
+            and index_classified_diff == 0
+            and post_consume_problem_sidea == 0
+        )
+
+        accounting_color = (
+            "#4ade80"
+            if accounting_ok
+            else "#fb7185"
+        )
+
+        accounting_border = (
+            "rgba(34,197,94,.35)"
+            if accounting_ok
+            else "rgba(244,63,94,.40)"
+        )
+
+        accounting_bg = (
+            "rgba(20,83,45,.12)"
+            if accounting_ok
+            else "rgba(127,29,29,.13)"
+        )
+
+        accounting_label = (
+            "✅ CUADRE PERFECTO"
+            if accounting_ok
+            else "🚨 REVISAR CUADRE"
+        )
+
+        accounting_html = f"""
+          <div style="
+            margin-top:9px;
+            padding:9px 10px;
+            border:1px solid {accounting_border};
+            border-radius:9px;
+            background:{accounting_bg};
+          ">
+
+            <div style="
+              display:flex;
+              justify-content:space-between;
+              align-items:center;
+              gap:8px;
+              margin-bottom:8px;
+            ">
+              <strong style="
+                font-size:11px;
+                color:{accounting_color};
+              ">
+                {accounting_label}
+              </strong>
+
+              <span style="
+                font-size:9px;
+                opacity:.65;
+              ">
+                {sidea_day}
+              </span>
+            </div>
+
+            <div style="
+              display:grid;
+              grid-template-columns:1fr auto;
+              gap:5px 10px;
+              font-size:10px;
+              line-height:1.35;
+            ">
+
+              <span style="opacity:.72;">
+                SIDEA consumidas
+              </span>
+              <strong>{used_total}</strong>
+
+              <span style="opacity:.72;">
+                Requests rastreados
+              </span>
+              <strong>{tracked_total}</strong>
+
+              <span style="opacity:.72;">
+                ✅ DONE + PDF
+              </span>
+              <strong>{done_sidea}</strong>
+
+              <span style="opacity:.72;">
+                ⏳ En curso
+              </span>
+              <strong>{in_progress_sidea}</strong>
+
+              <span style="opacity:.72;">
+                🚨 Problema post-consumo
+              </span>
+              <strong>{post_consume_problem_sidea}</strong>
+
+              <span style="opacity:.72;">
+                Diferencia consumo / índice
+              </span>
+              <strong>{usage_index_diff}</strong>
+
+            </div>
+
+          </div>
+        """
+
         token_q = quote(
             current_token or "",
             safe="",
@@ -11676,6 +11944,14 @@ def _sidea_main_panel_html(
                 🔐 Resolver {escape(label)}
               </a>
             """
+
+        # Mostrar siempre el cuadre SIDEA.
+        # Si ya existe una alerta de sesión/login,
+        # aparece además del bloque contable.
+        attention_html = (
+            attention_html
+            + accounting_html
+        )
 
         if need_login > 0:
             header_color = "#f87171"
