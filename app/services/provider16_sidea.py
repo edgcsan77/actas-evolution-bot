@@ -9151,12 +9151,39 @@ def sidea_resolve_chain(
                     "SIDEA_CHAIN_MISSING_ENTITY"
                 )
 
-            canonical_curp = (
-                hidden.get("curp")
-                or hidden.get("curp_1")
-                or hidden.get("curp_2")
-                or ""
-            ).strip().upper()
+            # PROVIDER16_VALID_CANONICAL_CURP_V1
+            #
+            # SIDEA usa placeholders como:
+            #   - - - - - - - - - -
+            #
+            # Esos valores son truthy en Python pero NO son CURP.
+            # Elegimos únicamente un valor alfanumérico de 18 caracteres.
+            curp_candidates = [
+                str(
+                    hidden.get("curp")
+                    or ""
+                ).strip().upper(),
+                str(
+                    hidden.get("curp_1")
+                    or ""
+                ).strip().upper(),
+                str(
+                    hidden.get("curp_2")
+                    or ""
+                ).strip().upper(),
+            ]
+
+            canonical_curp = next(
+                (
+                    value
+                    for value in curp_candidates
+                    if (
+                        len(value) == 18
+                        and value.isalnum()
+                    )
+                ),
+                "",
+            )
 
             if not canonical_curp:
                 raise SideaError(
@@ -9572,11 +9599,15 @@ def sidea_resolve_special_curp_to_chain(
                 or entidad
             ).strip()
 
-            canonical_curp = (
-                main_curp
-                or curp_1
-                or curp_2
-            )
+            # PROVIDER16_SPECIAL_REQUESTED_CURP_CANONICAL_V1
+            #
+            # Arriba ya validamos que `curp` coincide exactamente
+            # con main_curp / curp_1 / curp_2.
+            #
+            # No usar `main_curp or curp_1 or curp_2` porque SIDEA
+            # puede devolver placeholders truthy ("- - - - ...")
+            # antes de la CURP real.
+            canonical_curp = curp
 
             if not canonical_curp:
                 raise SideaError(
