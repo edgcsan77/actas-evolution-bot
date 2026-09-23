@@ -16,6 +16,7 @@ from sqlalchemy import and_, or_
 
 from sqlalchemy import text
 
+from app.utils.request_sequence import build_delivery_caption, build_final_delivery_caption
 from app.models import RequestLog, ProviderSetting, AppSetting, GroupPromotion, ApiClient, ApiCreditLog
 from app.services.evolution import send_group_text, send_text, send_document_base64, send_group_document_base64, send_reaction, find_recent_messages, _is_retryable_evolution_error
 from app.config import settings
@@ -26,6 +27,13 @@ from app.services.provider7 import Provider7Client
 from rq import Queue, get_current_job
 from app.queue import redis_conn, request_queue, slow_request_queue, delivery_queue
 from app.provider_status_cache import refresh_providers_status
+from app.provider_attempts import (
+    register_provider_attempt,
+    get_provider_attempts,
+    claim_pdf_winner,
+    release_pdf_winner_if_owned,
+    provider_attempt_latency,
+)
 from app.utils.bot_limits import increment_bot_used_and_maybe_block
 from app.pdf_storage import save_request_pdf_to_r2, generate_r2_presigned_download_url
 from app.client_messages import (
@@ -74,6 +82,26 @@ provider16_queue = Queue(
 )
 
 
+# MX_GLOBAL_QUEUE_PRIORITY_V1
+#
+# Esta prioridad afecta únicamente el orden de espera.
+# NO selecciona providers ni modifica compatibilidad/routing.
+def _mx_global_queue_priority(req) -> bool:
+    return (
+        str(
+            getattr(
+                req,
+                "instance_name",
+                "",
+            )
+            or ""
+        )
+        .strip()
+        .lower()
+        == "docifybot8mx"
+    )
+
+
 def _provider16_fifo_score(req) -> float:
     """
     Prioridad cronologica original del request.
@@ -100,9 +128,18 @@ def _provider16_fifo_score(req) -> float:
             tzinfo=timezone.utc
         )
 
-    return float(
+    score = float(
         created_at.timestamp()
     )
+
+    # MX_GLOBAL_QUEUE_PRIORITY_V1
+    #
+    # ZPOPMIN procesa el score MENOR primero.
+    # Esta banda conserva FIFO entre solicitudes MX.
+    if _mx_global_queue_priority(req):
+        score -= 10_000_000_000.0
+
+    return score
 
 
 def _provider16_fifo_member(
@@ -148,7 +185,10 @@ def _provider16_fifo_add_request(
     job = provider16_queue.enqueue(
         process_provider16_fifo_ticket,
         job_timeout=900,
-        at_front=ticket_at_front,
+        at_front=(
+            ticket_at_front
+            or _mx_global_queue_priority(req)
+        ),
     )
 
     print(
@@ -437,6 +477,63 @@ def _worker_stop_if_instance_blocked(req, db, label: str = "WORKER_BLOCKED_INSTA
         # Si el bot está bloqueado y el request ya está en estado terminal,
         # no lo modificamos, pero SÍ detenemos el procesamiento.
         return True
+
+    # PROVIDER16_GUARDED_RECOVERY_BLOCK_BYPASS_V1
+    #
+    # Si SIDEA ya tiene request_guard, el request pudo haber
+    # reservado/enviado y debe poder llegar a su recovery seguro.
+    # No aplica a requests terminales porque esos retornaron arriba.
+    provider_name = (
+        getattr(req, "provider_name", "")
+        or ""
+    ).strip().upper()
+
+    request_id = getattr(req, "id", None)
+
+    if (
+        provider_name == "PROVIDER16"
+        and request_id
+    ):
+        guard_key = (
+            "provider16:sidea:"
+            f"request_guard:v2:{request_id}"
+        )
+
+        try:
+            guard_exists = bool(
+                redis_conn.exists(guard_key)
+            )
+        except Exception as guard_exc:
+            print(
+                f"{label}_PROVIDER16_GUARD_CHECK_UNCERTAIN =",
+                {
+                    "request_id": request_id,
+                    "instance_name": instance_name,
+                    "error": str(guard_exc),
+                    "action": (
+                        "ALLOW_P16_SAFE_GUARD_RECHECK"
+                    ),
+                },
+                flush=True,
+            )
+
+            # Downstream P16 vuelve a comprobar el guard
+            # de forma fail-safe.
+            return False
+
+        if guard_exists:
+            print(
+                f"{label}_PROVIDER16_GUARDED_RECOVERY_ALLOWED =",
+                {
+                    "request_id": request_id,
+                    "instance_name": instance_name,
+                    "action": (
+                        "ALLOW_EXISTING_SIDEA_RECOVERY"
+                    ),
+                },
+                flush=True,
+            )
+            return False
 
     now = _utc_now_naive()
 
@@ -884,6 +981,64 @@ def _bot_provider_mode(db, instance_name: str | None) -> str:
     return (mode or default or "GLOBAL_POOL").strip().upper()
 
 
+# ============================================================
+# GLOBAL_POOL_EXCLUSIVE_FALLBACK_V2
+#
+# GLOBAL_POOL:
+#   fallback permitido SOLO entre estos 8 proveedores.
+#
+# GLOBAL:PROVIDERX / PERSONAL:*:
+#   proveedor exclusivo. JAMAS cambiar a otro.
+# ============================================================
+
+GLOBAL_POOL_ALLOWED_PROVIDERS = frozenset({
+    "PROVIDER1",   # ADMIN
+    "PROVIDER5",   # RODO
+    "PROVIDER14",  # E-BOT
+    "PROVIDER15",  # E-WEB
+    "PROVIDER16",  # SIDEA
+    "PROVIDER4",   # LAZARO WEB 1
+    "PROVIDER10",  # LAZARO WEB 2
+    "PROVIDER11",  # LAZARO WEB 3
+})
+
+
+def _bot_allows_global_fallback(
+    db,
+    instance_name: str | None,
+) -> bool:
+    return (
+        _bot_provider_mode(
+            db,
+            instance_name,
+        )
+        == "GLOBAL_POOL"
+    )
+
+
+def _filter_global_pool_providers(
+    providers,
+) -> list[str]:
+    return [
+        p
+        for p in providers
+        if (
+            str(p or "").strip().upper()
+            in GLOBAL_POOL_ALLOWED_PROVIDERS
+        )
+    ]
+
+
+def _global_pool_enabled_providers(
+    db,
+) -> list[str]:
+    return _filter_global_pool_providers(
+        sorted(
+            _enabled_providers(db)
+        )
+    )
+
+
 def _is_personal_provider_mode(mode: str | None) -> bool:
     return (mode or "").strip().upper().startswith("PERSONAL:")
 
@@ -1248,7 +1403,7 @@ PROVIDER_LABELS_SUPPORT = {
     "PROVIDER2": "ACTAS DEL SURESTE",
     "PROVIDER3": "AUSTRAM WEB",
     "PROVIDER4": "LAZARO WEB 1",
-    "PROVIDER5": "ACTAS CARAS",
+    "PROVIDER5": "RODO",
     "PROVIDER6": "ACTAS ESCALANTE",
     "PROVIDER7": "MESINO SID",
     "PROVIDER8": "ANGEL",
@@ -1276,7 +1431,7 @@ SUPPORT_ERROR_LABELS_ES = {
     "NO_PROVIDER6_ESPECIALES_GROUP_CONFIGURED": "No hay grupo de especiales configurado para ACTAS ESCALANTE.",
     "NO_PROVIDER6_NACIMIENTO_GROUP_CONFIGURED": "No hay grupo de nacimiento configurado para ACTAS ESCALANTE.",
     "PROVIDER2_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para ACTAS DEL SURESTE.",
-    "PROVIDER5_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para ACTAS CARAS.",
+    "PROVIDER5_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para RODO.",
     "PROVIDER8_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para ANGEL.",
     "PROVIDER9_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para EMILIANO.",
     "MAYAPROVIDER_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para el proveedor de MAYA.",
@@ -1334,8 +1489,9 @@ SUPPORT_ERROR_LABELS_ES = {
         "La solicitud debe reintentarse automáticamente con otro proveedor; "
         "no significa que el acta quedó perdida definitivamente."
     ),
-    "PROVIDER5_NACIMIENTO_GROUP_NOT_CONFIGURED": "No hay grupo de nacimiento configurado para ACTAS CARAS.",
-    "PROVIDER5_ESPECIALES_GROUP_NOT_CONFIGURED": "No hay grupo de especiales configurado para ACTAS CARAS.",
+    "PROVIDER5_NACIMIENTO_GROUP_NOT_CONFIGURED": "No hay grupo de nacimiento activo/configurado para RODO.",
+    "PROVIDER5_CADENA_FOLIADA_GROUP_NOT_CONFIGURED": "No hay grupo de cadena/foliada activo/configurado para RODO.",
+    "PROVIDER5_ESPECIALES_GROUP_NOT_CONFIGURED": "No hay grupo de especiales activo/configurado para RODO.",
     "PROVIDER12_GROUPS_NOT_CONFIGURED": "No hay grupos configurados para VILLAFUERTE.",
     "PROVIDER12_NACIMIENTO_GROUP_NOT_CONFIGURED": "No hay grupo de nacimiento configurado para VILLAFUERTE.",
     "PROVIDER12_ESPECIALES_GROUP_NOT_CONFIGURED": "No hay grupo de especiales configurado para VILLAFUERTE.",
@@ -1868,7 +2024,7 @@ def _fallback_to_provider3_web(req, db, process_started_ts):
     safe_media_b64 = base64.b64encode(pdf_bytes).decode()
 
     total_seconds = _request_total_seconds(req, process_started_ts)
-    caption_text = f"⏱️ Tiempo total: {_fmt_seconds(total_seconds)}"
+    caption_text = build_delivery_caption(db, req, _fmt_seconds(total_seconds))
 
     filename = (
         f"{req.curp}_FOLIO.pdf"
@@ -2274,6 +2430,60 @@ def _enqueue_pdf_delivery_now(
     caption_text: str = "",
     provider_media_label: str | None = None,
 ):
+    # API_R2_NO_WHATSAPP_DELIVERY_V1
+    if _is_api_request(req):
+        if not getattr(
+            req,
+            "pdf_storage_key",
+            None,
+        ):
+            raise RuntimeError(
+                "API_PDF_R2_KEY_REQUIRED:"
+                f"{getattr(req, 'id', None)}"
+            )
+
+        api_label = (
+            provider_media_label
+            or (
+                "R2_API_"
+                + (
+                    getattr(
+                        req,
+                        "provider_name",
+                        "",
+                    )
+                    or "PROVIDER"
+                ).upper()
+            )
+        )
+
+        req.provider_media_url = api_label
+        req.status = "DONE"
+        req.error_message = None
+        req.updated_at = _utc_now_naive()
+        db.commit()
+
+        _after_done_accounting(
+            req,
+            db,
+        )
+
+        print(
+            "API_R2_DONE_NO_WHATSAPP =",
+            {
+                "request_id": req.id,
+                "api_client_id": req.api_client_id,
+                "provider": req.provider_name,
+                "pdf_storage_key": req.pdf_storage_key,
+                "api_charged": bool(
+                    req.api_charged
+                ),
+            },
+            flush=True,
+        )
+
+        return
+
     if not getattr(req, "pdf_storage_key", None):
         raise RuntimeError(
             f"PDF_DELIVERY_R2_KEY_REQUIRED:{getattr(req, 'id', None)}"
@@ -2418,6 +2628,61 @@ def retry_pdf_delivery(
             print("RETRY_PDF_DELIVERY_ALREADY_DONE =", request_id, flush=True)
             return
 
+        # API_R2_NO_WHATSAPP_DELIVERY_V1
+        if _is_api_request(req):
+            if not getattr(
+                req,
+                "pdf_storage_key",
+                None,
+            ):
+                print(
+                    "API_DELIVERY_NO_R2_KEY =",
+                    {
+                        "request_id": req.id,
+                        "api_client_id": req.api_client_id,
+                    },
+                    flush=True,
+                )
+                return
+
+            req.provider_media_url = (
+                provider_media_label
+                or (
+                    "R2_API_"
+                    + (
+                        req.provider_name
+                        or "PROVIDER"
+                    ).upper()
+                )
+            )
+
+            req.status = "DONE"
+            req.error_message = None
+            req.updated_at = _utc_now_naive()
+            db.commit()
+
+            _after_done_accounting(
+                req,
+                db,
+            )
+
+            print(
+                "API_DELIVERY_BYPASS_DONE =",
+                {
+                    "request_id": req.id,
+                    "attempt": attempt,
+                    "api_client_id": req.api_client_id,
+                    "provider": req.provider_name,
+                    "pdf_storage_key": req.pdf_storage_key,
+                    "api_charged": bool(
+                        req.api_charged
+                    ),
+                },
+                flush=True,
+            )
+
+            return
+
         if not req.pdf_storage_key:
             print("RETRY_PDF_DELIVERY_NO_R2_KEY =", {
                 "request_id": request_id,
@@ -2493,7 +2758,7 @@ def retry_pdf_delivery(
                 caption_text = ""
             else:
                 caption_text = (
-                    f"⏱️ Tiempo total: {tiempo}"
+                    build_final_delivery_caption(db, req, tiempo)
                 )
 
             print(
@@ -2616,11 +2881,44 @@ def retry_pdf_delivery(
             )
 
             if req and (req.status or "").upper() != "DONE":
-                req.status = "ERROR"
-                req.error_message = (
-                    f"DELIVERY_FAILED_RETRY_{attempt}: "
-                    f"{str(e)[:300]}"
+
+                # DELIVERY_CONNECTION_WAIT_V1
+                #
+                # Un PDF ya existe en R2. Una falla temporal de
+                # WhatsApp NO debe convertir inmediatamente la
+                # solicitud en ERROR mientras todavía existan
+                # reintentos programados.
+                error_text = str(e)
+                error_up = error_text.upper()
+
+                is_connection_closed = (
+                    "CONNECTION CLOSED" in error_up
                 )
+
+                if attempt < 5:
+                    req.status = "PROCESSING"
+
+                    if is_connection_closed:
+                        req.error_message = (
+                            "DELIVERY_WAITING_CONNECTION_"
+                            f"RETRY_{attempt}: "
+                            f"{error_text[:300]}"
+                        )
+                    else:
+                        req.error_message = (
+                            "DELIVERY_WAITING_RETRY_"
+                            f"{attempt}: "
+                            f"{error_text[:300]}"
+                        )
+
+                else:
+                    req.status = "ERROR"
+                    req.error_message = (
+                        "DELIVERY_FAILED_FINAL_"
+                        f"{attempt}: "
+                        f"{error_text[:300]}"
+                    )
+
                 req.updated_at = _utc_now_naive()
                 db.commit()
 
@@ -2632,9 +2930,41 @@ def retry_pdf_delivery(
             )
 
         if attempt < 5:
-            next_delay = [60, 180, 300, 600][
-                min(attempt - 1, 3)
-            ]
+
+            error_text = str(e)
+            error_up = error_text.upper()
+
+            is_connection_closed = (
+                "CONNECTION CLOSED" in error_up
+            )
+
+            # Si la sesión WhatsApp está cerrada, no tiene sentido
+            # esperar 10-20 minutos entre cinco intentos.
+            #
+            # Ventana total aproximada:
+            # 30 + 60 + 90 + 120 = 5 minutos.
+            if is_connection_closed:
+                next_delay = [30, 60, 90, 120][
+                    min(attempt - 1, 3)
+                ]
+            else:
+                next_delay = [30, 60, 120, 180][
+                    min(attempt - 1, 3)
+                ]
+
+            print(
+                "PDF_DELIVERY_BACKOFF =",
+                {
+                    "request_id": request_id,
+                    "attempt": attempt,
+                    "next_attempt": attempt + 1,
+                    "delay_sec": next_delay,
+                    "connection_closed": (
+                        is_connection_closed
+                    ),
+                },
+                flush=True,
+            )
 
             _schedule_delivery_retry(
                 request_id,
@@ -2802,7 +3132,7 @@ def sweep_stuck_requests(max_age_minutes: int = 20, limit: int = 80):
                         else request_queue
                     )
                 
-                    queue.enqueue(process_request, req.id)
+                    queue.enqueue(process_request, req.id, at_front=_mx_global_queue_priority(req))
 
                     print("SWEEP_REQUEUED_QUEUED_REQUEST =", {
                         "request_id": req.id,
@@ -3045,7 +3375,43 @@ def _pick_provider14_overflow_fallback(db: Session, req) -> str | None:
     Cuando E-BOT ya tiene una solicitud esperando, manda las nuevas
     a otro proveedor global activo y compatible.
     """
-    enabled = sorted(_enabled_providers(db))
+    # GLOBAL_POOL_EXCLUSIVE_FALLBACK_V2
+    if not _bot_allows_global_fallback(
+        db,
+        getattr(
+            req,
+            "instance_name",
+            None,
+        ),
+    ):
+        print(
+            "PROVIDER14_NON_GLOBAL_MODE_NO_FALLBACK =",
+            {
+                "request_id": getattr(
+                    req,
+                    "id",
+                    None,
+                ),
+                "instance_name": getattr(
+                    req,
+                    "instance_name",
+                    None,
+                ),
+                "mode": _bot_provider_mode(
+                    db,
+                    getattr(
+                        req,
+                        "instance_name",
+                        None,
+                    ),
+                ),
+            },
+            flush=True,
+        )
+
+        return None
+
+    enabled = _global_pool_enabled_providers(db)
     candidates = [p for p in enabled if p != "PROVIDER14"]
 
     candidates = _exclude_failed_providers(
@@ -3122,7 +3488,43 @@ def _pick_provider15_timeout_fallback(db: Session, req) -> str | None:
     - respeta exclusión de P4/P7 cuando están reservados a grupos test;
     - conserva pesos del panel; si todos pesan 0 usa la rotación normal.
     """
-    enabled = sorted(_enabled_providers(db))
+    # GLOBAL_POOL_EXCLUSIVE_FALLBACK_V2
+    if not _bot_allows_global_fallback(
+        db,
+        getattr(
+            req,
+            "instance_name",
+            None,
+        ),
+    ):
+        print(
+            "PROVIDER15_NON_GLOBAL_MODE_NO_FALLBACK =",
+            {
+                "request_id": getattr(
+                    req,
+                    "id",
+                    None,
+                ),
+                "instance_name": getattr(
+                    req,
+                    "instance_name",
+                    None,
+                ),
+                "mode": _bot_provider_mode(
+                    db,
+                    getattr(
+                        req,
+                        "instance_name",
+                        None,
+                    ),
+                ),
+            },
+            flush=True,
+        )
+
+        return None
+
+    enabled = _global_pool_enabled_providers(db)
     candidates = [p for p in enabled if p != "PROVIDER15"]
 
     candidates = _exclude_failed_providers(
@@ -3163,6 +3565,14 @@ def _pick_provider15_timeout_fallback(db: Session, req) -> str | None:
         if not req.source_group_id or req.source_group_id not in PROVIDER7_TEST_GROUPS:
             candidates = [p for p in candidates if p != "PROVIDER7"]
 
+    candidates = (
+        _thard_health_filter_candidates(
+            candidates,
+            req.act_type,
+            strict=False,
+        )
+    )
+
     print(
         "PROVIDER15_TIMEOUT_FALLBACK_CANDIDATES =",
         {
@@ -3198,10 +3608,43 @@ def _pick_provider16_fallback(
     No vuelve a escoger PROVIDER16.
     """
 
-    enabled = sorted(
-        _enabled_providers(db)
-    )
+    # GLOBAL_POOL_EXCLUSIVE_FALLBACK_V2
+    if not _bot_allows_global_fallback(
+        db,
+        getattr(
+            req,
+            "instance_name",
+            None,
+        ),
+    ):
+        print(
+            "PROVIDER16_NON_GLOBAL_MODE_NO_FALLBACK =",
+            {
+                "request_id": getattr(
+                    req,
+                    "id",
+                    None,
+                ),
+                "instance_name": getattr(
+                    req,
+                    "instance_name",
+                    None,
+                ),
+                "mode": _bot_provider_mode(
+                    db,
+                    getattr(
+                        req,
+                        "instance_name",
+                        None,
+                    ),
+                ),
+            },
+            flush=True,
+        )
 
+        return None
+
+    enabled = _global_pool_enabled_providers(db)
     candidates = [
         p
         for p in enabled
@@ -3276,6 +3719,14 @@ def _pick_provider16_fallback(
                 for p in candidates
                 if p != "PROVIDER7"
             ]
+
+    candidates = (
+        _thard_health_filter_candidates(
+            candidates,
+            req.act_type,
+            strict=False,
+        )
+    )
 
     print(
         "PROVIDER16_FALLBACK_CANDIDATES =",
@@ -3406,7 +3857,7 @@ def _pick_provider_by_weight(db: Session, enabled: list[str]) -> str:
     return chosen
 
 
-def _pick_provider_name(
+def _pick_provider_name_base(
     db,
     request_id: int,
     source_group_id: str | None = None,
@@ -3489,105 +3940,58 @@ def _pick_provider_name(
                 "NO_PROVIDER_FOR_SPECIAL_FORMAT"
             )
 
-        if forced_provider in ("PROVIDER4", "PROVIDER10", "PROVIDER11") and not _is_provider4_eligible(term, act_type):
-            print("BOT_PROVIDER_FORCED_LAZARO_NOT_ALLOWED_FALLBACK_TO_GLOBAL =", {
-                "forced_provider": forced_provider,
-                "term": term,
-                "act_type": act_type,
-                "instance_name": instance_name,
-            }, flush=True)
-        
-            enabled = sorted(_enabled_providers(db))
-            enabled = [p for p in enabled if p not in ("PROVIDER4", "PROVIDER10", "PROVIDER11")]
-        
-            if "PROVIDER6" in enabled and not _is_provider6_allowed_request(term, act_type):
-                enabled = [p for p in enabled if p != "PROVIDER6"]
-        
-            if not enabled:
-                raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
-        
-            if (
-                "PROVIDER16" in enabled
-                and not _is_provider16_allowed_request(
-                    term,
-                    act_type,
-                )
-            ):
-                enabled = [
-                    p
-                    for p in enabled
-                    if p != "PROVIDER16"
-                ]
+        if (
+            forced_provider
+            in (
+                "PROVIDER4",
+                "PROVIDER10",
+                "PROVIDER11",
+            )
+            and not _is_provider4_eligible(
+                term,
+                act_type,
+            )
+        ):
+            print(
+                "BOT_PROVIDER_FORCED_LAZARO_NOT_ALLOWED_NO_FALLBACK =",
+                {
+                    "forced_provider": forced_provider,
+                    "term": term,
+                    "act_type": act_type,
+                    "instance_name": instance_name,
+                },
+                flush=True,
+            )
 
-            if not enabled:
-                raise RuntimeError(
-                    "NO_PROVIDER_FOR_SPECIAL_FORMAT"
-                )
+            raise RuntimeError(
+                "NO_PROVIDER_FOR_SPECIAL_FORMAT"
+            )
 
-            print("PICK_PROVIDER_ENABLED_FINAL_AFTER_FORCED_LAZARO_BLOCK =", enabled, flush=True)
-        
-            weighted_chosen = _pick_provider_by_weight(db, enabled)
-        
-            if weighted_chosen:
-                print("PICK_PROVIDER_WEIGHTED_CHOSEN_AFTER_FORCED_LAZARO_BLOCK =", weighted_chosen, flush=True)
-                return weighted_chosen
-        
-            idx = (request_id - 1) % len(enabled)
-            chosen = enabled[idx]
-        
-            print("PICK_PROVIDER_NORMAL_CHOSEN_AFTER_FORCED_LAZARO_BLOCK =", chosen, flush=True)
-            return chosen
-    
-        if forced_provider == "PROVIDER6" and not _is_provider6_allowed_request(term, act_type):
-            print("BOT_PROVIDER_FORCED_PROVIDER6_NOT_ALLOWED_FALLBACK_TO_GLOBAL =", {
-                "term": term,
-                "act_type": act_type,
-                "instance_name": instance_name,
-            }, flush=True)
-    
-            enabled = sorted(_enabled_providers(db))
-            enabled = [p for p in enabled if p != "PROVIDER6"]
+        if (
+            forced_provider == "PROVIDER6"
+            and not _is_provider6_allowed_request(
+                term,
+                act_type,
+            )
+        ):
+            print(
+                "BOT_PROVIDER_FORCED_PROVIDER6_NOT_ALLOWED_NO_FALLBACK =",
+                {
+                    "term": term,
+                    "act_type": act_type,
+                    "instance_name": instance_name,
+                },
+                flush=True,
+            )
 
-            if not _is_provider4_eligible(term, act_type):
-                enabled = [p for p in enabled if p not in ("PROVIDER4", "PROVIDER10", "PROVIDER11")]
-    
-            if not enabled:
-                raise RuntimeError("NO_PROVIDER_FOR_SPECIAL_FORMAT")
-    
-            if (
-                "PROVIDER16" in enabled
-                and not _is_provider16_allowed_request(
-                    term,
-                    act_type,
-                )
-            ):
-                enabled = [
-                    p
-                    for p in enabled
-                    if p != "PROVIDER16"
-                ]
+            raise RuntimeError(
+                "NO_PROVIDER_FOR_SPECIAL_FORMAT"
+            )
 
-            if not enabled:
-                raise RuntimeError(
-                    "NO_PROVIDER_FOR_SPECIAL_FORMAT"
-                )
-
-            print("PICK_PROVIDER_ENABLED_FINAL_AFTER_FORCED_PROVIDER6_BLOCK =", enabled, flush=True)
-    
-            weighted_chosen = _pick_provider_by_weight(db, enabled)
-            if weighted_chosen:
-                print("PICK_PROVIDER_WEIGHTED_CHOSEN_AFTER_FORCED_PROVIDER6_BLOCK =", weighted_chosen, flush=True)
-                return weighted_chosen
-    
-            idx = (request_id - 1) % len(enabled)
-            chosen = enabled[idx]
-            print("PICK_PROVIDER_NORMAL_CHOSEN_AFTER_FORCED_PROVIDER6_BLOCK =", chosen, flush=True)
-            return chosen
-    
         return forced_provider
 
     # GLOBAL_POOL => usa el pool normal del panel principal y SÍ cuenta
-    enabled = sorted(_enabled_providers(db))
+    enabled = _global_pool_enabled_providers(db)
 
     enabled = _exclude_failed_providers(
         request_id,
@@ -3723,6 +4127,14 @@ def _pick_provider_name(
         if not enabled:
             raise RuntimeError("NO_PROVIDER_ENABLED")
 
+    enabled = (
+        _thard_health_filter_candidates(
+            enabled,
+            act_type,
+            strict=False,
+        )
+    )
+
     if len(enabled) == 1:
         print("PICK_PROVIDER_SINGLE =", enabled[0], flush=True)
         return enabled[0]
@@ -3734,11 +4146,189 @@ def _pick_provider_name(
         return weighted_chosen
     
     # fallback: si todos los pesos están en 0, conserva tu rotación anterior
+    if not enabled:
+        raise RuntimeError("NO_PROVIDER_ENABLED")
+
     idx = (request_id - 1) % len(enabled)
     chosen = enabled[idx]
     
     print("PICK_PROVIDER_NORMAL_CHOSEN =", chosen, flush=True)
     return chosen
+
+def _pick_provider_name(
+    db,
+    request_id: int,
+    source_group_id: str | None = None,
+    term: str | None = None,
+    act_type: str | None = None,
+    instance_name: str | None = None,
+) -> str:
+    mode = _bot_provider_mode(
+        db,
+        instance_name,
+    )
+
+    forced_provider = (
+        _provider_from_mode(
+            mode
+        )
+    )
+
+    # GLOBAL:PROVIDERX y PERSONAL:
+    # continúan siendo EXACTOS.
+    #
+    # El breaker nunca cambia un fixed
+    # hacia otro proveedor.
+    if forced_provider:
+        return _pick_provider_name_base(
+            db,
+            request_id,
+            source_group_id,
+            term,
+            act_type,
+            instance_name,
+        )
+
+    from app.provider_health import (
+        claim_provider_half_open,
+        get_provider_breaker_snapshot,
+    )
+
+    # Normalmente una sola iteración.
+    # Más iteraciones sólo ocurren si dos
+    # workers compiten por el mismo probe.
+    for breaker_try in range(12):
+        provider = (
+            _pick_provider_name_base(
+                db,
+                request_id,
+                source_group_id,
+                term,
+                act_type,
+                instance_name,
+            )
+        )
+
+        # PROVIDER16_HALF_OPEN_CLAIM_AT_EXEC_V1
+        #
+        # P16 tiene FIFO dedicada. Si necesita probe HALF_OPEN,
+        # NO tomar el ownership durante routing porque todavía
+        # puede permanecer varios minutos esperando en la FIFO.
+        #
+        # El claim real se hará justo antes de _process_provider16.
+        if provider == "PROVIDER16":
+            p16_breaker = (
+                get_provider_breaker_snapshot(
+                    redis_conn,
+                    "PROVIDER16",
+                )
+            )
+
+            if (
+                p16_breaker.get("needs_probe")
+                and not p16_breaker.get("cooldown")
+            ):
+                print(
+                    "PROVIDER16_HALF_OPEN_DEFERRED_TO_FIFO =",
+                    {
+                        "request_id": request_id,
+                        "act_type": act_type,
+                        "breaker": p16_breaker,
+                    },
+                    flush=True,
+                )
+
+                return provider
+
+        decision = (
+            claim_provider_half_open(
+                redis_conn,
+                provider,
+                request_id,
+            )
+        )
+
+        # Si _thard_health_filter_candidates hizo SOFT FAIL-OPEN,
+        # el provider puede seguir marcado OPEN_COOLDOWN.
+        # Permitimos el envío porque el filtro ya confirmó HEALTHY.
+        if (
+            decision.get("mode") == "OPEN"
+            and decision.get("reason") == "COOLDOWN"
+        ):
+            print(
+                "THARD_SOFT_FAIL_OPEN_BYPASS_COOLDOWN =",
+                {
+                    "request_id": request_id,
+                    "provider": provider,
+                    "act_type": act_type,
+                },
+                flush=True,
+            )
+            return provider
+
+        if decision.get(
+            "allowed"
+        ):
+            if (
+                decision.get("mode")
+                == "HALF_OPEN"
+            ):
+                print(
+                    "THARD_HALF_OPEN_CLAIMED =",
+                    {
+                        "request_id": request_id,
+                        "provider": provider,
+                        "act_type": act_type,
+                        "try": breaker_try + 1,
+                    },
+                    flush=True,
+                )
+
+            return provider
+
+        # HALF_OPEN_BUSY_TRANSIENT_REQUEUE_V1
+        #
+        # Otro request posee temporalmente el probe.
+        # NO significa proveedor caído ni error del cliente.
+        #
+        # No tiene sentido hacer 12 vueltas en el mismo segundo:
+        # dejamos que el caller lo reprograme.
+        if (
+            decision.get("mode")
+            == "HALF_OPEN_BUSY"
+        ):
+            print(
+                "THARD_HALF_OPEN_BUSY_TRANSIENT =",
+                {
+                    "request_id": request_id,
+                    "provider": provider,
+                    "owner": decision.get("owner"),
+                    "act_type": act_type,
+                },
+                flush=True,
+            )
+
+            raise RuntimeError(
+                "NO_PROVIDER_ENABLED:"
+                "HALF_OPEN_SELECTION_BUSY"
+            )
+
+        print(
+            "THARD_HALF_OPEN_SELECTION_RETRY =",
+            {
+                "request_id": request_id,
+                "provider": provider,
+                "decision": decision,
+                "try": breaker_try + 1,
+            },
+            flush=True,
+        )
+
+    raise RuntimeError(
+        "NO_PROVIDER_ENABLED:"
+        "HALF_OPEN_SELECTION_BUSY"
+    )
+
 
 
 def _is_provider16_allowed_request(
@@ -4023,15 +4613,189 @@ def _is_birth_request(term: str | None, act_type: str | None) -> bool:
     return t.startswith("NACIMIENTO") or t.startswith("NAC")
 
 
-def _pick_provider5_group(term: str | None, act_type: str | None, request_id: int) -> str:
-    # ACTAS CARAS usa un solo grupo para todos los tipos de acta:
-    # nacimiento, matrimonio, defuncion, divorcio, etc.
-    group = (settings.PROVIDER5_GROUP_ESPECIALES or "").strip()
+# ============================================================
+# RODO_PROVIDER5_GROUP_TOGGLE_V1
+# ============================================================
 
-    if not group:
-        raise RuntimeError("PROVIDER5_ESPECIALES_GROUP_NOT_CONFIGURED")
+PROVIDER5_GROUP_ENABLED_KEYS = {
+    "NACIMIENTO_1": "PROVIDER5_GROUP_ENABLED:NACIMIENTO_1",
+    "NACIMIENTO_2": "PROVIDER5_GROUP_ENABLED:NACIMIENTO_2",
+    "NACIMIENTO_3": "PROVIDER5_GROUP_ENABLED:NACIMIENTO_3",
+    "CADENA_FOLIADA": "PROVIDER5_GROUP_ENABLED:CADENA_FOLIADA",
+    "ESPECIALES": "PROVIDER5_GROUP_ENABLED:ESPECIALES",
+}
 
-    return group
+
+def _provider5_group_enabled_map() -> dict[str, bool]:
+    enabled = {
+        key: True
+        for key in PROVIDER5_GROUP_ENABLED_KEYS
+    }
+
+    db = None
+
+    try:
+        db = SessionLocal()
+
+        for slot, setting_key in PROVIDER5_GROUP_ENABLED_KEYS.items():
+            raw = _get_app_setting(
+                db,
+                setting_key,
+                "1",
+            )
+
+            enabled[slot] = (
+                str(raw or "")
+                .strip()
+                .lower()
+                in {
+                    "1",
+                    "true",
+                    "yes",
+                    "si",
+                    "sí",
+                    "on",
+                    "enabled",
+                }
+            )
+
+        return enabled
+
+    except Exception as exc:
+        print(
+            "PROVIDER5_GROUP_ENABLED_LOOKUP_ERROR =",
+            repr(exc),
+            flush=True,
+        )
+
+        return enabled
+
+    finally:
+        if db is not None:
+            db.close()
+
+
+def _pick_provider5_group(
+    term: str | None,
+    act_type: str | None,
+    request_id: int,
+) -> str:
+
+    # RODO_MULTI_GROUP_ROUTING_V1
+
+    act_type_up = (
+        act_type or ""
+    ).upper().strip()
+
+    enabled = (
+        _provider5_group_enabled_map()
+    )
+
+    nacimiento_1 = (
+        settings.PROVIDER5_GROUP_NACIMIENTO
+        or ""
+    ).strip()
+
+    nacimiento_2 = (
+        settings.PROVIDER5_GROUP_NACIMIENTO_2
+        or ""
+    ).strip()
+
+    # RODO_NACIMIENTO_3_V1
+    nacimiento_3 = (
+        settings.PROVIDER5_GROUP_NACIMIENTO_3
+        or ""
+    ).strip()
+
+    cadena_folio = (
+        settings.PROVIDER5_GROUP_CADENA_FOLIO
+        or ""
+    ).strip()
+
+    especiales = (
+        settings.PROVIDER5_GROUP_ESPECIALES
+        or ""
+    ).strip()
+
+    is_cadena_req = is_chain(term)
+
+    is_folio_req = _is_folio_act(
+        act_type_up
+    )
+
+    is_birth_req = _is_birth_request(
+        term,
+        act_type_up,
+    )
+
+    # CADENA primero.
+    if is_cadena_req:
+        if (
+            not cadena_folio
+            or not enabled["CADENA_FOLIADA"]
+        ):
+            raise RuntimeError(
+                "PROVIDER5_CADENA_FOLIADA_GROUP_NOT_CONFIGURED"
+            )
+
+        return cadena_folio
+
+    # FOLIADAS.
+    if is_folio_req:
+        if (
+            not cadena_folio
+            or not enabled["CADENA_FOLIADA"]
+        ):
+            raise RuntimeError(
+                "PROVIDER5_CADENA_FOLIADA_GROUP_NOT_CONFIGURED"
+            )
+
+        return cadena_folio
+
+    # NACIMIENTOS.
+    if is_birth_req:
+        nacimiento_groups = [
+            group
+            for slot, group in (
+                (
+                    "NACIMIENTO_1",
+                    nacimiento_1,
+                ),
+                (
+                    "NACIMIENTO_2",
+                    nacimiento_2,
+                ),
+                (
+                    "NACIMIENTO_3",
+                    nacimiento_3,
+                ),
+            )
+            if (
+                group
+                and enabled[slot]
+            )
+        ]
+
+        if not nacimiento_groups:
+            raise RuntimeError(
+                "PROVIDER5_NACIMIENTO_GROUP_NOT_CONFIGURED"
+            )
+
+        return nacimiento_groups[
+            (request_id - 1)
+            % len(nacimiento_groups)
+        ]
+
+    # MATRIMONIO / DEFUNCION / DIVORCIO.
+    if (
+        not especiales
+        or not enabled["ESPECIALES"]
+    ):
+        raise RuntimeError(
+            "PROVIDER5_ESPECIALES_GROUP_NOT_CONFIGURED"
+        )
+
+    return especiales
 
 
 def _pick_provider12_group(term: str | None, act_type: str | None, request_id: int) -> str:
@@ -4984,6 +5748,52 @@ def _send_provider14_request(req, db):
         req.updated_at = _utc_now_naive()
         db.commit()
 
+        try:
+            provider_attempt = (
+                register_provider_attempt(
+                    redis_conn,
+                    request_id=req.id,
+                    provider_name="PROVIDER14",
+                    provider_group_id=(
+                        provider_jid
+                    ),
+                    provider_message_id=(
+                        provider_sent_msg_id
+                    ),
+                    provider_message=(
+                        text_to_provider
+                    ),
+                    sent_ts=float(
+                        provider14_send_ts
+                    ),
+                )
+            )
+
+            print(
+                "PROVIDER14_ATTEMPT_REGISTERED =",
+                provider_attempt,
+                flush=True,
+            )
+
+            _schedule_provider_thard(
+                req,
+                provider_attempt,
+                "PROVIDER14",
+                "HEDGE",
+            )
+
+        except Exception as attempt_exc:
+            print(
+                "PROVIDER14_ATTEMPT_REGISTER_ERROR =",
+                {
+                    "request_id": req.id,
+                    "error": str(
+                        attempt_exc
+                    ),
+                },
+                flush=True,
+            )
+
         print("PROVIDER14_SEND_OK =", {
             "req_id": req.id,
             "provider_jid": provider_jid,
@@ -5183,6 +5993,67 @@ def _send_provider14_request(req, db):
             )
 
         if not result_ok:
+            fresh_after_hedge = None
+
+            try:
+                db.expire_all()
+
+                fresh_after_hedge = (
+                    db.query(RequestLog)
+                    .filter(
+                        RequestLog.id
+                        == req.id
+                    )
+                    .populate_existing()
+                    .first()
+                )
+
+            except Exception as refresh_exc:
+                print(
+                    "THARD_P14_REFRESH_AFTER_WAIT_ERROR =",
+                    {
+                        "request_id": req.id,
+                        "error": str(
+                            refresh_exc
+                        )[:300],
+                    },
+                    flush=True,
+                )
+
+            if (
+                fresh_after_hedge
+                and (
+                    (
+                        fresh_after_hedge.status
+                        or ""
+                    )
+                    .strip()
+                    .upper()
+                    == "DONE"
+                    or getattr(
+                        fresh_after_hedge,
+                        "pdf_storage_key",
+                        None,
+                    )
+                )
+            ):
+                print(
+                    "THARD_OLD_PROVIDER_ERROR_AFTER_WINNER_SKIP =",
+                    {
+                        "request_id": req.id,
+                        "old_provider": (
+                            "PROVIDER14"
+                        ),
+                        "winner_provider": (
+                            fresh_after_hedge
+                            .provider_name
+                        ),
+                    },
+                    flush=True,
+                )
+
+                return True
+
             raise RuntimeError(
                 f"PROVIDER14_RESULT_TIMEOUT:{req.id}"
             )
@@ -5506,55 +6377,56 @@ def _provider4_tipo_acta_for_request(
     act_type: str,
 ) -> str:
     """
-    Para CURP usa el tipo real de acta.
+    LAZARO_CHAIN_USE_REAL_ACT_TYPE_V1
 
-    Para cadena, Lázaro acepta la cadena usando el mismo endpoint y campo
-    `curp`. El endpoint sigue exigiendo un parámetro `tipo`, aunque la cadena
-    identifica el documento.
+    CURP y cadena deben utilizar SIEMPRE el tipo
+    real solicitado.
 
-    El valor se deja configurable por proveedor para no amarrarlo a código.
-    Usa nacimiento como valor por defecto porque equivale a tipo=1.
+    Antes, toda cadena caia por defecto a
+    nacimiento/tipo=1 mediante PROVIDERx_CHAIN_TIPOA.
+
+    Eso provocaba, por ejemplo:
+        cadena DEFUNCION
+        -> tipo nacimiento
+        -> Lázaro generaba NACIMIENTO
+        -> el validador final la rechazaba.
+
+    La cadena identifica el registro, pero el endpoint
+    de Lázaro SI utiliza `tipo` para generar/recuperar
+    el documento correcto.
     """
-    term_clean = (term or "").strip().upper()
+
+    term_clean = (
+        term
+        or ""
+    ).strip().upper()
 
     chain_mode = (
         is_chain(term_clean)
-        or bool(re.fullmatch(r"\d{15,25}", term_clean))
+        or bool(
+            re.fullmatch(
+                r"\d{15,25}",
+                term_clean,
+            )
+        )
     )
 
-    if not chain_mode:
-        return _provider4_tipo_acta(act_type)
+    tipoa = _provider4_tipo_acta(
+        act_type
+    )
 
-    provider_name = (provider_name or "PROVIDER4").strip().upper()
-
-    configured = (
-        _get_app_setting(
-            db,
-            f"{provider_name}_CHAIN_TIPOA",
-            "nacimiento",
-        )
-        or "nacimiento"
-    ).strip().lower()
-
-    allowed = {
-        "nacimiento",
-        "matrimonio",
-        "defuncion",
-        "divorcio",
-    }
-
-    if configured not in allowed:
-        raise RuntimeError(
-            f"{provider_name}_INVALID_CHAIN_TIPOA:{configured}"
+    if chain_mode:
+        print(
+            f"{provider_name}_CHAIN_REAL_TIPOA_V1 =",
+            {
+                "term": term_clean,
+                "act_type": act_type,
+                "tipoa": tipoa,
+            },
+            flush=True,
         )
 
-    print(f"{provider_name}_CHAIN_TIPOA_USING =", {
-        "term": term_clean,
-        "configured_tipoa": configured,
-        "original_act_type": act_type,
-    }, flush=True)
-
-    return configured
+    return tipoa
 
 
 def _process_provider3(req, db):
@@ -5617,6 +6489,2061 @@ def _process_provider3(req, db):
     }
 
 
+
+# ============================================================
+# THARD_ALL_PROVIDERS_SAFE_V2
+# ============================================================
+
+THARD_SAFE_HEDGE_PROVIDERS = {
+    "PROVIDER1",
+    "PROVIDER5",
+}
+
+THARD_MAX_TOTAL_ATTEMPTS = 2
+
+
+def _thard_attempt_for_provider(
+    request_id: int,
+    provider_name: str,
+):
+    from app.provider_attempts import (
+        get_provider_attempts,
+    )
+
+    wanted = (
+        provider_name
+        or ""
+    ).strip().upper()
+
+    rows = (
+        get_provider_attempts(
+            redis_conn,
+            request_id,
+        )
+        or []
+    )
+
+    for row in reversed(rows):
+        if (
+            (
+                row.get("provider_name")
+                or ""
+            )
+            .strip()
+            .upper()
+            == wanted
+        ):
+            return row
+
+    return None
+
+
+def _thard_ensure_attempt(
+    req,
+    provider_name: str,
+    provider_group_id: str,
+    provider_message: str,
+    sent_ts: float | None = None,
+):
+    from app.provider_attempts import (
+        register_provider_attempt,
+    )
+
+    old = _thard_attempt_for_provider(
+        req.id,
+        provider_name,
+    )
+
+    if old:
+        return old
+
+    return register_provider_attempt(
+        redis_conn,
+        request_id=req.id,
+        provider_name=provider_name,
+        provider_group_id=(
+            provider_group_id
+            or ""
+        ),
+        provider_message_id="",
+        provider_message=(
+            provider_message
+            or ""
+        ),
+        sent_ts=float(
+            sent_ts
+            if sent_ts is not None
+            else time.time()
+        ),
+    )
+
+
+# THARD_ZERO_DUPLICATE_SAFE_ROUTING_V1
+
+# ============================================================
+# THARD_HALF_OPEN_BREAKER_V1
+# ============================================================
+
+def _thard_half_open_success(
+    request_id,
+    provider_name,
+):
+    try:
+        from app.provider_health import (
+            mark_provider_half_open_success,
+        )
+
+        recovered = (
+            mark_provider_half_open_success(
+                redis_conn,
+                provider_name,
+                request_id,
+            )
+        )
+
+        if recovered:
+            print(
+                "THARD_HALF_OPEN_RECOVERED =",
+                {
+                    "request_id": request_id,
+                    "provider": (
+                        provider_name
+                    ),
+                },
+                flush=True,
+            )
+
+        return bool(
+            recovered
+        )
+
+    except Exception as exc:
+        print(
+            "THARD_HALF_OPEN_SUCCESS_ERROR =",
+            {
+                "request_id": request_id,
+                "provider": provider_name,
+                "error": str(exc)[:300],
+            },
+            flush=True,
+        )
+
+        return False
+
+
+def _thard_health_filter_candidates(
+    candidates,
+    act_type,
+    strict=False,
+):
+    from app.provider_health import (
+        get_provider_health_snapshot,
+        get_provider_breaker_snapshot,
+        ensure_provider_probe_required,
+    )
+
+    original = [
+        str(x).strip().upper()
+        for x in (
+            candidates
+            or []
+        )
+        if str(x or "").strip()
+    ]
+
+    if not original:
+        return []
+
+    normal = []
+    probe_ready = []
+    excluded = []
+
+    for provider in original:
+        try:
+            health = (
+                get_provider_health_snapshot(
+                    redis_conn,
+                    provider,
+                    act_type,
+                )
+            )
+
+            state = (
+                health.get("state")
+                or "HEALTHY"
+            ).strip().upper()
+
+        except Exception as exc:
+            health = {
+                "state": "UNKNOWN",
+                "error": str(exc)[:200],
+            }
+
+            state = "UNKNOWN"
+
+        try:
+            breaker = (
+                get_provider_breaker_snapshot(
+                    redis_conn,
+                    provider,
+                )
+            )
+
+        except Exception as exc:
+            print(
+                "THARD_BREAKER_LOOKUP_ERROR =",
+                {
+                    "provider": provider,
+                    "error": str(exc)[:300],
+                },
+                flush=True,
+            )
+
+            # Error de Redis breaker:
+            # no tumbar proveedor por métrica.
+            normal.append(
+                provider
+            )
+            continue
+
+        # THARD_BREAKER_HEALTH_GATED_V2
+        #
+        # Health/T_hard es por tipo, mientras el key histórico
+        # del breaker es provider-wide. Para evitar contaminación
+        # cruzada, el breaker sólo afecta ESTE bucket cuando ESTE
+        # bucket está DOWN y acumula >=3 timeouts consecutivos.
+        breaker_streak = int(
+            health.get(
+                "timeout_streak"
+            )
+            or 0
+        )
+
+        breaker_eligible = (
+            state == "DOWN"
+            and breaker_streak >= 3
+        )
+
+        if not breaker_eligible:
+            normal.append(
+                provider
+            )
+            continue
+
+        # Si health histórico todavía dice DOWN
+        # y no existe recovery aprobado, exigir
+        # una única prueba HALF_OPEN.
+        # THARD_BREAKER_BUCKET_RECOVERY_GUARD_V21
+        #
+        # recovered es provider-wide, pero health/streak es por bucket.
+        # Nunca dejar que un recovery de OTRO tipo libere este bucket
+        # mientras este bucket siga DOWN con racha >= 3.
+        if (
+            breaker_eligible
+            and not breaker.get(
+                "needs_probe"
+            )
+        ):
+            try:
+                ensure_provider_probe_required(
+                    redis_conn,
+                    provider,
+                )
+
+                breaker = (
+                    get_provider_breaker_snapshot(
+                        redis_conn,
+                        provider,
+                    )
+                )
+
+            except Exception as exc:
+                print(
+                    "THARD_HALF_OPEN_SEED_ERROR =",
+                    {
+                        "provider": provider,
+                        "error": str(exc)[:300],
+                    },
+                    flush=True,
+                )
+
+        if breaker.get(
+            "cooldown"
+        ):
+            excluded.append(
+                {
+                    "provider": provider,
+                    "reason": "OPEN_COOLDOWN",
+                    "health_state": state,
+                    "breaker": breaker,
+                }
+            )
+            continue
+
+        if breaker.get(
+            "needs_probe"
+        ):
+            if breaker.get(
+                "half_open_locked"
+            ):
+                excluded.append(
+                    {
+                        "provider": provider,
+                        "reason": (
+                            "HALF_OPEN_BUSY"
+                        ),
+                        "health_state": state,
+                        "breaker": breaker,
+                    }
+                )
+                continue
+
+            probe_ready.append(
+                provider
+            )
+            continue
+
+        if breaker_eligible:
+            excluded.append(
+                {
+                    "provider": provider,
+                    "reason": "DOWN",
+                    "health_state": state,
+                    "breaker": breaker,
+                }
+            )
+            continue
+
+        normal.append(
+            provider
+        )
+
+    # Las pruebas HALF_OPEN tienen prioridad.
+    # Así el proveedor se prueba inmediatamente
+    # al terminar sus 120 s, no horas después.
+    #
+    # El claim atómico real ocurre DESPUÉS de
+    # que _pick_provider_name elija uno.
+    if probe_ready:
+        print(
+            "THARD_HALF_OPEN_PROBE_READY =",
+            {
+                "act_type": act_type,
+                "probe_ready": (
+                    probe_ready
+                ),
+                "normal_available": normal,
+            },
+            flush=True,
+        )
+
+        return probe_ready
+
+    if normal:
+        if excluded:
+            print(
+                "THARD_SAFE_ROUTING_EXCLUDED =",
+                {
+                    "act_type": act_type,
+                    "available": normal,
+                    "excluded": excluded,
+                },
+                flush=True,
+            )
+
+        return normal
+
+    print(
+        "THARD_ALL_PROVIDERS_BLOCKED_NO_FAIL_OPEN =",
+        {
+            "act_type": act_type,
+            "providers": original,
+            "excluded": excluded,
+            "strict": bool(strict),
+        },
+        flush=True,
+    )
+
+    # Si el routing NO es estricto y todos quedaron bloqueados,
+    # permitimos un fail-open limitado únicamente a proveedores
+    # que siguen HEALTHY pero están temporalmente en OPEN_COOLDOWN.
+    #
+    # Nunca reabrimos aquí proveedores DOWN ni HALF_OPEN_BUSY.
+    if not strict:
+        soft_fail_open = [
+            item.get("provider")
+            for item in excluded
+            if (
+                item.get("provider")
+                and item.get("health_state") == "HEALTHY"
+                and item.get("reason") == "OPEN_COOLDOWN"
+            )
+        ]
+
+        if soft_fail_open:
+            print(
+                "THARD_SOFT_FAIL_OPEN_HEALTHY_COOLDOWN =",
+                {
+                    "act_type": act_type,
+                    "providers": soft_fail_open,
+                },
+                flush=True,
+            )
+            return soft_fail_open
+
+    return []
+
+
+
+def _schedule_provider_thard(
+    req,
+    attempt,
+    provider_name: str,
+    policy: str,
+):
+    from app.provider_health import (
+        get_provider_health_snapshot,
+    )
+
+    attempt_id = str(
+        (attempt or {}).get(
+            "attempt_id"
+        )
+        or ""
+    ).strip()
+
+    if not attempt_id:
+        print(
+            "THARD_SCHEDULE_SKIP_NO_ATTEMPT =",
+            {
+                "request_id": getattr(
+                    req,
+                    "id",
+                    None,
+                ),
+                "provider": provider_name,
+                "policy": policy,
+            },
+            flush=True,
+        )
+        return None
+
+    key = (
+        "provider_thard:scheduled:v2:"
+        f"{req.id}:"
+        f"{attempt_id}"
+    )
+
+    try:
+        acquired = redis_conn.set(
+            key,
+            "1",
+            nx=True,
+            ex=86400,
+        )
+
+        if not acquired:
+            return None
+
+    except Exception as exc:
+        print(
+            "THARD_SCHEDULE_LOCK_ERROR =",
+            {
+                "request_id": req.id,
+                "provider": provider_name,
+                "error": str(exc)[:300],
+            },
+            flush=True,
+        )
+        return None
+
+    try:
+        health = (
+            get_provider_health_snapshot(
+                redis_conn,
+                provider_name,
+                req.act_type,
+            )
+        )
+
+        t_hard = int(
+            health.get(
+                "t_hard_sec"
+            )
+            or 90
+        )
+
+        if (
+            policy
+            or ""
+        ).upper() == "SIDEA":
+            t_hard = max(
+                90,
+                t_hard,
+            )
+
+        job = (
+            slow_request_queue.enqueue_in(
+                timedelta(
+                    seconds=t_hard
+                ),
+                _provider_t_hard_watchdog,
+                int(req.id),
+                attempt_id,
+                (
+                    provider_name
+                    or ""
+                ).strip().upper(),
+                (
+                    policy
+                    or ""
+                ).strip().upper(),
+            )
+        )
+
+        print(
+            "THARD_SCHEDULED =",
+            {
+                "request_id": req.id,
+                "provider_name": (
+                    provider_name
+                ),
+                "attempt_id": attempt_id,
+                "policy": policy,
+                "t_hard_sec": t_hard,
+                "health": health,
+                "job_id": job.id,
+            },
+            flush=True,
+        )
+
+        return job
+
+    except Exception as exc:
+        try:
+            redis_conn.delete(key)
+        except Exception:
+            pass
+
+        print(
+            "THARD_SCHEDULE_ERROR =",
+            {
+                "request_id": req.id,
+                "provider": provider_name,
+                "policy": policy,
+                "error": str(exc)[:500],
+            },
+            flush=True,
+        )
+
+        return None
+
+
+def _provider_t_hard_watchdog(
+    request_id: int,
+    attempt_id: str,
+    original_provider: str,
+    policy: str,
+):
+    from app.provider_attempts import (
+        get_provider_attempts,
+        get_pdf_winner,
+        register_provider_attempt,
+    )
+
+    from app.provider_health import (
+        record_provider_success,
+        record_provider_timeout,
+        get_provider_health_snapshot,
+    )
+
+    db = SessionLocal()
+
+    try:
+        row = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.id
+                == int(request_id)
+            )
+            .first()
+        )
+
+        if not row:
+            print(
+                "THARD_SKIP_REQUEST_MISSING =",
+                request_id,
+                flush=True,
+            )
+            return
+
+        status = (
+            row.status
+            or ""
+        ).strip().upper()
+
+        policy = (
+            policy
+            or ""
+        ).strip().upper()
+
+        # Ya terminó.
+        if (
+            status == "DONE"
+            or getattr(
+                row,
+                "pdf_storage_key",
+                None,
+            )
+        ):
+            # Para P1/P5/P14 main.py ya dejó
+            # provider real + latencia exacta.
+            if policy == "HEDGE":
+                try:
+                    winner_provider = (
+                        getattr(
+                            row,
+                            "provider_name",
+                            "",
+                        )
+                        or ""
+                    ).strip().upper()
+
+                    winner_latency = (
+                        getattr(
+                            row,
+                            "provider_processing_time",
+                            None,
+                        )
+                    )
+
+                    if (
+                        winner_provider
+                        and winner_latency
+                        is not None
+                    ):
+                        record_provider_success(
+                            redis_conn,
+                            winner_provider,
+                            row.act_type,
+                            float(
+                                winner_latency
+                            ),
+                        )
+                        _thard_half_open_success(
+                            request_id,
+                            winner_provider,
+                        )
+
+                        print(
+                            "THARD_TERMINAL_SUCCESS_RECORDED =",
+                            {
+                                "request_id": request_id,
+                                "winner_provider": (
+                                    winner_provider
+                                ),
+                                "latency_s": float(
+                                    winner_latency
+                                ),
+                            },
+                            flush=True,
+                        )
+
+                except Exception as exc:
+                    print(
+                        "THARD_TERMINAL_SUCCESS_ERROR =",
+                        {
+                            "request_id": request_id,
+                            "error": str(exc)[:300],
+                        },
+                        flush=True,
+                    )
+
+            print(
+                "THARD_SKIP_TERMINAL =",
+                {
+                    "request_id": request_id,
+                    "status": status,
+                    "provider": (
+                        original_provider
+                    ),
+                    "policy": policy,
+                },
+                flush=True,
+            )
+            return
+
+        # NO RECORD / ERROR real ya terminó:
+        # no penalizar proveedor y no fallback.
+        if status not in {
+            "QUEUED",
+            "PROCESSING",
+        }:
+            print(
+                "THARD_SKIP_TERMINAL =",
+                {
+                    "request_id": request_id,
+                    "status": status,
+                    "provider": (
+                        original_provider
+                    ),
+                    "policy": policy,
+                },
+                flush=True,
+            )
+            return
+
+        thard_is_api = (
+            getattr(
+                row,
+                "api_client_id",
+                None,
+            )
+            is not None
+            or str(
+                getattr(
+                    row,
+                    "source_group_id",
+                    "",
+                )
+                or ""
+            )
+            .strip()
+            .lower()
+            .startswith(
+                "api_cliente_"
+            )
+            or str(
+                getattr(
+                    row,
+                    "requester_wa_id",
+                    "",
+                )
+                or ""
+            )
+            .strip()
+            .lower()
+            .startswith(
+                "api:"
+            )
+        )
+
+        if thard_is_api:
+            print(
+                "THARD_SKIP_API =",
+                {
+                    "request_id": request_id,
+                    "provider": (
+                        original_provider
+                    ),
+                    "policy": policy,
+                },
+                flush=True,
+            )
+            return
+
+        attempts = (
+            get_provider_attempts(
+                redis_conn,
+                request_id,
+            )
+            or []
+        )
+
+        attempt = next(
+            (
+                x
+                for x in attempts
+                if str(
+                    x.get("attempt_id")
+                    or ""
+                )
+                == str(
+                    attempt_id
+                    or ""
+                )
+            ),
+            None,
+        )
+
+        if not attempt:
+            print(
+                "THARD_SKIP_ATTEMPT_MISSING =",
+                {
+                    "request_id": request_id,
+                    "attempt_id": attempt_id,
+                    "provider": (
+                        original_provider
+                    ),
+                },
+                flush=True,
+            )
+            return
+
+        # ====================================================
+        # SIDEA
+        #
+        # Nunca hacer hedge por silencio.
+        # Si existe guard, esa impresión puede
+        # estar YA reservada/consumida.
+        # ====================================================
+        if policy == "SIDEA":
+            guard_key = (
+                "provider16:sidea:"
+                "request_guard:v2:"
+                f"{request_id}"
+            )
+
+            audit_key = (
+                "provider16:sidea:"
+                "request_audit:v2:"
+                f"{request_id}"
+            )
+
+            try:
+                guard_exists = bool(
+                    redis_conn.get(
+                        guard_key
+                    )
+                )
+
+            except Exception as exc:
+                print(
+                    "PROVIDER16_THARD_GUARD_CHECK_ERROR =",
+                    {
+                        "request_id": request_id,
+                        "error": str(exc)[:300],
+                    },
+                    flush=True,
+                )
+                return
+
+            try:
+                audit_present = bool(
+                    redis_conn.get(
+                        audit_key
+                    )
+                )
+            except Exception:
+                audit_present = False
+
+            # PROVIDER16_CAPACITY_NOT_TIMEOUT_V1
+            #
+            # Estar esperando una cuenta SIDEA NO significa que
+            # SIDEA haya fallado ni que haya ocurrido un timeout.
+            #
+            # Solo se omite cuando:
+            # - sigue QUEUED,
+            # - no existe guard de impresión,
+            # - no existe audit SIDEA,
+            # - y el estado corresponde a espera de capacidad.
+            #
+            # Si realmente está PROCESSING contra SIDEA, este
+            # blindaje NO aplica y T-HARD sigue midiendo normal.
+            sidea_error_message = str(
+                getattr(
+                    row,
+                    "error_message",
+                    "",
+                )
+                or ""
+            ).strip().upper()
+
+            sidea_capacity_wait = (
+                status == "QUEUED"
+                and not guard_exists
+                and not audit_present
+                and (
+                    sidea_error_message.startswith(
+                        "PROVIDER16_BUSY_WAITING_CAPACITY:"
+                    )
+                    or (
+                        "SIDEA_ALL_READY_ACCOUNTS_BUSY"
+                        in sidea_error_message
+                    )
+                    or (
+                        "PROVIDER16_THARD_WAIT:"
+                        in sidea_error_message
+                    )
+                )
+            )
+
+            if sidea_capacity_wait:
+                print(
+                    "PROVIDER16_THARD_CAPACITY_WAIT_SKIPPED_TIMEOUT =",
+                    {
+                        "request_id": request_id,
+                        "attempt_id": attempt_id,
+                        "status": status,
+                        "error_message": (
+                            sidea_error_message[:500]
+                        ),
+                        "guard_exists": guard_exists,
+                        "audit_present": audit_present,
+                        "timeout_recorded": False,
+                    },
+                    flush=True,
+                )
+
+                return
+
+            added = record_provider_timeout(
+                redis_conn,
+                request_id=request_id,
+                attempt_id=attempt_id,
+                provider_name=(
+                    original_provider
+                ),
+                act_type=row.act_type,
+            )
+
+            try:
+                None  # THARD_BREAKER_HEALTH_GATED_V2: breaker centralizado
+
+            except Exception as cooldown_exc:
+                print(
+                    "PROVIDER16_THARD_COOLDOWN_SET_ERROR =",
+                    {
+                        "request_id": request_id,
+                        "error": str(
+                            cooldown_exc
+                        )[:300],
+                    },
+                    flush=True,
+                )
+
+            health = (
+                get_provider_health_snapshot(
+                    redis_conn,
+                    original_provider,
+                    row.act_type,
+                )
+            )
+
+            label = (
+                "PROVIDER16_THARD_POST_RESERVATION_RECOVERY_ONLY ="
+                if guard_exists
+                else
+                "PROVIDER16_THARD_PRE_RESERVATION_OR_CAPACITY_STALL ="
+            )
+
+            print(
+                label,
+                {
+                    "request_id": request_id,
+                    "status": status,
+                    "error_message": (
+                        row.error_message
+                    ),
+                    "guard_exists": (
+                        guard_exists
+                    ),
+                    "audit_present": (
+                        audit_present
+                    ),
+                    "timeout_recorded": (
+                        added
+                    ),
+                    "health": health,
+                },
+                flush=True,
+            )
+
+            return
+
+        # P1/P5/P14/P15:
+        # ya rebasó T_hard.
+        added = record_provider_timeout(
+            redis_conn,
+            request_id=request_id,
+            attempt_id=attempt_id,
+            provider_name=(
+                original_provider
+            ),
+            act_type=row.act_type,
+        )
+
+        health = (
+            get_provider_health_snapshot(
+                redis_conn,
+                original_provider,
+                row.act_type,
+            )
+        )
+
+        print(
+            "THARD_REACHED =",
+            {
+                "request_id": request_id,
+                "attempt_id": attempt_id,
+                "provider_name": (
+                    original_provider
+                ),
+                "policy": policy,
+                "timeout_recorded": added,
+                "health": health,
+                "attempt_count": len(
+                    attempts
+                ),
+            },
+            flush=True,
+        )
+        try:
+            None  # THARD_BREAKER_HEALTH_GATED_V2: breaker centralizado
+
+        except Exception as cooldown_exc:
+            print(
+                "THARD_COOLDOWN_SET_ERROR =",
+                {
+                    "request_id": request_id,
+                    "provider": original_provider,
+                    "error": str(
+                        cooldown_exc
+                    )[:300],
+                },
+                flush=True,
+            )
+
+        print(
+            "THARD_ZERO_DUPLICATE_NO_CONCURRENT_FAILOVER =",
+            {
+                "request_id": request_id,
+                "provider": original_provider,
+                "policy": policy,
+                "cooldown_sec": 120,
+            },
+            flush=True,
+        )
+
+        return
+
+        # E-WEB: no concurrent hedge todavía.
+        # El agente HTTP es síncrono y puede seguir
+        # trabajando aunque el cliente deje de esperar.
+        if policy == "MONITOR":
+            print(
+                "THARD_MONITOR_ONLY_NO_HEDGE =",
+                {
+                    "request_id": request_id,
+                    "provider": (
+                        original_provider
+                    ),
+                },
+                flush=True,
+            )
+            return
+
+        # Provider fijo:
+        # medir sí, cruzar proveedor NO.
+        if not _bot_allows_global_fallback(
+            db,
+            row.instance_name,
+        ):
+            print(
+                "THARD_FIXED_MODE_NO_HEDGE =",
+                {
+                    "request_id": request_id,
+                    "provider": (
+                        original_provider
+                    ),
+                    "mode": (
+                        _bot_provider_mode(
+                            db,
+                            row.instance_name,
+                        )
+                    ),
+                },
+                flush=True,
+            )
+            return
+
+        try:
+            winner = get_pdf_winner(
+                redis_conn,
+                request_id,
+            )
+        except Exception:
+            winner = None
+
+        if winner:
+            print(
+                "THARD_SKIP_WINNER_EXISTS =",
+                {
+                    "request_id": request_id,
+                    "winner": winner,
+                },
+                flush=True,
+            )
+            return
+
+        if (
+            len(attempts)
+            >= THARD_MAX_TOTAL_ATTEMPTS
+        ):
+            print(
+                "THARD_MAX_ATTEMPTS_REACHED =",
+                {
+                    "request_id": request_id,
+                    "attempt_count": len(
+                        attempts
+                    ),
+                },
+                flush=True,
+            )
+            return
+
+        attempted = {
+            (
+                x.get("provider_name")
+                or ""
+            )
+            .strip()
+            .upper()
+            for x in attempts
+        }
+
+        enabled = {
+            str(x).strip().upper()
+            for x in (
+                _global_pool_enabled_providers(
+                    db
+                )
+                or []
+            )
+        }
+
+        candidates = [
+            x
+            for x in sorted(
+                THARD_SAFE_HEDGE_PROVIDERS
+            )
+            if (
+                x in enabled
+                and x not in attempted
+            )
+        ]
+
+        candidates = (
+            _thard_health_filter_candidates(
+                candidates,
+                row.act_type,
+                strict=True,
+            )
+        )
+
+        viable = {}
+
+        for candidate in candidates:
+            try:
+                group_id = (
+                    _pick_provider_group(
+                        candidate,
+                        row.curp,
+                        row.act_type,
+                        row.id,
+                    )
+                )
+
+                message = (
+                    _build_provider_message(
+                        candidate,
+                        row.curp,
+                        row.act_type,
+                    )
+                )
+
+                if group_id and message:
+                    viable[
+                        candidate
+                    ] = (
+                        group_id,
+                        message,
+                    )
+
+            except Exception as exc:
+                print(
+                    "THARD_CANDIDATE_REJECTED =",
+                    {
+                        "request_id": request_id,
+                        "candidate": candidate,
+                        "error": str(exc)[:300],
+                    },
+                    flush=True,
+                )
+
+        if not viable:
+            print(
+                "THARD_NO_SAFE_HEDGE =",
+                {
+                    "request_id": request_id,
+                    "original_provider": (
+                        original_provider
+                    ),
+                    "enabled": sorted(
+                        enabled
+                    ),
+                    "safe_pool": sorted(
+                        THARD_SAFE_HEDGE_PROVIDERS
+                    ),
+                },
+                flush=True,
+            )
+            return
+
+        # Compartimos la misma llave que
+        # T_hard de Lázaro V1.
+        hedge_key = (
+            "provider_thard:hedge:v1:"
+            f"{request_id}"
+        )
+
+        try:
+            acquired = redis_conn.set(
+                hedge_key,
+                "1",
+                nx=True,
+                ex=3600,
+            )
+
+            if not acquired:
+                print(
+                    "THARD_HEDGE_ALREADY_CLAIMED =",
+                    request_id,
+                    flush=True,
+                )
+                return
+
+        except Exception as exc:
+            print(
+                "THARD_HEDGE_LOCK_ERROR =",
+                {
+                    "request_id": request_id,
+                    "error": str(exc)[:300],
+                },
+                flush=True,
+            )
+            return
+
+        names = list(viable)
+
+        chosen = (
+            _pick_provider_by_weight(
+                db,
+                names,
+            )
+            or names[
+                (
+                    int(request_id)
+                    - 1
+                )
+                % len(names)
+            ]
+        )
+
+        group_id, message = (
+            viable[chosen]
+        )
+
+        sent_ts = time.time()
+
+        try:
+            response = send_group_text(
+                group_id,
+                message,
+                _provider_sender_instance(
+                    chosen,
+                    row,
+                ),
+            )
+
+        except Exception as exc:
+            # No liberar hedge_key.
+            # Evolution puede fallar después
+            # de aceptar físicamente el mensaje.
+            print(
+                "THARD_HEDGE_SEND_UNCERTAIN =",
+                {
+                    "request_id": request_id,
+                    "fallback_provider": (
+                        chosen
+                    ),
+                    "error": str(exc)[:500],
+                },
+                flush=True,
+            )
+            return
+
+        message_id = (
+            (response or {})
+            .get(
+                "key",
+                {},
+            )
+            .get("id")
+            or (
+                (response or {})
+                .get(
+                    "data",
+                    {},
+                )
+                .get(
+                    "key",
+                    {},
+                )
+                .get("id")
+            )
+            or (
+                (response or {})
+                .get("id")
+            )
+            or ""
+        )
+
+        try:
+            fallback_attempt = (
+                register_provider_attempt(
+                    redis_conn,
+                    request_id=request_id,
+                    provider_name=chosen,
+                    provider_group_id=(
+                        group_id
+                    ),
+                    provider_message_id=(
+                        message_id
+                    ),
+                    provider_message=(
+                        message
+                    ),
+                    sent_ts=sent_ts,
+                )
+            )
+
+        except Exception as exc:
+            print(
+                "THARD_HEDGE_REGISTER_ERROR =",
+                {
+                    "request_id": request_id,
+                    "fallback_provider": (
+                        chosen
+                    ),
+                    "message_id": message_id,
+                    "error": str(exc)[:500],
+                },
+                flush=True,
+            )
+            return
+
+        print(
+            "THARD_HEDGE_SENT =",
+            {
+                "request_id": request_id,
+                "original_provider": (
+                    original_provider
+                ),
+                "fallback_provider": chosen,
+                "provider_group_id": (
+                    group_id
+                ),
+                "provider_message_id": (
+                    message_id
+                ),
+                "fallback_attempt": (
+                    fallback_attempt
+                ),
+            },
+            flush=True,
+        )
+
+    except Exception as exc:
+        print(
+            "THARD_WATCHDOG_ERROR =",
+            {
+                "request_id": request_id,
+                "attempt_id": attempt_id,
+                "provider_name": (
+                    original_provider
+                ),
+                "policy": policy,
+                "error": str(exc)[:800],
+            },
+            flush=True,
+        )
+
+    finally:
+        db.close()
+
+
+# ============================================================
+# LAZARO_THARD_HEDGE_V1
+# ============================================================
+
+LAZARO_THARD_SAFE_HEDGE_PROVIDERS = {
+    "PROVIDER1",
+    "PROVIDER5",
+}
+
+LAZARO_THARD_MAX_TOTAL_ATTEMPTS = 2
+
+
+def _lazaro_t_hard_watchdog(
+    request_id: int,
+    attempt_id: str,
+    original_provider: str,
+):
+    """
+    T_hard para Lázaro.
+
+    NO reemplaza ni borra el flow original.
+
+    Si existe un proveedor seguro disponible,
+    envía como máximo UN hedge adicional.
+
+    El Lázaro original continúa consultándose;
+    provider_pdf_winner decide quién gana.
+    """
+
+    from app.provider_attempts import (
+        get_provider_attempts,
+        get_pdf_winner,
+        register_provider_attempt,
+    )
+
+    from app.provider_health import (
+        record_provider_timeout,
+        get_provider_health_snapshot,
+    )
+
+    db = SessionLocal()
+
+    try:
+        req = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.id
+                == int(request_id)
+            )
+            .first()
+        )
+
+        if not req:
+            print(
+                "LAZARO_THARD_SKIP_REQUEST_MISSING =",
+                {
+                    "request_id": (
+                        request_id
+                    ),
+                },
+                flush=True,
+            )
+            return
+
+        current_status = (
+            req.status
+            or ""
+        ).strip().upper()
+
+        if current_status not in {
+            "QUEUED",
+            "PROCESSING",
+        }:
+            print(
+                "LAZARO_THARD_SKIP_TERMINAL =",
+                {
+                    "request_id": (
+                        request_id
+                    ),
+                    "status": (
+                        current_status
+                    ),
+                },
+                flush=True,
+            )
+            return
+
+        if getattr(
+            req,
+            "pdf_storage_key",
+            None,
+        ):
+            print(
+                "LAZARO_THARD_SKIP_R2_EXISTS =",
+                {
+                    "request_id": (
+                        request_id
+                    ),
+                },
+                flush=True,
+            )
+            return
+
+        try:
+            if _is_api_request(req):
+                print(
+                    "LAZARO_THARD_SKIP_API =",
+                    {
+                        "request_id": (
+                            request_id
+                        ),
+                    },
+                    flush=True,
+                )
+                return
+
+        except Exception:
+            pass
+
+        enabled_setting = str(
+            _get_app_setting(
+                db,
+                "LAZARO_THARD_ENABLED",
+                "1",
+            )
+            or "1"
+        ).strip().lower()
+
+        if enabled_setting not in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            print(
+                "LAZARO_THARD_DISABLED =",
+                {
+                    "request_id": (
+                        request_id
+                    ),
+                },
+                flush=True,
+            )
+            return
+
+        mode = (
+            _bot_provider_mode(
+                db,
+                req.instance_name,
+            )
+            or ""
+        ).strip().upper()
+
+        if mode != "GLOBAL_POOL":
+            print(
+                "LAZARO_THARD_SKIP_FIXED_MODE =",
+                {
+                    "request_id": (
+                        request_id
+                    ),
+                    "mode": mode,
+                },
+                flush=True,
+            )
+            return
+
+        winner = get_pdf_winner(
+            redis_conn,
+            request_id,
+        )
+
+        if winner:
+            print(
+                "LAZARO_THARD_SKIP_WINNER_EXISTS =",
+                {
+                    "request_id": (
+                        request_id
+                    ),
+                    "winner": winner,
+                },
+                flush=True,
+            )
+            return
+
+        attempts = (
+            get_provider_attempts(
+                redis_conn,
+                request_id,
+            )
+            or []
+        )
+
+        original_attempt = None
+
+        for row in attempts:
+            if (
+                str(
+                    row.get(
+                        "attempt_id"
+                    )
+                    or ""
+                )
+                == str(
+                    attempt_id
+                    or ""
+                )
+            ):
+                original_attempt = row
+                break
+
+        if not original_attempt:
+            print(
+                "LAZARO_THARD_SKIP_ATTEMPT_MISSING =",
+                {
+                    "request_id": (
+                        request_id
+                    ),
+                    "attempt_id": (
+                        attempt_id
+                    ),
+                },
+                flush=True,
+            )
+            return
+
+        if (
+            (
+                original_attempt.get(
+                    "provider_name"
+                )
+                or ""
+            )
+            .strip()
+            .upper()
+            != (
+                original_provider
+                or ""
+            )
+            .strip()
+            .upper()
+        ):
+            print(
+                "LAZARO_THARD_SKIP_ATTEMPT_PROVIDER_MISMATCH =",
+                {
+                    "request_id": (
+                        request_id
+                    ),
+                    "attempt": (
+                        original_attempt
+                    ),
+                    "expected": (
+                        original_provider
+                    ),
+                },
+                flush=True,
+            )
+            return
+
+        health = (
+            get_provider_health_snapshot(
+                redis_conn,
+                original_provider,
+                req.act_type,
+            )
+        )
+
+        timeout_added = (
+            record_provider_timeout(
+                redis_conn,
+                request_id=request_id,
+                attempt_id=attempt_id,
+                provider_name=(
+                    original_provider
+                ),
+                act_type=req.act_type,
+            )
+        )
+
+        print(
+            "LAZARO_THARD_REACHED =",
+            {
+                "request_id": (
+                    request_id
+                ),
+                "attempt_id": (
+                    attempt_id
+                ),
+                "provider_name": (
+                    original_provider
+                ),
+                "health_before": (
+                    health
+                ),
+                "timeout_recorded": (
+                    timeout_added
+                ),
+                "attempt_count": len(
+                    attempts
+                ),
+            },
+            flush=True,
+        )
+        try:
+            None  # THARD_BREAKER_HEALTH_GATED_V2: breaker centralizado
+
+        except Exception as cooldown_exc:
+            print(
+                "LAZARO_THARD_COOLDOWN_SET_ERROR =",
+                {
+                    "request_id": request_id,
+                    "provider": original_provider,
+                    "error": str(
+                        cooldown_exc
+                    )[:300],
+                },
+                flush=True,
+            )
+
+        print(
+            "LAZARO_ZERO_DUPLICATE_NO_CONCURRENT_FAILOVER =",
+            {
+                "request_id": request_id,
+                "provider": original_provider,
+                "cooldown_sec": 120,
+            },
+            flush=True,
+        )
+
+        return
+
+        if (
+            len(attempts)
+            >= LAZARO_THARD_MAX_TOTAL_ATTEMPTS
+        ):
+            print(
+                "LAZARO_THARD_MAX_ATTEMPTS_REACHED =",
+                {
+                    "request_id": (
+                        request_id
+                    ),
+                    "attempt_count": (
+                        len(attempts)
+                    ),
+                },
+                flush=True,
+            )
+            return
+
+        already_attempted = {
+            (
+                row.get(
+                    "provider_name"
+                )
+                or ""
+            )
+            .strip()
+            .upper()
+            for row in attempts
+        }
+
+        enabled = {
+            str(p).strip().upper()
+            for p in (
+                _enabled_providers(
+                    db
+                )
+                or []
+            )
+        }
+
+        candidate_names = [
+            p
+            for p in sorted(
+                LAZARO_THARD_SAFE_HEDGE_PROVIDERS
+            )
+            if (
+                p in enabled
+                and p
+                not in already_attempted
+            )
+        ]
+
+        viable = {}
+
+        for candidate in candidate_names:
+            try:
+                group_id = (
+                    _pick_provider_group(
+                        candidate,
+                        req.curp,
+                        req.act_type,
+                        req.id,
+                    )
+                )
+
+                message = (
+                    _build_provider_message(
+                        candidate,
+                        req.curp,
+                        req.act_type,
+                    )
+                )
+
+                if (
+                    group_id
+                    and message
+                ):
+                    viable[candidate] = {
+                        "group_id": (
+                            group_id
+                        ),
+                        "message": (
+                            message
+                        ),
+                    }
+
+            except Exception as candidate_exc:
+                print(
+                    "LAZARO_THARD_CANDIDATE_REJECTED =",
+                    {
+                        "request_id": (
+                            request_id
+                        ),
+                        "candidate": (
+                            candidate
+                        ),
+                        "error": str(
+                            candidate_exc
+                        )[:300],
+                    },
+                    flush=True,
+                )
+
+        if not viable:
+            print(
+                "LAZARO_THARD_NO_SAFE_HEDGE =",
+                {
+                    "request_id": (
+                        request_id
+                    ),
+                    "original_provider": (
+                        original_provider
+                    ),
+                    "enabled": sorted(
+                        enabled
+                    ),
+                    "safe_pool": sorted(
+                        LAZARO_THARD_SAFE_HEDGE_PROVIDERS
+                    ),
+                },
+                flush=True,
+            )
+            return
+
+        hedge_key = (
+            "provider_thard:hedge:v1:"
+            f"{request_id}"
+        )
+
+        hedge_lock = (
+            redis_conn.set(
+                hedge_key,
+                "1",
+                nx=True,
+                ex=60 * 60,
+            )
+        )
+
+        if not hedge_lock:
+            print(
+                "LAZARO_THARD_HEDGE_ALREADY_CLAIMED =",
+                {
+                    "request_id": (
+                        request_id
+                    ),
+                },
+                flush=True,
+            )
+            return
+
+        viable_names = list(
+            viable.keys()
+        )
+
+        chosen = (
+            _pick_provider_by_weight(
+                db,
+                viable_names,
+            )
+            or viable_names[
+                (
+                    int(request_id)
+                    - 1
+                )
+                % len(
+                    viable_names
+                )
+            ]
+        )
+
+        target = viable[
+            chosen
+        ]
+
+        sent_ts = time.time()
+
+        try:
+            response = send_group_text(
+                target["group_id"],
+                target["message"],
+                _provider_sender_instance(
+                    chosen,
+                    req,
+                ),
+            )
+
+        except Exception as send_exc:
+            # El envío puede ser incierto.
+            # NO reintentar automáticamente:
+            # podría haberse aceptado upstream.
+            print(
+                "LAZARO_THARD_HEDGE_SEND_UNCERTAIN =",
+                {
+                    "request_id": (
+                        request_id
+                    ),
+                    "fallback_provider": (
+                        chosen
+                    ),
+                    "error": str(
+                        send_exc
+                    )[:500],
+                },
+                flush=True,
+            )
+            return
+
+        message_id = (
+            (response or {})
+            .get(
+                "key",
+                {},
+            )
+            .get(
+                "id"
+            )
+            or (
+                (response or {})
+                .get(
+                    "data",
+                    {},
+                )
+                .get(
+                    "key",
+                    {},
+                )
+                .get(
+                    "id"
+                )
+            )
+            or (
+                (response or {})
+                .get(
+                    "id"
+                )
+            )
+            or ""
+        )
+
+        try:
+            fallback_attempt = (
+                register_provider_attempt(
+                    redis_conn,
+                    request_id=(
+                        request_id
+                    ),
+                    provider_name=(
+                        chosen
+                    ),
+                    provider_group_id=(
+                        target[
+                            "group_id"
+                        ]
+                    ),
+                    provider_message_id=(
+                        message_id
+                    ),
+                    provider_message=(
+                        target[
+                            "message"
+                        ]
+                    ),
+                    sent_ts=sent_ts,
+                )
+            )
+
+        except Exception as register_exc:
+            print(
+                "LAZARO_THARD_HEDGE_REGISTER_ERROR =",
+                {
+                    "request_id": (
+                        request_id
+                    ),
+                    "fallback_provider": (
+                        chosen
+                    ),
+                    "message_id": (
+                        message_id
+                    ),
+                    "error": str(
+                        register_exc
+                    )[:500],
+                },
+                flush=True,
+            )
+
+            # NO liberar hedge_key.
+            # El mensaje físico sí salió.
+            return
+
+        print(
+            "LAZARO_THARD_HEDGE_SENT =",
+            {
+                "request_id": (
+                    request_id
+                ),
+                "original_provider": (
+                    original_provider
+                ),
+                "fallback_provider": (
+                    chosen
+                ),
+                "provider_group_id": (
+                    target[
+                        "group_id"
+                    ]
+                ),
+                "provider_message_id": (
+                    message_id
+                ),
+                "fallback_attempt": (
+                    fallback_attempt
+                ),
+            },
+            flush=True,
+        )
+
+    except Exception as exc:
+        print(
+            "LAZARO_THARD_WATCHDOG_ERROR =",
+            {
+                "request_id": (
+                    request_id
+                ),
+                "attempt_id": (
+                    attempt_id
+                ),
+                "provider_name": (
+                    original_provider
+                ),
+                "error": str(
+                    exc
+                )[:800],
+            },
+            flush=True,
+        )
+
+    finally:
+        db.close()
+
+
 def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
 
     if _worker_stop_if_instance_blocked(
@@ -5637,13 +8564,13 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
         is_chain(term)
         or bool(re.fullmatch(r"\d{15,25}", term))
     )
-    
+
     print(f"{provider_name}_NEW_PROCESS_TERM =", term, flush=True)
     print(f"{provider_name}_NEW_PROCESS_CHAIN_MODE =", chain_mode, flush=True)
-    
+
     if not term:
         raise RuntimeError(f"{provider_name}_EMPTY_TERM")
-    
+
     # CURP solamente se exige cuando NO es cadena.
     if not chain_mode and not _is_curp_term(term):
         raise RuntimeError(f"{provider_name}_NOT_CURP_OR_CHAIN")
@@ -5651,10 +8578,49 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
     if provider_name == "PROVIDER4" and PROVIDER4_TEST_GROUPS and req.source_group_id not in PROVIDER4_TEST_GROUPS:
         raise RuntimeError("PROVIDER4_NOT_ALLOWED_GROUP")
 
-    # Si apagaste Provider4/10/11 en panel, no dejes que un job viejo lo use.
-    if not _provider_is_enabled(db, provider_name):
-        _provider4_new_clear_flow(req.id)
-        raise RuntimeError(f"{provider_name}_DISABLED_BEFORE_PROCESSING")
+    # LAZARO_ATTEMPT_WINNER_V1
+    #
+    # OFF manual:
+    # - NO iniciar una petición nueva.
+    # - si YA quedó SUBMITTED, conservar flow
+    #   y seguir buscando el PDF.
+    disabled_flow = (
+        _provider4_new_get_flow(
+            req.id
+        )
+    )
+
+    disabled_phase = (
+        disabled_flow.get(
+            "phase"
+        )
+        or ""
+    ).strip().upper()
+
+    if not _provider_is_enabled(
+        db,
+        provider_name,
+    ):
+        if disabled_phase == "SUBMITTED":
+            print(
+                f"{provider_name}_"
+                "DISABLED_RECOVERY_CONTINUE =",
+                {
+                    "request_id": req.id,
+                    "phase": disabled_phase,
+                },
+                flush=True,
+            )
+
+        else:
+            _provider4_new_clear_flow(
+                req.id
+            )
+
+            raise RuntimeError(
+                f"{provider_name}_"
+                "DISABLED_BEFORE_PROCESSING"
+            )
 
     setting = (
         db.query(ProviderSetting)
@@ -5680,11 +8646,11 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
         term=term,
         act_type=req.act_type,
     )
-    
+
     # El foliado depende del tipo/comando solicitado.
     # Aplica igual para CURP o para cadena.
     inc_folio = _is_folio_act(req.act_type)
-    
+
     print(
         f"{provider_name}_NEW_FOLIO_REQUEST =",
         {
@@ -5731,6 +8697,22 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
                     "reason": "BOT_BLOCKED_BEFORE_PROVIDER_SUBMIT",
                 }
         
+            lazaro_submit_started_ts = time.time()
+
+            # LAZARO_DB_TX_RELEASE_BEFORE_SUBMIT_V1
+            # No mantener una transacción PostgreSQL abierta
+            # mientras esperamos el HTTP externo de Lázaro.
+            if db.in_transaction():
+                db.commit()
+                print(
+                    "LAZARO_DB_TX_RELEASED_BEFORE_SUBMIT =",
+                    {
+                        "request_id": req.id,
+                        "provider_name": provider_name,
+                    },
+                    flush=True,
+                )
+
             submit_result = client.submit_peticion_new_api(
                 curp=term,
                 tipoa=tipoa,
@@ -5752,6 +8734,139 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
             }
 
             _provider4_new_set_flow(req.id, flow)
+
+            try:
+                lazaro_attempt = (
+                    register_provider_attempt(
+                        redis_conn,
+                        request_id=req.id,
+                        provider_name=(
+                            provider_name
+                        ),
+                        provider_group_id=(
+                            f"WEB:{provider_name}"
+                        ),
+                        provider_message_id=None,
+                        provider_message=(
+                            "LAZARO_SUBMIT:"
+                            + str(
+                                submit_result.get(
+                                    "code"
+                                )
+                                or ""
+                            )
+                        ),
+                        sent_ts=(
+                            lazaro_submit_started_ts
+                        ),
+                    )
+                )
+
+                print(
+                    "LAZARO_ATTEMPT_REGISTERED =",
+                    lazaro_attempt,
+                    flush=True,
+                )
+
+                try:
+                    from app.provider_health import (
+                        get_provider_health_snapshot,
+                    )
+
+                    lazaro_health = (
+                        get_provider_health_snapshot(
+                            redis_conn,
+                            provider_name,
+                            req.act_type,
+                        )
+                    )
+
+                    lazaro_t_hard_sec = int(
+                        lazaro_health.get(
+                            "t_hard_sec"
+                        )
+                        or 90
+                    )
+
+                    lazaro_thard_job = (
+                        slow_request_queue.enqueue_in(
+                            timedelta(
+                                seconds=(
+                                    lazaro_t_hard_sec
+                                )
+                            ),
+                            _lazaro_t_hard_watchdog,
+                            req.id,
+                            lazaro_attempt.get(
+                                "attempt_id"
+                            ),
+                            provider_name,
+                        )
+                    )
+
+                    print(
+                        "LAZARO_THARD_SCHEDULED =",
+                        {
+                            "request_id": (
+                                req.id
+                            ),
+                            "provider_name": (
+                                provider_name
+                            ),
+                            "attempt_id": (
+                                lazaro_attempt.get(
+                                    "attempt_id"
+                                )
+                            ),
+                            "t_hard_sec": (
+                                lazaro_t_hard_sec
+                            ),
+                            "health": (
+                                lazaro_health
+                            ),
+                            "job_id": (
+                                lazaro_thard_job.id
+                            ),
+                        },
+                        flush=True,
+                    )
+
+                except Exception as thard_exc:
+                    print(
+                        "LAZARO_THARD_SCHEDULE_ERROR =",
+                        {
+                            "request_id": (
+                                req.id
+                            ),
+                            "provider_name": (
+                                provider_name
+                            ),
+                            "error": str(
+                                thard_exc
+                            )[:500],
+                        },
+                        flush=True,
+                    )
+
+            except Exception as attempt_exc:
+                # Auxiliar solamente.
+                # Nunca romper una petición que
+                # Lázaro ya recibió.
+                print(
+                    "LAZARO_ATTEMPT_REGISTER_ERROR =",
+                    {
+                        "request_id": (
+                            req.id
+                        ),
+                        "provider_name": (
+                            provider_name
+                        ),
+                        "error": str(
+                            attempt_exc
+                        ),
+                    },
+                    flush=True,
+                )
 
             req.status = "PROCESSING"
             req.error_message = f"{provider_name}_NEW_SUBMITTED:{submit_result.get('code')}"
@@ -5786,12 +8901,38 @@ def _process_provider4(req, db, provider_name: str = "PROVIDER4"):
 
         try:
             if chain_mode:
+                # LAZARO_DB_TX_RELEASE_BEFORE_VERIFY_V1
+                if db.in_transaction():
+                    db.commit()
+                    print(
+                        "LAZARO_DB_TX_RELEASED_BEFORE_VERIFY =",
+                        {
+                            "request_id": req.id,
+                            "provider_name": provider_name,
+                            "mode": "CHAIN",
+                        },
+                        flush=True,
+                    )
+
                 check_result = client.verificar_cadena_por_historial_new_api(
                     cadena=term,
                     tipoa=tipoa,
                     inc_folio=inc_folio,
                 )
             else:
+                # LAZARO_DB_TX_RELEASE_BEFORE_VERIFY_V1
+                if db.in_transaction():
+                    db.commit()
+                    print(
+                        "LAZARO_DB_TX_RELEASED_BEFORE_VERIFY =",
+                        {
+                            "request_id": req.id,
+                            "provider_name": provider_name,
+                            "mode": "PDF",
+                        },
+                        flush=True,
+                    )
+
                 check_result = client.verificar_pdf_new_api(
                     curp=term,
                     tipoa=tipoa,
@@ -6157,6 +9298,51 @@ def _process_provider15(req, db):
         flush=True,
     )
 
+    provider15_started_ts = time.time()
+    provider15_attempt = None
+
+    try:
+        provider15_attempt = (
+            _thard_ensure_attempt(
+                req,
+                "PROVIDER15",
+                "HTTP:PROVIDER15",
+                (
+                    f"EWEB_PROCESS:"
+                    f"{term}:"
+                    f"{acta_format}"
+                ),
+                sent_ts=(
+                    provider15_started_ts
+                ),
+            )
+        )
+
+        print(
+            "PROVIDER15_THARD_ATTEMPT_REGISTERED =",
+            provider15_attempt,
+            flush=True,
+        )
+
+        _schedule_provider_thard(
+            req,
+            provider15_attempt,
+            "PROVIDER15",
+            "MONITOR",
+        )
+
+    except Exception as thard_exc:
+        print(
+            "PROVIDER15_THARD_REGISTER_ERROR =",
+            {
+                "request_id": req.id,
+                "error": str(
+                    thard_exc
+                )[:500],
+            },
+            flush=True,
+        )
+
     try:
         response = requests.post(
             f"{agent_url}/provider15/process",
@@ -6269,6 +9455,54 @@ def _process_provider15(req, db):
             },
             flush=True,
         )
+
+        try:
+            latency = (
+                provider_attempt_latency(
+                    provider15_attempt,
+                    now_ts=time.time(),
+                )
+            )
+
+            if latency is not None:
+                from app.provider_health import (
+                    record_provider_success,
+                )
+
+                record_provider_success(
+                    redis_conn,
+                    "PROVIDER15",
+                    req.act_type,
+                    latency,
+                )
+                _thard_half_open_success(
+                    req.id,
+                    "PROVIDER15",
+                )
+
+                print(
+                    "PROVIDER15_HEALTH_SUCCESS_RECORDED =",
+                    {
+                        "request_id": req.id,
+                        "latency_s": round(
+                            latency,
+                            3,
+                        ),
+                    },
+                    flush=True,
+                )
+
+        except Exception as health_exc:
+            print(
+                "PROVIDER15_HEALTH_SUCCESS_ERROR =",
+                {
+                    "request_id": req.id,
+                    "error": str(
+                        health_exc
+                    )[:500],
+                },
+                flush=True,
+            )
 
         return {
             "pdf_bytes": pdf_bytes,
@@ -7543,7 +10777,8 @@ def _after_done_accounting(req, db):
         if req.instance_name:
             used, limit_value, blocked_now = increment_bot_used_and_maybe_block(
                 db,
-                req.instance_name
+                req.instance_name,
+                request_id=req.id,
             )
             print("BOT_USED_AFTER_DONE =", used, flush=True)
             print("BOT_LIMIT =", limit_value, flush=True)
@@ -7852,6 +11087,10 @@ def process_request(request_id: int):
             and bool(existing_provider)
             and existing_provider != "PROVIDER15"
             and current_queue != SLOW_PROVIDER_QUEUE_NAME
+            and _bot_allows_global_fallback(
+                db,
+                req.instance_name,
+            )
         )
         
         # PROVIDER16_REQUEUE_REUSE_V1
@@ -7879,6 +11118,10 @@ def process_request(request_id: int):
             and _provider_is_enabled(
                 db,
                 existing_provider,
+            )
+            and _bot_allows_global_fallback(
+                db,
+                req.instance_name,
             )
         )
 
@@ -7915,6 +11158,10 @@ def process_request(request_id: int):
             and _provider_is_enabled(
                 db,
                 existing_provider,
+            )
+            and _bot_allows_global_fallback(
+                db,
+                req.instance_name,
             )
         )
 
@@ -8176,7 +11423,7 @@ def process_request(request_id: int):
                 req.updated_at = _utc_now_naive()
                 db.commit()
         
-                request_queue.enqueue(process_request, req.id)
+                request_queue.enqueue(process_request, req.id, at_front=_mx_global_queue_priority(req))
         
                 print("SLOW_QUEUE_LAZARO_NOT_ELIGIBLE_REQUEUED_TO_NORMAL =", {
                     "request_id": req.id,
@@ -8185,40 +11432,110 @@ def process_request(request_id: int):
                 }, flush=True)
         
                 return
-            
+
             if not _provider_is_enabled(db, existing_provider):
-                print("SLOW_QUEUE_EXISTING_PROVIDER_DISABLED_REQUEUE =", {
-                    "request_id": req.id,
-                    "old_provider": existing_provider,
-                    "queue": current_queue,
-                }, flush=True)
-        
-                try:
-                    _provider4_new_clear_flow(req.id)
-                except Exception as clear_exc:
-                    print("SLOW_QUEUE_DISABLED_CLEAR_FLOW_ERROR =", {
-                        "request_id": req.id,
-                        "old_provider": existing_provider,
-                        "error": str(clear_exc),
-                    }, flush=True)
-        
-                req.provider_name = ""
-                req.provider_group_id = None
-                req.provider_message = None
-                req.status = "QUEUED"
-                req.error_message = f"REQUEUED_AFTER_{existing_provider}_DISABLED"
-                req.updated_at = _utc_now_naive()
-                db.commit()
-        
-                request_queue.enqueue(process_request, req.id)
-        
-                print("SLOW_QUEUE_DISABLED_REQUEUED_TO_NORMAL =", {
-                    "request_id": req.id,
-                    "old_provider": existing_provider,
-                    "queue": "actas",
-                }, flush=True)
-        
-                return
+                # LAZARO_ATTEMPT_WINNER_V1
+                #
+                # OFF manual cierra la llave solamente
+                # para solicitudes NUEVAS.
+                #
+                # Si esta solicitud YA fue SUBMITTED,
+                # seguir consultando su PDF para no
+                # perder una acta que Lázaro procesa.
+                disabled_flow = (
+                    _provider4_new_get_flow(
+                        req.id
+                    )
+                )
+
+                disabled_phase = (
+                    disabled_flow.get(
+                        "phase"
+                    )
+                    or ""
+                ).strip().upper()
+
+                if disabled_phase == "SUBMITTED":
+                    print(
+                        "LAZARO_DISABLED_RECOVERY_CONTINUE =",
+                        {
+                            "request_id": req.id,
+                            "provider_name": (
+                                existing_provider
+                            ),
+                            "phase": disabled_phase,
+                            "queue": current_queue,
+                        },
+                        flush=True,
+                    )
+
+                else:
+                    print(
+                        "SLOW_QUEUE_EXISTING_PROVIDER_DISABLED_REQUEUE =",
+                        {
+                            "request_id": req.id,
+                            "old_provider": (
+                                existing_provider
+                            ),
+                            "queue": current_queue,
+                        },
+                        flush=True,
+                    )
+
+                    try:
+                        _provider4_new_clear_flow(
+                            req.id
+                        )
+
+                    except Exception as clear_exc:
+                        print(
+                            "SLOW_QUEUE_DISABLED_CLEAR_FLOW_ERROR =",
+                            {
+                                "request_id": (
+                                    req.id
+                                ),
+                                "old_provider": (
+                                    existing_provider
+                                ),
+                                "error": str(
+                                    clear_exc
+                                ),
+                            },
+                            flush=True,
+                        )
+
+                    req.provider_name = ""
+                    req.provider_group_id = None
+                    req.provider_message = None
+                    req.status = "QUEUED"
+                    req.error_message = (
+                        f"REQUEUED_AFTER_"
+                        f"{existing_provider}_DISABLED"
+                    )
+                    req.updated_at = (
+                        _utc_now_naive()
+                    )
+
+                    db.commit()
+
+                    request_queue.enqueue(
+                        process_request,
+                        req.id,
+                    )
+
+                    print(
+                        "SLOW_QUEUE_DISABLED_REQUEUED_TO_NORMAL =",
+                        {
+                            "request_id": req.id,
+                            "old_provider": (
+                                existing_provider
+                            ),
+                            "queue": "actas",
+                        },
+                        flush=True,
+                    )
+
+                    return
         
             # Este job viene de un reroute actas -> actas_slow.
             # NO volver a sortear proveedor, porque puede cambiar PROVIDER10/11/4
@@ -8254,26 +11571,69 @@ def process_request(request_id: int):
             except RuntimeError as pick_group_exc:
                 pick_group_err = str(pick_group_exc).strip().upper()
 
-                provider1_group_unavailable_errors = {
-                    "NO_CADENA_PROVIDER_GROUP_CONFIGURED",
-                    "NO_FOLIADAS_PROVIDER_GROUP_CONFIGURED",
-                    "NO_BIRTH_PROVIDER_GROUP_CONFIGURED",
-                    "NO_SPECIAL_PROVIDER_GROUP_CONFIGURED",
+                # PROVIDER_GROUP_UNAVAILABLE_FAILOVER_V2
+                provider_group_unavailable_errors = {
+                    "PROVIDER1": {
+                        "NO_CADENA_PROVIDER_GROUP_CONFIGURED",
+                        "NO_FOLIADAS_PROVIDER_GROUP_CONFIGURED",
+                        "NO_BIRTH_PROVIDER_GROUP_CONFIGURED",
+                        "NO_SPECIAL_PROVIDER_GROUP_CONFIGURED",
+                    },
+
+                    "PROVIDER5": {
+                        "PROVIDER5_NACIMIENTO_GROUP_NOT_CONFIGURED",
+                        "PROVIDER5_CADENA_FOLIADA_GROUP_NOT_CONFIGURED",
+                        "PROVIDER5_ESPECIALES_GROUP_NOT_CONFIGURED",
+                    },
                 }
 
+                unavailable_errors = (
+                    provider_group_unavailable_errors
+                    .get(
+                        provider_name,
+                        set(),
+                    )
+                )
+
                 if (
-                    provider_name == "PROVIDER1"
-                    and pick_group_err in provider1_group_unavailable_errors
+                    pick_group_err
+                    in unavailable_errors
                 ):
+                    if not _bot_allows_global_fallback(
+                        db,
+                        req.instance_name,
+                    ):
+                        print(
+                            "PROVIDER_GROUP_UNAVAILABLE_NON_GLOBAL_NO_FALLBACK =",
+                            {
+                                "request_id": req.id,
+                                "provider": provider_name,
+                                "instance_name": req.instance_name,
+                                "mode": _bot_provider_mode(
+                                    db,
+                                    req.instance_name,
+                                ),
+                                "reason": pick_group_err,
+                            },
+                            flush=True,
+                        )
+
+                        raise
+
+                    failed_provider = (
+                        provider_name
+                    )
+
                     _mark_provider_failed_for_request(
                         req.id,
-                        "PROVIDER1",
+                        failed_provider,
                     )
 
                     print(
-                        "PROVIDER1_GROUP_UNAVAILABLE_FAILOVER =",
+                        "PROVIDER_GROUP_UNAVAILABLE_FAILOVER =",
                         {
                             "request_id": req.id,
+                            "provider": failed_provider,
                             "curp": req.curp,
                             "act_type": req.act_type,
                             "reason": pick_group_err,
@@ -8281,31 +11641,40 @@ def process_request(request_id: int):
                         flush=True,
                     )
 
-                    provider_name = _pick_provider_name(
-                        db,
-                        req.id,
-                        req.source_group_id,
-                        req.curp,
-                        req.act_type,
-                        req.instance_name,
+                    provider_name = (
+                        _pick_provider_name(
+                            db,
+                            req.id,
+                            req.source_group_id,
+                            req.curp,
+                            req.act_type,
+                            req.instance_name,
+                        )
                     )
 
-                    if provider_name == "PROVIDER1":
+                    if (
+                        provider_name
+                        == failed_provider
+                    ):
                         raise RuntimeError(
-                            "PROVIDER1_GROUP_UNAVAILABLE_NO_FALLBACK"
+                            f"{failed_provider}_"
+                            "GROUP_UNAVAILABLE_NO_FALLBACK"
                         )
 
-                    provider_group_id = _pick_provider_group(
-                        provider_name,
-                        req.curp,
-                        req.act_type,
-                        req.id,
+                    provider_group_id = (
+                        _pick_provider_group(
+                            provider_name,
+                            req.curp,
+                            req.act_type,
+                            req.id,
+                        )
                     )
 
                     print(
-                        "PROVIDER1_GROUP_UNAVAILABLE_FALLBACK_SELECTED =",
+                        "PROVIDER_GROUP_UNAVAILABLE_FALLBACK_SELECTED =",
                         {
                             "request_id": req.id,
+                            "failed_provider": failed_provider,
                             "fallback_provider": provider_name,
                             "provider_group_id": provider_group_id,
                             "origin_error": pick_group_err,
@@ -8490,6 +11859,9 @@ def process_request(request_id: int):
                         process_request,
                         req.id,
                         job_timeout=900,
+                        at_front=(
+                            _mx_global_queue_priority(req)
+                        ),
                     )
 
                     print(
@@ -8573,7 +11945,7 @@ def process_request(request_id: int):
             req.updated_at = _utc_now_naive()
             db.commit()
 
-            job = slow_request_queue.enqueue(process_request, req.id)
+            job = slow_request_queue.enqueue(process_request, req.id, at_front=_mx_global_queue_priority(req))
 
             print(
                 "REQUEST_REROUTED_TO_SLOW_QUEUE =",
@@ -8609,7 +11981,10 @@ def process_request(request_id: int):
 
             outer_send_attempts = (
                 1
-                if provider_name == "PROVIDER1"
+                if provider_name in {
+                    "PROVIDER1",
+                    "PROVIDER5",
+                }
                 else 3
             )
 
@@ -8623,7 +11998,14 @@ def process_request(request_id: int):
                         send_ok = True
                         break
                     
-                    resp_json = send_group_text(provider_group_id, text_to_provider, sender_instance)
+                    # PROVIDER_ATTEMPT_REGISTER_V2
+                    provider_send_started_ts = time.time()
+
+                    resp_json = send_group_text(
+                        provider_group_id,
+                        text_to_provider,
+                        sender_instance,
+                    )
                     
                     send_ok = True
             
@@ -8639,6 +12021,64 @@ def process_request(request_id: int):
                         req.updated_at = _utc_now_naive()
                         db.commit()
             
+                    try:
+                        provider_attempt = (
+                            register_provider_attempt(
+                                redis_conn,
+                                request_id=req.id,
+                                provider_name=(
+                                    provider_name
+                                ),
+                                provider_group_id=(
+                                    provider_group_id
+                                ),
+                                provider_message_id=(
+                                    provider_sent_msg_id
+                                ),
+                                provider_message=(
+                                    text_to_provider
+                                ),
+                                sent_ts=(
+                                    provider_send_started_ts
+                                ),
+                            )
+                        )
+
+                        print(
+                            "PROVIDER_ATTEMPT_REGISTERED =",
+                            provider_attempt,
+                            flush=True,
+                        )
+
+                        if provider_name in {
+                            "PROVIDER1",
+                            "PROVIDER5",
+                        }:
+                            _schedule_provider_thard(
+                                req,
+                                provider_attempt,
+                                provider_name,
+                                "HEDGE",
+                            )
+
+                    except Exception as attempt_exc:
+                        # Este registro es auxiliar:
+                        # jamás convertir un SEND exitoso
+                        # en un error de la solicitud.
+                        print(
+                            "PROVIDER_ATTEMPT_REGISTER_ERROR =",
+                            {
+                                "request_id": req.id,
+                                "provider_name": (
+                                    provider_name
+                                ),
+                                "error": str(
+                                    attempt_exc
+                                ),
+                            },
+                            flush=True,
+                        )
+
                     print(f"PROVIDER_SEND_OK_ATTEMPT_{attempt+1} =", req.id, flush=True)
                     print("PROVIDER_SENT_MSG_ID =", provider_sent_msg_id, flush=True)
                     break
@@ -8661,10 +12101,14 @@ def process_request(request_id: int):
                         # de volver a colocar la solicitud al final.
                         time.sleep(15)
 
+                        # MX_P14_BUSY_REQUEUE_PRIORITY_V1
                         job = provider14_queue.enqueue(
                             process_request,
                             req.id,
                             job_timeout=900,
+                            at_front=(
+                                _mx_global_queue_priority(req)
+                            ),
                         )
 
                         print(
@@ -8735,6 +12179,10 @@ def process_request(request_id: int):
                 if (
                     provider1_is_transient
                     and provider1_global_fallback_allowed
+                    and _bot_allows_global_fallback(
+                        db,
+                        req.instance_name,
+                    )
                 ):
                     _mark_provider_failed_for_request(
                         req.id,
@@ -8819,6 +12267,8 @@ def process_request(request_id: int):
                                 for provider in candidates
                                 if provider != "PROVIDER7"
                             ]
+
+                    candidates = _filter_global_pool_providers(candidates)
 
                     print(
                         "PROVIDER1_TRANSIENT_FALLBACK_CANDIDATES =",
@@ -9760,6 +13210,107 @@ def process_request(request_id: int):
                     flush=True,
                 )
 
+                # PROVIDER16_HALF_OPEN_CLAIM_AT_EXEC_V1
+                #
+                # Ya estamos dentro de la ejecución real de P16.
+                # Aquí sí corresponde reclamar el probe HALF_OPEN.
+                from app.provider_health import (
+                    claim_provider_half_open,
+                )
+
+                p16_probe_decision = (
+                    claim_provider_half_open(
+                        redis_conn,
+                        "PROVIDER16",
+                        provider16_req_snapshot.id,
+                    )
+                )
+
+                if not p16_probe_decision.get(
+                    "allowed"
+                ):
+                    print(
+                        "PROVIDER16_HALF_OPEN_EXEC_WAIT =",
+                        {
+                            "request_id": (
+                                provider16_req_snapshot.id
+                            ),
+                            "decision": (
+                                p16_probe_decision
+                            ),
+                        },
+                        flush=True,
+                    )
+
+                    # Se trata como capacidad temporal ocupada.
+                    # El except SideaBusy de abajo conserva
+                    # la solicitud dentro de la FIFO.
+                    raise SideaBusy(
+                        "PROVIDER16_THARD_WAIT:"
+                        + str(
+                            p16_probe_decision.get(
+                                "mode"
+                            )
+                        )
+                    )
+
+                if (
+                    p16_probe_decision.get("mode")
+                    == "HALF_OPEN"
+                ):
+                    print(
+                        "PROVIDER16_HALF_OPEN_CLAIMED_AT_EXEC =",
+                        {
+                            "request_id": (
+                                provider16_req_snapshot.id
+                            ),
+                            "decision": (
+                                p16_probe_decision
+                            ),
+                        },
+                        flush=True,
+                    )
+
+                provider16_thard_attempt = None
+
+                try:
+                    provider16_thard_attempt = (
+                        _thard_ensure_attempt(
+                            provider16_req_snapshot,
+                            "PROVIDER16",
+                            "SIDEA:PROVIDER16",
+                            "SIDEA_WORK_START",
+                            sent_ts=time.time(),
+                        )
+                    )
+
+                    print(
+                        "PROVIDER16_THARD_ATTEMPT_REGISTERED =",
+                        provider16_thard_attempt,
+                        flush=True,
+                    )
+
+                    _schedule_provider_thard(
+                        provider16_req_snapshot,
+                        provider16_thard_attempt,
+                        "PROVIDER16",
+                        "SIDEA",
+                    )
+
+                except Exception as thard_exc:
+                    print(
+                        "PROVIDER16_THARD_REGISTER_ERROR =",
+                        {
+                            "request_id": (
+                                provider16_req_snapshot.id
+                            ),
+                            "error": str(
+                                thard_exc
+                            )[:500],
+                        },
+                        flush=True,
+                    )
+
                 provider16_result = (
                     _process_provider16(
                         provider16_req_snapshot,
@@ -9778,6 +13329,49 @@ def process_request(request_id: int):
             except SideaBusy as exc:
 
                 err = str(exc)
+
+                # HALF_OPEN_NEUTRAL_RELEASE_V1
+                #
+                # Si esta solicitud había tomado el probe HALF_OPEN
+                # pero SIDEA estaba ocupado, NO hubo prueba real
+                # del proveedor. Liberamos solamente el ownership
+                # para que otro request pueda intentar después.
+                try:
+                    from app.provider_health import (
+                        release_provider_half_open_neutral,
+                    )
+
+                    half_open_neutral_released = (
+                        release_provider_half_open_neutral(
+                            redis_conn,
+                            "PROVIDER16",
+                            req.id,
+                        )
+                    )
+
+                    print(
+                        "PROVIDER16_HALF_OPEN_NEUTRAL_RELEASE =",
+                        {
+                            "request_id": req.id,
+                            "released": (
+                                half_open_neutral_released
+                            ),
+                            "error": err[:300],
+                        },
+                        flush=True,
+                    )
+
+                except Exception as neutral_exc:
+                    print(
+                        "PROVIDER16_HALF_OPEN_NEUTRAL_RELEASE_ERROR =",
+                        {
+                            "request_id": req.id,
+                            "error": str(
+                                neutral_exc
+                            )[:500],
+                        },
+                        flush=True,
+                    )
 
                 # SIDEA_BUSY significa capacidad ocupada, no falla
                 # del acta ni del proveedor.
@@ -9844,11 +13438,19 @@ def process_request(request_id: int):
 
                 err = str(exc)
 
-                if _provider16_requeue_fallback(
-                    "NO_RECORD",
-                    err,
-                ):
-                    return
+                # PROVIDER16_NO_RECORD_TERMINAL_V1
+                #
+                # NO_RECORD es una respuesta funcional/terminal.
+                # JAMAS hacer fallback cross-provider por NO_RECORD.
+                print(
+                    "PROVIDER16_NO_RECORD_TERMINAL_V1 =",
+                    {
+                        "request_id": req.id,
+                        "provider": "PROVIDER16",
+                        "error": err[:300],
+                    },
+                    flush=True,
+                )
 
                 req.status = "ERROR"
                 req.error_message = err[:1000]
@@ -9856,6 +13458,29 @@ def process_request(request_id: int):
                     _utc_now_naive()
                 )
                 db.commit()
+
+                # PROVIDER16_TERMINAL_HALF_OPEN_RELEASE_V1
+                #
+                # NO_RECORD es una respuesta funcional de SIDEA.
+                # Si este request era dueño del probe HALF_OPEN,
+                # debe cerrarlo para no bloquear solicitudes futuras.
+                half_open_released = (
+                    _thard_half_open_success(
+                        req.id,
+                        "PROVIDER16",
+                    )
+                )
+
+                print(
+                    "PROVIDER16_NO_RECORD_HALF_OPEN_RELEASE =",
+                    {
+                        "request_id": req.id,
+                        "released": bool(
+                            half_open_released
+                        ),
+                    },
+                    flush=True,
+                )
 
                 _notify_client_no_record_once(
                     req,
@@ -10029,6 +13654,28 @@ def process_request(request_id: int):
                     req.updated_at = _utc_now_naive()
 
                     db.commit()
+
+                    # PROVIDER16_TERMINAL_HALF_OPEN_RELEASE_V1
+                    #
+                    # AMBIGUOUS también confirma que SIDEA respondió.
+                    # No debe dejar secuestrado un probe HALF_OPEN.
+                    half_open_released = (
+                        _thard_half_open_success(
+                            req.id,
+                            "PROVIDER16",
+                        )
+                    )
+
+                    print(
+                        "PROVIDER16_AMBIGUOUS_HALF_OPEN_RELEASE =",
+                        {
+                            "request_id": req.id,
+                            "released": bool(
+                                half_open_released
+                            ),
+                        },
+                        flush=True,
+                    )
 
                     # Soporte: una sola incidencia real.
                     _notify_support_error(
@@ -10271,6 +13918,64 @@ def process_request(request_id: int):
             # SUCCESS
             # ====================================================
 
+            try:
+                latency = (
+                    provider_attempt_latency(
+                        provider16_thard_attempt,
+                        now_ts=time.time(),
+                    )
+                )
+
+                if latency is not None:
+                    from app.provider_health import (
+                        record_provider_success,
+                    )
+
+                    record_provider_success(
+                        redis_conn,
+                        "PROVIDER16",
+                        (
+                            provider16_req_snapshot
+                            .act_type
+                        ),
+                        latency,
+                    )
+                    _thard_half_open_success(
+                        provider16_req_snapshot.id,
+                        "PROVIDER16",
+                    )
+
+                    print(
+                        "PROVIDER16_HEALTH_SUCCESS_RECORDED =",
+                        {
+                            "request_id": (
+                                provider16_req_snapshot.id
+                            ),
+                            "latency_s": round(
+                                latency,
+                                3,
+                            ),
+                            "recovered": bool(
+                                provider16_result.get(
+                                    "recovered"
+                                )
+                            ),
+                        },
+                        flush=True,
+                    )
+
+            except Exception as health_exc:
+                print(
+                    "PROVIDER16_HEALTH_SUCCESS_ERROR =",
+                    {
+                        "request_id": req.id,
+                        "error": str(
+                            health_exc
+                        )[:500],
+                    },
+                    flush=True,
+                )
+
             pdf_bytes = _require_pdf_bytes(
                 provider16_result,
                 "PROVIDER16",
@@ -10297,8 +14002,7 @@ def process_request(request_id: int):
                 not in NO_TIME_CAPTION_GROUPS
             ):
                 caption_text = (
-                    f"⏱️ Tiempo total: "
-                    f"{_fmt_seconds(total_seconds)}"
+                    build_delivery_caption(db, req, _fmt_seconds(total_seconds))
                 )
 
             # P16 inicialmente SOLO nacimiento normal.
@@ -10513,7 +14217,7 @@ def process_request(request_id: int):
                         req,
                         label="PROVIDER15_NO_RECORD",
                     )
-                
+
                     return
 
                 provider15_timeout = (
@@ -10525,15 +14229,66 @@ def process_request(request_id: int):
                     or err.startswith("PROVIDER15_AGENT_HTTP_503:")
                     or err.startswith("PROVIDER15_AGENT_HTTP_504:")
                 )
-        
+
                 if provider15_timeout:
+                    try:
+                        from app.provider_health import (
+                            record_provider_timeout,
+                        )
+
+                        p15_attempt = (
+                            _thard_attempt_for_provider(
+                                req.id,
+                                "PROVIDER15",
+                            )
+                        )
+
+                        if p15_attempt:
+                            record_provider_timeout(
+                                redis_conn,
+                                request_id=req.id,
+                                attempt_id=str(
+                                    p15_attempt.get(
+                                        "attempt_id"
+                                    )
+                                    or f"P15_TIMEOUT_{req.id}"
+                                ),
+                                provider_name="PROVIDER15",
+                                act_type=req.act_type,
+                            )
+
+                        None  # THARD_BREAKER_HEALTH_GATED_V2: breaker centralizado
+
+                    except Exception as health_exc:
+                        print(
+                            "PROVIDER15_TIMEOUT_HEALTH_ERROR =",
+                            {
+                                "request_id": req.id,
+                                "error": str(
+                                    health_exc
+                                )[:300],
+                            },
+                            flush=True,
+                        )
+
+                    print(
+                        "PROVIDER15_TIMEOUT_UNCERTAIN_NO_CROSS_FALLBACK =",
+                        {
+                            "request_id": req.id,
+                            "error": err[:300],
+                            "cooldown_sec": 120,
+                        },
+                        flush=True,
+                    )
+
+                    raise
         
                     if _current_mode_is_personal(
                         db,
                         req.instance_name,
                     ):
                         print(
-                            "PROVIDER15_TIMEOUT_PERSONAL_MODE_NO_GLOBAL_FALLBACK =",
+                            "PROVIDER15_TIMEOUT_NON_GLOBAL_MODE_NO_GLOBAL_FALLBACK =",
                             {
                                 "request_id": req.id,
                                 "instance_name": req.instance_name,
@@ -10677,8 +14432,7 @@ def process_request(request_id: int):
                 not in NO_TIME_CAPTION_GROUPS
             ):
                 caption_text = (
-                    f"⏱️ Tiempo total: "
-                    f"{_fmt_seconds(total_seconds)}"
+                    build_delivery_caption(db, req, _fmt_seconds(total_seconds))
                 )
 
             filename = (
@@ -10781,11 +14535,30 @@ def process_request(request_id: int):
                         or "INTENTE MÁS TARDE" in err_up
                         or "TIMEOUT" in err_up
                     )
-                
+
                     if not transient_p3:
                         raise
-                
+
                 print("PROVIDER3_GENERATION_FAILED =", err, flush=True)
+                if not _bot_allows_global_fallback(
+                    db,
+                    req.instance_name,
+                ):
+                    print(
+                        "PROVIDER3_NON_GLOBAL_MODE_NO_FALLBACK =",
+                        {
+                            "request_id": req.id,
+                            "instance_name": req.instance_name,
+                            "mode": _bot_provider_mode(
+                                db,
+                                req.instance_name,
+                            ),
+                        },
+                        flush=True,
+                    )
+
+                    raise
+
                 print("PROVIDER3_FALLBACK_TO_PROVIDER1 =", req.id, req.curp, flush=True)
 
                 enabled = _enabled_providers(db)
@@ -10826,7 +14599,7 @@ def process_request(request_id: int):
 
             caption_text = ""
             if req.source_group_id not in NO_TIME_CAPTION_GROUPS:
-                caption_text = f"⏱️ Tiempo total: {_fmt_seconds(total_seconds)}"
+                caption_text = build_delivery_caption(db, req, _fmt_seconds(total_seconds))
         
             print("PROVIDER3_CAPTION =", caption_text, flush=True)
         
@@ -10996,8 +14769,34 @@ def process_request(request_id: int):
         
             except Exception as p4_exc:
                 p4_err = str(p4_exc)
+
+                # LAZARO_DB_ROLLBACK_AFTER_EXCEPTION_V1
+                # Un fallo en flush/commit deja la Session en
+                # PendingRollback. Limpiarla antes del routing/fallback.
+                try:
+                    db.rollback()
+                    print(
+                        "LAZARO_DB_ROLLBACK_AFTER_EXCEPTION =",
+                        {
+                            "request_id": getattr(req, "id", None),
+                            "provider_name": provider_name,
+                            "error": p4_err[:300],
+                        },
+                        flush=True,
+                    )
+                except Exception as rollback_exc:
+                    print(
+                        "LAZARO_DB_ROLLBACK_FAILED =",
+                        {
+                            "provider_name": provider_name,
+                            "error": str(rollback_exc)[:300],
+                        },
+                        flush=True,
+                    )
+                    raise
+
                 p4_elapsed = time.perf_counter() - provider4_started_ts
-                enabled = _enabled_providers(db)
+                enabled = _global_pool_enabled_providers(db)
 
                 wrong_pdf_errors = (
                     p4_err.startswith(f"{provider_name}_WRONG_CURP_IN_PDF")
@@ -11044,8 +14843,104 @@ def process_request(request_id: int):
                 )
             
                 if should_fallback:
-                    if _current_mode_is_personal(db, req.instance_name):
-                        print("PERSONAL_MODE_NO_GLOBAL_FALLBACK =", req.id, flush=True)
+                    try:
+                        from app.provider_health import (
+                            record_provider_timeout,
+                        )
+
+                        lazaro_attempt = (
+                            _thard_attempt_for_provider(
+                                req.id,
+                                provider_name,
+                            )
+                        )
+
+                        lazaro_attempt_id = str(
+                            (
+                                lazaro_attempt
+                                or {}
+                            ).get(
+                                "attempt_id"
+                            )
+                            or (
+                                f"LAZARO_ERROR_"
+                                f"{provider_name}_"
+                                f"{req.id}"
+                            )
+                        )
+
+                        record_provider_timeout(
+                            redis_conn,
+                            request_id=req.id,
+                            attempt_id=(
+                                lazaro_attempt_id
+                            ),
+                            provider_name=(
+                                provider_name
+                            ),
+                            act_type=req.act_type,
+                        )
+
+                        None  # THARD_BREAKER_HEALTH_GATED_V2: breaker centralizado
+
+                    except Exception as health_exc:
+                        print(
+                            "LAZARO_LEGACY_ERROR_HEALTH_ERROR =",
+                            {
+                                "request_id": req.id,
+                                "provider": provider_name,
+                                "error": str(
+                                    health_exc
+                                )[:300],
+                            },
+                            flush=True,
+                        )
+
+                    print(
+                        "LAZARO_LEGACY_CROSS_FALLBACK_BLOCKED_ZERO_DUPLICATE =",
+                        {
+                            "request_id": req.id,
+                            "provider": provider_name,
+                            "error": p4_err[:300],
+                            "cooldown_sec": 120,
+                        },
+                        flush=True,
+                    )
+
+                    raise
+                    try:
+                        lazaro_thard_hedge_exists = bool(
+                            redis_conn.exists(
+                                "provider_thard:hedge:v1:"
+                                f"{req.id}"
+                            )
+                        )
+                    except Exception:
+                        lazaro_thard_hedge_exists = False
+
+                    if lazaro_thard_hedge_exists:
+                        print(
+                            "LAZARO_LEGACY_FALLBACK_SUPPRESSED_AFTER_THARD =",
+                            {
+                                "request_id": (
+                                    req.id
+                                ),
+                                "provider_name": (
+                                    provider_name
+                                ),
+                                "error": (
+                                    p4_err[:300]
+                                ),
+                            },
+                            flush=True,
+                        )
+
+                        # Ya se envió/intentó un hedge.
+                        # Nunca lanzar un tercer proveedor.
+                        raise
+
+                    if not _bot_allows_global_fallback(db, req.instance_name):
+                        print("NON_GLOBAL_MODE_NO_GLOBAL_FALLBACK =", req.id, flush=True)
                         raise
                 
                     _mark_provider_failed_for_request(
@@ -11243,8 +15138,8 @@ def process_request(request_id: int):
                         flush=True,
                     )
                     
-                    if _current_mode_is_personal(db, req.instance_name):
-                        print("PERSONAL_MODE_NO_GLOBAL_FALLBACK =", req.id, flush=True)
+                    if not _bot_allows_global_fallback(db, req.instance_name):
+                        print("NON_GLOBAL_MODE_NO_GLOBAL_FALLBACK =", req.id, flush=True)
                         raise
                         
                     _fallback_to_provider3_web(req, db, process_started_ts)
@@ -11252,13 +15147,190 @@ def process_request(request_id: int):
             
                 raise
         
+            # LAZARO_ATTEMPT_WINNER_V1
+            #
+            # El PDF ya pasó validaciones.
+            # Reclamar winner ANTES de R2/delivery.
+            lazaro_provider_attempt = None
+            lazaro_attempt_latency = None
+
+            try:
+                lazaro_attempts = (
+                    get_provider_attempts(
+                        redis_conn,
+                        req.id,
+                    )
+                )
+
+                for attempt_row in reversed(
+                    lazaro_attempts
+                ):
+                    if (
+                        (
+                            attempt_row.get(
+                                "provider_name"
+                            )
+                            or ""
+                        )
+                        .strip()
+                        .upper()
+                        == provider_name
+                    ):
+                        lazaro_provider_attempt = (
+                            attempt_row
+                        )
+                        break
+
+                (
+                    lazaro_winner_won,
+                    lazaro_winner_data,
+                ) = claim_pdf_winner(
+                    redis_conn,
+                    request_id=req.id,
+                    attempt=(
+                        lazaro_provider_attempt
+                    ),
+                )
+
+            except Exception as winner_exc:
+                # Fail-open:
+                # Redis auxiliar no puede hacer
+                # perder un PDF válido.
+                print(
+                    "LAZARO_PDF_WINNER_REDIS_ERROR =",
+                    {
+                        "request_id": req.id,
+                        "provider_name": (
+                            provider_name
+                        ),
+                        "error": str(
+                            winner_exc
+                        ),
+                    },
+                    flush=True,
+                )
+
+                lazaro_winner_won = True
+                lazaro_winner_data = None
+
+            if not lazaro_winner_won:
+                print(
+                    "LAZARO_PDF_LATE_LOSER_IGNORED =",
+                    {
+                        "request_id": req.id,
+                        "provider_name": (
+                            provider_name
+                        ),
+                        "incoming_attempt": (
+                            lazaro_provider_attempt
+                        ),
+                        "winner": (
+                            lazaro_winner_data
+                        ),
+                    },
+                    flush=True,
+                )
+
+                return
+
+            lazaro_attempt_latency = (
+                provider_attempt_latency(
+                    lazaro_provider_attempt,
+                    now_ts=time.time(),
+                )
+            )
+
+            print(
+                "LAZARO_PDF_WINNER_CLAIMED =",
+                {
+                    "request_id": req.id,
+                    "provider_name": (
+                        provider_name
+                    ),
+                    "attempt_latency_s": (
+                        round(
+                            lazaro_attempt_latency,
+                            3,
+                        )
+                        if (
+                            lazaro_attempt_latency
+                            is not None
+                        )
+                        else None
+                    ),
+                    "attempt": (
+                        lazaro_provider_attempt
+                    ),
+                },
+                flush=True,
+            )
+
+            try:
+                if (
+                    lazaro_attempt_latency
+                    is not None
+                ):
+                    from app.provider_health import (
+                        record_provider_success,
+                    )
+
+                    record_provider_success(
+                        redis_conn,
+                        provider_name,
+                        req.act_type,
+                        lazaro_attempt_latency,
+                    )
+                    _thard_half_open_success(
+                        req.id,
+                        provider_name,
+                    )
+
+                    print(
+                        "LAZARO_HEALTH_SUCCESS_RECORDED =",
+                        {
+                            "request_id": (
+                                req.id
+                            ),
+                            "provider_name": (
+                                provider_name
+                            ),
+                            "act_type": (
+                                req.act_type
+                            ),
+                            "latency_s": (
+                                round(
+                                    lazaro_attempt_latency,
+                                    3,
+                                )
+                            ),
+                        },
+                        flush=True,
+                    )
+
+            except Exception as health_exc:
+                print(
+                    "LAZARO_HEALTH_SUCCESS_ERROR =",
+                    {
+                        "request_id": (
+                            req.id
+                        ),
+                        "provider_name": (
+                            provider_name
+                        ),
+                        "error": str(
+                            health_exc
+                        )[:500],
+                    },
+                    flush=True,
+                )
+
             safe_media_b64 = base64.b64encode(pdf_bytes).decode()
         
             total_seconds = _request_total_seconds(req, process_started_ts)
 
             caption_text = ""
             if req.source_group_id not in NO_TIME_CAPTION_GROUPS:
-                caption_text = f"⏱️ Tiempo total: {_fmt_seconds(total_seconds)}"
+                caption_text = build_delivery_caption(db, req, _fmt_seconds(total_seconds))
         
             print(f"{provider_name}_CAPTION =", caption_text, flush=True)
         
@@ -11305,6 +15377,52 @@ def process_request(request_id: int):
                     db.rollback()
                 except Exception:
                     pass
+
+                try:
+                    lazaro_winner_released = (
+                        release_pdf_winner_if_owned(
+                            redis_conn,
+                            request_id=(
+                                req_id_for_pdf
+                            ),
+                            attempt=(
+                                lazaro_provider_attempt
+                            ),
+                        )
+                    )
+
+                    print(
+                        "LAZARO_PDF_WINNER_RELEASE_AFTER_R2_ERROR =",
+                        {
+                            "request_id": (
+                                req_id_for_pdf
+                            ),
+                            "provider_name": (
+                                provider_name
+                            ),
+                            "released": (
+                                lazaro_winner_released
+                            ),
+                        },
+                        flush=True,
+                    )
+
+                except Exception as release_exc:
+                    print(
+                        "LAZARO_PDF_WINNER_RELEASE_ERROR =",
+                        {
+                            "request_id": (
+                                req_id_for_pdf
+                            ),
+                            "provider_name": (
+                                provider_name
+                            ),
+                            "error": str(
+                                release_exc
+                            ),
+                        },
+                        flush=True,
+                    )
             
                 print(f"R2_SAVE_{provider_name}_PDF_ERROR =", {
                     "req_id": req_id_for_pdf,
@@ -11312,6 +15430,59 @@ def process_request(request_id: int):
                     "error": str(r2_exc),
                 }, flush=True)
                 raise
+
+            if lazaro_attempt_latency is not None:
+                try:
+                    req.provider_processing_time = (
+                        round(
+                            lazaro_attempt_latency,
+                            3,
+                        )
+                    )
+
+                    req.updated_at = (
+                        _utc_now_naive()
+                    )
+
+                    db.commit()
+
+                    print(
+                        "LAZARO_ATTEMPT_LATENCY_COMMITTED =",
+                        {
+                            "request_id": (
+                                req.id
+                            ),
+                            "provider_name": (
+                                provider_name
+                            ),
+                            "seconds": (
+                                req.provider_processing_time
+                            ),
+                        },
+                        flush=True,
+                    )
+
+                except Exception as metric_exc:
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+
+                    print(
+                        "LAZARO_ATTEMPT_LATENCY_COMMIT_ERROR =",
+                        {
+                            "request_id": (
+                                req.id
+                            ),
+                            "provider_name": (
+                                provider_name
+                            ),
+                            "error": str(
+                                metric_exc
+                            ),
+                        },
+                        flush=True,
+                    )
 
             instance = req.instance_name or "docifybot8"
 
@@ -11398,7 +15569,7 @@ def process_request(request_id: int):
             safe_media_b64 = base64.b64encode(pdf_bytes).decode()
         
             total_seconds = _request_total_seconds(req, process_started_ts)
-            caption_text = f"⏱️ Tiempo total: {_fmt_seconds(total_seconds)}"
+            caption_text = build_delivery_caption(db, req, _fmt_seconds(total_seconds))
         
             filename = (
                 f"{req.curp}_FOLIO.pdf"
@@ -11522,6 +15693,52 @@ def process_request(request_id: int):
                 _notify_support_error(req, err, msg)
                 return
 
+            # HALF_OPEN_BUSY_TRANSIENT_REQUEUE_V1
+            #
+            # Capacidad lógica temporalmente ocupada.
+            # No consumir los 3 intentos de NO_PROVIDER_ENABLED
+            # y jamás mandar ERROR/soporte por este motivo.
+            if (
+                err
+                == "NO_PROVIDER_ENABLED:"
+                   "HALF_OPEN_SELECTION_BUSY"
+            ):
+                req.provider_name = ""
+                req.provider_group_id = None
+                req.provider_message = None
+
+                req.status = "QUEUED"
+                req.error_message = (
+                    "HALF_OPEN_SELECTION_BUSY_WAITING"
+                )
+                req.updated_at = _utc_now_naive()
+
+                db.commit()
+
+                # Limpiar intentos viejos acumulados cuando
+                # HALF_OPEN_BUSY se trataba como NO_PROVIDER.
+                redis_conn.delete(
+                    f"no_provider_enabled_retry:{req.id}"
+                )
+
+                job = request_queue.enqueue_in(
+                    timedelta(seconds=10),
+                    process_request,
+                    req.id,
+                )
+
+                print(
+                    "HALF_OPEN_SELECTION_BUSY_REQUEUED =",
+                    {
+                        "request_id": req.id,
+                        "delay_sec": 10,
+                        "job_id": job.id,
+                    },
+                    flush=True,
+                )
+
+                return
+
             if err.startswith("NO_PROVIDER_ENABLED"):
                 retry_count_key = f"no_provider_enabled_retry:{req.id}"
                 retry_count = int(redis_conn.incr(retry_count_key) or 1)
@@ -11602,7 +15819,7 @@ def process_request(request_id: int):
                 req.updated_at = _utc_now_naive()
                 db.commit()
 
-                request_queue.enqueue(process_request, req.id)
+                request_queue.enqueue(process_request, req.id, at_front=_mx_global_queue_priority(req))
 
                 print("PROVIDER_DISABLED_REQUEUED =", {
                     "request_id": req.id,

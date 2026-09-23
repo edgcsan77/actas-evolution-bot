@@ -396,7 +396,31 @@ def _enqueue_process_request(req, reason: str = ""):
         queue_name = "actas"
         queue = request_queue
 
-    job = queue.enqueue(process_request, req.id)
+    # MX_GLOBAL_QUEUE_PRIORITY_V1
+    #
+    # Prioridad de COLA exclusivamente para docifybot8mx.
+    # No altera routing, pesos, provider mode ni fallback.
+    mx_global_priority = (
+        instance_name == "docifybot8mx"
+    )
+
+    job = queue.enqueue(
+        process_request,
+        req.id,
+        at_front=mx_global_priority,
+    )
+
+    if mx_global_priority:
+        print(
+            "MX_GLOBAL_QUEUE_PRIORITY_ENQUEUED =",
+            {
+                "request_id": req.id,
+                "instance_name": instance_name,
+                "queue": queue_name,
+                "reason": reason,
+            },
+            flush=True,
+        )
 
     print(
         "REQUEST_ENQUEUED_QUEUE =",
@@ -20863,6 +20887,9 @@ def _all_provider_groups() -> set[str]:
         settings.PROVIDER2_GROUP_1,
         settings.PROVIDER2_GROUP_2,
         settings.PROVIDER5_GROUP_NACIMIENTO,
+        settings.PROVIDER5_GROUP_NACIMIENTO_2,
+        settings.PROVIDER5_GROUP_NACIMIENTO_3,
+        settings.PROVIDER5_GROUP_CADENA_FOLIO,
         settings.PROVIDER5_GROUP_ESPECIALES,
         settings.PROVIDER6_GROUP_1_NACIMIENTO,
         settings.PROVIDER6_GROUP_2_NACIMIENTO,
@@ -24412,7 +24439,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         if open_req.instance_name:
                             used, limit_value, blocked_now = increment_bot_used_and_maybe_block(
                                 db,
-                                open_req.instance_name
+                                open_req.instance_name,
+                                request_id=open_req.id,
                             )
                             print("BOT_USED_AFTER_DONE =", used, flush=True)
                             print("BOT_LIMIT =", limit_value, flush=True)
