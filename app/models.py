@@ -63,6 +63,11 @@ class RequestLog(Base):
 
     evolution_message_id = Column(String(120), nullable=True)
 
+    # PROVIDER16_SINGLE_PAIR_REQUEST_V1
+    # Segunda CURP usada solo como pista para MAT/DIV.
+    # NO representa una segunda solicitud.
+    companion_curp = Column(String(40), nullable=True)
+
     provider_name = Column(String(30), nullable=True, index=True)
     provider_group_id = Column(String(120), nullable=True, index=True)
     provider_message = Column(Text, nullable=True)

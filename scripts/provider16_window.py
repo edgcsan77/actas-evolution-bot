@@ -7,6 +7,11 @@ from zoneinfo import ZoneInfo
 from app.db import SessionLocal
 from app.models import ProviderSetting
 from app.queue import redis_conn
+from app.services.provider16_sidea import (
+    sidea_operating_window,
+)
+
+# PROVIDER16_DYNAMIC_WINDOW_RECONCILER_V2
 
 
 TZ = ZoneInfo("America/Mexico_City")
@@ -108,15 +113,12 @@ def main() -> None:
 
     now = datetime.now(TZ)
 
-    minutes = (
-        now.hour * 60
-        + now.minute
+    window = sidea_operating_window(
+        now
     )
 
-    open_now = (
-        7 * 60
-        <= minutes
-        < 23 * 60
+    open_now = bool(
+        window["is_open"]
     )
 
     stamp = now.strftime(
@@ -158,6 +160,8 @@ def main() -> None:
         {
             "open": open_now,
             "time": stamp,
+            "start": window["start"],
+            "end": window["end"],
         },
         flush=True,
     )

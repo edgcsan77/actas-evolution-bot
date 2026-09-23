@@ -24,6 +24,14 @@ from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.db import Base, engine, get_db, SessionLocal
+from app.utils.request_sequence import build_delivery_caption
+from app.provider_attempts import (
+    find_provider_attempt,
+    find_provider_attempt_by_message,
+    claim_pdf_winner,
+    release_pdf_winner_if_owned,
+    provider_attempt_latency,
+)
 from app.models import AuthorizedUser, AuthorizedGroup, RequestLog, ProviderSetting, AppSetting, GroupPromotion, GroupAlias, GroupCategory, BotControl, BotRechargeLog, ApiClient, ApiCreditLog
 from app.queue import request_queue, slow_request_queue, maya_request_queue, redis_conn, broadcast_queue, ack_queue, delivery_queue
 from app.client_messages import (
@@ -174,7 +182,7 @@ BOT_PROVIDER_OPTIONS = {
     "GLOBAL_POOL": "Automático",
 
     "GLOBAL:PROVIDER1": "ADMIN",
-    "GLOBAL:PROVIDER5": "ACTAS CARAS",
+    "GLOBAL:PROVIDER5": "RODO",
 
     "GLOBAL:PROVIDER14": "E-BOT",
     "GLOBAL:PROVIDER15": "E-WEB",
@@ -204,7 +212,7 @@ MAYA_PROVIDER_OPTIONS = {
     "GLOBAL_POOL": "GLOBAL MESINO",
     "PERSONAL:MAYAPROVIDER": "PRIVADOS 50/50",
     "PERSONAL:MAYAPROVIDER_REYES": "PRIVADO REYES",
-    "PERSONAL:MAYAPROVIDER_HERNANDEZ": "PRIVADO HERNANDEZ",
+    "PERSONAL:MAYAPROVIDER_DOCIFYMX": "PRIVADO DOCIFY MX",
 }
 
 
@@ -239,7 +247,7 @@ def _provider_from_mode(mode: str | None) -> str | None:
 
     if provider_name in {
         "MAYAPROVIDER_REYES",
-        "MAYAPROVIDER_HERNANDEZ",
+        "MAYAPROVIDER_DOCIFYMX",
     }:
         return "MAYAPROVIDER"
 
@@ -371,7 +379,7 @@ def _enqueue_process_request(req, reason: str = ""):
                     in {
                         "PERSONAL:MAYAPROVIDER",
                         "PERSONAL:MAYAPROVIDER_REYES",
-                        "PERSONAL:MAYAPROVIDER_HERNANDEZ",
+                        "PERSONAL:MAYAPROVIDER_DOCIFYMX",
                     }
                 )
             finally:
@@ -396,7 +404,29 @@ def _enqueue_process_request(req, reason: str = ""):
         queue_name = "actas"
         queue = request_queue
 
-    job = queue.enqueue(process_request, req.id)
+    # MX_QUEUE_FAIRNESS_V1
+    #
+    # docifybot8mx usa el mismo orden de cola que los demas bots.
+    # Se conserva la variable para no alterar el resto del flujo.
+    mx_global_priority = False
+
+    job = queue.enqueue(
+        process_request,
+        req.id,
+        at_front=mx_global_priority,
+    )
+
+    if mx_global_priority:
+        print(
+            "MX_GLOBAL_QUEUE_PRIORITY_ENQUEUED =",
+            {
+                "request_id": req.id,
+                "instance_name": instance_name,
+                "queue": queue_name,
+                "reason": reason,
+            },
+            flush=True,
+        )
 
     print(
         "REQUEST_ENQUEUED_QUEUE =",
@@ -814,7 +844,13 @@ def _bot_status_rows_uncached(db: Session) -> list[dict]:
 
         out.append({
             "instance_name": inst,
-            "label": dynamic_bots.get(inst) or bot_label(inst),
+            # BOT_EDIT_PANEL_V1
+            "label": (
+                (bc.label or "").strip()
+                if bc and (bc.label or "").strip()
+                else dynamic_bots.get(inst)
+                or bot_label(inst)
+            ),
             "state": ev.get("state", "unknown"),
             "blocked": blocked,
             "used": used,
@@ -947,6 +983,768 @@ def panel_disconnect_bot(
 
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+@app.get(
+    "/panel/bots/{instance_name}/edit-info"
+)
+def panel_bot_edit_info(
+    instance_name: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    # BOT_EDIT_PANEL_V1
+    if not _is_valid_admin_panel_token(
+        request
+    ):
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "UNAUTHORIZED",
+            },
+            status_code=403,
+        )
+
+    inst = (
+        instance_name
+        or ""
+    ).strip()
+
+    row = (
+        db.query(BotControl)
+        .filter(
+            BotControl.instance_name == inst
+        )
+        .first()
+    )
+
+    is_static = (
+        inst in BOT_LABELS
+        or inst in BOT_PANEL_TOKENS.values()
+    )
+
+    if not row and not is_static:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "BOT_NO_ENCONTRADO",
+            },
+            status_code=404,
+        )
+
+    label = ""
+
+    if row and (row.label or "").strip():
+        label = (row.label or "").strip()
+    else:
+        label = (
+            BOT_LABELS.get(inst)
+            or bot_label(inst)
+            or inst
+        )
+
+    return {
+        "ok": True,
+        "instance_name": inst,
+        "label": label,
+        "is_static": is_static,
+        "can_rename_instance": (
+            not is_static
+            and row is not None
+        ),
+    }
+
+
+@app.post(
+    "/panel/bots/{instance_name}/edit"
+)
+def panel_bot_edit(
+    instance_name: str,
+    request: Request,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    """
+    BOT_EDIT_PANEL_V1
+
+    Nombre:
+      editable para bot estático o dinámico.
+
+    Instancia:
+      solamente bots dinámicos creados desde panel.
+
+    Cambiar instancia crea una NUEVA instancia Evolution,
+    migra las referencias internas y conserva token,
+    límite, usadas, grupos e historial.
+    """
+
+    if not _is_valid_admin_panel_token(
+        request
+    ):
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "UNAUTHORIZED",
+            },
+            status_code=403,
+        )
+
+    import re
+
+    from sqlalchemy import text as sql_text
+    from fastapi.responses import JSONResponse
+
+    old_instance = (
+        instance_name
+        or ""
+    ).strip()
+
+    new_label = str(
+        payload.get("label")
+        or ""
+    ).strip()
+
+    new_instance = str(
+        payload.get("instance_name")
+        or ""
+    ).strip()
+
+    if not old_instance:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "INSTANCIA_ORIGINAL_VACIA",
+            },
+            status_code=400,
+        )
+
+    if not new_label:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "NOMBRE_VACIO",
+            },
+            status_code=400,
+        )
+
+    if len(new_label) > 120:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "NOMBRE_DEMASIADO_LARGO",
+            },
+            status_code=400,
+        )
+
+    if not new_instance:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "INSTANCIA_VACIA",
+            },
+            status_code=400,
+        )
+
+    if (
+        len(new_instance) > 50
+        or not re.fullmatch(
+            r"[A-Za-z0-9._-]+",
+            new_instance,
+        )
+    ):
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    "Instancia inválida. "
+                    "Usa solo letras, números, "
+                    "punto, guion y guion bajo."
+                ),
+            },
+            status_code=400,
+        )
+
+    row = (
+        db.query(BotControl)
+        .filter(
+            BotControl.instance_name
+            == old_instance
+        )
+        .first()
+    )
+
+    is_static = (
+        old_instance in BOT_LABELS
+        or old_instance
+        in BOT_PANEL_TOKENS.values()
+    )
+
+    # --------------------------------------------------------
+    # Si es bot histórico/estático, crear un override
+    # BotControl para que el label pueda editarse.
+    # La instancia está protegida.
+    # --------------------------------------------------------
+
+    if is_static:
+
+        if new_instance != old_instance:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": (
+                        "Esta es una instancia histórica "
+                        "protegida. Puedes cambiar el nombre "
+                        "visible, pero no la instancia desde "
+                        "este editor."
+                    ),
+                },
+                status_code=400,
+            )
+
+        if row is None:
+
+            static_token = next(
+                (
+                    tok
+                    for tok, inst
+                    in BOT_PANEL_TOKENS.items()
+                    if inst == old_instance
+                ),
+                None,
+            )
+
+            row = BotControl(
+                instance_name=old_instance,
+                label=new_label,
+                panel_token=static_token,
+                limit=0,
+                used=0,
+                recharges=0,
+                is_blocked=False,
+                is_active=True,
+            )
+
+            db.add(row)
+
+        else:
+            row.label = new_label
+
+        db.commit()
+
+        _clear_panel_cache()
+
+        return {
+            "ok": True,
+            "label": new_label,
+            "old_instance": old_instance,
+            "instance_name": old_instance,
+            "instance_changed": False,
+            "needs_qr": False,
+        }
+
+    # --------------------------------------------------------
+    # Bot dinámico
+    # --------------------------------------------------------
+
+    if row is None:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "BOT_DINAMICO_NO_ENCONTRADO",
+            },
+            status_code=404,
+        )
+
+    # Solo cambió label.
+    if new_instance == old_instance:
+
+        row.label = new_label
+        db.commit()
+
+        _clear_panel_cache()
+
+        return {
+            "ok": True,
+            "label": new_label,
+            "old_instance": old_instance,
+            "instance_name": old_instance,
+            "instance_changed": False,
+            "needs_qr": False,
+        }
+
+    # --------------------------------------------------------
+    # Cambio real de instancia.
+    # No hacerlo con solicitudes todavía vivas.
+    # --------------------------------------------------------
+
+    active_count = (
+        db.query(RequestLog)
+        .filter(
+            RequestLog.instance_name
+            == old_instance,
+            RequestLog.status.in_(
+                [
+                    "QUEUED",
+                    "PROCESSING",
+                ]
+            ),
+        )
+        .count()
+    )
+
+    if active_count:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    f"Hay {active_count} solicitud(es) "
+                    "activas en esta instancia. "
+                    "Espera a que terminen antes de "
+                    "cambiarla."
+                ),
+            },
+            status_code=409,
+        )
+
+    static_bots = (
+        set(BOT_LABELS.keys())
+        | set(BOT_PANEL_TOKENS.values())
+    )
+
+    if new_instance in static_bots:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    "La nueva instancia pertenece "
+                    "a un bot histórico existente."
+                ),
+            },
+            status_code=409,
+        )
+
+    other_row = (
+        db.query(BotControl)
+        .filter(
+            BotControl.instance_name
+            == new_instance
+        )
+        .first()
+    )
+
+    if other_row:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "LA_NUEVA_INSTANCIA_YA_EXISTE",
+            },
+            status_code=409,
+        )
+
+    # --------------------------------------------------------
+    # Crear primero la nueva instancia Evolution.
+    # El bot viejo NO se toca si esto falla.
+    # --------------------------------------------------------
+
+    create_url = (
+        f"{EVOLUTION_BASE_URL}"
+        "/instance/create"
+    )
+
+    try:
+        create_resp = requests.post(
+            create_url,
+            headers={
+                "apikey": EVOLUTION_APIKEY,
+                "Content-Type": "application/json",
+            },
+            json={
+                "instanceName": new_instance,
+                "qrcode": True,
+                "integration": "WHATSAPP-BAILEYS",
+            },
+            timeout=30,
+        )
+
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    "No se pudo crear la nueva "
+                    f"instancia Evolution: {exc}"
+                ),
+            },
+            status_code=502,
+        )
+
+    # Para editar/renombrar no aceptamos 403/409:
+    # podría ser una instancia Evolution ajena.
+    if create_resp.status_code not in (
+        200,
+        201,
+    ):
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    "Evolution no permitió crear "
+                    "la nueva instancia."
+                ),
+                "status_code":
+                    create_resp.status_code,
+                "detail":
+                    (create_resp.text or "")[:300],
+            },
+            status_code=409,
+        )
+
+    # Webhook nuevo.
+    webhook_url = (
+        f"{EVOLUTION_BASE_URL}"
+        f"/webhook/set/{new_instance}"
+    )
+
+    try:
+        webhook_resp = requests.post(
+            webhook_url,
+            headers={
+                "apikey": EVOLUTION_APIKEY,
+                "Content-Type": "application/json",
+            },
+            json={
+                "webhook": {
+                    "url": (
+                        "http://187.127.248.94:8000/"
+                        "webhook/evolution"
+                    ),
+                    "enabled": True,
+                    "webhook_by_events": False,
+                    "events": [
+                        "MESSAGES_UPSERT",
+                    ],
+                }
+            },
+            timeout=30,
+        )
+
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    "La instancia nueva fue creada, "
+                    "pero falló configurar webhook: "
+                    f"{exc}"
+                ),
+            },
+            status_code=502,
+        )
+
+    if webhook_resp.status_code not in (
+        200,
+        201,
+    ):
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    "La instancia nueva fue creada, "
+                    "pero Evolution rechazó el webhook."
+                ),
+                "status_code":
+                    webhook_resp.status_code,
+                "detail":
+                    (webhook_resp.text or "")[:300],
+            },
+            status_code=502,
+        )
+
+    # --------------------------------------------------------
+    # Migración interna ATÓMICA.
+    # --------------------------------------------------------
+
+    try:
+
+        # BotControl conserva mismo ID/token/saldos.
+        row.instance_name = new_instance
+        row.label = new_label
+
+        # Historial y solicitudes.
+        (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.instance_name
+                == old_instance
+            )
+            .update(
+                {
+                    RequestLog.instance_name:
+                        new_instance
+                },
+                synchronize_session=False,
+            )
+        )
+
+        # Grupos / aliases / categorías / promos.
+        for model in (
+            AuthorizedGroup,
+            GroupAlias,
+            GroupCategory,
+            GroupPromotion,
+        ):
+            (
+                db.query(model)
+                .filter(
+                    model.owner_instance
+                    == old_instance
+                )
+                .update(
+                    {
+                        model.owner_instance:
+                            new_instance
+                    },
+                    synchronize_session=False,
+                )
+            )
+
+        # Historial de recargas.
+        (
+            db.query(BotRechargeLog)
+            .filter(
+                BotRechargeLog.instance_name
+                == old_instance
+            )
+            .update(
+                {
+                    BotRechargeLog.instance_name:
+                        new_instance
+                },
+                synchronize_session=False,
+            )
+        )
+
+        # Clientes API que apuntaran al bot.
+        (
+            db.query(ApiClient)
+            .filter(
+                ApiClient.panel_instance_name
+                == old_instance
+            )
+            .update(
+                {
+                    ApiClient.panel_instance_name:
+                        new_instance
+                },
+                synchronize_session=False,
+            )
+        )
+
+        # Ledger monotónico.
+        db.execute(
+            sql_text(
+                """
+                UPDATE bot_usage_consumptions
+                SET instance_name = :new_instance
+                WHERE instance_name = :old_instance
+                """
+            ),
+            {
+                "new_instance": new_instance,
+                "old_instance": old_instance,
+            },
+        )
+
+        # Settings propios del bot.
+        #
+        # Captura:
+        #   bot_limit:
+        #   bot_used:
+        #   bot_used_offset:
+        #   BOT_PROVIDER_MODE:
+        #   BOT_MANAGER_NAME:
+        #   BOT_MANAGER_PRICE:
+        #   y cualquier futura BOT_*:<instancia>
+        settings_rows = (
+            db.query(AppSetting)
+            .filter(
+                or_(
+                    AppSetting.key.like(
+                        f"BOT_%:{old_instance}"
+                    ),
+                    AppSetting.key.like(
+                        f"bot_%:{old_instance}"
+                    ),
+                )
+            )
+            .all()
+        )
+
+        for setting in settings_rows:
+
+            old_key = str(
+                setting.key or ""
+            )
+
+            if not old_key.endswith(
+                ":" + old_instance
+            ):
+                continue
+
+            new_key = (
+                old_key[
+                    : -len(old_instance)
+                ]
+                + new_instance
+            )
+
+            exists_key = (
+                db.query(AppSetting)
+                .filter(
+                    AppSetting.key
+                    == new_key
+                )
+                .first()
+            )
+
+            if exists_key:
+                raise RuntimeError(
+                    "APP_SETTING_TARGET_EXISTS:"
+                    + new_key
+                )
+
+            setting.key = new_key
+
+        db.commit()
+
+    except Exception as exc:
+
+        db.rollback()
+
+        # La instancia nueva puede quedar creada,
+        # pero los datos internos siguen apuntando
+        # al bot viejo.
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    "Se creó la nueva instancia, "
+                    "pero la migración interna falló. "
+                    "No se modificó la base de datos. "
+                    f"Detalle: {str(exc)[:250]}"
+                ),
+            },
+            status_code=500,
+        )
+
+    # --------------------------------------------------------
+    # Redis: conservar bloqueos.
+    # --------------------------------------------------------
+
+    for redis_set in (
+        BLOCKED_INSTANCES_KEY,
+        ADMIN_BLOCKED_INSTANCES_KEY,
+    ):
+        try:
+            if redis_conn.sismember(
+                redis_set,
+                old_instance,
+            ):
+                redis_conn.sadd(
+                    redis_set,
+                    new_instance,
+                )
+
+            redis_conn.srem(
+                redis_set,
+                old_instance,
+            )
+
+        except Exception as exc:
+            print(
+                "BOT_EDIT_REDIS_SET_WARN =",
+                {
+                    "set": redis_set,
+                    "error": repr(exc),
+                },
+                flush=True,
+            )
+
+    try:
+        redis_conn.delete(
+            f"panel:evolution_state:{old_instance}"
+        )
+        redis_conn.delete(
+            f"panel:evolution_state:{new_instance}"
+        )
+    except Exception:
+        pass
+
+    # --------------------------------------------------------
+    # Desconectar la instancia anterior para que no queden
+    # dos conexiones procesando mensajes.
+    # Best effort: DB ya quedó migrada.
+    # --------------------------------------------------------
+
+    old_logout_warning = ""
+
+    try:
+        logout_resp = requests.delete(
+            (
+                f"{EVOLUTION_BASE_URL}"
+                f"/instance/logout/{old_instance}"
+            ),
+            headers={
+                "apikey": EVOLUTION_APIKEY
+            },
+            timeout=20,
+        )
+
+        if logout_resp.status_code not in (
+            200,
+            201,
+            204,
+            400,
+            404,
+        ):
+            old_logout_warning = (
+                "OLD_LOGOUT_HTTP_"
+                + str(logout_resp.status_code)
+            )
+
+    except Exception as exc:
+        old_logout_warning = str(exc)[:180]
+
+    _clear_panel_cache()
+
+    print(
+        "BOT_INSTANCE_MIGRATED =",
+        {
+            "old_instance": old_instance,
+            "new_instance": new_instance,
+            "label": new_label,
+            "old_logout_warning":
+                old_logout_warning,
+        },
+        flush=True,
+    )
+
+    return {
+        "ok": True,
+        "label": new_label,
+        "old_instance": old_instance,
+        "instance_name": new_instance,
+        "instance_changed": True,
+        "needs_qr": True,
+        "old_logout_warning":
+            old_logout_warning,
+    }
 
 
 @app.post("/panel/bots/create")
@@ -1168,7 +1966,7 @@ PROVIDER_LABELS = {
     "PROVIDER2": "ACTAS DEL SURESTE",
     "PROVIDER3": "AUSTRAM WEB",
     "PROVIDER4": "LAZARO WEB 1",
-    "PROVIDER5": "ACTAS CARAS",
+    "PROVIDER5": "RODO",
     "PROVIDER6": "ACTAS ESCALANTE",
     "PROVIDER7": "MESINO SID",
     "PROVIDER8": "ANGEL",
@@ -3249,9 +4047,27 @@ def panel_block_all_instances(
 
     for inst in sorted(instances):
 
+        norm_inst = _norm_instance(inst)
+
+        # PANEL_PROTECTED_INTERNAL_BOTS_V1
+        #
+        # Estos bots son infraestructura interna y NO deben
+        # ser afectados por "Bloquear todos".
+        #
+        # Esto NO modifica su proveedor/routing real.
+        if norm_inst in {
+            "docifybot8mx",
+            "docifybot8isaac",
+        }:
+            skipped.append({
+                "instance_name": inst,
+                "reason": "INTERNAL_PROTECTED_BOT",
+            })
+            continue
+
         # Gestoría Maya queda fuera del bloqueo masivo
         # mientras esté usando cualquiera de sus modos privados.
-        if _norm_instance(inst) == "docifybot8maya":
+        if norm_inst == "docifybot8maya":
             maya_mode = _bot_provider_mode(
                 db,
                 inst,
@@ -3260,7 +4076,7 @@ def panel_block_all_instances(
             if maya_mode in {
                 "PERSONAL:MAYAPROVIDER",
                 "PERSONAL:MAYAPROVIDER_REYES",
-                "PERSONAL:MAYAPROVIDER_HERNANDEZ",
+                "PERSONAL:MAYAPROVIDER_DOCIFYMX",
             }:
                 skipped.append({
                     "instance_name": inst,
@@ -8794,6 +9610,12 @@ def botpanel_provider_mode_ui(token: str, db: Session = Depends(get_db)):
 
     options_html = ""
     for value, text in MAYA_PROVIDER_OPTIONS.items():
+
+        # GESTORIA_MAYA_HIDE_GLOBAL_MESINO_V1
+        # GLOBAL_POOL sigue existiendo internamente,
+        # pero no aparece en Seleccionar modo.
+        if value == "GLOBAL_POOL":
+            continue
         selected = "selected" if value == mode else ""
         options_html += f'<option value="{_esc(value)}" {selected}>{_esc(text)}</option>'
 
@@ -8880,7 +9702,6 @@ def botpanel_provider_mode_ui(token: str, db: Session = Depends(get_db)):
         <button onclick="saveProviderMode()">Guardar modo</button>
 
         <div class="help">
-          <strong>Global:</strong> usa proveedores del sistema principal y sí cuenta.<br>
           <strong>Privado:</strong> usa proveedor personal y no cuenta en panel, promociones ni límite.
         </div>
       </div>
@@ -9855,6 +10676,55 @@ def panel_sidea_accounts(
     rows = get_sidea_accounts_for_panel(db)
     pool = SideaPool(redis_conn)
 
+    # SIDEA_DYNAMIC_WINDOW_PANEL_V1
+    sidea_window_start_key = (
+        "provider16_operating_start_hhmm"
+    )
+
+    sidea_window_end_key = (
+        "provider16_operating_end_hhmm"
+    )
+
+    sidea_window_start_row = (
+        db.query(AppSetting)
+        .filter(
+            AppSetting.key
+            == sidea_window_start_key
+        )
+        .first()
+    )
+
+    sidea_window_end_row = (
+        db.query(AppSetting)
+        .filter(
+            AppSetting.key
+            == sidea_window_end_key
+        )
+        .first()
+    )
+
+    sidea_window_start = (
+        str(
+            sidea_window_start_row.value
+            or "07:00"
+        ).strip()
+        if sidea_window_start_row
+        else "07:00"
+    )
+
+    sidea_window_end = (
+        str(
+            sidea_window_end_row.value
+            or "23:00"
+        ).strip()
+        if sidea_window_end_row
+        else "23:00"
+    )
+
+    # SIDEA_PANEL_ACCOUNTING_LABELS_V2
+    # pool.usage() = reserva local de seguridad.
+    # NO equivale por sí sola a PDF DONE ni a entrega WhatsApp.
+
     configured_count = 0
     ready_count = 0
     total_usage = 0
@@ -9891,7 +10761,6 @@ def panel_sidea_accounts(
 
         if configured:
             configured_count += 1
-            total_capacity += daily_limit
             total_usage += usage
 
         if not configured:
@@ -9908,7 +10777,11 @@ def panel_sidea_accounts(
             and enabled
             and status == "READY"
         ):
+            # SIDEA_ACTIVE_CAPACITY_READY_ONLY_V1
+            # "Capacidad activa" representa solamente
+            # cuentas que realmente pueden usarse ahora.
             ready_count += 1
+            total_capacity += daily_limit
 
         if status == "READY":
             badge_class = "ready"
@@ -10097,7 +10970,7 @@ def panel_sidea_accounts(
                   <span>/ {daily_limit}</span>
 
                   <small>
-                    {remaining} disponibles
+                    {remaining} disponibles seguridad
                   </small>
                 </div>
 
@@ -10148,7 +11021,7 @@ def panel_sidea_accounts(
                       id="{slot}_limit"
                       type="number"
                       min="1"
-                      max="2000"
+                      max="9999"
                       value="{daily_limit}"
                     >
                   </div>
@@ -10173,12 +11046,12 @@ def panel_sidea_accounts(
 
                   <div class="sidea-mini-stats">
                     <div>
-                      <span>Usadas hoy</span>
+                      <span>Reserva local</span>
                       <strong>{usage}</strong>
                     </div>
 
                     <div>
-                      <span>Restantes</span>
+                      <span>Disponibles seguridad</span>
                       <strong>{remaining}</strong>
                     </div>
                   </div>
@@ -10829,7 +11702,7 @@ def panel_sidea_accounts(
     </div>
 
     <div class="stat">
-      <span>Usadas hoy</span>
+      <span>Reserva local SIDEA</span>
       <strong>__USAGE__</strong>
     </div>
 
@@ -10839,6 +11712,126 @@ def panel_sidea_accounts(
     </div>
 
   </div>
+
+  <!-- SIDEA_DYNAMIC_WINDOW_PANEL_V1 -->
+  <div style="
+    margin:18px 0 20px 0;
+    padding:16px;
+    border:1px solid #25334c;
+    border-radius:14px;
+    background:#111827;
+  ">
+
+    <div style="
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:12px;
+      flex-wrap:wrap;
+      margin-bottom:14px;
+    ">
+
+      <div>
+        <div style="
+          font-size:15px;
+          font-weight:700;
+        ">
+          🕒 Horario operativo SIDEA
+        </div>
+
+        <div style="
+          opacity:.65;
+          font-size:11px;
+          margin-top:3px;
+        ">
+          America/Mexico_City
+        </div>
+      </div>
+
+      <div
+        id="sidea_window_message"
+        style="
+          font-size:11px;
+          opacity:.75;
+        "
+      ></div>
+
+    </div>
+
+    <div style="
+      display:grid;
+      grid-template-columns:
+        repeat(auto-fit,minmax(160px,1fr));
+      gap:12px;
+      align-items:end;
+    ">
+
+      <div>
+        <label style="
+          display:block;
+          font-size:11px;
+          opacity:.72;
+          margin-bottom:5px;
+        ">
+          Hora de inicio
+        </label>
+
+        <input
+          id="sidea_window_start"
+          type="time"
+          step="60"
+          value="__SIDEA_WINDOW_START__"
+          style="
+            width:100%;
+            box-sizing:border-box;
+          "
+        >
+      </div>
+
+      <div>
+        <label style="
+          display:block;
+          font-size:11px;
+          opacity:.72;
+          margin-bottom:5px;
+        ">
+          Hora de cierre
+        </label>
+
+        <input
+          id="sidea_window_end"
+          type="time"
+          step="60"
+          value="__SIDEA_WINDOW_END__"
+          style="
+            width:100%;
+            box-sizing:border-box;
+          "
+        >
+      </div>
+
+      <button
+        type="button"
+        class="sidea-save-btn"
+        onclick="saveSideaWindow()"
+        style="height:42px;"
+      >
+        Guardar horario
+      </button>
+
+    </div>
+
+    <div style="
+      margin-top:10px;
+      font-size:10px;
+      opacity:.55;
+    ">
+      Inicio inclusivo · cierre exclusivo.
+      El cambio se aplica al horario real de SIDEA.
+    </div>
+
+  </div>
+
 
   <div class="section-head">
 
@@ -11143,6 +12136,94 @@ async function saveSideaAccount(slot) {
   }
 }
 
+async function saveSideaWindow() {
+
+  const button =
+    event.currentTarget;
+
+  const oldText =
+    button.textContent;
+
+  const message =
+    document.getElementById(
+      "sidea_window_message"
+    );
+
+  const start =
+    document.getElementById(
+      "sidea_window_start"
+    ).value;
+
+  const end =
+    document.getElementById(
+      "sidea_window_end"
+    ).value;
+
+  if (!start || !end) {
+    alert(
+      "Selecciona hora de inicio y cierre"
+    );
+    return;
+  }
+
+  button.disabled = true;
+  button.textContent = "Guardando...";
+
+  try {
+
+    const response = await fetch(
+      "/panel/sidea/window?token="
+      + encodeURIComponent(panelToken),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
+        body: JSON.stringify({
+          start: start,
+          end: end
+        })
+      }
+    );
+
+    const data =
+      await response.json();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(
+        data.error
+        || "No se pudo guardar horario"
+      );
+    }
+
+    button.textContent = "✓ Guardado";
+
+    if (message) {
+      message.textContent =
+        data.start
+        + " – "
+        + data.end;
+    }
+
+    setTimeout(
+      () => window.location.reload(),
+      700
+    );
+
+  } catch (error) {
+
+    button.disabled = false;
+    button.textContent = oldText;
+
+    alert(
+      error.message
+      || "No se pudo guardar horario"
+    );
+  }
+}
+
+
 const focusedSideaSlot = __FOCUS_JSON__;
 
 if (focusedSideaSlot) {
@@ -11210,6 +12291,16 @@ if (focusedSideaSlot) {
     html = html.replace(
         "__CAPACITY__",
         str(total_capacity),
+    )
+
+    html = html.replace(
+        "__SIDEA_WINDOW_START__",
+        _esc(sidea_window_start),
+    )
+
+    html = html.replace(
+        "__SIDEA_WINDOW_END__",
+        _esc(sidea_window_end),
     )
 
     return HTMLResponse(
@@ -11457,6 +12548,360 @@ def panel_sidea_account_save(
     return {
         "ok": True,
         **result,
+    }
+
+
+@app.post(
+    "/panel/sidea/window"
+)
+def panel_sidea_window_save(
+    request: Request,
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    """
+    SIDEA_DYNAMIC_WINDOW_PANEL_V1
+
+    Guarda horario persistente y reprograma
+    actas-provider16-window.timer.
+    """
+
+    if not _is_valid_admin_panel_token(
+        request
+    ):
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "UNAUTHORIZED",
+            },
+            status_code=403,
+        )
+
+    def normalize_hhmm(value):
+
+        raw = str(
+            value or ""
+        ).strip()
+
+        parts = raw.split(":")
+
+        if len(parts) != 2:
+            raise ValueError(
+                "Hora inválida"
+            )
+
+        hour = int(parts[0])
+        minute = int(parts[1])
+
+        if not (
+            0 <= hour <= 23
+            and 0 <= minute <= 59
+        ):
+            raise ValueError(
+                "Hora inválida"
+            )
+
+        return (
+            f"{hour:02d}:{minute:02d}",
+            hour * 60 + minute,
+        )
+
+    try:
+        start, start_minute = (
+            normalize_hhmm(
+                payload.get("start")
+            )
+        )
+
+        end, end_minute = (
+            normalize_hhmm(
+                payload.get("end")
+            )
+        )
+
+    except Exception:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    "Formato inválido. "
+                    "Usa HH:MM."
+                ),
+            },
+            status_code=400,
+        )
+
+    if start_minute >= end_minute:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    "La hora de inicio debe "
+                    "ser anterior al cierre."
+                ),
+            },
+            status_code=400,
+        )
+
+    from pathlib import Path
+    import subprocess
+
+    start_db_key = (
+        "provider16_operating_start_hhmm"
+    )
+
+    end_db_key = (
+        "provider16_operating_end_hhmm"
+    )
+
+    start_redis_key = (
+        "provider16:operating_start_hhmm:v1"
+    )
+
+    end_redis_key = (
+        "provider16:operating_end_hhmm:v1"
+    )
+
+    timer_path = Path(
+        "/etc/systemd/system/"
+        "actas-provider16-window.timer"
+    )
+
+    old_timer = (
+        timer_path.read_text()
+        if timer_path.exists()
+        else ""
+    )
+
+    timer_text = f"""[Unit]
+Description=ACTAS PROVIDER16 schedule {start}-{end} America/Mexico_City
+
+[Timer]
+OnBootSec=30s
+OnCalendar=*-*-* {start}:00 America/Mexico_City
+OnCalendar=*-*-* {end}:00 America/Mexico_City
+Persistent=true
+AccuracySec=1s
+Unit=actas-provider16-window.service
+
+[Install]
+WantedBy=timers.target
+"""
+
+    try:
+        # Primero validar que systemd acepte
+        # y cargue el nuevo calendario.
+        timer_path.write_text(
+            timer_text
+        )
+
+        subprocess.run(
+            [
+                "systemctl",
+                "daemon-reload",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        subprocess.run(
+            [
+                "systemctl",
+                "restart",
+                "actas-provider16-window.timer",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    except Exception as exc:
+
+        # Restauración del timer anterior.
+        try:
+            if old_timer:
+                timer_path.write_text(
+                    old_timer
+                )
+
+                subprocess.run(
+                    [
+                        "systemctl",
+                        "daemon-reload",
+                    ],
+                    check=False,
+                )
+
+                subprocess.run(
+                    [
+                        "systemctl",
+                        "restart",
+                        "actas-provider16-window.timer",
+                    ],
+                    check=False,
+                )
+        except Exception:
+            pass
+
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    "No se pudo reprogramar "
+                    f"systemd: {str(exc)[:200]}"
+                ),
+            },
+            status_code=500,
+        )
+
+    try:
+        for key, value in (
+            (
+                start_db_key,
+                start,
+            ),
+            (
+                end_db_key,
+                end,
+            ),
+        ):
+            row = (
+                db.query(AppSetting)
+                .filter(
+                    AppSetting.key
+                    == key
+                )
+                .first()
+            )
+
+            if row:
+                row.value = value
+                row.updated_at = (
+                    _utc_now_naive()
+                )
+
+            else:
+                db.add(
+                    AppSetting(
+                        key=key,
+                        value=value,
+                        updated_at=(
+                            _utc_now_naive()
+                        ),
+                    )
+                )
+
+        db.commit()
+
+    except Exception as exc:
+
+        db.rollback()
+
+        # Si DB falla, volver al timer anterior.
+        try:
+            if old_timer:
+                timer_path.write_text(
+                    old_timer
+                )
+
+                subprocess.run(
+                    [
+                        "systemctl",
+                        "daemon-reload",
+                    ],
+                    check=False,
+                )
+
+                subprocess.run(
+                    [
+                        "systemctl",
+                        "restart",
+                        "actas-provider16-window.timer",
+                    ],
+                    check=False,
+                )
+        except Exception:
+            pass
+
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    "No se pudo guardar horario: "
+                    f"{str(exc)[:200]}"
+                ),
+            },
+            status_code=500,
+        )
+
+    # Refrescar cache runtime.
+    try:
+        redis_conn.delete(
+            start_redis_key,
+            end_redis_key,
+        )
+
+        redis_conn.set(
+            start_redis_key,
+            start,
+        )
+
+        redis_conn.set(
+            end_redis_key,
+            end,
+        )
+
+    except Exception as exc:
+        print(
+            "SIDEA_WINDOW_REDIS_WARN =",
+            repr(exc),
+            flush=True,
+        )
+
+    # Aplicar inmediatamente el estado actual
+    # según el nuevo horario.
+    reconcile_warning = ""
+
+    try:
+        subprocess.run(
+            [
+                "systemctl",
+                "start",
+                "actas-provider16-window.service",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    except Exception as exc:
+        reconcile_warning = (
+            str(exc)[:200]
+        )
+
+    _clear_panel_cache()
+
+    return {
+        "ok": True,
+        "start": start,
+        "end": end,
+        "timezone": (
+            "America/Mexico_City"
+        ),
+        "reconcile_warning": (
+            reconcile_warning
+        ),
     }
 
 
@@ -11724,17 +13169,49 @@ def _sidea_main_panel_html(
             consumed_ids
         )
 
+        # ============================================================
+        # SIDEA_PANEL_ACCOUNTING_BREAKDOWN_V3
+        #
+        # Este bloque es SOLO observabilidad/panel.
+        # No modifica:
+        #   - pool.usage()
+        #   - daily_limit
+        #   - request_guard
+        #   - consumed_requests
+        #   - recovery
+        #   - selección de cuenta
+        # ============================================================
+
         done_sidea = 0
 
-        # DONE consumidas hoy, separadas por
-        # fecha original del RequestLog.
+        # DONE SIDEA separadas por fecha original
+        # del RequestLog.
         done_today_sidea = 0
         carryover_done_sidea = 0
 
+        # Requests todavía activos.
         processing_sidea = 0
         queued_sidea = 0
-        error_sidea = 0
+
+        # SIDEA ya produjo PDF, pero el request
+        # terminó ERROR antes de DONE.
+        # En el flujo actual esto corresponde
+        # principalmente a entrega WhatsApp fallida.
+        delivery_failed_pdf_sidea = 0
+
+        # Reserva consumida, sin PDF recuperado,
+        # cerrada de forma segura después de agotar
+        # recovery.
+        hold_no_pdf_sidea = 0
+
+        # ERROR que no corresponde ni a PDF ya
+        # generado ni a CONSUMED_RECOVERY_HOLD.
+        error_other_sidea = 0
+
+        # SIDEA consumió, pero el RequestLog terminó
+        # DONE bajo otro proveedor o sin PDF P16.
         done_anomalo_sidea = 0
+
         other_sidea = 0
         missing_sidea = 0
 
@@ -11747,6 +13224,7 @@ def _sidea_main_panel_html(
                     RequestLog.provider_name,
                     RequestLog.pdf_storage_key,
                     RequestLog.created_at,
+                    RequestLog.error_message,
                 )
                 .filter(
                     RequestLog.id.in_(
@@ -11783,6 +13261,15 @@ def _sidea_main_panel_html(
                     consumed_row[4]
                 )
 
+                request_error = str(
+                    consumed_row[5]
+                    or ""
+                ).strip()
+
+                request_error_up = (
+                    request_error.upper()
+                )
+
                 found_ids.add(
                     request_id
                 )
@@ -11815,11 +13302,22 @@ def _sidea_main_panel_html(
                     queued_sidea += 1
 
                 elif request_status == "ERROR":
-                    error_sidea += 1
+
+                    if request_pdf:
+                        # El PDF existe físicamente.
+                        # SIDEA terminó la generación;
+                        # el fallo ocurrió después.
+                        delivery_failed_pdf_sidea += 1
+
+                    elif request_error_up.startswith(
+                        "PROVIDER16_CONSUMED_RECOVERY_HOLD"
+                    ):
+                        hold_no_pdf_sidea += 1
+
+                    else:
+                        error_other_sidea += 1
 
                 elif request_status == "DONE":
-                    # SIDEA consumió, pero el resultado final
-                    # quedó en otro proveedor o sin PDF SIDEA.
                     done_anomalo_sidea += 1
 
                 else:
@@ -11836,18 +13334,26 @@ def _sidea_main_panel_html(
             + queued_sidea
         )
 
-        post_consume_problem_sidea = (
-            error_sidea
+        other_problem_sidea = (
+            error_other_sidea
             + done_anomalo_sidea
             + other_sidea
             + missing_sidea
+        )
+
+        operational_issues_sidea = (
+            delivery_failed_pdf_sidea
+            + hold_no_pdf_sidea
+            + other_problem_sidea
         )
 
         classified_total = (
             done_sidea
             + processing_sidea
             + queued_sidea
-            + error_sidea
+            + delivery_failed_pdf_sidea
+            + hold_no_pdf_sidea
+            + error_other_sidea
             + done_anomalo_sidea
             + other_sidea
             + missing_sidea
@@ -11863,35 +13369,52 @@ def _sidea_main_panel_html(
             - int(classified_total)
         )
 
-        accounting_ok = (
+        # "CUADRE" significa integridad contable.
+        # Una incidencia operativa NO implica por sí
+        # sola que la contabilidad esté descuadrada.
+        accounting_integrity_ok = (
             usage_index_diff == 0
             and index_classified_diff == 0
-            and post_consume_problem_sidea == 0
         )
 
-        accounting_color = (
-            "#4ade80"
-            if accounting_ok
-            else "#fb7185"
-        )
+        if not accounting_integrity_ok:
 
-        accounting_border = (
-            "rgba(34,197,94,.35)"
-            if accounting_ok
-            else "rgba(244,63,94,.40)"
-        )
+            accounting_color = "#fb7185"
+            accounting_border = (
+                "rgba(244,63,94,.40)"
+            )
+            accounting_bg = (
+                "rgba(127,29,29,.13)"
+            )
+            accounting_label = (
+                "🚨 DESCUADRE CONTABLE"
+            )
 
-        accounting_bg = (
-            "rgba(20,83,45,.12)"
-            if accounting_ok
-            else "rgba(127,29,29,.13)"
-        )
+        elif operational_issues_sidea > 0:
 
-        accounting_label = (
-            "✅ CUADRE PERFECTO"
-            if accounting_ok
-            else "🚨 REVISAR CUADRE"
-        )
+            accounting_color = "#fbbf24"
+            accounting_border = (
+                "rgba(245,158,11,.35)"
+            )
+            accounting_bg = (
+                "rgba(120,53,15,.10)"
+            )
+            accounting_label = (
+                "⚠ CUADRE OK · CON INCIDENCIAS"
+            )
+
+        else:
+
+            accounting_color = "#4ade80"
+            accounting_border = (
+                "rgba(34,197,94,.35)"
+            )
+            accounting_bg = (
+                "rgba(20,83,45,.12)"
+            )
+            accounting_label = (
+                "✅ CUADRE PERFECTO"
+            )
 
         accounting_html = f"""
           <div style="
@@ -11933,39 +13456,78 @@ def _sidea_main_panel_html(
             ">
 
               <span style="opacity:.72;">
-                SIDEA consumidas
+                Reserva local SIDEA
               </span>
               <strong>{used_total}</strong>
 
               <span style="opacity:.72;">
-                Requests rastreados
+                Reservas rastreadas
               </span>
               <strong>{tracked_total}</strong>
 
               <span style="opacity:.72;">
-                ✅ Creadas hoy + DONE
+                ✅ PDFs SIDEA DONE total
+              </span>
+              <strong>{done_sidea}</strong>
+
+              <span style="
+                opacity:.58;
+                padding-left:10px;
+              ">
+                ↳ Creados hoy
               </span>
               <strong>{done_today_sidea}</strong>
 
-              <span style="opacity:.72;">
-                ↩️ Arrastre anterior + DONE
+              <span style="
+                opacity:.58;
+                padding-left:10px;
+              ">
+                ↳ Arrastre anterior
               </span>
               <strong>{carryover_done_sidea}</strong>
 
               <span style="opacity:.72;">
-                ⏳ En curso
+                📦 PDF generado / no DONE
+              </span>
+              <strong>{delivery_failed_pdf_sidea}</strong>
+
+              <span style="opacity:.72;">
+                ⏳ Recovery / entrega activo
               </span>
               <strong>{in_progress_sidea}</strong>
 
               <span style="opacity:.72;">
-                🚨 Problema post-consumo
+                🛑 HOLD sin PDF
               </span>
-              <strong>{post_consume_problem_sidea}</strong>
+              <strong>{hold_no_pdf_sidea}</strong>
 
               <span style="opacity:.72;">
-                Diferencia consumo / índice
+                ⚠ Otros errores / anomalías
               </span>
-              <strong>{usage_index_diff}</strong>
+              <strong>{other_problem_sidea}</strong>
+
+              <span style="
+                margin-top:3px;
+                padding-top:5px;
+                border-top:
+                  1px solid rgba(148,163,184,.15);
+                opacity:.62;
+              ">
+                Diferencia reserva / índice
+              </span>
+              <strong style="
+                margin-top:3px;
+                padding-top:5px;
+                border-top:
+                  1px solid rgba(148,163,184,.15);
+              ">
+                {usage_index_diff}
+              </strong>
+
+              <span style="opacity:.62;">
+                Diferencia índice / clasificación
+              </span>
+              <strong>{index_classified_diff}</strong>
 
             </div>
 
@@ -12167,7 +13729,7 @@ def _sidea_main_panel_html(
 
             <div>
               <div style="opacity:.60;">
-                Usadas hoy
+                Reserva local
               </div>
               <strong>
                 {used_total}
@@ -12463,6 +14025,37 @@ def panel_actas(
             )
 
             provider1_group_enabled[slot] = (
+                str(raw or "")
+                .strip()
+                .lower()
+                in {
+                    "1",
+                    "true",
+                    "yes",
+                    "si",
+                    "sí",
+                    "on",
+                    "enabled",
+                }
+            )
+
+        # PROVIDER5_PANEL_GROUP_STATES_V1
+        provider5_group_enabled = {}
+
+        for slot in (
+            "NACIMIENTO_1",
+            "NACIMIENTO_2",
+            "NACIMIENTO_3",
+            "CADENA_FOLIADA",
+            "ESPECIALES",
+        ):
+            raw = _get_app_setting(
+                db,
+                f"PROVIDER5_GROUP_ENABLED:{slot}",
+                "1",
+            )
+
+            provider5_group_enabled[slot] = (
                 str(raw or "")
                 .strip()
                 .lower()
@@ -12786,8 +14379,26 @@ def panel_actas(
                 action_html = '<span class="badge badge-success">Conectado</span>'
 
             actions_html = f"""
-            <button class="btn btn-warning" onclick="disconnectBot('{_esc(b["instance_name"])}')">Desconectar</button>
-            <button class="btn btn-danger" onclick="hideBot('{_esc(b["instance_name"])}')">Ocultar</button>
+            <button
+              class="btn btn-primary"
+              onclick="editBot('{_esc(b["instance_name"])}')"
+            >
+              ✏️ Editar
+            </button>
+
+            <button
+              class="btn btn-warning"
+              onclick="disconnectBot('{_esc(b["instance_name"])}')"
+            >
+              Desconectar
+            </button>
+
+            <button
+              class="btn btn-danger"
+              onclick="hideBot('{_esc(b["instance_name"])}')"
+            >
+              Ocultar
+            </button>
             """
 
             bot_status_html += f"""
@@ -12808,6 +14419,136 @@ def panel_actas(
               </tbody>
             </table>
           </div>
+
+          <!-- BOT_EDIT_PANEL_V1 -->
+          <div
+            id="editBotModal"
+            style="
+              display:none;
+              position:fixed;
+              inset:0;
+              z-index:99999;
+              background:rgba(15,23,42,.70);
+              align-items:center;
+              justify-content:center;
+              padding:18px;
+            "
+          >
+            <div
+              style="
+                width:min(520px,100%);
+                background:white;
+                border-radius:16px;
+                box-shadow:0 20px 60px rgba(0,0,0,.35);
+                overflow:hidden;
+              "
+            >
+              <div
+                style="
+                  display:flex;
+                  justify-content:space-between;
+                  align-items:center;
+                  padding:16px 18px;
+                  border-bottom:1px solid #e5e7eb;
+                "
+              >
+                <strong>✏️ Editar bot</strong>
+
+                <button
+                  type="button"
+                  class="btn btn-light"
+                  onclick="closeEditBot()"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div style="padding:18px;display:grid;gap:14px;">
+
+                <div>
+                  <label
+                    style="
+                      display:block;
+                      font-weight:700;
+                      margin-bottom:6px;
+                    "
+                  >
+                    Nombre visible del bot
+                  </label>
+
+                  <input
+                    id="editBotLabel"
+                    type="text"
+                    maxlength="120"
+                    style="width:100%;"
+                  >
+                </div>
+
+                <div>
+                  <label
+                    style="
+                      display:block;
+                      font-weight:700;
+                      margin-bottom:6px;
+                    "
+                  >
+                    Instancia Evolution
+                  </label>
+
+                  <input
+                    id="editBotInstance"
+                    type="text"
+                    maxlength="50"
+                    style="width:100%;"
+                  >
+
+                  <div
+                    id="editBotInstanceHelp"
+                    class="small"
+                    style="margin-top:6px;"
+                  ></div>
+                </div>
+
+                <input
+                  id="editBotOriginalInstance"
+                  type="hidden"
+                >
+
+                <div
+                  id="editBotMessage"
+                  class="small"
+                ></div>
+
+                <div
+                  style="
+                    display:flex;
+                    justify-content:flex-end;
+                    gap:8px;
+                    margin-top:5px;
+                  "
+                >
+                  <button
+                    type="button"
+                    class="btn btn-light"
+                    onclick="closeEditBot()"
+                  >
+                    Cancelar
+                  </button>
+
+                  <button
+                    id="editBotSaveBtn"
+                    type="button"
+                    class="btn btn-success"
+                    onclick="saveEditBot()"
+                  >
+                    Guardar cambios
+                  </button>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
 
           <div class="box" style="margin-top:14px;">
             <div class="head"><strong>Nuevo Bot</strong></div>
@@ -14370,7 +16111,7 @@ def panel_actas(
                     <div class="provider-row-break"></div>
 
                     <div class="provider-card">
-                      <div class="provider-name">ACTAS CARAS</div>
+                      <div class="provider-name">RODO</div>
                       <div style="margin:6px 0;">
                         <div style="font-size:12px;font-weight:700;margin-bottom:5px;opacity:.85;">Prioridad de uso</div>
                         <div style="display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;">
@@ -14385,6 +16126,45 @@ def panel_actas(
                       <div class="provider-actions">
                         <button class="btn btn-success" onclick="toggleProvider('PROVIDER5','on')">Activar</button>
                         <button class="btn btn-danger" onclick="toggleProvider('PROVIDER5','off')">Desactivar</button>
+                      </div>
+                      <div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(148,163,184,.35);">
+                        <div style="font-size:12px;font-weight:800;margin-bottom:8px;">
+                          Grupos RODO
+                        </div>
+
+                        <div style="display:grid;grid-template-columns:1fr auto;gap:6px 8px;font-size:11px;align-items:center;">
+
+                          <span>Nacimiento 1</span>
+                          <button class="btn {'btn-success' if provider5_group_enabled['NACIMIENTO_1'] else 'btn-danger'}"
+                            onclick="toggleProvider5Group('NACIMIENTO_1', {'false' if provider5_group_enabled['NACIMIENTO_1'] else 'true'})">
+                            {'🟢 Activo' if provider5_group_enabled['NACIMIENTO_1'] else '🔴 Inactivo'}
+                          </button>
+
+                          <span>Nacimiento 2</span>
+                          <button class="btn {'btn-success' if provider5_group_enabled['NACIMIENTO_2'] else 'btn-danger'}"
+                            onclick="toggleProvider5Group('NACIMIENTO_2', {'false' if provider5_group_enabled['NACIMIENTO_2'] else 'true'})">
+                            {'🟢 Activo' if provider5_group_enabled['NACIMIENTO_2'] else '🔴 Inactivo'}
+                          </button>
+
+                          <span>Nacimiento 3</span>
+                          <button class="btn {'btn-success' if provider5_group_enabled['NACIMIENTO_3'] else 'btn-danger'}"
+                            onclick="toggleProvider5Group('NACIMIENTO_3', {'false' if provider5_group_enabled['NACIMIENTO_3'] else 'true'})">
+                            {'🟢 Activo' if provider5_group_enabled['NACIMIENTO_3'] else '🔴 Inactivo'}
+                          </button>
+
+                          <span>Cadena / Foliada</span>
+                          <button class="btn {'btn-success' if provider5_group_enabled['CADENA_FOLIADA'] else 'btn-danger'}"
+                            onclick="toggleProvider5Group('CADENA_FOLIADA', {'false' if provider5_group_enabled['CADENA_FOLIADA'] else 'true'})">
+                            {'🟢 Activo' if provider5_group_enabled['CADENA_FOLIADA'] else '🔴 Inactivo'}
+                          </button>
+
+                          <span>Especiales</span>
+                          <button class="btn {'btn-success' if provider5_group_enabled['ESPECIALES'] else 'btn-danger'}"
+                            onclick="toggleProvider5Group('ESPECIALES', {'false' if provider5_group_enabled['ESPECIALES'] else 'true'})">
+                            {'🟢 Activo' if provider5_group_enabled['ESPECIALES'] else '🔴 Inactivo'}
+                          </button>
+
+                        </div>
                       </div>
                     </div>
 
@@ -15130,16 +16910,24 @@ def panel_actas(
                     f'</option>'
                 )
 
-            maya_private_hidden = (
-                _norm_instance(inst) == "docifybot8maya"
-                and provider_mode in {
-                    "PERSONAL:MAYAPROVIDER",
-                    "PERSONAL:MAYAPROVIDER_REYES",
-                    "PERSONAL:MAYAPROVIDER_HERNANDEZ",
+            # PANEL_PROTECTED_INTERNAL_BOTS_V1
+            protected_configured = (
+                _norm_instance(inst) in {
+                    "docifybot8mx",
+                    "docifybot8isaac",
                 }
+                or (
+                    _norm_instance(inst)
+                    == "docifybot8maya"
+                    and provider_mode in {
+                        "PERSONAL:MAYAPROVIDER",
+                        "PERSONAL:MAYAPROVIDER_REYES",
+                        "PERSONAL:MAYAPROVIDER_DOCIFYMX",
+                    }
+                )
             )
 
-            if maya_private_hidden:
+            if protected_configured:
                 provider_mode_label = "CONFIGURADO"
             else:
                 provider_mode_label = BOT_PROVIDER_OPTIONS.get(
@@ -15165,7 +16953,7 @@ def panel_actas(
                 inst
             )
 
-            if maya_private_hidden:
+            if protected_configured:
                 status_badge = ""
             else:
                 status_badge = (
@@ -16079,6 +17867,33 @@ def panel_actas(
           }}
         }}
 
+        async function toggleProvider5Group(slot, enable) {{
+          const action = enable ? "on" : "off";
+          const token = new URLSearchParams(window.location.search).get("token") || "";
+          const url = `/panel/provider5/group/${{slot}}/${{action}}?token=${{encodeURIComponent(token)}}`;
+
+          try {{
+            const res = await fetch(url, {{
+              method: "POST"
+            }});
+
+            const data = await res.json();
+
+            if (data.ok) {{
+              location.reload();
+            }} else {{
+              alert(
+                data.error
+                || "No se pudo cambiar el grupo RODO"
+              );
+            }}
+          }} catch (e) {{
+            alert(
+              "No se pudo conectar con el servidor"
+            );
+          }}
+        }}
+
         async function refreshSID() {{
           const sid = prompt("Pega el nuevo PHPSESSID");
           if (!sid) return;
@@ -16487,6 +18302,249 @@ def panel_actas(
             box.innerHTML = `<div style="color:red;font-weight:800;">Error de conexión</div>`;
           }}
         }}
+
+        let editBotCurrentStatic = false;
+
+        function closeEditBot() {{
+          const modal =
+            document.getElementById("editBotModal");
+
+          if (modal) {{
+            modal.style.display = "none";
+          }}
+        }}
+
+        async function editBot(instanceName) {{
+          const modal =
+            document.getElementById("editBotModal");
+
+          const labelInput =
+            document.getElementById("editBotLabel");
+
+          const instanceInput =
+            document.getElementById("editBotInstance");
+
+          const originalInput =
+            document.getElementById(
+              "editBotOriginalInstance"
+            );
+
+          const help =
+            document.getElementById(
+              "editBotInstanceHelp"
+            );
+
+          const message =
+            document.getElementById(
+              "editBotMessage"
+            );
+
+          if (!modal) return;
+
+          const panelToken =
+            new URLSearchParams(
+              window.location.search
+            ).get("token") || "";
+
+          if (message) {{
+            message.textContent =
+              "Cargando...";
+          }}
+
+          modal.style.display = "flex";
+
+          try {{
+            const response = await fetch(
+              `/panel/bots/${{encodeURIComponent(instanceName)}}/edit-info?token=${{encodeURIComponent(panelToken)}}`
+            );
+
+            const data =
+              await response.json();
+
+            if (!response.ok || !data.ok) {{
+              throw new Error(
+                data.error ||
+                "No se pudo cargar el bot."
+              );
+            }}
+
+            editBotCurrentStatic =
+              Boolean(data.is_static);
+
+            labelInput.value =
+              data.label || "";
+
+            instanceInput.value =
+              data.instance_name || "";
+
+            originalInput.value =
+              data.instance_name || "";
+
+            instanceInput.disabled =
+              !data.can_rename_instance;
+
+            if (help) {{
+              help.textContent =
+                data.can_rename_instance
+                ? (
+                    "Si cambias la instancia, "
+                    + "se creará una instancia Evolution nueva "
+                    + "y tendrás que vincular WhatsApp por QR."
+                  )
+                : (
+                    "Instancia histórica protegida. "
+                    + "Puedes cambiar el nombre visible, "
+                    + "pero no este identificador."
+                  );
+            }}
+
+            if (message) {{
+              message.textContent = "";
+            }}
+
+          }} catch (error) {{
+            if (message) {{
+              message.textContent =
+                error.message || String(error);
+            }}
+          }}
+        }}
+
+        async function saveEditBot() {{
+          const labelInput =
+            document.getElementById("editBotLabel");
+
+          const instanceInput =
+            document.getElementById("editBotInstance");
+
+          const originalInput =
+            document.getElementById(
+              "editBotOriginalInstance"
+            );
+
+          const message =
+            document.getElementById(
+              "editBotMessage"
+            );
+
+          const button =
+            document.getElementById(
+              "editBotSaveBtn"
+            );
+
+          const label =
+            (labelInput?.value || "").trim();
+
+          const oldInstance =
+            (originalInput?.value || "").trim();
+
+          const newInstance =
+            (instanceInput?.value || "").trim();
+
+          if (!label) {{
+            alert("Escribe el nombre del bot.");
+            return;
+          }}
+
+          if (!newInstance) {{
+            alert("Escribe la instancia.");
+            return;
+          }}
+
+          if (
+            newInstance !== oldInstance
+            && !editBotCurrentStatic
+          ) {{
+            const ok = confirm(
+              "Vas a cambiar la instancia Evolution de:\\n\\n"
+              + oldInstance
+              + "\\n\\na:\\n\\n"
+              + newInstance
+              + "\\n\\nLa nueva instancia necesitará QR de WhatsApp. "
+              + "Los grupos, token, límite, usadas e historial "
+              + "se migrarán al nuevo nombre.\\n\\n¿Continuar?"
+            );
+
+            if (!ok) return;
+          }}
+
+          const panelToken =
+            new URLSearchParams(
+              window.location.search
+            ).get("token") || "";
+
+          if (button) {{
+            button.disabled = true;
+            button.textContent =
+              "Guardando...";
+          }}
+
+          if (message) {{
+            message.textContent =
+              "Aplicando cambios...";
+          }}
+
+          try {{
+            const response = await fetch(
+              `/panel/bots/${{encodeURIComponent(oldInstance)}}/edit?token=${{encodeURIComponent(panelToken)}}`,
+              {{
+                method: "POST",
+                headers: {{
+                  "Content-Type":
+                    "application/json"
+                }},
+                body: JSON.stringify({{
+                  label: label,
+                  instance_name: newInstance
+                }})
+              }}
+            );
+
+            const data =
+              await response.json();
+
+            if (!response.ok || !data.ok) {{
+              throw new Error(
+                data.error ||
+                "No se pudieron guardar los cambios."
+              );
+            }}
+
+            if (data.instance_changed) {{
+              alert(
+                "Bot actualizado.\\n\\n"
+                + "Nueva instancia: "
+                + data.instance_name
+                + "\\n\\nAhora pulsa Reconectar / QR "
+                + "para vincular WhatsApp."
+              );
+            }} else {{
+              alert(
+                "Nombre del bot actualizado."
+              );
+            }}
+
+            location.reload();
+
+          }} catch (error) {{
+            if (button) {{
+              button.disabled = false;
+              button.textContent =
+                "Guardar cambios";
+            }}
+
+            if (message) {{
+              message.textContent =
+                error.message || String(error);
+            }}
+
+            alert(
+              error.message ||
+              "No se pudieron guardar los cambios."
+            );
+          }}
+        }}
+
 
         async function disconnectBot(i){{
           if(!confirm("Desconectar?")) return;
@@ -18116,6 +20174,66 @@ def update_provider7_credentials(
     return {
         "ok": True,
         "message": "Credenciales de Provider 7 actualizadas",
+    }
+
+
+@app.post("/panel/provider5/group/{slot}/{action}")
+def panel_provider5_group_toggle(
+    slot: str,
+    action: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    # RODO_PANEL_GROUP_TOGGLE_V1
+    if not _is_valid_admin_panel_token(request):
+        return {
+            "ok": False,
+            "error": "No autorizado",
+        }
+
+    slot = (
+        slot or ""
+    ).strip().upper()
+
+    action = (
+        action or ""
+    ).strip().lower()
+
+    allowed_slots = {
+        "NACIMIENTO_1",
+        "NACIMIENTO_2",
+        "NACIMIENTO_3",
+        "CADENA_FOLIADA",
+        "ESPECIALES",
+    }
+
+    if slot not in allowed_slots:
+        return {
+            "ok": False,
+            "error": "Grupo RODO inválido",
+        }
+
+    if action not in {"on", "off"}:
+        return {
+            "ok": False,
+            "error": "Acción inválida",
+        }
+
+    enabled = action == "on"
+
+    _set_app_setting(
+        db,
+        f"PROVIDER5_GROUP_ENABLED:{slot}",
+        "1" if enabled else "0",
+    )
+
+    _clear_panel_cache()
+
+    return {
+        "ok": True,
+        "provider": "PROVIDER5",
+        "slot": slot,
+        "enabled": enabled,
     }
 
 
@@ -20014,6 +22132,72 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
     instance = req.instance_name or instance_name or "docifybot8"
     filename = filename or f"{req.curp}.pdf"
 
+    # API_DELIVER_BEFORE_CAPTION_V1
+    #
+    # API no necesita caption ni WhatsApp.
+    # Salir ANTES de build_delivery_caption(),
+    # porque esta función no tiene una Session db propia.
+    if getattr(req, "api_client_id", None):
+        is_base64 = not pdf_data.startswith("http")
+
+        raw = (pdf_data or "").strip()
+
+        if not is_base64:
+            r = requests.get(
+                pdf_data,
+                timeout=60,
+            )
+            r.raise_for_status()
+            raw = base64.b64encode(
+                r.content
+            ).decode()
+
+        if raw.startswith("data:"):
+            raw = raw.split(
+                ",",
+                1,
+            )[1]
+
+        raw = (
+            raw
+            .replace("\n", "")
+            .replace("\r", "")
+            .strip()
+        )
+
+        req.api_result_base64 = raw
+        req.api_result_filename = (
+            filename
+            or f"{req.curp}.pdf"
+        )
+
+        req.provider_media_url = (
+            "BASE64_API_FROM_PROVIDER_WEBHOOK"
+        )
+
+        req.pdf_url = None
+        req.updated_at = _utc_now_naive()
+
+        print(
+            "API_MAIN_PDF_STORED_NO_WHATSAPP =",
+            {
+                "req_id": req.id,
+                "api_client_id": req.api_client_id,
+                "filename": (
+                    req.api_result_filename
+                ),
+                "pdf_storage_key": getattr(
+                    req,
+                    "pdf_storage_key",
+                    None,
+                ),
+                "b64_len": len(raw),
+            },
+            flush=True,
+        )
+
+        return
+
     caption_text = ""
 
     NO_TIME_CAPTION_GROUPS = {
@@ -20042,7 +22226,7 @@ def _deliver_pdf_result(req: RequestLog, pdf_data: str, filename: str | None = N
             tiempo = f"{total_seconds:.2f} segundos"
 
         if req.source_group_id not in NO_TIME_CAPTION_GROUPS:
-            caption_text = f"⏱️ Tiempo total: {tiempo}"
+            caption_text = build_delivery_caption(db, req, tiempo)
 
     print("PDF_DELIVER_INSTANCE =", instance, flush=True)
     print("PDF_CAPTION =", caption_text, flush=True)
@@ -20809,6 +22993,162 @@ def _pick_matching_processing_req_for_pdf(
             .all()
         )
 
+    # PROVIDER_PDF_WINNER_V3
+    #
+    # Si hubo fallback, RequestLog ya puede apuntar
+    # al proveedor nuevo.
+    #
+    # Antes de hacer match laxo por CURP,
+    # revisar los intentos fisicos historicos.
+    if not candidates and quoted_msg_id:
+        try:
+            direct_attempt = (
+                find_provider_attempt_by_message(
+                    redis_conn,
+                    quoted_msg_id,
+                )
+            )
+
+            direct_request_id = int(
+                (
+                    direct_attempt
+                    or {}
+                ).get(
+                    "request_id"
+                )
+                or 0
+            )
+
+            if direct_request_id:
+                direct_req = (
+                    db.query(RequestLog)
+                    .filter(
+                        RequestLog.id
+                        == direct_request_id,
+                        status_filter,
+                    )
+                    .first()
+                )
+
+                if direct_req:
+                    candidates = [
+                        direct_req
+                    ]
+
+                    print(
+                        "PROVIDER_PDF_MATCH_OLD_ATTEMPT_BY_MESSAGE =",
+                        {
+                            "request_id": (
+                                direct_req.id
+                            ),
+                            "quoted_msg_id": (
+                                quoted_msg_id
+                            ),
+                            "attempt": (
+                                direct_attempt
+                            ),
+                        },
+                        flush=True,
+                    )
+
+        except Exception as attempt_match_exc:
+            print(
+                "PROVIDER_PDF_OLD_ATTEMPT_MESSAGE_MATCH_ERROR =",
+                str(
+                    attempt_match_exc
+                ),
+                flush=True,
+            )
+
+    if not candidates and lookup_id:
+        try:
+            attempt_limit = (
+                _utc_now_naive()
+                - timedelta(hours=18)
+            )
+
+            attempt_rows = (
+                db.query(RequestLog)
+                .filter(
+                    RequestLog.curp
+                    == lookup_id,
+                    RequestLog.created_at
+                    >= attempt_limit,
+                    status_filter,
+                )
+                .order_by(
+                    case(
+                        (
+                            RequestLog.status
+                            == "PROCESSING",
+                            0,
+                        ),
+                        else_=1,
+                    ),
+                    RequestLog.created_at.desc(),
+                )
+                .limit(20)
+                .all()
+            )
+
+            attempt_matches = []
+
+            for attempt_req in attempt_rows:
+                matched_attempt = (
+                    find_provider_attempt(
+                        redis_conn,
+                        request_id=(
+                            attempt_req.id
+                        ),
+                        source_chat_id=(
+                            source_chat_id
+                        ),
+                        quoted_message_id=(
+                            quoted_msg_id
+                        ),
+                    )
+                )
+
+                if matched_attempt:
+                    attempt_matches.append(
+                        attempt_req
+                    )
+
+            if attempt_matches:
+                candidates = (
+                    attempt_matches
+                )
+
+                print(
+                    "PROVIDER_PDF_MATCH_OLD_ATTEMPT_BY_SOURCE =",
+                    {
+                        "lookup_id": (
+                            lookup_id
+                        ),
+                        "source_chat_id": (
+                            source_chat_id
+                        ),
+                        "quoted_msg_id": (
+                            quoted_msg_id
+                        ),
+                        "request_ids": [
+                            row.id
+                            for row
+                            in attempt_matches
+                        ],
+                    },
+                    flush=True,
+                )
+
+        except Exception as attempt_match_exc:
+            print(
+                "PROVIDER_PDF_OLD_ATTEMPT_SOURCE_MATCH_ERROR =",
+                str(
+                    attempt_match_exc
+                ),
+                flush=True,
+            )
+
     if not candidates and lookup_id:
         today_limit = _utc_now_naive() - timedelta(hours=18)
 
@@ -21225,6 +23565,9 @@ def _all_provider_groups() -> set[str]:
         settings.PROVIDER2_GROUP_1,
         settings.PROVIDER2_GROUP_2,
         settings.PROVIDER5_GROUP_NACIMIENTO,
+        settings.PROVIDER5_GROUP_NACIMIENTO_2,
+        settings.PROVIDER5_GROUP_NACIMIENTO_3,
+        settings.PROVIDER5_GROUP_CADENA_FOLIO,
         settings.PROVIDER5_GROUP_ESPECIALES,
         settings.PROVIDER6_GROUP_1_NACIMIENTO,
         settings.PROVIDER6_GROUP_2_NACIMIENTO,
@@ -21317,6 +23660,254 @@ def _unblock_client_groups_main(rows: list):
 
 def _promotion_available(promo: GroupPromotion) -> int:
     return max(0, (promo.total_actas or 0) - (promo.used_actas or 0))
+
+
+# ============================================================
+# PROMO_BATCH_CAPACITY_V1
+# ============================================================
+def _promotion_admission_remaining(
+    db: Session,
+    group_jid: str | None,
+) -> int | None:
+    """
+    Cupo REAL disponible para admitir una nueva solicitud.
+
+    None = el grupo no tiene promoción aplicable.
+    0+   = espacios actualmente disponibles.
+
+    Considera:
+      - actas DONE ya consumidas;
+      - QUEUED / PROCESSING todavía no contabilizadas;
+      - bolsa compartida;
+      - límite individual del grupo.
+
+    Las filas GroupPromotion se bloquean FOR UPDATE para que
+    dos webhooks simultáneos no puedan reservar el mismo lugar.
+    """
+
+    from sqlalchemy import text as sa_text
+
+    gid = (group_jid or "").strip()
+
+    if not gid:
+        return None
+
+    base = (
+        db.query(GroupPromotion)
+        .filter(
+            GroupPromotion.group_jid == gid
+        )
+        .with_for_update()
+        .first()
+    )
+
+    if not base:
+        return None
+
+    promo_name = (
+        getattr(base, "promo_name", None)
+        or ""
+    ).strip()
+
+    total_base = int(
+        getattr(base, "total_actas", 0)
+        or 0
+    )
+
+    used_base = int(
+        getattr(base, "used_actas", 0)
+        or 0
+    )
+
+    # Una fila vacía/inactiva eliminada no representa promo.
+    meaningful_promo = bool(
+        promo_name
+        or total_base > 0
+        or used_base > 0
+    )
+
+    if not meaningful_promo:
+        return None
+
+    # Promo agotada/desactivada: no admitir nuevas solicitudes.
+    if not bool(
+        getattr(base, "is_active", False)
+    ):
+        return 0
+
+    shared_key = (
+        getattr(base, "shared_key", None)
+        or ""
+    ).strip()
+
+    if shared_key:
+        rows = (
+            db.query(GroupPromotion)
+            .filter(
+                GroupPromotion.shared_key == shared_key,
+                GroupPromotion.is_active == True,
+            )
+            .order_by(GroupPromotion.id.asc())
+            .with_for_update()
+            .all()
+        )
+
+        if not rows:
+            return 0
+
+    else:
+        rows = [base]
+
+    leader = rows[0]
+
+    total_actas = int(
+        leader.total_actas
+        or 0
+    )
+
+    if shared_key:
+        used_actas = max(
+            int(leader.used_actas or 0),
+            sum(
+                int(
+                    row.shared_group_used_actas
+                    or 0
+                )
+                for row in rows
+            ),
+        )
+    else:
+        used_actas = int(
+            leader.used_actas
+            or 0
+        )
+
+    group_ids = [
+        (row.group_jid or "").strip()
+        for row in rows
+        if (row.group_jid or "").strip()
+    ]
+
+    if not group_ids:
+        group_ids = [gid]
+
+    # --------------------------------------------------------
+    # Pendientes que todavía NO han consumido promoción.
+    #
+    # Si promotion_consumptions ya contiene request_id,
+    # no volvemos a reservarlo aunque siga PROCESSING por
+    # entrega u otra etapa posterior.
+    # --------------------------------------------------------
+
+    placeholders = []
+
+    params = {}
+
+    for idx, group_id in enumerate(group_ids):
+        key = f"gid_{idx}"
+        placeholders.append(f":{key}")
+        params[key] = group_id
+
+    pending_global_sql = sa_text(
+        f"""
+        SELECT COUNT(*)
+        FROM request_logs AS r
+        WHERE r.source_group_id IN (
+            {", ".join(placeholders)}
+        )
+          AND r.status IN (
+            'QUEUED',
+            'PROCESSING'
+          )
+          AND NOT EXISTS (
+              SELECT 1
+              FROM promotion_consumptions AS pc
+              WHERE pc.request_id = r.id
+          )
+        """
+    )
+
+    pending_global = int(
+        db.execute(
+            pending_global_sql,
+            params,
+        ).scalar()
+        or 0
+    )
+
+    global_remaining = max(
+        0,
+        total_actas
+        - used_actas
+        - pending_global,
+    )
+
+    # --------------------------------------------------------
+    # Límite individual dentro de bolsa compartida
+    # --------------------------------------------------------
+
+    if shared_key:
+        current_group_row = next(
+            (
+                row
+                for row in rows
+                if (
+                    row.group_jid
+                    or ""
+                ).strip() == gid
+            ),
+            base,
+        )
+
+        group_limit = int(
+            current_group_row.shared_group_limit_actas
+            or 0
+        )
+
+        if group_limit > 0:
+            group_used = int(
+                current_group_row.shared_group_used_actas
+                or 0
+            )
+
+            pending_group = int(
+                db.execute(
+                    sa_text(
+                        """
+                        SELECT COUNT(*)
+                        FROM request_logs AS r
+                        WHERE r.source_group_id = :gid
+                          AND r.status IN (
+                              'QUEUED',
+                              'PROCESSING'
+                          )
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM promotion_consumptions AS pc
+                              WHERE pc.request_id = r.id
+                          )
+                        """
+                    ),
+                    {
+                        "gid": gid,
+                    },
+                ).scalar()
+                or 0
+            )
+
+            group_remaining = max(
+                0,
+                group_limit
+                - group_used
+                - pending_group,
+            )
+
+            return min(
+                global_remaining,
+                group_remaining,
+            )
+
+    return global_remaining
 
 
 def _real_promo_used_count(db: Session, promo: GroupPromotion) -> int:
@@ -21965,7 +24556,7 @@ def _providers_status_text(db: Session) -> str:
 
     text = (
         f"ADMIN:          {s1}\n"
-        f"ACTAS CARAS:    {s5}\n"
+        f"RODO:    {s5}\n"
         f"E-BOT:          {s14}\n"
         f"E-WEB:          {s15}\n"
         f"SIDEA:          {s16}\n"
@@ -22761,10 +25352,12 @@ def _get_latest_request(
     term: str,
     act_type: str,
     source_chat_id: str | None,
+    companion_curp: str | None = None,
 ):
     day_start, day_end = _bot_day_bounds()
 
-    return (
+    # PROVIDER16_SINGLE_PAIR_REQUEST_V1
+    q = (
         db.query(RequestLog)
         .filter(
             RequestLog.curp == term,
@@ -22773,7 +25366,30 @@ def _get_latest_request(
             RequestLog.created_at >= day_start,
             RequestLog.created_at < day_end,
         )
-        .order_by(RequestLog.created_at.desc(), RequestLog.id.desc())
+    )
+
+    companion_norm = (
+        str(companion_curp or "")
+        .strip()
+        .upper()
+    )
+
+    if companion_norm:
+        q = q.filter(
+            RequestLog.companion_curp
+            == companion_norm
+        )
+    else:
+        q = q.filter(
+            RequestLog.companion_curp.is_(None)
+        )
+
+    return (
+        q
+        .order_by(
+            RequestLog.created_at.desc(),
+            RequestLog.id.desc(),
+        )
         .first()
     )
 
@@ -23173,6 +25789,53 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         is_provider_message = source_chat_id in provider_groups
         is_admin_command = text_upper.startswith("/")
 
+        # MAYA_MX_BRIDGE_REQUEST_V1
+        #
+        # MAYAPROVIDER_GROUP_2 es un puente privado:
+        #
+        # docifybot8maya -> grupo puente -> docifybot8mx
+        #
+        # Para MX, un texto entrante en este grupo es una
+        # SOLICITUD normal, no una respuesta de proveedor.
+        #
+        # Para MAYA el mismo grupo sigue siendo proveedor,
+        # de modo que el PDF que MX devuelve se procesa
+        # como resultado de MAYAPROVIDER.
+        maya_mx_bridge_group = (
+            getattr(
+                settings,
+                "MAYAPROVIDER_GROUP_2",
+                "",
+            )
+            or ""
+        ).strip()
+
+        is_maya_mx_bridge_request = (
+            is_group
+            and (instance_name or "").strip().lower()
+            == "docifybot8mx"
+            and source_chat_id
+            == maya_mx_bridge_group
+            and not from_me
+            and not is_admin_command
+        )
+
+        if is_maya_mx_bridge_request:
+            is_provider_message = False
+
+            print(
+                "MAYA_MX_BRIDGE_REQUEST =",
+                {
+                    "instance_name": instance_name,
+                    "source_group_id": (
+                        source_group_id
+                    ),
+                    "msg_id": msg_id,
+                    "text": text_body[:180],
+                },
+                flush=True,
+            )
+
         if is_group and not is_provider_message and not is_admin_command:
             ignore_group, ignore_reason = _should_ignore_group_for_instance(
                 db,
@@ -23261,7 +25924,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         print("WEBHOOK_SOURCE_GROUP_ID =", source_group_id, flush=True)
         print("WEBHOOK_IS_GROUP_BLOCKED =", is_group_blocked(source_group_id), flush=True)
 
-        if is_group and is_group_blocked(source_group_id) and not (is_admin_command and _is_admin(requester_wa_id, from_me)):
+        if (
+            is_group
+            and not is_provider_message
+            and is_group_blocked(source_group_id)
+            and not (is_admin_command and _is_admin(requester_wa_id, from_me))
+        ):
             print("IGNORED_REASON = group_blocked", flush=True)
             print("IGNORED_GROUP =", source_group_id, flush=True)
             print("IGNORED_INSTANCE =", instance_name, flush=True)
@@ -24425,6 +27093,220 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 db.commit()
                 print("T_DB_COMMIT_BEFORE_DELIVERY =", round(time.perf_counter() - t2, 3), flush=True)
 
+                # PROVIDER_PDF_WINNER_V3
+                #
+                # provider_pdf_sending ya protege esta
+                # solicitud mientras decidimos ganador.
+                matched_provider_attempt = None
+                attempt_latency = None
+
+                try:
+                    matched_provider_attempt = (
+                        find_provider_attempt(
+                            redis_conn,
+                            request_id=(
+                                open_req.id
+                            ),
+                            source_chat_id=(
+                                source_chat_id
+                            ),
+                            quoted_message_id=(
+                                quoted_msg_id
+                            ),
+                        )
+                    )
+
+                    (
+                        winner_won,
+                        winner_data,
+                    ) = claim_pdf_winner(
+                        redis_conn,
+                        request_id=(
+                            open_req.id
+                        ),
+                        attempt=(
+                            matched_provider_attempt
+                        ),
+                    )
+
+                except Exception as winner_exc:
+                    # Fail-open:
+                    # una falla del Redis auxiliar
+                    # nunca debe hacer perder
+                    # un PDF valido.
+                    print(
+                        "PROVIDER_PDF_WINNER_REDIS_ERROR =",
+                        {
+                            "request_id": (
+                                open_req.id
+                            ),
+                            "error": str(
+                                winner_exc
+                            ),
+                        },
+                        flush=True,
+                    )
+
+                    winner_won = True
+                    winner_data = None
+
+                if not winner_won:
+                    try:
+                        redis_conn.delete(
+                            sending_key
+                        )
+                    except Exception as unlock_exc:
+                        print(
+                            "PROVIDER_PDF_LATE_LOSER_UNLOCK_ERROR =",
+                            str(
+                                unlock_exc
+                            ),
+                            flush=True,
+                        )
+
+                    print(
+                        "PROVIDER_PDF_LATE_LOSER_IGNORED =",
+                        {
+                            "request_id": (
+                                open_req.id
+                            ),
+                            "source_chat_id": (
+                                source_chat_id
+                            ),
+                            "quoted_msg_id": (
+                                quoted_msg_id
+                            ),
+                            "incoming_attempt": (
+                                matched_provider_attempt
+                            ),
+                            "winner": (
+                                winner_data
+                            ),
+                        },
+                        flush=True,
+                    )
+
+                    return {
+                        "ok": True,
+                        "ignored": (
+                            "provider_pdf_late_loser"
+                        ),
+                    }
+
+                attempt_latency = (
+                    provider_attempt_latency(
+                        matched_provider_attempt,
+                        now_ts=(
+                            webhook_received_ts
+                        ),
+                    )
+                )
+
+                if matched_provider_attempt:
+                    old_provider = (
+                        open_req.provider_name
+                    )
+
+                    old_group = (
+                        open_req.provider_group_id
+                    )
+
+                    open_req.provider_name = (
+                        matched_provider_attempt
+                        .get(
+                            "provider_name"
+                        )
+                        or open_req.provider_name
+                    )
+
+                    open_req.provider_group_id = (
+                        matched_provider_attempt
+                        .get(
+                            "provider_group_id"
+                        )
+                        or open_req.provider_group_id
+                    )
+
+                    open_req.provider_message_id = (
+                        matched_provider_attempt
+                        .get(
+                            "provider_message_id"
+                        )
+                        or open_req.provider_message_id
+                    )
+
+                    open_req.provider_message = (
+                        matched_provider_attempt
+                        .get(
+                            "provider_message"
+                        )
+                        or open_req.provider_message
+                    )
+
+                    if (
+                        attempt_latency
+                        is not None
+                    ):
+                        open_req.provider_processing_time = (
+                            round(
+                                attempt_latency,
+                                3,
+                            )
+                        )
+
+                    print(
+                        "PROVIDER_PDF_WINNER_CLAIMED =",
+                        {
+                            "request_id": (
+                                open_req.id
+                            ),
+                            "winner_provider": (
+                                open_req.provider_name
+                            ),
+                            "old_current_provider": (
+                                old_provider
+                            ),
+                            "winner_group": (
+                                open_req.provider_group_id
+                            ),
+                            "old_current_group": (
+                                old_group
+                            ),
+                            "attempt_latency_s": (
+                                round(
+                                    attempt_latency,
+                                    3,
+                                )
+                                if (
+                                    attempt_latency
+                                    is not None
+                                )
+                                else None
+                            ),
+                            "attempt": (
+                                matched_provider_attempt
+                            ),
+                        },
+                        flush=True,
+                    )
+
+                else:
+                    print(
+                        "PROVIDER_PDF_WINNER_LEGACY_NO_ATTEMPT =",
+                        {
+                            "request_id": (
+                                open_req.id
+                            ),
+                            "provider_name": (
+                                open_req.provider_name
+                            ),
+                            "source_chat_id": (
+                                source_chat_id
+                            ),
+                        },
+                        flush=True,
+                    )
+
                 print("PROVIDER_PDF_MATCHED_REQ_ID =", open_req.id, flush=True)
                 print("PROVIDER_PDF_MATCHED_CURP =", open_req.curp, flush=True)
 
@@ -24504,6 +27386,41 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         except Exception:
                             pass
 
+                        try:
+                            winner_released = (
+                                release_pdf_winner_if_owned(
+                                    redis_conn,
+                                    request_id=(
+                                        open_req.id
+                                    ),
+                                    attempt=(
+                                        matched_provider_attempt
+                                    ),
+                                )
+                            )
+
+                            print(
+                                "PROVIDER_PDF_WINNER_RELEASE_AFTER_R2_ERROR =",
+                                {
+                                    "request_id": (
+                                        open_req.id
+                                    ),
+                                    "released": (
+                                        winner_released
+                                    ),
+                                },
+                                flush=True,
+                            )
+
+                        except Exception as release_exc:
+                            print(
+                                "PROVIDER_PDF_WINNER_RELEASE_ERROR =",
+                                str(
+                                    release_exc
+                                ),
+                                flush=True,
+                            )
+
                         print("R2_SAVE_BEFORE_DELIVERY_ERROR =", {
                             "req_id": getattr(open_req, "id", None),
                             "provider_name": getattr(open_req, "provider_name", None),
@@ -24582,12 +27499,18 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                                 not in no_time_caption_groups
                             ):
                                 caption_text = (
-                                    f"⏱️ Tiempo total: {tiempo}"
+                                    build_delivery_caption(db, open_req, tiempo)
                                 )
 
-                        # Guardar tiempo de proveedor antes de liberar webhook.
+                        # Guardar tiempo exacto del intento cuando existe.
                         try:
-                            if open_req.created_at:
+                            if attempt_latency is not None:
+                                open_req.provider_processing_time = round(
+                                    attempt_latency,
+                                    3,
+                                )
+
+                            elif open_req.created_at:
                                 created_ts = (
                                     open_req.created_at.timestamp()
                                 )
@@ -24597,7 +27520,7 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                                     3,
                                 )
 
-                                db.commit()
+                            db.commit()
 
                         except Exception as metric_exc:
                             print(
@@ -24739,10 +27662,25 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     open_req.t_total_provider1_relay = total_relay_s
 
                     try:
-                        if open_req.created_at:
-                            created_ts = open_req.created_at.timestamp()
-                            provider_ts = pdf_received_ts
-                            open_req.provider_processing_time = round(provider_ts - created_ts, 3)
+                        if attempt_latency is not None:
+                            open_req.provider_processing_time = round(
+                                attempt_latency,
+                                3,
+                            )
+
+                        elif open_req.created_at:
+                            created_ts = (
+                                open_req.created_at.timestamp()
+                            )
+                            provider_ts = (
+                                pdf_received_ts
+                            )
+                            open_req.provider_processing_time = round(
+                                provider_ts
+                                - created_ts,
+                                3,
+                            )
+
                     except Exception as e:
                         print("API_PROVIDER_PROCESSING_TIME_ERROR =", str(e), flush=True)
 
@@ -24774,7 +27712,8 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         if open_req.instance_name:
                             used, limit_value, blocked_now = increment_bot_used_and_maybe_block(
                                 db,
-                                open_req.instance_name
+                                open_req.instance_name,
+                                request_id=open_req.id,
                             )
                             print("BOT_USED_AFTER_DONE =", used, flush=True)
                             print("BOT_LIMIT =", limit_value, flush=True)
@@ -25333,6 +28272,86 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 for term in terms
             ]
 
+        # ====================================================
+        # PROVIDER16_SINGLE_PAIR_REQUEST_V1
+        #
+        # 2 CURP + MATRIMONIO/DIVORCIO = UNA solicitud.
+        # La segunda CURP es únicamente pista de pareja.
+        # ====================================================
+        pair_companion_by_term = {}
+
+        if len(typed_terms) == 2:
+            pair_term_1, pair_type_1 = typed_terms[0]
+            pair_term_2, pair_type_2 = typed_terms[1]
+
+            pair_term_1 = (
+                str(pair_term_1 or "")
+                .strip()
+                .upper()
+            )
+            pair_term_2 = (
+                str(pair_term_2 or "")
+                .strip()
+                .upper()
+            )
+
+            pair_type_1_norm = (
+                str(pair_type_1 or "")
+                .strip()
+                .upper()
+            )
+            pair_type_2_norm = (
+                str(pair_type_2 or "")
+                .strip()
+                .upper()
+            )
+
+            pair_is_special = (
+                pair_type_1_norm
+                == pair_type_2_norm
+                and (
+                    pair_type_1_norm.startswith(
+                        "MATRIMONIO"
+                    )
+                    or pair_type_1_norm.startswith(
+                        "DIVORCIO"
+                    )
+                )
+            )
+
+            pair_are_curps = (
+                len(pair_term_1) == 18
+                and pair_term_1.isalnum()
+                and len(pair_term_2) == 18
+                and pair_term_2.isalnum()
+                and pair_term_1 != pair_term_2
+            )
+
+            if pair_is_special and pair_are_curps:
+                pair_companion_by_term[
+                    pair_term_1
+                ] = pair_term_2
+
+                typed_terms = [
+                    (
+                        pair_term_1,
+                        pair_type_1,
+                    )
+                ]
+
+                print(
+                    "PROVIDER16_SINGLE_PAIR_REQUEST =",
+                    {
+                        "primary_curp": pair_term_1,
+                        "companion_curp": pair_term_2,
+                        "act_type": (
+                            pair_type_1_norm
+                        ),
+                        "message_id": msg_id,
+                    },
+                    flush=True,
+                )
+
         print("REQUEST_TYPED_TERMS =", typed_terms, flush=True)
 
         created_any = False
@@ -25340,7 +28359,20 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
         created_act_types = []
         created_terms = []
 
+        # PROMO_BATCH_CAPACITY_V1
+        promo_rejected_count = 0
+        promo_rejected_terms = []
+
         for term, act_type in typed_terms:
+            companion_curp = (
+                pair_companion_by_term.get(
+                    str(term or "")
+                    .strip()
+                    .upper(),
+                    "",
+                )
+            )
+
             print(
                 "PROCESSING_TYPED_TERM =",
                 {
@@ -25351,7 +28383,16 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
             )
 
             #last_done = get_last_done_request(db, term, act_type)
-            last_req = _get_latest_request(db, term, act_type, source_chat_id)
+            last_req = _get_latest_request(
+                db,
+                term,
+                act_type,
+                source_chat_id,
+                companion_curp=(
+                    companion_curp
+                    or None
+                ),
+            )
 
             if last_req:
                 print(
@@ -25558,6 +28599,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     RequestLog.curp == term,
                     RequestLog.act_type == act_type,
                     RequestLog.source_chat_id == source_chat_id,
+                    (
+                        RequestLog.companion_curp
+                        == companion_curp
+                        if companion_curp
+                        else RequestLog.companion_curp.is_(None)
+                    ),
                     RequestLog.created_at >= day_start,
                     RequestLog.created_at < day_end,
                 )
@@ -25626,6 +28673,12 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     RequestLog.curp == term,
                     RequestLog.act_type == act_type,
                     RequestLog.instance_name == instance_name,
+                    (
+                        RequestLog.companion_curp
+                        == companion_curp
+                        if companion_curp
+                        else RequestLog.companion_curp.is_(None)
+                    ),
                     RequestLog.status == "ERROR",
                     RequestLog.updated_at >= no_record_cutoff,
                     or_(
@@ -25922,9 +28975,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                         "CURP solicitada.\n"
                         "No se volverá a procesar automáticamente "
                         "con la misma CURP.\n"
-                        "Si cuentas con la Cadena Digital o "
-                        "Identificador Electrónico, envíalo para "
-                        "precisar el acta."
+                        # PROVIDER16_AMBIGUOUS_CLIENT_GUIDANCE_V2
+                        "Para identificar el acta correcta, envía "
+                        "las CURP de ambas personas o la Cadena "
+                        "Digital / Identificador Electrónico."
                     )
 
                     print(
@@ -25960,6 +29014,49 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
 
 
                 # --------------------------------------------------------
+                # PROMO_BATCH_CAPACITY_V1
+                # Verificar cupo JUSTO antes de reactivar.
+                #
+                # El FOR UPDATE permanece hasta el commit que reactiva
+                # esta solicitud, evitando sobreventa concurrente.
+                # --------------------------------------------------------
+                promo_remaining = (
+                    _promotion_admission_remaining(
+                        db,
+                        source_group_id,
+                    )
+                )
+
+                if (
+                    promo_remaining is not None
+                    and promo_remaining <= 0
+                ):
+                    promo_rejected_count += 1
+                    promo_rejected_terms.append(
+                        str(term or "").strip()
+                    )
+
+                    print(
+                        "PROMOTION_BATCH_REQUEST_REJECTED =",
+                        {
+                            "term": term,
+                            "act_type": act_type,
+                            "group_jid": source_group_id,
+                            "reason": (
+                                "NO_PROMO_CAPACITY"
+                            ),
+                            "path": (
+                                "REQUEUE_ERROR"
+                            ),
+                        },
+                        flush=True,
+                    )
+
+                    # Liberar FOR UPDATE sin modificar nada.
+                    db.commit()
+                    continue
+
+                # --------------------------------------------------------
                 # REACTIVAR LA MISMA REQUEST
                 # --------------------------------------------------------
                 error_existing.request_key = request_key
@@ -25969,6 +29066,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 error_existing.updated_at = _utc_now_naive()
                 error_existing.error_message = None
                 error_existing.evolution_message_id = msg_id
+                error_existing.companion_curp = (
+                    companion_curp
+                    or None
+                )
                 error_existing.requester_wa_id = requester_wa_id
                 error_existing.requester_name = requester_display_name
                 error_existing.source_chat_id = source_chat_id
@@ -25979,6 +29080,92 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 error_existing.provider_message = None
                 error_existing.provider_media_url = None
                 error_existing.pdf_url = None
+
+                # REQUEUE_ERROR_CLEAR_PRE_RESERVATION_STATE_V1
+                #
+                # Una solicitud ERROR reenviada por el usuario representa
+                # una nueva oportunidad de ejecución.
+                #
+                # Si NO hubo reserva SIDEA, debemos olvidar únicamente
+                # el estado transitorio de la ejecución anterior:
+                #
+                # - proveedores ya fallidos en failover;
+                # - contador de retry de red P16;
+                # - contador genérico NO_PROVIDER.
+                #
+                # IMPORTANTE:
+                # request_guard:v2 demuestra consumo SIDEA.
+                # Si existe, NO tocamos guard/audit/recovery porque debe
+                # continuar la MISMA impresión y nunca hacer otro POST.
+                requeue_guard_key = (
+                    "provider16:sidea:"
+                    "request_guard:v2:"
+                    f"{error_existing.id}"
+                )
+
+                try:
+                    requeue_has_sidea_reservation = bool(
+                        redis_conn.exists(
+                            requeue_guard_key
+                        )
+                    )
+
+                    if not requeue_has_sidea_reservation:
+                        transient_keys = [
+                            (
+                                "provider_failover_failed:"
+                                f"{error_existing.id}"
+                            ),
+                            (
+                                "provider16:sidea:"
+                                "network_retry:v1:"
+                                f"{error_existing.id}"
+                            ),
+                            (
+                                "no_provider_enabled_retry:"
+                                f"{error_existing.id}"
+                            ),
+                        ]
+
+                        deleted_count = int(
+                            redis_conn.delete(
+                                *transient_keys
+                            )
+                            or 0
+                        )
+
+                        print(
+                            "REQUEUE_ERROR_PRE_RESERVATION_STATE_CLEARED =",
+                            {
+                                "request_id": error_existing.id,
+                                "deleted_keys": deleted_count,
+                                "reservation_guard": False,
+                            },
+                            flush=True,
+                        )
+
+                    else:
+                        print(
+                            "REQUEUE_ERROR_RECOVERY_STATE_PRESERVED =",
+                            {
+                                "request_id": error_existing.id,
+                                "reservation_guard": True,
+                                "action": "PRESERVE_SIDEA_RECOVERY",
+                            },
+                            flush=True,
+                        )
+
+                except Exception as requeue_state_exc:
+                    print(
+                        "REQUEUE_ERROR_STATE_CLEAR_ERROR =",
+                        {
+                            "request_id": error_existing.id,
+                            "error": str(
+                                requeue_state_exc
+                            )[:500],
+                        },
+                        flush=True,
+                    )
 
                 now_utc = _utc_now_naive()
 
@@ -26021,6 +29208,44 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 continue
 
             # ============================================================
+            # PROMO_BATCH_CAPACITY_V1
+            # Verificar cupo JUSTO antes de crear una solicitud nueva.
+            # ============================================================
+            promo_remaining = (
+                _promotion_admission_remaining(
+                    db,
+                    source_group_id,
+                )
+            )
+
+            if (
+                promo_remaining is not None
+                and promo_remaining <= 0
+            ):
+                promo_rejected_count += 1
+                promo_rejected_terms.append(
+                    str(term or "").strip()
+                )
+
+                print(
+                    "PROMOTION_BATCH_REQUEST_REJECTED =",
+                    {
+                        "term": term,
+                        "act_type": act_type,
+                        "group_jid": source_group_id,
+                        "reason": (
+                            "NO_PROMO_CAPACITY"
+                        ),
+                        "path": "NEW_REQUEST",
+                    },
+                    flush=True,
+                )
+
+                # Soltar FOR UPDATE.
+                db.commit()
+                continue
+
+            # ============================================================
             # SOLICITUD NUEVA
             # ============================================================
             row = RequestLog(
@@ -26033,6 +29258,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 source_group_id=source_group_id,
                 instance_name=instance_name,
                 evolution_message_id=msg_id,
+                companion_curp=(
+                    companion_curp
+                    or None
+                ),
                 status="QUEUED",
                 created_at=_utc_now_naive(),
                 updated_at=_utc_now_naive(),
@@ -26064,6 +29293,10 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                     source_group_id=source_group_id,
                     instance_name=instance_name,
                     evolution_message_id=msg_id,
+                    companion_curp=(
+                        companion_curp
+                        or None
+                    ),
                     status="QUEUED",
                     created_at=_utc_now_naive(),
                     updated_at=_utc_now_naive(),
@@ -26122,6 +29355,63 @@ async def evolution_webhook(payload: dict, db: Session = Depends(get_db)):
                 row.source_group_id,
                 flush=True,
             )
+
+        # ================================================================
+        # PROMO_BATCH_CAPACITY_V1
+        # Avisar UNA sola vez si parte del lote no pudo admitirse.
+        # ================================================================
+        if promo_rejected_count > 0:
+            rejected_label = (
+                "solicitud"
+                if promo_rejected_count == 1
+                else "solicitudes"
+            )
+
+            promo_limit_msg = (
+                "⚠️ *Cupo promocional limitado*\n\n"
+                f"No se procesaron "
+                f"*{promo_rejected_count} {rejected_label}* "
+                "de este mensaje porque el saldo disponible "
+                "de la promoción ya estaba utilizado o "
+                "reservado por solicitudes en proceso.\n\n"
+                "Las solicitudes que sí tenían cupo "
+                "continúan normalmente."
+            )
+
+            print(
+                "PROMOTION_BATCH_REJECT_SUMMARY =",
+                {
+                    "group_jid": source_group_id,
+                    "rejected_count": (
+                        promo_rejected_count
+                    ),
+                    "rejected_terms": (
+                        promo_rejected_terms
+                    ),
+                    "created_count": created_count,
+                },
+                flush=True,
+            )
+
+            try:
+                if source_group_id:
+                    send_group_text(
+                        source_group_id,
+                        promo_limit_msg,
+                        instance_name=instance_name,
+                    )
+                else:
+                    send_text(
+                        requester_wa_id,
+                        promo_limit_msg,
+                        instance_name=instance_name,
+                    )
+            except Exception as promo_limit_exc:
+                print(
+                    "PROMOTION_BATCH_REJECT_NOTIFY_ERROR =",
+                    str(promo_limit_exc),
+                    flush=True,
+                )
 
         # ================================================================
         # ACK ÚNICO DEL BATCH

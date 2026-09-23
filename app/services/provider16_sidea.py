@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 import requests
 import fitz
 from pypdf import PdfReader, PdfWriter
+import time
 
 
 # ============================================================
@@ -36,17 +37,230 @@ SIDEA_TIMEZONE = os.getenv(
 
 
 # ============================================================
-# PROVIDER16_OPERATING_WINDOW_V1
+# PROVIDER16_OPERATING_WINDOW_DYNAMIC_V2
 #
-# SIDEA solamente puede iniciar trabajo nuevo entre:
+# Horario dinámico configurable desde /panel/sidea.
+# Fuente persistente: AppSetting.
+# Cache runtime: Redis.
 #
-#   07:00 <= hora CDMX < 23:00
-#
-# A las 23:00 ya se considera cerrado.
+# Inicio inclusivo / cierre exclusivo:
+#   start <= hora local < end
 # ============================================================
 
-SIDEA_OPERATING_START_MINUTE = 7 * 60
-SIDEA_OPERATING_END_MINUTE = 23 * 60
+SIDEA_OPERATING_START_DEFAULT = "07:00"
+SIDEA_OPERATING_END_DEFAULT = "23:00"
+
+SIDEA_WINDOW_START_DB_KEY = (
+    "provider16_operating_start_hhmm"
+)
+
+SIDEA_WINDOW_END_DB_KEY = (
+    "provider16_operating_end_hhmm"
+)
+
+SIDEA_WINDOW_START_REDIS_KEY = (
+    "provider16:operating_start_hhmm:v1"
+)
+
+SIDEA_WINDOW_END_REDIS_KEY = (
+    "provider16:operating_end_hhmm:v1"
+)
+
+
+def _sidea_decode_text(value) -> str:
+
+    if isinstance(value, bytes):
+        value = value.decode(
+            "utf-8",
+            errors="ignore",
+        )
+
+    return str(value or "").strip()
+
+
+def _sidea_parse_hhmm(
+    value: str,
+) -> tuple[str, int]:
+
+    raw = str(value or "").strip()
+
+    parts = raw.split(":")
+
+    if len(parts) != 2:
+        raise ValueError(
+            "SIDEA_WINDOW_INVALID_TIME"
+        )
+
+    hour = int(parts[0])
+    minute = int(parts[1])
+
+    if not (
+        0 <= hour <= 23
+        and 0 <= minute <= 59
+    ):
+        raise ValueError(
+            "SIDEA_WINDOW_INVALID_TIME"
+        )
+
+    normalized = (
+        f"{hour:02d}:{minute:02d}"
+    )
+
+    return (
+        normalized,
+        hour * 60 + minute,
+    )
+
+
+def _sidea_operating_bounds():
+
+    start_value = ""
+    end_value = ""
+
+    # Primero Redis: cero consultas DB
+    # durante operación normal.
+    try:
+        from app.queue import (
+            redis_conn as _runtime_redis,
+        )
+
+        start_value = _sidea_decode_text(
+            _runtime_redis.get(
+                SIDEA_WINDOW_START_REDIS_KEY
+            )
+        )
+
+        end_value = _sidea_decode_text(
+            _runtime_redis.get(
+                SIDEA_WINDOW_END_REDIS_KEY
+            )
+        )
+
+    except Exception:
+        pass
+
+    # Si Redis no tiene configuración,
+    # recuperar desde AppSetting.
+    if not start_value or not end_value:
+
+        db = None
+
+        try:
+            from app.db import SessionLocal
+            from app.models import AppSetting
+
+            db = SessionLocal()
+
+            rows = (
+                db.query(AppSetting)
+                .filter(
+                    AppSetting.key.in_(
+                        [
+                            SIDEA_WINDOW_START_DB_KEY,
+                            SIDEA_WINDOW_END_DB_KEY,
+                        ]
+                    )
+                )
+                .all()
+            )
+
+            values = {
+                str(row.key): str(
+                    row.value or ""
+                ).strip()
+                for row in rows
+            }
+
+            start_value = (
+                start_value
+                or values.get(
+                    SIDEA_WINDOW_START_DB_KEY,
+                    "",
+                )
+            )
+
+            end_value = (
+                end_value
+                or values.get(
+                    SIDEA_WINDOW_END_DB_KEY,
+                    "",
+                )
+            )
+
+        except Exception:
+            pass
+
+        finally:
+            if db is not None:
+                db.close()
+
+    start_value = (
+        start_value
+        or SIDEA_OPERATING_START_DEFAULT
+    )
+
+    end_value = (
+        end_value
+        or SIDEA_OPERATING_END_DEFAULT
+    )
+
+    try:
+        start_text, start_minute = (
+            _sidea_parse_hhmm(
+                start_value
+            )
+        )
+
+        end_text, end_minute = (
+            _sidea_parse_hhmm(
+                end_value
+            )
+        )
+
+        if start_minute >= end_minute:
+            raise ValueError(
+                "SIDEA_WINDOW_START_AFTER_END"
+            )
+
+    except Exception:
+
+        start_text, start_minute = (
+            _sidea_parse_hhmm(
+                SIDEA_OPERATING_START_DEFAULT
+            )
+        )
+
+        end_text, end_minute = (
+            _sidea_parse_hhmm(
+                SIDEA_OPERATING_END_DEFAULT
+            )
+        )
+
+    # Rehidratar Redis si hizo falta.
+    try:
+        from app.queue import (
+            redis_conn as _runtime_redis,
+        )
+
+        _runtime_redis.set(
+            SIDEA_WINDOW_START_REDIS_KEY,
+            start_text,
+        )
+
+        _runtime_redis.set(
+            SIDEA_WINDOW_END_REDIS_KEY,
+            end_text,
+        )
+
+    except Exception:
+        pass
+
+    return (
+        start_text,
+        start_minute,
+        end_text,
+        end_minute,
+    )
 
 
 def sidea_operating_window(
@@ -72,23 +286,32 @@ def sidea_operating_window(
             tz
         )
 
+    (
+        start_text,
+        start_minute,
+        end_text,
+        end_minute,
+    ) = _sidea_operating_bounds()
+
     minute_of_day = (
         local_now.hour * 60
         + local_now.minute
     )
 
     is_open = (
-        SIDEA_OPERATING_START_MINUTE
+        start_minute
         <= minute_of_day
-        < SIDEA_OPERATING_END_MINUTE
+        < end_minute
     )
 
     return {
         "is_open": is_open,
         "timezone": SIDEA_TIMEZONE,
         "local_iso": local_now.isoformat(),
-        "start": "07:00",
-        "end": "23:00",
+        "start": start_text,
+        "end": end_text,
+        "start_minute": start_minute,
+        "end_minute": end_minute,
     }
 
 
@@ -558,14 +781,93 @@ class SideaPool:
         reason: str = "SESSION_EXPIRED",
     ) -> None:
 
+        session_key = self._session_key(
+            account_key
+        )
+
+        # =====================================================
+        # SIDEA_MASS_SESSION_PURGE_GUARD_V1
+        #
+        # Una anomalía global de SIDEA no puede vaciar todo
+        # el pool en unos segundos.
+        #
+        # Para NEED_LOGIN permitimos como máximo una
+        # eliminación de sesión cada 15 segundos.
+        # =====================================================
+
+        if reason == "NEED_LOGIN":
+
+            session_exists = bool(
+                self.redis.exists(
+                    session_key
+                )
+            )
+
+            # Si ya no existe la sesión, no hay nada que
+            # proteger; sólo sincronizamos el status.
+            if not session_exists:
+                self.set_status(
+                    account_key,
+                    reason,
+                    ttl_sec=86400,
+                )
+
+                print(
+                    "SIDEA_SESSION_ALREADY_MISSING =",
+                    {
+                        "account": account_key,
+                        "reason": reason,
+                    },
+                    flush=True,
+                )
+
+                return
+
+            guard_key = (
+                "provider16:sidea:"
+                "session_clear_guard:v1"
+            )
+
+            allowed = self.redis.set(
+                guard_key,
+                account_key,
+                nx=True,
+                ex=15,
+            )
+
+            if not allowed:
+
+                print(
+                    "SIDEA_SESSION_CLEAR_BLOCKED_"
+                    "BY_CIRCUIT =",
+                    {
+                        "account": account_key,
+                        "reason": reason,
+                    },
+                    flush=True,
+                )
+
+                # MUY IMPORTANTE:
+                # conservar tanto cookies como status.
+                return
+
         self.redis.delete(
-            self._session_key(account_key)
+            session_key
         )
 
         self.set_status(
             account_key,
             reason,
             ttl_sec=86400,
+        )
+
+        print(
+            "SIDEA_SESSION_CLEARED =",
+            {
+                "account": account_key,
+                "reason": reason,
+            },
+            flush=True,
         )
 
     def build_http_session(
@@ -636,6 +938,18 @@ class SideaPool:
             ) from exc
 
         html = response.text or ""
+
+        if _sidea_quarantine_password_change(
+            self,
+            account_key,
+            html,
+            "SESSION_VALIDATE",
+        ):
+            raise SideaNeedLogin(
+                "SIDEA_PASSWORD_CHANGE_REQUIRED:"
+                f"{account_key}:"
+                "SESSION_VALIDATE"
+            )
 
         login_seen = (
             "autenticacion.do" in html
@@ -2394,9 +2708,151 @@ def _sidea_form_values(
     return values
 
 
+
+# ============================================================
+# SIDEA_PASSWORD_CHANGE_REQUIRED_V1
+#
+# SIDEA puede aceptar usuario/contraseña pero bloquear el
+# acceso normal mostrando:
+#
+#   "Actualizar contraseña por tiempo"
+#
+# Esa pantalla JAMAS debe interpretarse como una búsqueda
+# válida ni terminar en SIDEA_NO_RECORD.
+# ============================================================
+
+
+def _sidea_html_requires_password_change(
+    html: str,
+) -> bool:
+
+    from html import unescape
+
+    text = unescape(
+        html or ""
+    ).lower()
+
+    text = " ".join(
+        text.split()
+    )
+
+    strong_signals = (
+        "actualizar contraseña por tiempo",
+        "actualizar contrasena por tiempo",
+        "actualización de contraseña por tiempo",
+        "actualizacion de contrasena por tiempo",
+    )
+
+    if any(
+        signal in text
+        for signal in strong_signals
+    ):
+        return True
+
+    old_password = (
+        "contraseña anterior" in text
+        or "contrasena anterior" in text
+        or "contraseña actual" in text
+        or "contrasena actual" in text
+    )
+
+    new_password = (
+        "nueva contraseña" in text
+        or "nueva contrasena" in text
+    )
+
+    confirm_password = (
+        "confirmar contraseña" in text
+        or "confirmar contrasena" in text
+    )
+
+    return bool(
+        old_password
+        and new_password
+        and confirm_password
+    )
+
+
+def _sidea_quarantine_password_change(
+    pool,
+    account_key: str,
+    html: str,
+    context: str,
+) -> bool:
+
+    if not _sidea_html_requires_password_change(
+        html
+    ):
+        return False
+
+    key = (
+        account_key
+        or ""
+    ).strip()
+
+    if not key:
+        return True
+
+    # La sesión actual ya no sirve para búsquedas.
+    # Eliminarla evita reutilizar cookies bloqueadas.
+    try:
+        pool.clear_session(
+            key,
+            reason="PASSWORD_CHANGE_REQUIRED",
+        )
+    except Exception as exc:
+        print(
+            "SIDEA_PASSWORD_CHANGE_CLEAR_WARN =",
+            {
+                "account": key,
+                "context": context,
+                "error": str(exc)[:200],
+            },
+            flush=True,
+        )
+
+    # Mantenerla fuera del pool.
+    # save_session() la regresará a READY después de
+    # actualizar contraseña e iniciar sesión correctamente.
+    try:
+        pool.set_status(
+            key,
+            "PASSWORD_CHANGE_REQUIRED",
+            ttl_sec=604800,
+        )
+    except Exception as exc:
+        print(
+            "SIDEA_PASSWORD_CHANGE_STATUS_WARN =",
+            {
+                "account": key,
+                "context": context,
+                "error": str(exc)[:200],
+            },
+            flush=True,
+        )
+
+    print(
+        "SIDEA_PASSWORD_CHANGE_REQUIRED =",
+        {
+            "account": key,
+            "context": context,
+        },
+        flush=True,
+    )
+
+    return True
+
+
 def _sidea_html_is_authenticated(
     html: str,
 ) -> bool:
+
+    # SIDEA_PASSWORD_CHANGE_REQUIRED_V1
+    if _sidea_html_requires_password_change(
+        html
+    ):
+        return False
+
 
     html = html or ""
     lower = html.lower()
@@ -2555,9 +3011,37 @@ def sidea_search_curp(
 
     html = response.text or ""
 
+    if _sidea_quarantine_password_change(
+        pool,
+        account_key,
+        html,
+        "SEARCH_CURP",
+    ):
+        raise SideaNeedLogin(
+            "SIDEA_PASSWORD_CHANGE_REQUIRED:"
+            f"{account_key}:"
+            "SEARCH_CURP"
+        )
+
     if not _sidea_html_is_authenticated(
         html
     ):
+        confirmed_need_login = (
+            _sidea_prod_confirm_need_login(
+                    session,
+                    account_key,
+                    "SEARCH_CURP",
+                    pool=pool,
+                )
+        )
+
+        if not confirmed_need_login:
+            raise SideaError(
+                "SIDEA_AUTH_AMBIGUOUS:"
+                f"{account_key}:"
+                "SEARCH_CURP"
+            )
+
         pool.clear_session(
             account_key,
             reason="NEED_LOGIN",
@@ -3212,9 +3696,37 @@ def sidea_search_curp(
 
     html = response.text or ""
 
+    if _sidea_quarantine_password_change(
+        pool,
+        account_key,
+        html,
+        "SEARCH_CURP",
+    ):
+        raise SideaNeedLogin(
+            "SIDEA_PASSWORD_CHANGE_REQUIRED:"
+            f"{account_key}:"
+            "SEARCH_CURP"
+        )
+
     if not _sidea_html_is_authenticated(
         html
     ):
+        confirmed_need_login = (
+            _sidea_prod_confirm_need_login(
+                    session,
+                    account_key,
+                    "SEARCH_CURP",
+                    pool=pool,
+                )
+        )
+
+        if not confirmed_need_login:
+            raise SideaError(
+                "SIDEA_AUTH_AMBIGUOUS:"
+                f"{account_key}:"
+                "SEARCH_CURP"
+            )
+
         pool.clear_session(
             account_key,
             reason="NEED_LOGIN",
@@ -3547,12 +4059,44 @@ class _SideaHiddenInputParser(HTMLParser):
 def _sidea_find_matching_row_html(
     html: str,
     curp: str,
+    companion_curp: str | None = None,
 ) -> str:
+
+    # ========================================================
+    # PROVIDER16_AMBIGUOUS_SEMANTIC_DEDUPE_V1
+    #
+    # SIDEA puede devolver:
+    #
+    # 1. Una sola fila real.
+    #
+    # 2. Varias filas del MISMO acto registral, por ejemplo
+    #    registro=0 / registro=1 con cadenas diferentes.
+    #
+    # 3. Varias actas realmente distintas para la misma CURP.
+    #
+    # Además, en actos especiales la persona solicitada puede
+    # estar en:
+    #   curp
+    #   curp_1
+    #   curp_2
+    #
+    # Sólo auto-resolvemos 1 y 2.
+    # El caso 3 permanece AMBIGUOUS.
+    # ========================================================
 
     requested = (
         curp
         or ""
     ).strip().upper()
+
+    # PROVIDER16_PAIR_HINT_V1
+    companion = (
+        companion_curp
+        or ""
+    ).strip().upper()
+
+    if companion == requested:
+        companion = ""
 
     if not requested:
         raise SideaError(
@@ -3578,34 +4122,451 @@ def _sidea_find_matching_row_html(
             "CURP_ROW_NOT_FOUND"
         )
 
-    if len(matched) > 1:
-        # No escoger a ciegas una fila ambigua.
-        exact = []
+    # --------------------------------------------------------
+    # Una sola TR:
+    # conservar compatibilidad del flujo actual.
+    # --------------------------------------------------------
 
-        for row in matched:
-            parser = (
-                _SideaHiddenInputParser()
-            )
-            parser.feed(row)
+    if len(matched) == 1:
+        return matched[0]
 
-            hidden_curp = (
-                parser.values.get("curp")
+
+    # --------------------------------------------------------
+    # Varias TR:
+    # confirmar coincidencia REAL en los hidden inputs.
+    # --------------------------------------------------------
+
+    candidates = []
+
+    for row in matched:
+
+        parser = (
+            _SideaHiddenInputParser()
+        )
+
+        parser.feed(row)
+
+        hidden = {
+            str(k or "")
+            .strip()
+            .lower(): str(v or "").strip()
+            for k, v
+            in parser.values.items()
+        }
+
+        match_slots = []
+
+        for slot in (
+            "curp",
+            "curp_1",
+            "curp_2",
+        ):
+
+            value = (
+                hidden.get(slot)
                 or ""
             ).strip().upper()
 
-            if hidden_curp == requested:
-                exact.append(row)
+            if value == requested:
+                match_slots.append(slot)
 
-        if len(exact) == 1:
-            return exact[0]
+        if match_slots:
+
+            candidates.append(
+                {
+                    "row": row,
+                    "hidden": hidden,
+                    "match_slots": (
+                        tuple(match_slots)
+                    ),
+                }
+            )
+
+
+    # Si solamente una de las filas contiene realmente la CURP
+    # en alguno de los tres slots, esa es la fila correcta.
+
+    if len(candidates) == 1:
+
+        print(
+            "PROVIDER16_SIDEA_"
+            "AMBIGUOUS_RESOLVED_BY_CURP_SLOT =",
+            {
+                "curp": requested,
+                "raw_rows": len(matched),
+                "matched_rows": 1,
+                "match_slots": (
+                    candidates[0][
+                        "match_slots"
+                    ]
+                ),
+            },
+            flush=True,
+        )
+
+        return candidates[0]["row"]
+
+
+    if not candidates:
 
         raise SideaError(
             "SIDEA_AMBIGUOUS_CURP_ROWS:"
             f"{len(matched)}"
         )
 
-    return matched[0]
+    # ========================================================
+    # PROVIDER16_PAIR_HINT_V1
+    #
+    # Para MATRIMONIO / DIVORCIO, si el mensaje original
+    # contenía exactamente otra CURP, puede servir como
+    # discriminador seguro.
+    #
+    # IMPORTANTE:
+    # - sólo filtra si la otra CURP aparece realmente
+    #   en curp / curp_1 / curp_2;
+    # - si no aparece, NO fuerza selección alguna;
+    # - varias coincidencias continúan por dedupe semántico.
+    # ========================================================
+    if companion:
 
+        paired_candidates = []
+
+        for candidate in candidates:
+
+            hidden = candidate["hidden"]
+
+            row_curps = {
+                (
+                    hidden.get(slot)
+                    or ""
+                ).strip().upper()
+                for slot in (
+                    "curp",
+                    "curp_1",
+                    "curp_2",
+                )
+                if (
+                    hidden.get(slot)
+                    or ""
+                ).strip()
+            }
+
+            if companion in row_curps:
+                paired_candidates.append(
+                    candidate
+                )
+
+        if len(paired_candidates) == 1:
+
+            selected_hidden = (
+                paired_candidates[0][
+                    "hidden"
+                ]
+            )
+
+            print(
+                "PROVIDER16_SIDEA_PAIR_HINT_RESOLVED =",
+                {
+                    "curp": requested,
+                    "companion_curp": companion,
+                    "candidates_before": len(
+                        candidates
+                    ),
+                    "candidates_after": 1,
+                    "cadena": (
+                        selected_hidden.get(
+                            "cadena"
+                        )
+                        or ""
+                    ),
+                },
+                flush=True,
+            )
+
+            return paired_candidates[0][
+                "row"
+            ]
+
+        if len(paired_candidates) > 1:
+
+            print(
+                "PROVIDER16_SIDEA_PAIR_HINT_FILTERED =",
+                {
+                    "curp": requested,
+                    "companion_curp": companion,
+                    "candidates_before": len(
+                        candidates
+                    ),
+                    "candidates_after": len(
+                        paired_candidates
+                    ),
+                },
+                flush=True,
+            )
+
+            candidates = paired_candidates
+
+        else:
+
+            print(
+                "PROVIDER16_SIDEA_PAIR_HINT_NOT_APPLICABLE =",
+                {
+                    "curp": requested,
+                    "companion_curp": companion,
+                    "candidates": len(
+                        candidates
+                    ),
+                },
+                flush=True,
+            )
+
+
+    # --------------------------------------------------------
+    # Identidad SEMANTICA del acta.
+    #
+    # Intencionalmente NO usamos:
+    #   cadena
+    #   registro
+    #
+    # porque SIDEA puede tener dos representaciones del mismo
+    # acto (ej. TETF: registro 0/1) con cadenas distintas.
+    #
+    # Sí usamos datos registrales + ambas personas.
+    # --------------------------------------------------------
+
+    identity_fields = (
+        "acto",
+        "entidad",
+        "municipio",
+        "oficialia",
+        "anio",
+        "acta",
+
+        # PROVIDER16_AMBIGUOUS_IGNORE_ACTABIS_V1
+        #
+        # actabis puede diferir 0/1 entre dos filas SIDEA
+        # que representan el MISMO acto registral.
+        # No forma parte de la identidad semántica.
+        "libro",
+        "tomo",
+        "foja",
+        "fecharegistro",
+
+        "curp",
+        "curp_1",
+        "curp_2",
+
+        "primerapellido_1",
+        "segundoapellido_1",
+        "nombre_1",
+
+        "primerapellido_2",
+        "segundoapellido_2",
+        "nombre_2",
+    )
+
+
+    def _identity(hidden):
+
+        return tuple(
+            (
+                hidden.get(field)
+                or ""
+            ).strip().upper()
+            for field in identity_fields
+        )
+
+
+    identities = {}
+
+    for candidate in candidates:
+
+        identity = _identity(
+            candidate["hidden"]
+        )
+
+        identities.setdefault(
+            identity,
+            [],
+        ).append(
+            candidate
+        )
+
+
+    # --------------------------------------------------------
+    # Todas las filas describen el MISMO acto.
+    #
+    # Ya comprobamos en diagnóstico real que SIDEA puede
+    # resolver ambas cadenas de ese mismo acto.
+    #
+    # Conservamos la primera fila en el orden entregado por
+    # SIDEA; NO elegimos una cadena por heurística inventada.
+    # --------------------------------------------------------
+
+    if len(identities) == 1:
+
+        chains = sorted({
+            (
+                candidate["hidden"]
+                .get("cadena")
+                or ""
+            ).strip()
+            for candidate in candidates
+            if (
+                candidate["hidden"]
+                .get("cadena")
+                or ""
+            ).strip()
+        })
+
+        registros = sorted({
+            (
+                candidate["hidden"]
+                .get("registro")
+                or ""
+            ).strip()
+            for candidate in candidates
+            if (
+                candidate["hidden"]
+                .get("registro")
+                or ""
+            ).strip()
+        })
+
+        first_hidden = (
+            candidates[0]["hidden"]
+        )
+
+        print(
+            "PROVIDER16_SIDEA_"
+            "DUPLICATE_ACT_ROWS_DEDUPED =",
+            {
+                "curp": requested,
+                "rows": len(candidates),
+                "acto": (
+                    first_hidden.get(
+                        "acto"
+                    )
+                    or ""
+                ),
+                "entidad": (
+                    first_hidden.get(
+                        "entidad"
+                    )
+                    or ""
+                ),
+                "municipio": (
+                    first_hidden.get(
+                        "municipio"
+                    )
+                    or ""
+                ),
+                "oficialia": (
+                    first_hidden.get(
+                        "oficialia"
+                    )
+                    or ""
+                ),
+                "anio": (
+                    first_hidden.get(
+                        "anio"
+                    )
+                    or ""
+                ),
+                "acta": (
+                    first_hidden.get(
+                        "acta"
+                    )
+                    or ""
+                ),
+                "chains": chains,
+                "registros": registros,
+                "selected": (
+                    (
+                        first_hidden.get(
+                            "cadena"
+                        )
+                        or ""
+                    ).strip()
+                ),
+            },
+            flush=True,
+        )
+
+        return candidates[0]["row"]
+
+
+    # --------------------------------------------------------
+    # Aquí sí existen VARIAS ACTAS REALES.
+    #
+    # Nunca escoger automáticamente.
+    # --------------------------------------------------------
+
+    summaries = []
+
+    for candidate in candidates:
+
+        hidden = candidate["hidden"]
+
+        summaries.append(
+            {
+                "cadena": (
+                    hidden.get("cadena")
+                    or ""
+                ),
+                "entidad": (
+                    hidden.get("entidad")
+                    or ""
+                ),
+                "municipio": (
+                    hidden.get("municipio")
+                    or ""
+                ),
+                "oficialia": (
+                    hidden.get("oficialia")
+                    or ""
+                ),
+                "anio": (
+                    hidden.get("anio")
+                    or ""
+                ),
+                "acta": (
+                    hidden.get("acta")
+                    or ""
+                ),
+                "registro": (
+                    hidden.get("registro")
+                    or ""
+                ),
+                "curp_1": (
+                    hidden.get("curp_1")
+                    or ""
+                ),
+                "curp_2": (
+                    hidden.get("curp_2")
+                    or ""
+                ),
+            }
+        )
+
+    print(
+        "PROVIDER16_SIDEA_"
+        "MULTIPLE_REAL_ACTS =",
+        {
+            "curp": requested,
+            "rows": len(candidates),
+            "unique_acts": (
+                len(identities)
+            ),
+            "candidates": summaries,
+        },
+        flush=True,
+    )
+
+    raise SideaError(
+        "SIDEA_AMBIGUOUS_CURP_ROWS:"
+        f"{len(identities)}"
+    )
 
 def _sidea_hidden_values_from_row(
     row_html: str,
@@ -3638,6 +4599,7 @@ def sidea_search_curp(
     entidad: str | int,
     acto: str | int = "1",
     tipo: str | int = "1",
+    companion_curp: str | None = None,
 ) -> dict:
     """
     V3 definitiva.
@@ -3725,9 +4687,38 @@ def sidea_search_curp(
 
     html = response.text or ""
 
+    if _sidea_quarantine_password_change(
+        pool,
+        account_key,
+        html,
+        "SEARCH_CURP",
+    ):
+        raise SideaNeedLogin(
+            "SIDEA_PASSWORD_CHANGE_REQUIRED:"
+            f"{account_key}:"
+            "SEARCH_CURP"
+        )
+
     if not _sidea_html_is_authenticated(
         html
     ):
+        confirmed_need_login = (
+            _sidea_prod_confirm_need_login(
+                    session,
+                    account_key,
+                    "SEARCH_CURP",
+                    pool=pool,
+                )
+        )
+
+        if not confirmed_need_login:
+            # SIDEA_ACCOUNT_AUTH_FAILOVER_V2
+            raise SideaNeedLogin(
+                "SIDEA_AUTH_AMBIGUOUS:"
+                f"{account_key}:"
+                "SEARCH_CURP"
+            )
+
         pool.clear_session(
             account_key,
             reason="NEED_LOGIN",
@@ -3751,6 +4742,7 @@ def sidea_search_curp(
         _sidea_find_matching_row_html(
             html,
             curp,
+            companion_curp=companion_curp,
         )
     )
 
@@ -4636,6 +5628,392 @@ def _sidea_prod_monitor_get(
     )
 
 
+# ============================================================
+# SIDEA_AUTH_CONFIRM_BEFORE_CLEAR_V1
+#
+# Una sola respuesta HTML sospechosa JAMAS debe eliminar
+# una sesión compartida de producción.
+#
+# Confirmamos usando /solicitudes.do dos veces.
+#
+# Estados:
+#   AUTH    -> sesión viva
+#   EXPIRED -> login / sesión finalizada explícitos
+#   UNKNOWN -> respuesta ambigua; NO borrar
+# ============================================================
+
+def _sidea_prod_confirm_need_login(
+    session,
+    account_key: str,
+    context: str,
+    pool: SideaPool | None = None,
+) -> bool:
+    """
+    SIDEA_AUTH_EXPIRED_3_CYCLES_SHARED_V2
+
+    Una rafaga corta EXPIRED/EXPIRED NO basta para
+    destruir una sesion compartida de produccion.
+
+    Cada doble confirmacion EXPIRED cuenta como UN
+    ciclo independiente.
+
+    Worker y keepalive comparten:
+
+      provider16:sidea:auth_expired_streak:v1:<account>
+      provider16:sidea:auth_expired_strike_gate:v1:<account>
+
+    Reglas:
+      AUTH:
+        reset total de sospecha.
+
+      UNKNOWN / HTTP error:
+        conservar sesion y conservar contador.
+
+      EXPIRED + EXPIRED:
+        maximo 1 strike cada 180 segundos.
+
+      3 strikes independientes:
+        confirmar NEED_LOGIN.
+    """
+
+    verify_url = (
+        f"{SIDEA_BASE_URL}"
+        "/solicitudes.do"
+    )
+
+    strike_key = (
+        "provider16:sidea:"
+        "auth_expired_streak:v1:"
+        f"{account_key}"
+    )
+
+    gate_key = (
+        "provider16:sidea:"
+        "auth_expired_strike_gate:v1:"
+        f"{account_key}"
+    )
+
+    def classify(response) -> str:
+
+        html = (
+            response.text
+            or ""
+        )
+
+        if _sidea_html_is_authenticated(
+            html
+        ):
+            return "AUTH"
+
+        lower = html.lower()
+
+        final_url = str(
+            getattr(
+                response,
+                "url",
+                "",
+            )
+            or ""
+        ).lower()
+
+        expired_signals = (
+            "sesi&oacute;n finalizada",
+            "sesión finalizada",
+            "sesion finalizada",
+            "ha finalizado debido",
+            "tiempo de inactiv",
+            "acceder nuevamente",
+        )
+
+        if any(
+            signal in lower
+            for signal in expired_signals
+        ):
+            return "EXPIRED"
+
+        login_form = (
+            "autenticacion.do"
+            in lower
+            and (
+                "contrasenia"
+                in lower
+                or "contrase&ntilde;a"
+                in lower
+                or "contraseña"
+                in lower
+            )
+        )
+
+        if login_form:
+            return "EXPIRED"
+
+        if (
+            "autenticacion.do"
+            in final_url
+        ):
+            return "EXPIRED"
+
+        return "UNKNOWN"
+
+
+    states = []
+
+    for attempt in (1, 2):
+
+        if attempt == 2:
+            time.sleep(2.0)
+
+        try:
+            response = session.get(
+                verify_url,
+                timeout=(
+                    SIDEA_HTTP_CONNECT_TIMEOUT,
+                    SIDEA_HTTP_READ_TIMEOUT,
+                ),
+                allow_redirects=True,
+            )
+
+            response.raise_for_status()
+
+        except requests.RequestException as exc:
+
+            print(
+                "SIDEA_AUTH_CONFIRM_INCONCLUSIVE =",
+                {
+                    "account": account_key,
+                    "context": context,
+                    "attempt": attempt,
+                    "error_type": (
+                        type(exc).__name__
+                    ),
+                },
+                flush=True,
+            )
+
+            # ConnectionReset / HTTP 500 / timeout
+            # JAMAS significa por si solo sesion perdida.
+            return False
+
+        state = classify(
+            response
+        )
+
+        states.append(
+            state
+        )
+
+        print(
+            "SIDEA_AUTH_CONFIRM_CHECK =",
+            {
+                "account": account_key,
+                "context": context,
+                "attempt": attempt,
+                "state": state,
+                "http_status": (
+                    response.status_code
+                ),
+            },
+            flush=True,
+        )
+
+        # ====================================================
+        # AUTH REAL:
+        # borrar todos los strikes acumulados.
+        # ====================================================
+
+        if state == "AUTH":
+
+            if pool is not None:
+                try:
+                    pool.redis.delete(
+                        strike_key,
+                        gate_key,
+                    )
+                except Exception as exc:
+                    print(
+                        "SIDEA_AUTH_STRIKE_RESET_ERROR =",
+                        {
+                            "account": account_key,
+                            "context": context,
+                            "error": str(exc)[:250],
+                        },
+                        flush=True,
+                    )
+
+            print(
+                "SIDEA_AUTH_SUSPECT_RECOVERED =",
+                {
+                    "account": account_key,
+                    "context": context,
+                },
+                flush=True,
+            )
+
+            return False
+
+        # ====================================================
+        # UNKNOWN:
+        # no sumar strikes y no borrar sesion.
+        # ====================================================
+
+        if state == "UNKNOWN":
+
+            print(
+                "SIDEA_AUTH_AMBIGUOUS_PRESERVED =",
+                {
+                    "account": account_key,
+                    "context": context,
+                },
+                flush=True,
+            )
+
+            return False
+
+
+    # ========================================================
+    # Sólo EXPIRED + EXPIRED llega hasta aquí.
+    # ========================================================
+
+    if states != [
+        "EXPIRED",
+        "EXPIRED",
+    ]:
+        return False
+
+
+    # Sin Redis compartido, fail-safe:
+    # JAMÁS destruir la sesión.
+    if pool is None:
+
+        print(
+            "SIDEA_AUTH_SHARED_COUNTER_MISSING_PRESERVED =",
+            {
+                "account": account_key,
+                "context": context,
+            },
+            flush=True,
+        )
+
+        return False
+
+
+    # ========================================================
+    # CICLOS INDEPENDIENTES
+    #
+    # Máximo un strike cada 180 s aunque 10 workers
+    # vean EXPIRED simultáneamente.
+    # ========================================================
+
+    try:
+        gate_acquired = bool(
+            pool.redis.set(
+                gate_key,
+                "1",
+                nx=True,
+                ex=180,
+            )
+        )
+
+        if gate_acquired:
+
+            strike_count = int(
+                pool.redis.incr(
+                    strike_key
+                )
+            )
+
+            pool.redis.expire(
+                strike_key,
+                3600,
+            )
+
+        else:
+
+            strike_raw = (
+                pool.redis.get(
+                    strike_key
+                )
+            )
+
+            strike_count = int(
+                strike_raw
+                or 0
+            )
+
+    except Exception as exc:
+
+        print(
+            "SIDEA_AUTH_EXPIRED_COUNTER_ERROR =",
+            {
+                "account": account_key,
+                "context": context,
+                "error": str(exc)[:250],
+            },
+            flush=True,
+        )
+
+        # Redis dudoso = conservar sesión.
+        return False
+
+
+    print(
+        "SIDEA_AUTH_EXPIRED_STRIKE_V2 =",
+        {
+            "account": account_key,
+            "context": context,
+            "strike": strike_count,
+            "required": 3,
+            "gate_acquired": gate_acquired,
+            "states": states,
+        },
+        flush=True,
+    )
+
+
+    # ========================================================
+    # STRIKE 1 / 2:
+    # NO borrar cookies.
+    # ========================================================
+
+    if strike_count < 3:
+
+        print(
+            "SIDEA_AUTH_EXPIRED_SESSION_PRESERVED_V2 =",
+            {
+                "account": account_key,
+                "context": context,
+                "strike": strike_count,
+                "required": 3,
+            },
+            flush=True,
+        )
+
+        return False
+
+
+    # ========================================================
+    # 3 ciclos independientes:
+    # ahora sí consideramos pérdida real.
+    # El caller existente hará clear_session(NEED_LOGIN).
+    # ========================================================
+
+    print(
+        "SIDEA_AUTH_LOSS_CONFIRMED =",
+        {
+            "account": account_key,
+            "context": context,
+            "states": states,
+            "strike": strike_count,
+            "required": 3,
+            "policy": (
+                "EXPIRED_3_INDEPENDENT_CYCLES"
+            ),
+        },
+        flush=True,
+    )
+
+    return True
+
 def _sidea_prod_candidate_accounts(
     pool: SideaPool,
     accounts: list[SideaAccount],
@@ -4847,6 +6225,7 @@ def sidea_search_curp_auto(
     acto: str | int = "1",
     tipo: str | int = "1",
     preferred_entidad=None,
+    companion_curp: str | None = None,
 ) -> dict:
     """
     Localiza el registro probando entidades.
@@ -4878,6 +6257,7 @@ def sidea_search_curp_auto(
                 entidad=candidate,
                 acto=str(acto),
                 tipo=str(tipo),
+                companion_curp=companion_curp,
             )
 
         except SideaNoRecord as exc:
@@ -4931,6 +6311,7 @@ def sidea_generate_pdf(
     response_poll_attempts: int = 45,
     response_poll_delay_sec: float = 4.0,
     add_internal_folio: bool = False,
+    companion_curp: str | None = None,
 ) -> dict:
     """
     PROVIDER16 SIDEA - flujo completo de producción.
@@ -6238,6 +7619,10 @@ def sidea_generate_pdf(
         )
 
     last_need_login = None
+    # SIDEA_AUTH_FINAL_CLASSIFICATION_V1
+    auth_ambiguous_seen = False
+    confirmed_need_login_seen = False
+    saw_capacity_wait = False
 
     for account in candidates:
 
@@ -6249,6 +7634,7 @@ def sidea_generate_pdf(
         )
 
         if not lock_token:
+            saw_capacity_wait = True
             continue
 
         try:
@@ -6267,10 +7653,56 @@ def sidea_generate_pdf(
                     acto=acto,
                     tipo=tipo,
                     preferred_entidad=entidad,
+                    companion_curp=companion_curp,
                 )
 
             except SideaNeedLogin as exc:
                 last_need_login = exc
+                auth_error_text = str(exc)
+                if auth_error_text.startswith(
+                    "SIDEA_AUTH_AMBIGUOUS:"
+                ):
+                    auth_ambiguous_seen = True
+                else:
+                    confirmed_need_login_seen = True
+
+                err_need_login = str(exc)
+
+                # PROVIDER16_PASSWORD_CHANGE_SKIP_ACCOUNT_V1
+                #
+                # Una cuenta bloqueada por renovación de contraseña
+                # no debe tumbar la solicitud completa.
+                # Ya quedó fuera del pool como
+                # PASSWORD_CHANGE_REQUIRED; probar otra SIDEA.
+                if err_need_login.startswith(
+                    "SIDEA_PASSWORD_CHANGE_REQUIRED:"
+                ):
+                    print(
+                        "SIDEA_PASSWORD_CHANGE_SKIP_ACCOUNT =",
+                        {
+                            "request_id": request_id_int,
+                            "account": account.key,
+                            "flow": "GENERATE_PDF",
+                            "error": err_need_login[:250],
+                        },
+                        flush=True,
+                    )
+                    continue
+
+                # SIDEA_ACCOUNT_AUTH_FAILOVER_V2
+                # La cuenta actual tuvo problema de autenticación
+                # antes de reservar cuota. Probar la siguiente.
+                print(
+                    "SIDEA_ACCOUNT_AUTH_FAILOVER =",
+                    {
+                        "request_id": request_id_int,
+                        "account": account.key,
+                        "flow": "GENERATE_PDF",
+                        "error": err_need_login[:250],
+                    },
+                    flush=True,
+                )
+
                 continue
 
             chain = (
@@ -6504,6 +7936,7 @@ def sidea_generate_pdf(
             )
 
             if reserved is None:
+                saw_capacity_wait = True
                 continue
 
             _write_request_audit(
@@ -7208,7 +8641,30 @@ def sidea_generate_pdf(
                 lock_token,
             )
 
-    if last_need_login is not None:
+    # ========================================================
+    # SIDEA_AUTH_FINAL_CLASSIFICATION_V1
+    #
+    # Prioridad:
+    # 1) si una cuenta sana pudo estar simplemente ocupada,
+    #    reintentar como capacidad;
+    # 2) AUTH_AMBIGUOUS nunca se convierte falsamente en
+    #    ALL_READY_ACCOUNTS_NEED_LOGIN;
+    # 3) ALL_READY_ACCOUNTS_NEED_LOGIN solo cuando los fallos
+    #    observados fueron login confirmado.
+    # ========================================================
+
+    if saw_capacity_wait:
+        raise SideaBusy(
+            "SIDEA_ALL_READY_ACCOUNTS_BUSY"
+        )
+
+    if auth_ambiguous_seen:
+        raise SideaError(
+            "SIDEA_AUTH_AMBIGUOUS:"
+            "ALL_READY_ACCOUNTS"
+        )
+
+    if confirmed_need_login_seen:
         raise SideaNeedLogin(
             "SIDEA_ALL_READY_ACCOUNTS_NEED_LOGIN"
         ) from last_need_login
@@ -7493,6 +8949,10 @@ def sidea_resolve_chain(
         )
 
     last_need_login = None
+    # SIDEA_AUTH_FINAL_CLASSIFICATION_V1
+    auth_ambiguous_seen = False
+    confirmed_need_login_seen = False
+    saw_capacity_wait = False
     last_no_record = None
     obtained_lock = False
 
@@ -7506,6 +8966,7 @@ def sidea_resolve_chain(
         )
 
         if not lock_token:
+            saw_capacity_wait = True
             continue
 
         obtained_lock = True
@@ -7521,6 +8982,13 @@ def sidea_resolve_chain(
 
             except SideaNeedLogin as exc:
                 last_need_login = exc
+                auth_error_text = str(exc)
+                if auth_error_text.startswith(
+                    "SIDEA_AUTH_AMBIGUOUS:"
+                ):
+                    auth_ambiguous_seen = True
+                else:
+                    confirmed_need_login_seen = True
                 continue
 
             try:
@@ -7553,19 +9021,75 @@ def sidea_resolve_chain(
 
             html = response.text or ""
 
+            if _sidea_quarantine_password_change(
+                pool,
+                account.key,
+                html,
+                "CHAIN_SEARCH",
+            ):
+                confirmed_need_login_seen = True
+                last_need_login = SideaNeedLogin(
+                    "SIDEA_PASSWORD_CHANGE_REQUIRED:"
+                    f"{account.key}:"
+                    "CHAIN_SEARCH"
+                )
+                continue
+
             if not _sidea_html_is_authenticated(
                 html
             ):
+                confirmed_need_login = (
+                    _sidea_prod_confirm_need_login(
+                    session,
+                    account.key,
+                    "CHAIN_SEARCH",
+                    pool=pool,
+                )
+                )
+
+                if not confirmed_need_login:
+                    auth_ambiguous_seen = True
+                    # SIDEA_ACCOUNT_AUTH_FAILOVER_V2
+                    last_need_login = SideaNeedLogin(
+                        "SIDEA_AUTH_AMBIGUOUS:"
+                        f"{account.key}:"
+                        "CHAIN_SEARCH"
+                    )
+
+                    print(
+                        "SIDEA_ACCOUNT_AUTH_FAILOVER =",
+                        {
+                            "account": account.key,
+                            "flow": "CHAIN_SEARCH",
+                            "error": str(last_need_login),
+                        },
+                        flush=True,
+                    )
+
+                    continue
+
                 pool.clear_session(
                     account.key,
                     reason="NEED_LOGIN",
                 )
 
+                confirmed_need_login_seen = True
                 last_need_login = (
                     SideaNeedLogin(
                         "SIDEA_NEED_LOGIN:"
                         f"{account.key}"
                     )
+                )
+
+                # SIDEA_ACCOUNT_AUTH_FAILOVER_V2
+                print(
+                    "SIDEA_ACCOUNT_AUTH_FAILOVER =",
+                    {
+                        "account": account.key,
+                        "flow": "CHAIN_SEARCH",
+                        "error": str(last_need_login),
+                    },
+                    flush=True,
                 )
 
                 continue
@@ -7700,16 +9224,31 @@ def sidea_resolve_chain(
                 lock_token,
             )
 
-    if last_need_login is not None:
-        raise SideaNeedLogin(
-            "SIDEA_ALL_READY_ACCOUNTS_NEED_LOGIN"
-        ) from last_need_login
+    # ========================================================
+    # SIDEA_AUTH_FINAL_CLASSIFICATION_V1
+    # ========================================================
+
+    if saw_capacity_wait:
+        raise SideaBusy(
+            "SIDEA_ALL_READY_ACCOUNTS_BUSY"
+        )
 
     if last_no_record is not None:
         raise SideaNoRecord(
             "SIDEA_NO_RECORD:"
             "CHAIN_NOT_FOUND"
         ) from last_no_record
+
+    if auth_ambiguous_seen:
+        raise SideaError(
+            "SIDEA_AUTH_AMBIGUOUS:"
+            "ALL_READY_ACCOUNTS"
+        )
+
+    if confirmed_need_login_seen:
+        raise SideaNeedLogin(
+            "SIDEA_ALL_READY_ACCOUNTS_NEED_LOGIN"
+        ) from last_need_login
 
     if not obtained_lock:
         raise SideaBusy(
@@ -7727,6 +9266,7 @@ def sidea_resolve_special_curp_to_chain(
     curp: str,
     acto: str | int,
     accounts: list[SideaAccount] | None = None,
+    companion_curp: str | None = None,
 ) -> dict:
     """
     DEFUNCION / MATRIMONIO / DIVORCIO por CURP.
@@ -7746,6 +9286,14 @@ def sidea_resolve_special_curp_to_chain(
         curp
         or ""
     ).strip().upper()
+
+    companion_curp = (
+        companion_curp
+        or ""
+    ).strip().upper()
+
+    if companion_curp == curp:
+        companion_curp = ""
 
     acto = str(
         acto
@@ -7800,6 +9348,10 @@ def sidea_resolve_special_curp_to_chain(
         )
 
     last_need_login = None
+    # SIDEA_AUTH_FINAL_CLASSIFICATION_V1
+    auth_ambiguous_seen = False
+    confirmed_need_login_seen = False
+    saw_capacity_wait = False
     last_no_record = None
     obtained_lock = False
 
@@ -7813,6 +9365,7 @@ def sidea_resolve_special_curp_to_chain(
         )
 
         if not lock_token:
+            saw_capacity_wait = True
             continue
 
         obtained_lock = True
@@ -7828,6 +9381,13 @@ def sidea_resolve_special_curp_to_chain(
 
             except SideaNeedLogin as exc:
                 last_need_login = exc
+                auth_error_text = str(exc)
+                if auth_error_text.startswith(
+                    "SIDEA_AUTH_AMBIGUOUS:"
+                ):
+                    auth_ambiguous_seen = True
+                else:
+                    confirmed_need_login_seen = True
                 continue
 
             try:
@@ -7863,19 +9423,75 @@ def sidea_resolve_special_curp_to_chain(
 
             html = response.text or ""
 
+            if _sidea_quarantine_password_change(
+                pool,
+                account.key,
+                html,
+                "SPECIAL_CURP_SEARCH",
+            ):
+                confirmed_need_login_seen = True
+                last_need_login = SideaNeedLogin(
+                    "SIDEA_PASSWORD_CHANGE_REQUIRED:"
+                    f"{account.key}:"
+                    "SPECIAL_CURP_SEARCH"
+                )
+                continue
+
             if not _sidea_html_is_authenticated(
                 html
             ):
+                confirmed_need_login = (
+                    _sidea_prod_confirm_need_login(
+                    session,
+                    account.key,
+                    "SPECIAL_CURP_SEARCH",
+                    pool=pool,
+                )
+                )
+
+                if not confirmed_need_login:
+                    auth_ambiguous_seen = True
+                    # SIDEA_ACCOUNT_AUTH_FAILOVER_V2
+                    last_need_login = SideaNeedLogin(
+                        "SIDEA_AUTH_AMBIGUOUS:"
+                        f"{account.key}:"
+                        "SPECIAL_CURP_SEARCH"
+                    )
+
+                    print(
+                        "SIDEA_ACCOUNT_AUTH_FAILOVER =",
+                        {
+                            "account": account.key,
+                            "flow": "SPECIAL_CURP_SEARCH",
+                            "error": str(last_need_login),
+                        },
+                        flush=True,
+                    )
+
+                    continue
+
                 pool.clear_session(
                     account.key,
                     reason="NEED_LOGIN",
                 )
 
+                confirmed_need_login_seen = True
                 last_need_login = (
                     SideaNeedLogin(
                         "SIDEA_NEED_LOGIN:"
                         f"{account.key}"
                     )
+                )
+
+                # SIDEA_ACCOUNT_AUTH_FAILOVER_V2
+                print(
+                    "SIDEA_ACCOUNT_AUTH_FAILOVER =",
+                    {
+                        "account": account.key,
+                        "flow": "SPECIAL_CURP_SEARCH",
+                        "error": str(last_need_login),
+                    },
+                    flush=True,
                 )
 
                 continue
@@ -7885,6 +9501,9 @@ def sidea_resolve_special_curp_to_chain(
                     _sidea_find_matching_row_html(
                         html,
                         curp,
+                        companion_curp=(
+                            companion_curp
+                        ),
                     )
                 )
 
@@ -8022,16 +9641,31 @@ def sidea_resolve_special_curp_to_chain(
                 lock_token,
             )
 
-    if last_need_login is not None:
-        raise SideaNeedLogin(
-            "SIDEA_ALL_READY_ACCOUNTS_NEED_LOGIN"
-        ) from last_need_login
+    # ========================================================
+    # SIDEA_AUTH_FINAL_CLASSIFICATION_V1
+    # ========================================================
+
+    if saw_capacity_wait:
+        raise SideaBusy(
+            "SIDEA_ALL_READY_ACCOUNTS_BUSY"
+        )
 
     if last_no_record is not None:
         raise SideaNoRecord(
             "SIDEA_NO_RECORD:"
             "SPECIAL_CURP_NOT_FOUND"
         ) from last_no_record
+
+    if auth_ambiguous_seen:
+        raise SideaError(
+            "SIDEA_AUTH_AMBIGUOUS:"
+            "ALL_READY_ACCOUNTS"
+        )
+
+    if confirmed_need_login_seen:
+        raise SideaNeedLogin(
+            "SIDEA_ALL_READY_ACCOUNTS_NEED_LOGIN"
+        ) from last_need_login
 
     if not obtained_lock:
         raise SideaBusy(
@@ -8051,6 +9685,7 @@ def sidea_generate_pdf_from_chain(
     expected_acto: str | int | None = None,
     request_id: int | None = None,
     add_internal_folio: bool = False,
+    companion_curp: str | None = None,
 ) -> dict:
     """
     Cadena Digital -> registro real -> flujo normal SIDEA.
@@ -8085,6 +9720,10 @@ def sidea_generate_pdf_from_chain(
             f"REAL_{real_acto}"
         )
 
+    # PROVIDER16_CHAIN_COMPANION_PRESERVE_V1
+    # La cadena ya fue resuelta; si venimos de dos CURP,
+    # conservamos la segunda como discriminador durante
+    # la búsqueda final previa a la impresión.
     result = sidea_generate_pdf(
         pool=pool,
         curp=resolved["curp"],
@@ -8094,6 +9733,7 @@ def sidea_generate_pdf_from_chain(
         accounts=accounts,
         request_id=request_id,
         add_internal_folio=add_internal_folio,
+        companion_curp=companion_curp,
     )
 
     result = dict(result)

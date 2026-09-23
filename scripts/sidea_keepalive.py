@@ -7,7 +7,10 @@ from app.services.provider16_sidea import (
     SIDEA_HTTP_READ_TIMEOUT,
     SideaPool,
     _sidea_html_is_authenticated,
+    _sidea_html_requires_password_change,
     _sidea_safe_cookie_dict,
+    _sidea_prod_acquire_lock,
+    _sidea_prod_release_lock,
     load_sidea_accounts,
 )
 
@@ -25,6 +28,11 @@ def _keepalive_auth_state(
 
     html = html or ""
     lower = html.lower()
+
+    if _sidea_html_requires_password_change(
+        html
+    ):
+        return "PASSWORD_CHANGE_REQUIRED"
 
     if _sidea_html_is_authenticated(
         html
@@ -93,6 +101,31 @@ def main():
             )
             continue
 
+        # =====================================================
+        # SIDEA_KEEPALIVE_ACCOUNT_LOCK_V1
+        #
+        # El keepalive comparte las mismas sesiones Redis
+        # que los workers de producción.
+        #
+        # JAMÁS tocar una sesión mientras un worker esté
+        # usando esa misma cuenta.
+        # =====================================================
+        lock_token = _sidea_prod_acquire_lock(
+            pool,
+            account_key,
+            ttl_sec=120,
+        )
+
+        if not lock_token:
+            print(
+                "SIDEA_KEEPALIVE_SKIP_BUSY =",
+                {
+                    "account": account_key,
+                },
+                flush=True,
+            )
+            continue
+
         try:
             session, state = (
                 pool.build_http_session(
@@ -118,6 +151,34 @@ def main():
             )
 
             if auth_state != "AUTHENTICATED":
+
+                if (
+                    auth_state
+                    == "PASSWORD_CHANGE_REQUIRED"
+                ):
+                    pool.clear_session(
+                        account_key,
+                        reason=(
+                            "PASSWORD_CHANGE_REQUIRED"
+                        ),
+                    )
+
+                    pool.set_status(
+                        account_key,
+                        "PASSWORD_CHANGE_REQUIRED",
+                        ttl_sec=604800,
+                    )
+
+                    print(
+                        "SIDEA_KEEPALIVE_"
+                        "PASSWORD_CHANGE_REQUIRED =",
+                        {
+                            "account": account_key,
+                        },
+                        flush=True,
+                    )
+
+                    continue
 
                 print(
                     "SIDEA_KEEPALIVE_AUTH_SUSPECT =",
@@ -213,10 +274,134 @@ def main():
                         "LOGIN_FORM",
                     }
                 ):
+
+                    # ============================================
+                    # SIDEA_KEEPALIVE_EXPIRED_3_CYCLES_V1
+                    #
+                    # SIDEA está alternando entre:
+                    #   AUTH / HTTP 500 / EXPIRED.
+                    #
+                    # Dos EXPIRED separados sólo por 2 segundos
+                    # ya no son prueba suficiente para destruir
+                    # la sesión.
+                    #
+                    # Exigimos 3 CICLOS independientes.
+                    #
+                    # El gate evita que varios arranques manuales
+                    # del keepalive sumen strikes inmediatamente.
+                    # ============================================
+
+                    strike_key = (
+                        "provider16:sidea:"
+                        "auth_expired_streak:v1:"
+                        f"{account_key}"
+                    )
+
+                    gate_key = (
+                        "provider16:sidea:"
+                        "auth_expired_strike_gate:v1:"
+                        f"{account_key}"
+                    )
+
+                    try:
+                        gate_acquired = bool(
+                            pool.redis.set(
+                                gate_key,
+                                "1",
+                                nx=True,
+                                ex=180,
+                            )
+                        )
+
+                        if gate_acquired:
+                            strike_count = int(
+                                pool.redis.incr(
+                                    strike_key
+                                )
+                            )
+
+                            pool.redis.expire(
+                                strike_key,
+                                3600,
+                            )
+
+                        else:
+                            strike_raw = (
+                                pool.redis.get(
+                                    strike_key
+                                )
+                            )
+
+                            strike_count = int(
+                                strike_raw
+                                or 0
+                            )
+
+                    except Exception as exc:
+
+                        # Si Redis no permite llevar el contador
+                        # de forma fiable, NO borrar la sesión.
+                        print(
+                            "SIDEA_KEEPALIVE_"
+                            "EXPIRED_COUNTER_ERROR =",
+                            {
+                                "account": account_key,
+                                "error": str(exc)[:250],
+                            },
+                            flush=True,
+                        )
+
+                        continue
+
+                    print(
+                        "SIDEA_KEEPALIVE_"
+                        "EXPIRED_STRIKE =",
+                        {
+                            "account": account_key,
+                            "strike": strike_count,
+                            "required": 3,
+                            "first_state": auth_state,
+                            "confirm_state": (
+                                confirm_auth_state
+                            ),
+                            "gate_acquired": (
+                                gate_acquired
+                            ),
+                        },
+                        flush=True,
+                    )
+
+                    if strike_count < 3:
+
+                        print(
+                            "SIDEA_KEEPALIVE_"
+                            "EXPIRED_SESSION_PRESERVED =",
+                            {
+                                "account": account_key,
+                                "strike": strike_count,
+                                "required": 3,
+                            },
+                            flush=True,
+                        )
+
+                        continue
+
+                    # Tercer ciclo confirmado:
+                    # ahora sí consideramos la sesión vencida.
                     pool.clear_session(
                         account_key,
                         reason="NEED_LOGIN",
                     )
+
+                    try:
+                        pool.redis.delete(
+                            strike_key
+                        )
+                        pool.redis.delete(
+                            gate_key
+                        )
+                    except Exception:
+                        pass
 
                     print(
                         "SIDEA_KEEPALIVE_NEED_LOGIN_CONFIRMED =",
@@ -235,6 +420,10 @@ def main():
                                 confirm_response
                                 .status_code
                             ),
+                            "expired_cycles": (
+                                strike_count
+                            ),
+                            "required_cycles": 3,
                         },
                         flush=True,
                     )
@@ -264,6 +453,32 @@ def main():
                     )
 
                     continue
+
+            # SIDEA_KEEPALIVE_EXPIRED_3_CYCLES_V1
+            #
+            # Llegar aquí significa sesión autenticada.
+            # Cualquier racha previa de EXPIRED queda anulada.
+            try:
+                pool.redis.delete(
+                    "provider16:sidea:"
+                    "auth_expired_streak:v1:"
+                    f"{account_key}"
+                )
+                pool.redis.delete(
+                    "provider16:sidea:"
+                    "auth_expired_strike_gate:v1:"
+                    f"{account_key}"
+                )
+            except Exception as exc:
+                print(
+                    "SIDEA_KEEPALIVE_"
+                    "EXPIRED_RESET_WARN =",
+                    {
+                        "account": account_key,
+                        "error": str(exc)[:200],
+                    },
+                    flush=True,
+                )
 
             # Guardar las cookies refrescadas y renovar
             # también el TTL local de Redis.
@@ -313,6 +528,13 @@ def main():
                     "error": str(exc)[:300],
                 },
                 flush=True,
+            )
+
+        finally:
+            _sidea_prod_release_lock(
+                pool,
+                account_key,
+                lock_token,
             )
 
 
