@@ -367,7 +367,7 @@ def _provider16_restore_busy_after_delay(
 # a 5 para no intentar 7 operaciones contra 6 cuentas.
 # ============================================================
 
-PROVIDER16_NORMAL_CAPACITY = 6
+PROVIDER16_NORMAL_CAPACITY = 8
 
 PROVIDER16_CAPACITY_SLOT_PREFIX = (
     "provider16:capacity_slot:v1"
