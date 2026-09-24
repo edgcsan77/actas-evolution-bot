@@ -5315,6 +5315,16 @@ def _sidea_prod_petition_oids(
 
     result: set[str] = set()
 
+    # PROVIDER16_CHAIN_ONLY_CORRELATION_V1
+    #
+    # Exclusivo para cadenas históricas encontradas exactamente
+    # por solicitudXCadena.do que NO poseen una CURP real.
+    #
+    # Una CURP normal jamás empieza con este sentinel.
+    chain_only = wanted_curp.startswith(
+        "__SIDEA_CHAIN_ONLY__:"
+    )
+
     # dsOption:
     # 0  TA07_E_OID
     # 1  TA07_E_CURP
@@ -5349,8 +5359,11 @@ def _sidea_prod_petition_oids(
 
         if (
             oid
-            and row_curp == wanted_curp
             and row_chain == wanted_chain
+            and (
+                chain_only
+                or row_curp == wanted_curp
+            )
         ):
             result.add(oid)
 
@@ -5374,6 +5387,11 @@ def _sidea_prod_response_oids(
     ).strip()
 
     result: set[str] = set()
+
+    # PROVIDER16_CHAIN_ONLY_CORRELATION_V1
+    chain_only = wanted_curp.startswith(
+        "__SIDEA_CHAIN_ONLY__:"
+    )
 
     # dsOption2:
     # 0  CADENA
@@ -5409,8 +5427,11 @@ def _sidea_prod_response_oids(
 
         if (
             petition_oid
-            and row_curp == wanted_curp
             and row_chain == wanted_chain
+            and (
+                chain_only
+                or row_curp == wanted_curp
+            )
         ):
             result.add(
                 petition_oid
@@ -6312,6 +6333,7 @@ def sidea_generate_pdf(
     response_poll_delay_sec: float = 4.0,
     add_internal_folio: bool = False,
     companion_curp: str | None = None,
+    pre_resolved_search: dict | None = None,
 ) -> dict:
     """
     PROVIDER16 SIDEA - flujo completo de producción.
@@ -7644,16 +7666,20 @@ def sidea_generate_pdf(
             # =================================================
 
             try:
-                search = sidea_search_curp_auto(
-                    pool=pool,
-                    account_key=(
-                        account.key
-                    ),
-                    curp=curp,
-                    acto=acto,
-                    tipo=tipo,
-                    preferred_entidad=entidad,
-                    companion_curp=companion_curp,
+                search = (
+                    dict(pre_resolved_search)
+                    if pre_resolved_search is not None
+                    else sidea_search_curp_auto(
+                        pool=pool,
+                        account_key=(
+                            account.key
+                        ),
+                        curp=curp,
+                        acto=acto,
+                        tipo=tipo,
+                        preferred_entidad=entidad,
+                        companion_curp=companion_curp,
+                    )
                 )
 
             except SideaNeedLogin as exc:
@@ -9709,6 +9735,433 @@ def sidea_resolve_special_curp_to_chain(
     )
 
 
+
+def _sidea_chain_no_curp_search_for_print(
+    pool: SideaPool,
+    cadena: str,
+    accounts: list[SideaAccount] | None = None,
+) -> dict:
+    """
+    PROVIDER16_CHAIN_NO_CURP_V1
+
+    Resuelve exclusivamente una CADENA exacta cuyo registro SIDEA
+    no contiene CURP real.
+
+    - NO imprime.
+    - NO reserva cuota.
+    - NO cambia el flujo CURP existente.
+    - Devuelve el mismo formato "search" usado por sidea_generate_pdf().
+    """
+
+    cadena = (cadena or "").strip()
+
+    if not cadena:
+        raise SideaError("SIDEA_EMPTY_CHAIN")
+
+    if accounts is None:
+        accounts = load_sidea_accounts()
+
+    if not accounts:
+        raise SideaNoReadyAccount(
+            "SIDEA_ACCOUNTS_NOT_CONFIGURED"
+        )
+
+    candidates = _sidea_prod_candidate_accounts(
+        pool,
+        accounts,
+    )
+
+    if not candidates:
+        raise SideaNoReadyAccount(
+            "SIDEA_NO_READY_ACCOUNT"
+        )
+
+    last_need_login = None
+    last_no_record = None
+    saw_capacity_wait = False
+    obtained_lock = False
+
+    for account in candidates:
+
+        lock_token = _sidea_prod_acquire_lock(
+            pool,
+            account.key,
+        )
+
+        if not lock_token:
+            saw_capacity_wait = True
+            continue
+
+        obtained_lock = True
+
+        try:
+            try:
+                session, state = pool.build_http_session(
+                    account.key
+                )
+            except SideaNeedLogin as exc:
+                last_need_login = exc
+                continue
+
+            try:
+                response = session.post(
+                    (
+                        f"{SIDEA_BASE_URL}"
+                        "/solicitudXCadena.do"
+                    ),
+                    data={
+                        "cadena": cadena,
+                    },
+                    headers={
+                        "Referer": (
+                            f"{SIDEA_BASE_URL}"
+                            "/solicitudes.do"
+                        ),
+                    },
+                    timeout=(
+                        SIDEA_HTTP_CONNECT_TIMEOUT,
+                        SIDEA_HTTP_READ_TIMEOUT,
+                    ),
+                    allow_redirects=True,
+                )
+            except requests.RequestException as exc:
+                raise SideaError(
+                    "SIDEA_SEARCH_CHAIN_HTTP_ERROR:"
+                    f"{type(exc).__name__}"
+                ) from exc
+
+            html = response.text or ""
+
+            if _sidea_quarantine_password_change(
+                pool,
+                account.key,
+                html,
+                "CHAIN_NO_CURP_SEARCH",
+            ):
+                last_need_login = SideaNeedLogin(
+                    "SIDEA_PASSWORD_CHANGE_REQUIRED:"
+                    f"{account.key}:CHAIN_NO_CURP_SEARCH"
+                )
+                continue
+
+            if not _sidea_html_is_authenticated(html):
+                confirmed = _sidea_prod_confirm_need_login(
+                    session,
+                    account.key,
+                    "CHAIN_NO_CURP_SEARCH",
+                    pool=pool,
+                )
+
+                if confirmed:
+                    pool.clear_session(
+                        account.key,
+                        reason="NEED_LOGIN",
+                    )
+                    last_need_login = SideaNeedLogin(
+                        f"SIDEA_NEED_LOGIN:{account.key}"
+                    )
+                    continue
+
+                last_need_login = SideaNeedLogin(
+                    "SIDEA_AUTH_AMBIGUOUS:"
+                    f"{account.key}:CHAIN_NO_CURP_SEARCH"
+                )
+                continue
+
+            try:
+                row_html = _sidea_find_matching_row_html(
+                    html,
+                    cadena,
+                )
+            except SideaNoRecord as exc:
+                last_no_record = exc
+                continue
+
+            hidden = _sidea_hidden_values_from_row(
+                row_html
+            )
+
+            real_chain = str(
+                hidden.get("cadena") or ""
+            ).strip()
+
+            if not real_chain:
+                raise SideaNoRecord(
+                    "SIDEA_NO_RECORD:"
+                    "CHAIN_NO_CURP_EMPTY_CHAIN"
+                )
+
+            if real_chain != cadena:
+                raise SideaError(
+                    "SIDEA_CHAIN_MISMATCH"
+                )
+
+            acto = str(
+                hidden.get("acto") or ""
+            ).strip()
+
+            if acto not in {"1", "2", "3", "4"}:
+                raise SideaError(
+                    "SIDEA_CHAIN_ACT_NOT_SUPPORTED:"
+                    f"{acto}"
+                )
+
+            entidad = str(
+                hidden.get("entidad") or ""
+            ).strip()
+
+            if not entidad:
+                raise SideaError(
+                    "SIDEA_CHAIN_MISSING_ENTITY"
+                )
+
+            curp_values = [
+                str(
+                    hidden.get("curp") or ""
+                ).strip().upper(),
+                str(
+                    hidden.get("curp_1") or ""
+                ).strip().upper(),
+                str(
+                    hidden.get("curp_2") or ""
+                ).strip().upper(),
+            ]
+
+            # Esta ruta SOLO se permite si realmente NO hay CURP.
+            if any(
+                len(value) == 18
+                and value.isalnum()
+                for value in curp_values
+            ):
+                raise SideaError(
+                    "SIDEA_CHAIN_NO_CURP_ROUTE_HAS_REAL_CURP"
+                )
+
+            raw_curp = next(
+                (
+                    value
+                    for value in curp_values
+                    if value
+                ),
+                "",
+            )
+
+            # La fila histórica normalmente conserva un placeholder.
+            if not raw_curp:
+                raise SideaError(
+                    "SIDEA_CHAIN_NO_CURP_RAW_TOKEN_MISSING"
+                )
+
+            print_form = _sidea_find_form(
+                html,
+                "solicitudImpresion.do",
+            )
+
+            if not print_form:
+                raise SideaError(
+                    "SIDEA_PRINT_FORM_NOT_FOUND"
+                )
+
+            form_values = _sidea_form_values(
+                print_form
+            )
+
+            primer_apellido = str(
+                hidden.get("primerApellido") or ""
+            ).strip()
+
+            segundo_apellido = str(
+                hidden.get("segundoApellido") or ""
+            ).strip()
+
+            nombre = str(
+                hidden.get("nombre") or ""
+            ).strip()
+
+            fecha_nacimiento = str(
+                hidden.get("fnacim")
+                or hidden.get("fechaNacimiento")
+                or ""
+            ).strip()
+
+            raw_sexo = str(
+                hidden.get("sexo") or ""
+            ).strip().upper()
+
+            sexo = {
+                "HOMBRE": "M",
+                "MASCULINO": "M",
+                "H": "M",
+                "M": "M",
+                "MUJER": "F",
+                "FEMENINO": "F",
+                "F": "F",
+            }.get(
+                raw_sexo,
+                raw_sexo,
+            )
+
+            if not nombre:
+                raise SideaError(
+                    "SIDEA_RESULT_MISSING_NAME"
+                )
+
+            if not primer_apellido:
+                raise SideaError(
+                    "SIDEA_RESULT_MISSING_FIRST_LASTNAME"
+                )
+
+            if not fecha_nacimiento:
+                raise SideaError(
+                    "SIDEA_RESULT_MISSING_BIRTH_DATE"
+                )
+
+            if sexo not in {"M", "F"}:
+                raise SideaError(
+                    "SIDEA_BAD_PRINT_SEX"
+                )
+
+            session_id = str(
+                form_values.get("sessionId")
+                or state.get("session_id")
+                or ""
+            ).strip()
+
+            usuario = str(
+                form_values.get("usuario")
+                or state.get("usuario")
+                or ""
+            ).strip()
+
+            usuario_rol = str(
+                form_values.get("usuario_rol")
+                or state.get("usuario_rol")
+                or ""
+            ).strip()
+
+            usuario_entidad = str(
+                form_values.get("usuario_entidad")
+                or state.get("usuario_entidad")
+                or ""
+            ).strip()
+
+            if not session_id:
+                raise SideaError(
+                    "SIDEA_SEARCH_MISSING_SESSIONID"
+                )
+
+            print_payload = {
+                "tipo": "1",
+                "acto": acto,
+                "cadena": real_chain,
+                # Token RAW que SIDEA entregó.
+                # NO se considera CURP real.
+                "curp": raw_curp,
+                "primerApellido": primer_apellido,
+                "segundoApellido": segundo_apellido,
+                "nombre": nombre,
+                "fechaNacimiento": fecha_nacimiento,
+                "sexo": sexo,
+                "entidad": entidad,
+                "usuario": usuario,
+                "usuario_rol": usuario_rol,
+                "usuario_entidad": usuario_entidad,
+                "sessionId": session_id,
+                "formato": "1",
+                "impresiones": "1",
+                "folioHacienda": "",
+                "folioControl": "",
+                "dialecto": "1",
+            }
+
+            pool.save_session(
+                account_key=account.key,
+                cookies=_sidea_safe_cookie_dict(
+                    session
+                ),
+                session_id=session_id,
+                usuario=usuario,
+                usuario_rol=usuario_rol,
+                usuario_entidad=usuario_entidad,
+            )
+
+            print(
+                "PROVIDER16_CHAIN_NO_CURP_SEARCH_OK =",
+                {
+                    "account": account.key,
+                    "chain": real_chain,
+                    "acto": acto,
+                    "entity": entidad,
+                },
+                flush=True,
+            )
+
+            return {
+                "account_key": account.key,
+                "requested_curp": "",
+                "returned_curp": raw_curp,
+                "cadena": real_chain,
+                "primer_apellido": primer_apellido,
+                "segundo_apellido": segundo_apellido,
+                "nombre": nombre,
+                "fecha_nacimiento": fecha_nacimiento,
+                "sexo": sexo,
+                "entidad": entidad,
+                "municipio": str(
+                    hidden.get("municipio") or ""
+                ).strip(),
+                "oficialia": str(
+                    hidden.get("oficialia") or ""
+                ).strip(),
+                "anio_registro": str(
+                    hidden.get("anio") or ""
+                ).strip(),
+                "numero_acta": str(
+                    hidden.get("acta") or ""
+                ).strip(),
+                "registro": str(
+                    hidden.get("registro") or ""
+                ).strip(),
+                "acto": acto,
+                "tipo": "1",
+                "session_id": session_id,
+                "usuario": usuario,
+                "usuario_rol": usuario_rol,
+                "usuario_entidad": usuario_entidad,
+                "print_payload": print_payload,
+                "chain_no_curp": True,
+            }
+
+        finally:
+            _sidea_prod_release_lock(
+                pool,
+                account.key,
+                lock_token,
+            )
+
+    if saw_capacity_wait:
+        raise SideaBusy(
+            "SIDEA_ALL_READY_ACCOUNTS_BUSY"
+        )
+
+    if last_no_record is not None:
+        raise SideaNoRecord(
+            "SIDEA_NO_RECORD:CHAIN_NOT_FOUND"
+        ) from last_no_record
+
+    if last_need_login is not None:
+        raise last_need_login
+
+    if not obtained_lock:
+        raise SideaBusy(
+            "SIDEA_ALL_READY_ACCOUNTS_BUSY"
+        )
+
+    raise SideaNoRecord(
+        "SIDEA_NO_RECORD:CHAIN_NOT_FOUND"
+    )
+
+
 def sidea_generate_pdf_from_chain(
     pool: SideaPool,
     cadena: str,
@@ -9721,15 +10174,107 @@ def sidea_generate_pdf_from_chain(
     """
     Cadena Digital -> registro real -> flujo normal SIDEA.
 
-    expected_acto evita imprimir una cadena perteneciente
-    a un acto diferente al solicitado.
+    Si la cadena exacta pertenece a un registro histórico SIN
+    CURP real, usa PROVIDER16_CHAIN_NO_CURP_V1.
+
+    El resto del comportamiento permanece sin cambios.
     """
 
-    resolved = sidea_resolve_chain(
-        pool=pool,
-        cadena=cadena,
-        accounts=accounts,
+    effective_accounts = (
+        accounts
+        if accounts is not None
+        else load_sidea_accounts()
     )
+
+    try:
+        resolved = sidea_resolve_chain(
+            pool=pool,
+            cadena=cadena,
+            accounts=effective_accounts,
+        )
+
+    except SideaError as exc:
+
+        # ÚNICO fallback nuevo permitido.
+        if str(exc) != "SIDEA_CHAIN_MISSING_CURP":
+            raise
+
+        search = _sidea_chain_no_curp_search_for_print(
+            pool=pool,
+            cadena=cadena,
+            accounts=effective_accounts,
+        )
+
+        real_acto = str(
+            search.get("acto") or ""
+        ).strip()
+
+        expected = str(
+            expected_acto or ""
+        ).strip()
+
+        if (
+            expected
+            and real_acto != expected
+        ):
+            raise SideaError(
+                "SIDEA_CHAIN_ACT_MISMATCH:"
+                f"EXPECTED_{expected}:"
+                f"REAL_{real_acto}"
+            )
+
+        account_key = str(
+            search.get("account_key") or ""
+        ).strip()
+
+        account = next(
+            (
+                item
+                for item in effective_accounts
+                if str(item.key).strip()
+                == account_key
+            ),
+            None,
+        )
+
+        if account is None:
+            raise SideaError(
+                "SIDEA_CHAIN_NO_CURP_ACCOUNT_MISSING:"
+                f"{account_key}"
+            )
+
+        # Sentinel INTERNO.
+        # Nunca se envía a SIDEA porque print_payload ya viene
+        # preconstruido con el valor RAW de la fila.
+        correlation_curp = (
+            "__SIDEA_CHAIN_ONLY__:"
+            f"{cadena}"
+        )
+
+        result = sidea_generate_pdf(
+            pool=pool,
+            curp=correlation_curp,
+            entidad=search["entidad"],
+            acto=real_acto,
+            tipo="1",
+            accounts=[account],
+            request_id=request_id,
+            add_internal_folio=add_internal_folio,
+            companion_curp=None,
+            pre_resolved_search=search,
+        )
+
+        result = dict(result)
+        result["resolved_from_chain"] = True
+        result["chain_without_real_curp"] = True
+        result["input_chain"] = cadena
+        result["resolved_acto"] = real_acto
+
+        return result
+
+    # ========================================================
+    # FLUJO EXISTENTE: CADENA CON CURP REAL
+    # ========================================================
 
     expected = str(
         expected_acto
@@ -9751,34 +10296,22 @@ def sidea_generate_pdf_from_chain(
             f"REAL_{real_acto}"
         )
 
-    # PROVIDER16_CHAIN_COMPANION_PRESERVE_V1
-    # La cadena ya fue resuelta; si venimos de dos CURP,
-    # conservamos la segunda como discriminador durante
-    # la búsqueda final previa a la impresión.
     result = sidea_generate_pdf(
         pool=pool,
         curp=resolved["curp"],
         entidad=resolved["entidad"],
         acto=real_acto,
         tipo="1",
-        accounts=accounts,
+        accounts=effective_accounts,
         request_id=request_id,
         add_internal_folio=add_internal_folio,
         companion_curp=companion_curp,
     )
 
     result = dict(result)
-
-    result[
-        "resolved_from_chain"
-    ] = True
-
-    result[
-        "input_chain"
-    ] = cadena
-
-    result[
-        "resolved_acto"
-    ] = real_acto
+    result["resolved_from_chain"] = True
+    result["input_chain"] = cadena
+    result["resolved_acto"] = real_acto
 
     return result
+
