@@ -796,10 +796,56 @@ def record_provider_timeout(
         or "HEALTHY"
     ).strip().upper()
 
+    # P16_BREAKER_TRANSIENT_STREAK_GUARD_V1
+    #
+    # El breaker de Provider16 es GLOBAL para las cuentas SIDEA.
+    # Una rafaga corta de errores de red en un solo bucket
+    # no debe detener todas las cuentas.
+    #
+    # Otros proveedores conservan el umbral historico de 3.
+    # Provider16 exige 8 timeouts consecutivos antes de abrir
+    # el breaker global.
+    provider_norm = _norm_provider(
+        provider_name
+    )
+
+    breaker_min_streak = (
+        8
+        if provider_norm == "PROVIDER16"
+        else 3
+    )
+
     breaker_should_open = (
         breaker_state == "DOWN"
-        and breaker_streak >= 3
+        and breaker_streak >= breaker_min_streak
     )
+
+    if (
+        provider_norm == "PROVIDER16"
+        and breaker_state == "DOWN"
+        and not breaker_should_open
+    ):
+        print(
+            "PROVIDER16_BREAKER_SUPPRESSED_TRANSIENT_STREAK =",
+            {
+                "provider": provider_name,
+                "act_type": act_type,
+                "request_id": request_id,
+                "state": breaker_state,
+                "streak": breaker_streak,
+                "required_streak": breaker_min_streak,
+                "timeout_ratio": health_after.get(
+                    "timeout_ratio"
+                ),
+                "timeout_count": health_after.get(
+                    "timeout_count"
+                ),
+                "success_count": health_after.get(
+                    "success_count"
+                ),
+            },
+            flush=True,
+        )
 
     if breaker_should_open:
         try:

@@ -14631,9 +14631,9 @@ def process_request(request_id: int):
                     elif "SIDEA_RECOVERY_GLOBAL_BUSY:" in err:
                         busy_delay_sec = 10
                     elif "SIDEA_ALL_READY_ACCOUNTS_BUSY" in err:
-                        busy_delay_sec = 1
+                        busy_delay_sec = 3
                     elif "PROVIDER16_THARD_WAIT:" in err:
-                        busy_delay_sec = 2
+                        busy_delay_sec = 10
                     else:
                         busy_delay_sec = 1
 
